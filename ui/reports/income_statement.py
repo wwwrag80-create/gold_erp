@@ -104,7 +104,7 @@ class IncomeStatementScreen(QtWidgets.QWidget):
         try:
             f = self.d_from.date().toString("yyyy-MM-dd")
             t = self.d_to.date().toString("yyyy-MM-dd")
-            with db() as conn:
+            with db(readonly=True) as conn:
                 r = income_statement_consignment(conn, f, t)
             self._render(r)
         except Exception as e:

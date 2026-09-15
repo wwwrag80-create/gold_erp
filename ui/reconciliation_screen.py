@@ -49,7 +49,7 @@ class ReconciliationScreen(QtWidgets.QWidget):
 
     def run(self):
         try:
-            with db() as conn:
+            with db(readonly=True) as conn:
                 res = reconciliation.reconcile(conn)
             self.issues = res["issues"]
             self._render(res)

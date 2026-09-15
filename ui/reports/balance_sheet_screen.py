@@ -88,7 +88,7 @@ class BalanceSheetScreen(QtWidgets.QWidget):
     def load(self):
         try:
             lvl = self.level.currentData() or 3
-            with db() as conn:
+            with db(readonly=True) as conn:
                 b = balance_tree.balance_sheet_tree(
                     conn, date_to=dstr(self.d_to), date_from=None,
                     max_level=int(lvl), hide_zero=self.zero.isChecked())

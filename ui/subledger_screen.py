@@ -209,7 +209,7 @@ class SubLedgerScreen(QtWidgets.QWidget):
     def refresh(self):
         try:
             cat = self.category.currentData()
-            with db() as conn:
+            with db(readonly=True) as conn:
                 summary, details = entities.subledger_summary(conn, cat)
             self._rows = details
             self.c_count.set_value(str(summary["count"]),

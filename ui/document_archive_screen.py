@@ -127,7 +127,7 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
             term = self.q.text().strip()
             d1, d2 = dstr(self.d_from), dstr(self.d_to)
             rows = []
-            with db() as conn:
+            with db(readonly=True) as conn:
                 for k in keys:
                     # الفلاتر تُطبَّق **خارج** الاستعلام الأساسي حتى لا
                     # تتعارض أسماء الأعمدة المكرّرة بين الجداول المرتبطة

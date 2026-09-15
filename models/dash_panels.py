@@ -74,19 +74,9 @@ def save_panels(panels):
 
 
 def _subtree_ids(conn, code):
-    """الحساب وكل فروعه."""
-    row = conn.execute("SELECT id FROM accounts WHERE code=?",
-                       (code,)).fetchone()
-    if not row:
-        return []
-    ids, stack = [], [row["id"]]
-    while stack:
-        cur = stack.pop()
-        ids.append(cur)
-        for r in conn.execute("SELECT id FROM accounts WHERE parent_id=?",
-                              (cur,)):
-            stack.append(r["id"])
-    return ids
+    """الحساب وكل فروعه — استعلام واحد (انظر models/accounts.py)."""
+    from models.accounts import subtree_ids_by_code
+    return subtree_ids_by_code(conn, code)
 
 
 def account_rows(conn, codes, date_from=None, date_to=None):

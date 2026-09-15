@@ -28,7 +28,7 @@ class StockReportScreen(QtWidgets.QWidget):
         lay.addWidget(btn)
 
     def refresh(self):
-        with db() as conn:
+        with db(readonly=True) as conn:
             s = stock_snapshot(conn)
         self.gold_summary.setText(
             f"خزينة التصنيع: {s['tazeena_gold']:,.2f} جم عيار 18   |   "

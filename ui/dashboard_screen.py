@@ -306,7 +306,7 @@ class DashboardScreen(QtWidgets.QWidget):
                 raise ValueError(
                     "لوحة صندوق الكسر تعرض الأعيرة تلقائياً — "
                     "لا تُضاف إليها حسابات")
-            with db() as conn:
+            with db(readonly=True) as conn:
                 accs = [dict(r) for r in conn.execute(
                     "SELECT code, name FROM accounts ORDER BY code")]
             # قائمة بحث حيّ: تقترح أقرب اسم مع أول حرف تكتبه
@@ -391,7 +391,7 @@ class DashboardScreen(QtWidgets.QWidget):
             if len(accs) < 2:
                 raise ValueError(
                     "أضف حسابين على الأقل للجدول قبل إنشاء نسبة")
-            with db() as conn:
+            with db(readonly=True) as conn:
                 names = {}
                 for c in accs:
                     r = conn.execute(
@@ -552,7 +552,7 @@ class DashboardScreen(QtWidgets.QWidget):
                 self.d_to.setEnabled(has)
             finally:
                 self._loading = False
-            with db() as conn:
+            with db(readonly=True) as conn:
                 if p.get("kind") == "scrap":
                     self._render_scrap(conn, p)
                 else:

@@ -168,7 +168,7 @@ class TransactionLogScreen(QtWidgets.QWidget):
     def search(self):
         try:
             _, _, columns, loader, mapper = self._current_spec()
-            with db() as conn:
+            with db(readonly=True) as conn:
                 rows = loader(conn, self.q.text().strip(),
                              self.d_from.date().toString("yyyy-MM-dd"),
                              self.d_to.date().toString("yyyy-MM-dd"))

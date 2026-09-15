@@ -321,14 +321,9 @@ def delete_subtree(conn, account_id, username, force=False):
     if not acc:
         raise ValueError("الحساب غير موجود")
 
-    # كل الشجرة الفرعية (الأب وأبناؤه وأحفاده)
-    ids, stack = [], [account_id]
-    while stack:
-        cur = stack.pop()
-        ids.append(cur)
-        for r in conn.execute("SELECT id FROM accounts WHERE parent_id=?",
-                              (cur,)):
-            stack.append(r["id"])
+    # كل الشجرة الفرعية (الأب وأبناؤه وأحفاده) — استعلام واحد
+    from models.accounts import subtree_ids
+    ids = subtree_ids(conn, account_id)
 
     qs = ",".join("?" * len(ids))
     moved = {r["account_id"] for r in conn.execute(
@@ -391,14 +386,9 @@ def purge_account_tree(conn, account_id, username, confirm_text=""):
         raise ValueError(
             "للحذف النهائي اكتب عبارة التأكيد: حذف نهائي")
 
-    # الشجرة الفرعية كاملة
-    ids, stack = [], [account_id]
-    while stack:
-        cur = stack.pop()
-        ids.append(cur)
-        for r in conn.execute("SELECT id FROM accounts WHERE parent_id=?",
-                              (cur,)):
-            stack.append(r["id"])
+    # الشجرة الفرعية كاملة — استعلام واحد
+    from models.accounts import subtree_ids
+    ids = subtree_ids(conn, account_id)
     qs = ",".join("?" * len(ids))
 
     # القيود التي تمسّ أياً من هذه الحسابات

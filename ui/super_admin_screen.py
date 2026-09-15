@@ -597,6 +597,19 @@ class SuperAdminScreen(QtWidgets.QWidget):
         btn_restore = QtWidgets.QPushButton("♻ استرجاع النسخة المحددة")
         btn_restore.setObjectName("homeBtn")
         btn_restore.clicked.connect(self.cloud_restore)
+        btn_tune = QtWidgets.QPushButton("⚡ صيانة سريعة")
+        btn_tune.setToolTip(
+            "تنظيف طابور المزامنة المرفوع، دمج ملف WAL، وتحديث "
+            "إحصاءات مخطِّط الاستعلام. آمن أثناء العمل ويستغرق ثوانيَ.")
+        btn_tune.clicked.connect(self.run_maintenance)
+        btn_compact = QtWidgets.QPushButton("🗜 ضغط قاعدة البيانات")
+        btn_compact.setToolTip(
+            "يعيد بناء الملف بلا صفحات محرَّرة فيصغر حجمه ومعه كل "
+            "نسخة احتياطية. يقفل النظام أثناء التنفيذ — نفّذه وقت "
+            "الفراغ.")
+        btn_compact.clicked.connect(self.compact_db)
+        btn_dbstats = QtWidgets.QPushButton("📊 حجم الجداول")
+        btn_dbstats.clicked.connect(self.show_db_stats)
 
         row = QtWidgets.QHBoxLayout()
         row.addWidget(btn_now)
@@ -608,6 +621,15 @@ class SuperAdminScreen(QtWidgets.QWidget):
         row_cloud.addWidget(btn_cloud_ls)
         row_cloud.addWidget(btn_restore)
         row_cloud.addStretch(1)
+
+        row_maint = QtWidgets.QHBoxLayout()
+        row_maint.addWidget(btn_tune)
+        row_maint.addWidget(btn_compact)
+        row_maint.addWidget(btn_dbstats)
+        row_maint.addStretch(1)
+        self.maint_label = QtWidgets.QLabel("")
+        self.maint_label.setObjectName("cardSub")
+        self.maint_label.setWordWrap(True)
 
         self.bk_table = make_table()
         self.upd_label = big_label(
@@ -628,6 +650,19 @@ class SuperAdminScreen(QtWidgets.QWidget):
         lay.addLayout(row_cloud)
         self.cloud_table = make_table()
         lay.addWidget(self.cloud_table, 1)
+        maint_box = QtWidgets.QGroupBox("صيانة قاعدة البيانات")
+        ml = QtWidgets.QVBoxLayout(maint_box)
+        mnote = QtWidgets.QLabel(
+            "قاعدة البيانات لا تبطؤ فجأة بل ببطء: الإحصاءات تتقادم "
+            "فيختار المخطِّط مساراً أبطأ، وملف WAL يتضخّم، والصفحات "
+            "المحرَّرة تبقى في الملف. الصيانة السريعة تعالج ذلك "
+            "تلقائياً كل يوم، وهذه الأزرار لتشغيلها فوراً عند الحاجة.")
+        mnote.setObjectName("cardSub")
+        mnote.setWordWrap(True)
+        ml.addWidget(mnote)
+        ml.addLayout(row_maint)
+        ml.addWidget(self.maint_label)
+        lay.addWidget(maint_box)
         lay.addWidget(self.upd_label)
 
         # ── منطقة الخطر ──
@@ -648,6 +683,58 @@ class SuperAdminScreen(QtWidgets.QWidget):
         dl.addWidget(btn_wipe)
         lay.addWidget(danger)
         return w
+
+    # ══════════════════════════════════════════════════════════════
+    #  صيانة قاعدة البيانات
+    # ══════════════════════════════════════════════════════════════
+
+    def run_maintenance(self):
+        try:
+            from services import maintenance
+            res = maintenance.light_maintenance()
+            wal = res.get("wal")
+            parts = [f"حُذفت {res.get('purged', 0):,} حزمة مزامنة مرفوعة"]
+            if wal:
+                parts.append(f"دُمج ملف WAL ({wal[1]} صفحة)")
+            if res.get("optimized"):
+                parts.append("حُدِّثت إحصاءات المخطِّط")
+            self.maint_label.setText("✔ " + " · ".join(parts))
+            info(self, "اكتملت الصيانة السريعة.\n\n" + "\n".join(parts))
+        except Exception as e:
+            err(self, e)
+
+    def compact_db(self):
+        try:
+            from services import maintenance
+            if not ask(self,
+                       "ضغط قاعدة البيانات؟\n\n"
+                       "يعيد بناء الملف فيصغر حجمه ومعه كل نسخة "
+                       "احتياطية. النظام يتوقّف عن الاستجابة أثناء "
+                       "التنفيذ (ثوانٍ إلى دقائق حسب الحجم)، "
+                       "والبيانات لا تُمسّ.\n\n"
+                       "يُنصح بتنفيذه خارج وقت العمل."):
+                return
+            before, after = maintenance.compact()
+            saved = round(before - after, 1)
+            self.maint_label.setText(
+                f"✔ ضُغطت القاعدة: {before} → {after} ميجابايت")
+            info(self, f"اكتمل الضغط.\n\nقبل: {before} ميجابايت\n"
+                       f"بعد: {after} ميجابايت\nالموفَّر: {saved} ميجابايت")
+        except Exception as e:
+            err(self, e)
+
+    def show_db_stats(self):
+        try:
+            from services import maintenance
+            st = maintenance.db_stats()
+            lines = [f"حجم القاعدة: {st['db_mb']} ميجابايت",
+                     f"ملف WAL: {st['wal_mb']} ميجابايت", "",
+                     "أكبر الجداول:"]
+            for t in st["tables"]:
+                lines.append(f"   {t['table']}: {t['rows']:,} سجل")
+            info(self, "\n".join(lines), "حجم قاعدة البيانات")
+        except Exception as e:
+            err(self, e)
 
     def wipe_system(self):
         """تهيئة كاملة — بتأكيد مغلَّظ وكلمة المرور."""

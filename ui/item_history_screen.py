@@ -174,7 +174,7 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         if not no:
             return
         try:
-            with db() as conn:
+            with db(readonly=True) as conn:
                 wo, rows = inventory.item_history(conn, no)
             self.info.setText(
                 f"الطقم {wo['work_order_no']}  ·  النوع: {wo['item_type'] or '—'}"
@@ -192,7 +192,7 @@ class ItemHistoryScreen(QtWidgets.QWidget):
     def load_turnover(self):
         """يحدّث اللوحات الأربع من التتبّع الفردي لأرقام التشغيل."""
         try:
-            with db() as conn:
+            with db(readonly=True) as conn:
                 data = inventory.turnover_all(
                     conn, dstr(self.d_from), dstr(self.d_to))
             for key, pnl in self.panels.items():

@@ -55,7 +55,7 @@ class KhazinaReportScreen(QtWidgets.QWidget):
 
     def load(self):
         try:
-            with db() as conn:
+            with db(readonly=True) as conn:
                 r = khazina_tiles(
                     conn, self.d_from.date().toString("yyyy-MM-dd"),
                     self.d_to.date().toString("yyyy-MM-dd"))

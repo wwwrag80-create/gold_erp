@@ -274,6 +274,28 @@ def main():
     check("تنظيف الحزم المرفوعة يعمل", purged > 0 and st2["total"] == 0,
           f"حُذفت {purged}")
 
+    step("10) صيانة قاعدة البيانات")
+    from services import maintenance
+    res = maintenance.light_maintenance()
+    check("الصيانة الخفيفة تعمل", res.get("optimized") is True,
+          f"WAL={res.get('wal')}")
+    before, after = maintenance.compact()
+    check("ضغط القاعدة يعمل", after > 0, f"{before} → {after} ميجابايت")
+    stt = maintenance.db_stats()
+    check("إحصاءات الجداول تُقرأ", bool(stt["tables"]),
+          f"{len(stt['tables'])} جدول")
+
+    step("11) شجرة الحسابات باستعلام واحد")
+    from models.accounts import subtree_ids_by_code
+    with db(readonly=True) as conn:
+        ids = subtree_ids_by_code(conn, "1600")
+        direct = {r["id"] for r in conn.execute(
+            "SELECT a.id FROM accounts a JOIN accounts p ON a.parent_id=p.id"
+            " WHERE p.code='1600'")}
+    check("الشجرة الفرعية تشمل الأب وفروعه",
+          bool(ids) and direct.issubset(set(ids)),
+          f"{len(ids)} حساب")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -94,6 +94,10 @@ def start_background_workers():
             # نسخة سحابية كل ساعة
             ("cloud_backup", lambda: __import__(
                 "services.cloud_backup", fromlist=["x"]).start_worker()),
+            # صيانة يومية: تنظيف الطابور، تفتيش WAL، تحديث إحصاءات
+            # مخطِّط الاستعلام — بها يبقى النظام سريعاً مع نموّ الدفتر
+            ("maintenance", lambda: __import__(
+                "services.maintenance", fromlist=["x"]).start_worker()),
     ):
         try:
             fn()

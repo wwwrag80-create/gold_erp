@@ -173,7 +173,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             code = self.account.currentData()
             if code is None:
                 raise ValueError("اختر الحساب أولاً ثم اعرض الكشف")
-            with db() as conn:
+            with db(readonly=True) as conn:
                 acc = conn.execute("SELECT id FROM accounts WHERE code=?",
                                    (code,)).fetchone()
                 if not acc:
@@ -192,7 +192,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             code = self.account.currentData()
             if code is None:
                 raise ValueError("اختر الحساب أولاً ثم اعرض الكشف")
-            with db() as conn:
+            with db(readonly=True) as conn:
                 acc = conn.execute("SELECT id FROM accounts WHERE code=?",
                                    (code,)).fetchone()
                 if not acc:
@@ -209,7 +209,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             code = self.account.currentData()
             if code is None:
                 raise ValueError("اختر الحساب")
-            with db() as conn:
+            with db(readonly=True) as conn:
                 acc = conn.execute("SELECT id FROM accounts WHERE code=?",
                                    (code,)).fetchone()
                 if not acc:
@@ -367,7 +367,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 raise ValueError(
                     "هذا النوع من المستندات لا يُنقل — النقل متاح "
                     "للفواتير والسندات والمشتريات والتسكير.")
-            with db() as conn:
+            with db(readonly=True) as conn:
                 info = doc_transfer.preview(conn, src, sid)
                 ents = conn.execute(
                     "SELECT id, name, entity_type FROM entities"
@@ -458,7 +458,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             err(self, e)
 
     def refresh(self):
-        with db() as conn:
+        with db(readonly=True) as conn:
             self.accounts = list_postable(conn)
         current = self.account.currentData()
         self.account.blockSignals(True)

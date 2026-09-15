@@ -117,7 +117,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         if self.customer_id is None:
             return
         try:
-            with db() as conn:
+            with db(readonly=True) as conn:
                 p = sa.all_panels(conn, self.customer_id,
                                   dstr(self.d_from), dstr(self.d_to))
                 details = {k: sa.panel_details(conn, k, self.customer_id,
@@ -133,7 +133,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
             self.columns["collection"].set_value(
                 f"ذهب {coll['gold']:,.2f} · نقد {coll['cash']:,.2f}")
             # الرصيد المتبقي = رصيد حساب العميل في الدليل
-            with db() as conn:
+            with db(readonly=True) as conn:
                 acc = conn.execute(
                     "SELECT account_id FROM entities WHERE id=?",
                     (self.customer_id,)).fetchone()
@@ -216,7 +216,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         return out
 
     def refresh(self):
-        with db() as conn:
+        with db(readonly=True) as conn:
             custs = [e for e in entities.list_entities(conn)
                      if e["entity_type"] == "customer" and not e["is_internal"]]
             reload_combo(self.customer, custs, lambda r: r["name"])

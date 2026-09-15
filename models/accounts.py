@@ -28,3 +28,31 @@ def list_tree(conn):
         "SELECT id, code, name, type, parent_id, is_postable FROM accounts ORDER BY code").fetchall()
 
 
+def subtree_ids(conn, root_id):
+    """معرّفات الحساب وكل فروعه وأحفاده — باستعلام **واحد**.
+
+    كان كل موضع يمشي الشجرة باستعلام لكل عقدة. الحساب التجميعي
+    للعملاء وحده قد يضمّ مئات الفروع، فتُنفَّذ مئات الاستعلامات في كل
+    تحديث للوحة التحكم — وهذا ما يجعل النظام يبطؤ مع نموّ عدد
+    العملاء لا مع حجم العمل. استعلام CTE تكراري واحد يكفي.
+
+    `LIMIT 5000` و`depth` حارسان: لو وُجدت حلقة في الشجرة (حساب أبوه
+    أحد أحفاده) لدار الاستعلام بلا نهاية وتجمّد النظام.
+    """
+    rows = conn.execute(
+        "WITH RECURSIVE sub(id, depth) AS ("
+        "  SELECT id, 0 FROM accounts WHERE id=?"
+        "  UNION"
+        "  SELECT a.id, s.depth+1 FROM accounts a"
+        "   JOIN sub s ON a.parent_id=s.id WHERE s.depth < 20"
+        ") SELECT id FROM sub LIMIT 5000", (root_id,)).fetchall()
+    return [r["id"] for r in rows]
+
+
+def subtree_ids_by_code(conn, code):
+    """كسابقتها لكن بكود الحساب. تعيد [] إن لم يوجد."""
+    row = conn.execute("SELECT id FROM accounts WHERE code=?",
+                       (code,)).fetchone()
+    return subtree_ids(conn, row["id"]) if row else []
+
+
