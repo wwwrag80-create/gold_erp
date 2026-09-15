@@ -105,6 +105,12 @@ def repost(conn, entry_id, username, create_fn, *args, **kwargs):
 
 def load_document(conn, source_table, source_id):
     """يجلب بيانات المستند لتعبئة شاشته عند التعديل."""
+    # اسم الجدول يُركَّب في نص SQL ولا يمكن تمريره كوسيط، فلا يُقبل
+    # إلا من قائمة المستندات القابلة للتعديل. المصدر اليوم هو عمود
+    # `source_table` الذي يكتبه النظام بنفسه، لكن حصر القيمة هنا
+    # يجعل الأمان خاصيةً في الكود لا افتراضاً عن مُدخلاته.
+    if source_table not in EDITABLE:
+        raise ValueError(f"نوع مستند غير مدعوم للتعديل: {source_table}")
     table = {"manual": "journal_entries"}.get(source_table, source_table)
     if source_table == "manual":
         e = conn.execute("SELECT * FROM journal_entries WHERE id=?",
