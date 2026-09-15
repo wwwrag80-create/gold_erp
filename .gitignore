@@ -1,0 +1,40 @@
+# ══════════════════════════════════════════════════════════════
+#  ما لا يدخل المستودع أبداً
+# ══════════════════════════════════════════════════════════════
+
+# الأسرار: مفاتيح Supabase (ومنها مفتاح الخدمة service_role الذي
+# يتجاوز كل صلاحيات RLS). القالب .env.example وحده هو ما يُشارك.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+admin_token.json
+auth_cache.json
+
+# بيانات المستخدم والنسخ الاحتياطية
+data/
+backups/
+*.db
+*.db-wal
+*.db-shm
+*.bak
+system_errors.log
+
+# مخرجات البناء والتحزيم
+build/
+dist/
+*.spec
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# باركودات ومخرجات مؤقتة
+assets/barcodes/*
+!assets/barcodes/.gitkeep
+
+# محرّرات ونظام التشغيل
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

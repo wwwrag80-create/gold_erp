@@ -1,0 +1,87 @@
+﻿═══════════════════════════════════════════════════
+   بناء ملف EXE يدوياً — بلا MAKE_EXE.bat
+═══════════════════════════════════════════════════
+
+  الخطوة ١ — افتح موجّه الأوامر في مجلد النظام
+  ─────────────────────────────────────────────
+  افتح مجلد gold_erp، واكتب في شريط العنوان:
+
+      cmd
+
+  ثم Enter — سيفتح موجّه الأوامر في المجلد نفسه.
+
+
+  الخطوة ٢ — ثبّت الأدوات (مرة واحدة)
+  ────────────────────────────────────
+  انسخ هذا السطر والصقه ثم Enter:
+
+python -m pip install --upgrade pip PyQt5 qrcode pillow python-barcode pyinstaller
+
+
+  الخطوة ٣ — نظّف البناء السابق
+  ──────────────────────────────
+
+rmdir /s /q build dist 2>nul & del /q *.spec 2>nul
+
+
+  الخطوة ٤ — نفّذ أمر البناء
+  ───────────────────────────
+  انسخ الأمر التالي **كاملاً** والصقه ثم Enter.
+  (سطر واحد طويل — احرص أن تنسخه كله)
+
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name gold_erp --icon assets\logo.ico --version-file version_info.txt --add-data "assets;assets" --add-data "migrations;migrations" --add-data "cloud;cloud" --add-data ".env;." --collect-submodules services --collect-submodules models --collect-submodules ui --collect-submodules database --collect-submodules core --collect-all barcode --collect-all qrcode --hidden-import PyQt5.QtPrintSupport --hidden-import PyQt5.QtSvg --hidden-import PyQt5.QtNetwork --hidden-import sqlite3 --hidden-import gzip --hidden-import urllib.request --hidden-import urllib.parse --hidden-import urllib.error --hidden-import app_config --hidden-import PIL main.py
+
+
+  الخطوة ٥ — انتظر ثم خذ الملف
+  ─────────────────────────────
+  المدة: من ٣ إلى ١٠ دقائق.
+
+  عند ظهور:   Building EXE ... completed successfully
+
+  ستجد الملف في:
+
+      dist\gold_erp.exe
+
+  انسخه لأي جهاز وشغّله مباشرة.
+
+
+═══════════════════════════════════════════════════
+  شرح مقاطع الأمر (للفهم فقط)
+═══════════════════════════════════════════════════
+
+  --onefile              ملف تنفيذي واحد
+  --windowed             بلا نافذة سوداء خلفه
+  --name gold_erp        اسم الملف الناتج
+  --icon                 أيقونة البرنامج
+  --add-data             ملفات تُرفق داخله
+                         (الأصول · الهجرات · الإعدادات)
+  --collect-submodules   يضمّ كل وحدات المجلد
+                         (ضروري: النظام يستورد
+                          ديناميكياً فلا يكتشفها
+                          PyInstaller وحده)
+  --collect-all          يضمّ ملفات المكتبة كاملةً
+                         (خطوط الباركود مثلاً)
+  --hidden-import        وحدة لا تظهر في التحليل
+
+
+═══════════════════════════════════════════════════
+  إن ظهر خطأ
+═══════════════════════════════════════════════════
+
+  «is not recognized»
+     بايثون غير مثبّت أو ليس في PATH.
+     ثبّته من python.org مع تفعيل:
+        [x] Add Python to PATH
+
+  «No module named PyInstaller»
+     أعد الخطوة ٢.
+
+  «.env not found»
+     احذف من الأمر:  --add-data ".env;."
+     ثم ضع ملف .env بجانب الـexe يدوياً.
+
+  الملف يعمل لكن بلا اتصال سحابي
+     تأكد أن ملف .env موجود ومملوء قبل البناء،
+     أو ضعه بجانب gold_erp.exe.
+
+═══════════════════════════════════════════════════
