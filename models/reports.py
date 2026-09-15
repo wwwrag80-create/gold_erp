@@ -290,20 +290,89 @@ def income_statement_cashflow(conn, date_from, date_to):
 # ═══════════════ الميزانية العمومية ثنائية البعد ═══════════════
 
 def _subtree_ids(conn, code):
-    """كل معرّفات الحسابات تحت كود معيّن (الحساب نفسه وفروعه بأي عمق)."""
-    root = conn.execute("SELECT id FROM accounts WHERE code=?",
-                        (code,)).fetchone()
-    if not root:
-        return []
-    ids, frontier = [root["id"]], [root["id"]]
-    while frontier:
-        qs = ",".join("?" * len(frontier))
-        kids = [r["id"] for r in conn.execute(
-            f"SELECT id FROM accounts WHERE parent_id IN ({qs})",
-            frontier).fetchall()]
-        ids += kids
-        frontier = kids
-    return ids
+    """كل معرّفات الحسابات تحت كود معيّن — استعلام واحد."""
+    from models.accounts import subtree_ids_by_code
+    return subtree_ids_by_code(conn, code)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  ميزان المراجعة
+# ══════════════════════════════════════════════════════════════════
+
+def trial_balance(conn, date_from=None, date_to=None, include_zero=False):
+    """ميزان المراجعة ثنائي البعد (ذهب ونقد) بالأرصدة والحركة.
+
+    **لماذا هو أهم تقرير**: الميزانية وقائمة الدخل تعرضان **نتيجة**
+    الدفتر، أما ميزان المراجعة فيعرض الدفتر نفسه حساباً حساباً ويُثبت
+    أنه متوازن. وهو أول ما يطلبه المحاسب أو المدقّق، وأول مكان
+    يُكتشف فيه أي خلل: حساب برصيد غير متوقّع يظهر هنا فوراً بدل أن
+    يختفي داخل مجموع في الميزانية.
+
+    لكل حساب قابل للترحيل:
+      • رصيد أول المدة (كل الحركة قبل `date_from`)
+      • مدين الفترة ودائنها (حجم النشاط، لا محصّلته)
+      • رصيد آخر المدة = أول المدة + مدين − دائن
+    كلها في البعدين معاً. يعيد {"rows": [...], "totals": {...}}.
+    """
+    # وسائط مسمّاة: الشرط نفسه يتكرر ست مرات، والتسمية تمنع أي خطأ
+    # في ترتيب الوسائط — وهو خطأ لا يُكتشف إلا بأرقام خاطئة صامتة.
+    params = {"df": date_from or None, "dt": date_to or None}
+    BEFORE = "(:df IS NOT NULL AND e.entry_date < :df)"
+    WITHIN = ("(:df IS NULL OR e.entry_date >= :df)"
+              " AND (:dt IS NULL OR e.entry_date <= :dt)")
+    q = (
+        "SELECT a.id, a.code, a.name, a.type, a.nature,"
+        f" COALESCE(SUM(CASE WHEN {BEFORE} THEN"
+        "   l.gold_debit - l.gold_credit ELSE 0 END),0) og,"
+        f" COALESCE(SUM(CASE WHEN {BEFORE} THEN"
+        "   l.cash_debit - l.cash_credit ELSE 0 END),0) oc,"
+        f" COALESCE(SUM(CASE WHEN {WITHIN} THEN"
+        "   l.gold_debit ELSE 0 END),0) gd,"
+        f" COALESCE(SUM(CASE WHEN {WITHIN} THEN"
+        "   l.gold_credit ELSE 0 END),0) gc,"
+        f" COALESCE(SUM(CASE WHEN {WITHIN} THEN"
+        "   l.cash_debit ELSE 0 END),0) cd,"
+        f" COALESCE(SUM(CASE WHEN {WITHIN} THEN"
+        "   l.cash_credit ELSE 0 END),0) cc"
+        " FROM accounts a"
+        " JOIN journal_lines l ON l.account_id = a.id"
+        " JOIN journal_entries e ON e.id = l.entry_id AND e.is_deleted = 0"
+        " GROUP BY a.id ORDER BY a.code")
+
+    rows, tot = [], {k: 0.0 for k in (
+        "open_gold", "open_cash", "gold_debit", "gold_credit",
+        "cash_debit", "cash_credit", "close_gold", "close_cash")}
+    for r in conn.execute(q, params):
+        og, oc = r["og"] or 0.0, r["oc"] or 0.0
+        gd, gc = r["gd"] or 0.0, r["gc"] or 0.0
+        cd, cc = r["cd"] or 0.0, r["cc"] or 0.0
+        clg = og + gd - gc
+        clc = oc + cd - cc
+        if not include_zero and all(
+                abs(v) < 0.005 for v in (og, oc, gd, gc, cd, cc, clg, clc)):
+            continue
+        rows.append({
+            "id": r["id"], "code": r["code"], "name": r["name"],
+            "type": r["type"], "nature": r["nature"],
+            "open_gold": round(og, 3), "open_cash": round(oc, 2),
+            "gold_debit": round(gd, 3), "gold_credit": round(gc, 3),
+            "cash_debit": round(cd, 2), "cash_credit": round(cc, 2),
+            "close_gold": round(clg, 3), "close_cash": round(clc, 2)})
+        for k, v in (("open_gold", og), ("open_cash", oc),
+                     ("gold_debit", gd), ("gold_credit", gc),
+                     ("cash_debit", cd), ("cash_credit", cc),
+                     ("close_gold", clg), ("close_cash", clc)):
+            tot[k] += v
+    for k in tot:
+        tot[k] = round(tot[k], 3 if "gold" in k else 2)
+    # الميزان سليم حين يتساوى مدين الفترة ودائنها، ويصفر مجموع
+    # أرصدة الإقفال — في البعدين معاً.
+    tot["balanced_gold"] = (abs(tot["gold_debit"] - tot["gold_credit"]) <= 0.011
+                            and abs(tot["close_gold"]) <= 0.011)
+    tot["balanced_cash"] = (abs(tot["cash_debit"] - tot["cash_credit"]) <= 0.011
+                            and abs(tot["close_cash"]) <= 0.011)
+    return {"rows": rows, "totals": tot,
+            "date_from": date_from or "", "date_to": date_to or ""}
 
 
 def _group_balance(conn, codes, date_to=None):

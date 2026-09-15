@@ -35,6 +35,7 @@ from ui.opening_stock_screen import OpeningStockScreen
 from ui.production_screen import ProductionScreen
 from ui.purchases_screen import PurchasesScreen
 from ui.reports.balance_sheet_screen import BalanceSheetScreen
+from ui.reports.trial_balance_screen import TrialBalanceScreen
 from ui.reports.factory_reports_screen import FactoryReportsScreen
 from ui.reports.income_statement import IncomeStatementScreen
 from ui.reports.khazina_report_screen import KhazinaReportScreen
@@ -135,6 +136,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("الإقرار الضريبي (VAT)", Lazy(lambda: VatReturnScreen(user), "الإقرار الضريبي (VAT)")),
                 ]),
                 ("التقارير الختامية والفترات المالية", [
+                    ("ميزان المراجعة", Lazy(lambda: TrialBalanceScreen(user), "ميزان المراجعة")),
                     ("الميزانية العمومية", Lazy(lambda: BalanceSheetScreen(user), "الميزانية العمومية")),
                     ("تهيئة أرصدة أول المدة (تاريخ القطع)", Lazy(lambda: OpeningBalancesScreen(user), "تهيئة أرصدة أول المدة (تاريخ القطع)")),
                     ("الإقفال السنوي", Lazy(lambda: YearEndScreen(user), "الإقفال السنوي")),

@@ -1165,6 +1165,10 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
                                         kw.get("hide_zero", True)))
+        if doc_type == "trial_balance":
+            return en(_tpl_trial_balance(conn, doc_id, kw.get("date_from"),
+                                         kw.get("date_to"),
+                                         kw.get("include_zero", False)))
         if doc_type == "workshop_accounts":
             return en(_tpl_workshop_accounts(conn, doc_id,
                                              kw.get("rows") or [],
@@ -1384,6 +1388,66 @@ def _tpl_balance_tree(conn, _id=0, date_to=None, max_level=3,
     table = f"{TBL}<tr>{head}</tr>{body}</table>"
     return (_header("الميزانية العمومية", "—", date_to or today,
                     show_meta=False) + meta + table + totals)
+
+
+def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
+                       include_zero=False):
+    """قالب ميزان المراجعة — أرصدة أول المدة والحركة والإقفال."""
+    from models.reports import trial_balance
+    tb = trial_balance(conn, date_from, date_to, bool(include_zero))
+    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    types = {"asset": "أصل", "liability": "خصم", "equity": "حقوق ملكية",
+             "revenue": "إيراد", "expense": "مصروف", "bridge": "وسيط"}
+
+    body = ""
+    for r in tb["rows"]:
+        body += ("<tr>" + cells(
+            f'<td>{en(r["code"])}</td>',
+            f'<td class="r">{r["name"]}</td>',
+            f'<td>{types.get(r["type"], r["type"])}</td>',
+            f'<td>{_w(r["open_gold"])}</td>',
+            f'<td>{_w(r["gold_debit"])}</td>',
+            f'<td>{_w(r["gold_credit"])}</td>',
+            f'<td>{_w(r["close_gold"])}</td>',
+            f'<td>{_w(r["open_cash"], 2)}</td>',
+            f'<td>{_w(r["cash_debit"], 2)}</td>',
+            f'<td>{_w(r["cash_credit"], 2)}</td>',
+            f'<td>{_w(r["close_cash"], 2)}</td>') + "</tr>")
+    if not body:
+        body = f'<tr><td {TD} colspan="11">لا توجد حركة في الفترة</td></tr>'
+
+    t = tb["totals"]
+    body += ("<tr>" + cells(
+        '<td></td>', '<td class="r"><b>الإجمالي</b></td>', '<td></td>',
+        f'<td><b>{_w(t["open_gold"])}</b></td>',
+        f'<td><b>{_w(t["gold_debit"])}</b></td>',
+        f'<td><b>{_w(t["gold_credit"])}</b></td>',
+        f'<td><b>{_w(t["close_gold"])}</b></td>',
+        f'<td><b>{_w(t["open_cash"], 2)}</b></td>',
+        f'<td><b>{_w(t["cash_debit"], 2)}</b></td>',
+        f'<td><b>{_w(t["cash_credit"], 2)}</b></td>',
+        f'<td><b>{_w(t["close_cash"], 2)}</b></td>') + "</tr>")
+
+    head = cells(thw("الكود", 7), thw("الحساب", 21), thw("النوع", 8),
+                 thw("افتتاح ذهب", 8), thw("مدين ذهب", 8),
+                 thw("دائن ذهب", 8), thw("إقفال ذهب", 8),
+                 thw("افتتاح نقد", 8), thw("مدين نقد", 8),
+                 thw("دائن نقد", 8), thw("إقفال نقد", 8))
+    meta = f'''{TBL}
+      <tr>{cells(thw("من تاريخ"), f'<td>{en(date_from or "البداية")}</td>',
+                 thw("إلى تاريخ"), f'<td>{en(date_to or today)}</td>',
+                 thw("عدد الحسابات"), f'<td>{en(len(tb["rows"]))}</td>')}</tr>
+    </table><br/>'''
+    ok = t["balanced_gold"] and t["balanced_cash"]
+    verdict = f'''
+    <div {WIDE} style="margin-top:6px">
+      <b>{"✔ الميزان متوازن في البعدين — مدين الفترة = دائنها وأرصدة "
+          "الإقفال مجموعها صفر"
+          if ok else "✘ الميزان غير متوازن — راجع القيود"}</b>
+    </div>'''
+    table = f"{TBL}<tr>{head}</tr>{body}</table>"
+    return (_header("ميزان المراجعة", "—", date_to or today,
+                    show_meta=False) + meta + table + verdict)
 
 
 def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
@@ -1687,6 +1751,7 @@ BUILDERS = {
     "workshop_losses_log": _tpl_workshop_losses,
     "workshop_accounts": _tpl_workshop_accounts,
     "balance_tree": _tpl_balance_tree,
+    "trial_balance": _tpl_trial_balance,
     "models_catalog": _tpl_models_catalog,
     "dash_panel": _tpl_dash_panel,
     "model_photos": _tpl_model_photos,

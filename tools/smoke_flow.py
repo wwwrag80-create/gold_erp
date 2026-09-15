@@ -201,6 +201,26 @@ def main():
     check("رصيد الذهب المشغول = ما تبقّى (T-101)",
           abs(wg - 30.0) < 0.011, f"{wg}")
 
+    step("5b) ميزان المراجعة")
+    from models.reports import trial_balance
+    with db(readonly=True) as conn:
+        tbal = trial_balance(conn)
+        tb26 = trial_balance(conn, "2026-01-01", "2026-12-31")
+    tt = tbal["totals"]
+    check("ميزان المراجعة يتوازن في البعدين",
+          tt["balanced_gold"] and tt["balanced_cash"],
+          f"ذهب {tt['gold_debit']}/{tt['gold_credit']} · "
+          f"نقد {tt['cash_debit']}/{tt['cash_credit']}")
+    check("مجموع أرصدة الإقفال صفر",
+          abs(tt["close_gold"]) < 0.011 and abs(tt["close_cash"]) < 0.011,
+          f"{tt['close_gold']} · {tt['close_cash']}")
+    check("الميزان يُرشّح بالفترة", tb26["totals"]["balanced_cash"],
+          f"{len(tb26['rows'])} حساباً في 2026")
+    tb_acc = {r["code"] for r in tbal["rows"]}
+    check("الميزان يشمل حسابات البيع والمخزون",
+          {"1200", "1400"} & tb_acc == {"1200", "1400"},
+          f"{len(tb_acc)} حساباً متحرّكاً")
+
     step("6) قفل الفترات")
     with db() as conn:
         fiscal.set_lock(conn, "2026-01-31", "admin")
