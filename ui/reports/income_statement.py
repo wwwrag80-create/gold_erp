@@ -17,6 +17,7 @@ from database.database import db
 from services import karat_view as kv
 from models.reports import income_statement_consignment
 from ui.widgets.common import (date_edit, dstr, err, fill, make_table, title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -71,6 +72,7 @@ class IncomeStatementScreen(QtWidgets.QWidget):
         self.movement.setWordWrap(True)
 
         self.table = make_table()
+        _enhance(self.table, key="income")
 
         # شريط سفلي: النتيجة النهائية
         self.result = QtWidgets.QLabel("")

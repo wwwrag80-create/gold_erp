@@ -476,11 +476,87 @@ class SalesScreen(QtWidgets.QWidget):
             "المبيعات والمرتجعات والتحويلات الداخلية — فوترة ZATCA"))
         # الأجر يُستدعى آلياً عند الإضافة؛ تعديله اختياري عبر زر مستقل.
         lay.addWidget(inv_box, 1)
+        keys = QtWidgets.QLabel(
+            "⌨ إدخالٌ بلوحة المفاتيح وحدها:  F3 رقم التشغيل  ·  Enter "
+            "ينتقل ويضيف السطر  ·  F4 العميل  ·  F2 ترحيل الفاتورة  ·  "
+            "Delete حذف السطر المحدد  ·  Esc إلغاء التعديل")
+        keys.setObjectName("cardSub")
+        keys.setWordWrap(True)
+        lay.addWidget(keys)
         note = QtWidgets.QLabel(
             "لعرض سجل الفواتير والتحويلات السابقة أو حذفها منطقياً: افتح "
             "شاشة (سجل العمليات).")
         note.setObjectName("cardSub")
         lay.addWidget(note)
+        self._install_shortcuts()
+
+    # ══════════════════════════════════════════════════════════════
+    #  الإدخال السريع بلوحة المفاتيح
+    # ══════════════════════════════════════════════════════════════
+
+    def _install_shortcuts(self):
+        """مفاتيح تُغني عن الفأرة في شاشة الإدخال الأكثر استعمالاً.
+
+        **لماذا هنا بالذات**: المبيعات شاشةُ الدوام كله — عشرات
+        الفواتير في اليوم، وكل فاتورة عدة أسطر. وترك لوحة المفاتيح
+        لالتقاط الفأرة بين كل سطرٍ وآخر يضاعف زمن الفاتورة ويُدخل
+        أخطاءً في النقر. الأسهم وEnter كانا موجودين؛ ما ينقص هو
+        الحفظ والإلغاء والقفز — فأُضيفت هنا.
+
+        المفاتيح محصورة في هذه الشاشة (`WidgetWithChildrenShortcut`)
+        فلا تتسرّب إلى شاشةٍ أخرى ولا تصطدم باختصار عام.
+        """
+        self._shortcuts = []
+        for seq, fn in (("F2", self._save_shortcut),
+                        ("F3", lambda: self._focus(self.barcode)),
+                        ("F4", lambda: self._focus(self.customer)),
+                        ("Esc", self._escape)):
+            sc = QtWidgets.QShortcut(QtGui.QKeySequence(seq), self)
+            sc.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(fn)
+            self._shortcuts.append(sc)
+        # ══ Delete على الجدول وحده ══
+        # الاختصار يبتلع المفتاح قبل أن يصل لمن تحته. فلو كان مداه
+        # الشاشة كلها لحذف سطراً من الفاتورة كلما ضغط المستخدم Delete
+        # وهو يصحّح رقماً في حقل الكتابة — وهو أسوأ ما يمكن أن يفعله
+        # اختصارٌ يُفترض أنه تسهيل.
+        sc = QtWidgets.QShortcut(QtGui.QKeySequence("Delete"),
+                                 self.items_table)
+        sc.setContext(QtCore.Qt.WidgetShortcut)
+        sc.activated.connect(self._delete_shortcut)
+        self._shortcuts.append(sc)
+
+    def _focus(self, widget):
+        widget.setFocus(QtCore.Qt.ShortcutFocusReason)
+        if hasattr(widget, "selectAll"):
+            widget.selectAll()
+        elif hasattr(widget, "lineEdit") and widget.lineEdit() is not None:
+            widget.lineEdit().selectAll()
+
+    def _save_shortcut(self):
+        """F2 يرحّل — وزرُّ الترحيل هو المرجع لا الدالة مباشرةً.
+
+        الزر يُعطَّل أثناء الترحيل، فالمرور به يمنع ترحيلاً ثانياً لو
+        ضُغط المفتاح مرتين متتاليتين.
+        """
+        if self.btn_save.isEnabled():
+            self.btn_save.click()
+
+    def _delete_shortcut(self):
+        """Delete يحذف السطر المحدد — ولا يعمل إلا والجدول هو المُركَّز."""
+        if self.items_table.currentRow() >= 0:
+            self.remove_item()
+
+    def _escape(self):
+        """Esc يلغي وضع التعديل، أو يعيد المؤشر لرقم التشغيل.
+
+        لا يمسح فاتورةً قيد الإدخال: مفتاحٌ واحد يمحو عمل خمس دقائق
+        خطأٌ في التصميم لا تسهيل.
+        """
+        if self.editing_id is not None:
+            self.cancel_edit()
+        else:
+            self._focus(self.barcode)
 
     # ---- الطرف المقابل ----
     def _is_internal(self, cid):
@@ -580,8 +656,17 @@ class SalesScreen(QtWidgets.QWidget):
                               if editing else "ترحيل الفاتورة")
 
     def eventFilter(self, obj, event):
-        """Enter في حقل الأجر ⇒ إضافة السطر (المؤشر يعود لرقم التشغيل)."""
-        if obj is self.line_wage and event.type() == QtCore.QEvent.KeyPress:
+        """Enter في حقل الأجر ⇒ إضافة السطر (المؤشر يعود لرقم التشغيل).
+
+        **القراءة بـ`getattr` لا بالسمة مباشرةً**: الشاشة تُغلق عند
+        الانتقال لغيرها (شاشة واحدة حيّة في كل لحظة)، وأثناء هدمها
+        يصل حدث `Destroy` لكل حقل فيها بعد أن يكون كائن بايثون قد
+        بدأ فناءه وفرغت سماته — فيرفع `self.line_wage` استثناءً في
+        مرشّح أحداث، وهو استثناء يقتل التطبيق لا يُلتقط.
+        """
+        wage = getattr(self, "line_wage", None)
+        if wage is not None and obj is wage \
+                and event.type() == QtCore.QEvent.KeyPress:
             if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
                 self.add_item()
                 return True

@@ -15,6 +15,7 @@ from services import karat_view as kv
 from models import balance_tree
 from ui.widgets.common import (big_label, date_edit, dstr, err, make_table,
                                title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 COLS = ["الحساب", "الكود", "النقد / الأجور (ريال)", "الذهب (جم 18)"]
 
@@ -70,6 +71,7 @@ class BalanceSheetScreen(QtWidgets.QWidget):
         head.addStretch(1)
 
         self.table = make_table()
+        _enhance(self.table, key="balance_sheet")
         self.summary = big_label()
         self.check = big_label()
 

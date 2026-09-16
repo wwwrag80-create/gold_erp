@@ -11,6 +11,7 @@ from database.database import db
 from services import karat_view as kv
 from models import closing, fiscal
 from ui.widgets.common import (ask, big_label, dstr, err, fill, info, make_table, title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 COLS = ["الكود", "الحساب", "النوع", "الرصيد النقدي", "رصيد الذهب"]
 
@@ -45,6 +46,7 @@ class YearEndScreen(QtWidgets.QWidget):
 
         self.summary = big_label()
         self.table = make_table()
+        _enhance(self.table, key="year_end")
 
         # ══ قفل الفترات ══
         self.lock_state = QtWidgets.QLabel("—")

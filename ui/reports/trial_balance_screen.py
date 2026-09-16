@@ -15,6 +15,7 @@ from database.database import db
 from services import karat_view as kv
 from models.reports import trial_balance
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill, info, make_table, title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 COLS = ["الكود", "الحساب", "النوع",
         "افتتاح ذهب 18", "مدين ذهب 18", "دائن ذهب 18", "إقفال ذهب 18",
@@ -62,6 +63,7 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         head.addStretch(1)
 
         self.table = make_table()
+        _enhance(self.table, key="trial_balance")
         self.status = big_label()
 
         note = QtWidgets.QLabel(

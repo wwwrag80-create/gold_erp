@@ -1128,6 +1128,121 @@ def main():
     except ImportError:
         check("فحوص الانشغال والتحجيم", True, "تخطّي — PyQt5 غير مثبّت")
 
+    step("27) المظهر والجداول والشاشة الأولى وشريط الأوامر")
+    # ── المظهر: بنيةٌ واحدة ولوحتان ──
+    from ui import theme as _th
+    _tpl = "QWidget { background: @bg; color: @ink; font-size: 14px; }"
+    _light = _th.build(_tpl, _th.LIGHT, 1.0)
+    _dark = _th.build(_tpl, _th.DARK, 1.0)
+    check("الأسماء الرمزية تُستبدل بألوانها",
+          "@" not in _light and _th.LIGHT["bg"] in _light)
+    check("اللوحتان تختلفان فعلاً", _light != _dark
+          and _th.DARK["bg"] in _dark)
+    check("اسمٌ غير معروف لا يكسر النمط",
+          "@nope" in _th.build("a { color: @nope; }", _th.LIGHT, 1.0))
+    _big = _th.build(_tpl, _th.LIGHT, 2.0)
+    check("مقاس الخط يُضرب في المعامل", "font-size:28.0px" in
+          _big.replace("font-size: ", "font-size:"), _big)
+    check("كل مفاتيح اللوحة الفاتحة لها مقابل في الليلية",
+          set(_th.LIGHT) == set(_th.DARK),
+          str(set(_th.LIGHT) ^ set(_th.DARK)))
+    import re as _re
+    _used = set(_re.findall(r"@([A-Za-z][A-Za-z0-9_]*)",
+                            __import__("ui.styles", fromlist=["x"]).TEMPLATE))
+    check("كل اسمٍ في النمط معرَّف في اللوحتين",
+          not (_used - set(_th.LIGHT)), str(sorted(_used - set(_th.LIGHT))))
+
+    # ── أدوات الجداول: الفرز رقميٌّ لا حرفي ──
+    from ui.widgets import table_tools as _tt
+    check("قراءة الرقم من الخلية بفواصل الآلاف",
+          _tt.as_number("1,250.50") == 1250.5)
+    check("السالب بالشرطة الطويلة يُقرأ رقماً",
+          _tt.as_number("–40") == -40.0)
+    check("النص ليس رقماً", _tt.as_number("خزينة التصنيع") is None)
+    check("التاريخ يُفرز زمنياً لا حرفياً",
+          _tt._key("2026-01-09") < _tt._key("2026-01-10"))
+    check("الفرز الرقمي لا الحرفي: 9 قبل 100",
+          _tt._key("9") < _tt._key("100"))
+    check("الأرقام والنصوص لا تُقارَن ببعضها فترفع استثناءً",
+          sorted(["ب", "100", "9", "—"], key=_tt._key)[0] == "9")
+
+    # ── لقطة الشاشة الأولى ──
+    from models import home_panels as _hp
+    with db(readonly=True) as conn:
+        _snap = _hp.snapshot(conn, date="2026-06-05")
+        _recent = _hp.recent_ops(conn, 5)
+        _tre = _hp.treasury(conn)
+    check("لقطة الشاشة الأولى تحمل أقسامها الخمسة",
+          all(k in _snap for k in ("pulse", "treasury", "negatives",
+                                   "debts", "ops")))
+    check("نبض اليوم يقرأ حركة يومه",
+          _snap["pulse"]["count"] >= 1, str(_snap["pulse"]))
+    check("آخر العمليات مرتَّبة بزمن الترحيل ولها مصدرها",
+          bool(_recent) and all(r["src"] for r in _recent))
+    check("الخزائن تُقرأ وتُعلَّم إشارتها",
+          bool(_tre) and all("negative" in t for t in _tre))
+    _neg = [t for t in _tre if t["negative"]]
+    check("الأرصدة السالبة هي عينها ما يحرسه حارس المخزون",
+          all(t["code"] in {c for c, _n, _d in _hp.WATCH} for t in _neg))
+
+    # ── شريط الأوامر: يجد ما أنشأته هذه الدورة ──
+    from ui.widgets import palette as _pal
+    with db(readonly=True) as conn:
+        _hits = _pal.db_lookup(conn, "VT1")
+        _inv_hits = _pal.db_lookup(conn, vinv["invoice_no"])
+    check("شريط الأوامر يجد رقم التشغيل",
+          any(k == _pal.WORK_ORDER and p == "VT1" for k, _l, _h, p in _hits),
+          str(_hits))
+    check("ويجد رقم الفاتورة",
+          any(k == _pal.INVOICE and p == vinv["invoice_no"]
+              for k, _l, _h, p in _inv_hits), str(_inv_hits))
+    check("ولا يُرجع شيئاً لنصٍّ فارغ", _pal.db_lookup(None, "") == [])
+    check("المطابقة من أول الاسم أقوى من الوسط",
+          _pal._score("عمر", "عمر الخير") < _pal._score("عمر", "محمد عمر"))
+
+    try:
+        from PyQt5 import QtWidgets as _QW4
+        _app4 = _QW4.QApplication.instance() or _QW4.QApplication([])
+        # صفُّ الإجمالي يبقى في القاع مهما فُرز ما فوقه
+        t2 = _QW4.QTableWidget(0, 2)
+        t2.setHorizontalHeaderLabels(["الاسم", "المبلغ"])
+        for name, amount in (("ب", "9"), ("أ", "100"), ("ج", "40")):
+            r = t2.rowCount()
+            t2.insertRow(r)
+            t2.setItem(r, 0, _QW4.QTableWidgetItem(name))
+            t2.setItem(r, 1, _QW4.QTableWidgetItem(amount))
+        _tt.total_row(t2, {1: "149"})
+        s = _tt.attach_sorter(t2)
+        s.sort_by(1)
+        check("الفرز الرقمي تصاعدياً",
+              [t2.item(r, 1).text() for r in range(3)] == ["9", "40", "100"])
+        check("صف الإجمالي لا يُفرَز بل يبقى في القاع",
+              bool(t2.item(3, 0).data(_tt.TOTAL_ROLE)))
+        s.sort_by(1)
+        check("النقرة الثانية تعكس الاتجاه",
+              [t2.item(r, 1).text() for r in range(3)] == ["100", "40", "9"])
+        check("والإجمالي ما زال في القاع",
+              bool(t2.item(3, 0).data(_tt.TOTAL_ROLE)))
+        check("جمع الأعمدة يتجاهل صف الإجمالي",
+              _tt.sum_columns(t2, [1])[1] == 149.0)
+        check("التصدير يبدأ بصف العناوين",
+              _tt.rows_of(t2)[0] == ["الاسم", "المبلغ"])
+
+        # أوزان المستخدم تسبق أوزان الشاشة في مُحجِّم الأعمدة
+        from ui.widgets.table_fit import ColumnFitter as _CF
+        t3 = _QW4.QTableWidget(1, 2)
+        t3.show()
+        t3.resize(400, 100)
+        t3.setProperty("_user_weights", [80.0, 20.0])
+        f3 = _CF(t3, [1, 1])
+        f3.refit()
+        f3._do_apply()
+        check("عرض الأعمدة المحفوظ يسبق أوزان الشاشة",
+              t3.columnWidth(0) > t3.columnWidth(1) * 2,
+              f"{t3.columnWidth(0)} / {t3.columnWidth(1)}")
+    except ImportError:
+        check("فحوص الجداول الاحترافية", True, "تخطّي — PyQt5 غير مثبّت")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

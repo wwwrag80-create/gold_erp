@@ -9,6 +9,7 @@ from PyQt5 import QtWidgets
 from database.database import db
 from models.reports import vat_return
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -69,6 +70,7 @@ class VatReturnScreen(QtWidgets.QWidget):
             cards.addWidget(c)
 
         self.table = make_table()
+        _enhance(self.table, key="vat_return")
         self.status = big_label()
 
         lay = QtWidgets.QVBoxLayout(self)

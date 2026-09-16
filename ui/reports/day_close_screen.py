@@ -11,6 +11,7 @@ from models import day_close
 from services import karat_view as kv
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
                                make_table, title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 
 class DayCloseScreen(QtWidgets.QWidget):
@@ -47,8 +48,11 @@ class DayCloseScreen(QtWidgets.QWidget):
             cards.addWidget(c)
 
         self.kinds = make_table()
+        _enhance(self.kinds, key="day_close_kinds")
         self.balances = make_table()
+        _enhance(self.balances, key="day_close_bal")
         self.docs = make_table()
+        _enhance(self.docs, key="day_close_docs")
         self.summary = big_label()
 
         tabs = QtWidgets.QTabWidget()
