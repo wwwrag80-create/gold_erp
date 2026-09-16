@@ -398,6 +398,38 @@ def main():
         if not _prev:
             _td.clear_active_tenant()
 
+    step("14) توحيد صيغة التواريخ")
+    # التواريخ تُقارَن نصاً، ورمز الرقم العربي أكبر من رمز الإنجليزي،
+    # فتاريخ بأرقام عربية يسقط من كل فلتر: القيد موجود وغير مرئي.
+    from services.dates import (has_non_ascii_digits, normalize_date,
+                                normalize_digits)
+    check("يُكتشف الرقم العربي", has_non_ascii_digits("٢٠٢٦-٠٩-١٦"))
+    check("لا إنذار كاذب للإنجليزي",
+          has_non_ascii_digits("2026-09-16") is False)
+    check("يُحوَّل العربي للإنجليزي",
+          normalize_digits("٢٠٢٦-٠٩-١٦") == "2026-09-16")
+    check("يُحوَّل الفارسي أيضاً",
+          normalize_digits("۲۰۲۶-۰۹-۱۶") == "2026-09-16")
+    check("تُوحَّد الفواصل", normalize_date("٢٠٢٦/٠٩/١٦") == "2026-09-16")
+    expect_error("يُرفض ما ليس تاريخاً",
+                 lambda: normalize_date("كلام"), "غير صالح")
+
+    # الحارس في محرك القيود: أي قيد يُرحَّل بتاريخ عربي يُحفظ إنجليزياً
+    with db() as conn:
+        eid = post_entry(conn, "٢٠٢٧-٠٣-٠٤", "اختبار تاريخ عربي", [
+            {"account_id": cash, "cash_debit": 7},
+            {"account_id": acc_id(conn, "1500"), "cash_credit": 7}],
+            username="admin")
+    with db(readonly=True) as conn:
+        saved = conn.execute("SELECT entry_date d FROM journal_entries"
+                             " WHERE id=?", (eid,)).fetchone()["d"]
+        seen = conn.execute(
+            "SELECT COUNT(*) c FROM journal_entries WHERE id=? AND"
+            " entry_date>='2027-01-01' AND entry_date<='2027-12-31'",
+            (eid,)).fetchone()["c"]
+    check("المحرك يحفظ التاريخ إنجليزياً", saved == "2027-03-04", saved)
+    check("القيد يظهر في فلتر الفترة", seen == 1)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
