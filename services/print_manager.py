@@ -1276,7 +1276,8 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "aging":
             return en(_tpl_aging(conn, doc_id,
                                  kw.get("entity_type", "customer"),
-                                 kw.get("as_of"), kw.get("dim", "both")))
+                                 kw.get("as_of"), kw.get("dim", "both"),
+                                 kw.get("only")))
         if doc_type == "day_close":
             return en(_tpl_day_close(conn, doc_id, kw.get("date")))
         if doc_type == "balance_tree":
@@ -1856,11 +1857,19 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az"):
 
 # خريطة نوع المستند ← قالبه. تُبنى من الدوال الموجودة فعلاً،
 # فلا تنكسر إن أُعيد ترتيب الملف.
-def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both"):
-    """تقرير أعمار الديون — الأقدم أولاً وصف إجمالي بارز."""
+def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
+               only=None):
+    """تقرير أعمار الديون — الأقدم أولاً وصف إجمالي بارز.
+
+    `only` معرّفات جهات بعينها: الورقة تطابق ما رُشّح على الشاشة، فلا
+    يُطبع تقريرٌ يخالف ما أمام المستخدم.
+    """
     from models import aging
     from services import karat_view
     rows = aging.report(conn, entity_type, as_of)
+    if only:
+        chosen = set(only)
+        rows = [r for r in rows if r["entity_id"] in chosen]
     t = aging.totals(rows)
     today = _qd(QtCore.QDate.currentDate())
     label = {"customer": "العملاء", "supplier": "الموردين",
@@ -1911,7 +1920,10 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both"):
       <tr><td {TH} width="25%">الفئة</td><td>{label}</td>
           <th>حتى تاريخ</th><td>{en(as_of or today)}</td></tr>
       <tr><th>عدد الجهات المدينة</th><td>{en(f"{t['count']:,}")}</td>
-          <th>تاريخ الطباعة</th><td>{en(today)}</td></tr>
+          <th>النطاق</th>
+          <td>{("جهات مختارة: " + en(str(len(only)))) if only
+               else "كل الجهات"}</td></tr>
+      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
     </table>
 
     {TBL}
@@ -2079,7 +2091,8 @@ def build_html(doc_type, doc_id, **kw):
         elif doc_type == "aging":
             html = _tpl_aging(conn, doc_id,
                               kw.get("entity_type", "customer"),
-                              kw.get("as_of"), kw.get("dim", "both"))
+                              kw.get("as_of"), kw.get("dim", "both"),
+                              kw.get("only"))
         elif doc_type == "day_close":
             html = _tpl_day_close(conn, doc_id, kw.get("date"))
         else:

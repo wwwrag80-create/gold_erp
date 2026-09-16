@@ -8,7 +8,7 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
-from models import aging
+from models import aging, entities
 from services import karat_view as kv
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err,
                                make_table, title_label)
@@ -32,10 +32,27 @@ class AgingScreen(QtWidgets.QWidget):
         self.as_of = date_edit()
         self.dim = QtWidgets.QComboBox()
         self.dim.setMaximumWidth(150)
-        self.dim.addItem("نقد وذهب معاً", "both")
+        # النقد أولاً: أربعة عشر عموداً في شاشة واحدة لا تُقرأ، وسؤال
+        # «كم تأخّر علينا؟» نقديٌّ في الغالب. والبعدان متاحان لمن أراد.
         self.dim.addItem("النقد فقط", "cash")
         self.dim.addItem("الذهب فقط", "gold")
+        self.dim.addItem("نقد وذهب معاً", "both")
         self.dim.currentIndexChanged.connect(self.render)
+
+        # ── ترشيح بالأسماء ──
+        # التقرير كاملاً مفيد للنظرة العامة، لكن المتابعة اليومية تكون
+        # مع جهةٍ بعينها أو مجموعة. النافذة أنسب من قائمة منسدلة لأن
+        # الجهات قد تبلغ المئات، وفيها بحثٌ بالاسم.
+        self.selected = []                  # فارغة = كل الجهات
+        self.btn_names = QtWidgets.QPushButton("الجهات: كل الجهات ▾")
+        self.btn_names.setMinimumWidth(220)
+        self.btn_names.setToolTip(
+            "اختر جهةً أو أكثر ليقتصر الجدول عليها — والفراغ يعني الكل")
+        self.btn_names.clicked.connect(self.pick_names)
+        btn_clear = QtWidgets.QPushButton("مسح التحديد")
+        btn_clear.setObjectName("ghost")
+        btn_clear.setToolTip("يعيد عرض كل الجهات")
+        btn_clear.clicked.connect(self.clear_names)
         btn = QtWidgets.QPushButton("عرض")
         btn.clicked.connect(self.refresh)
         btn_print = QtWidgets.QPushButton("👁 معاينة وطباعة")
@@ -49,6 +66,8 @@ class AgingScreen(QtWidgets.QWidget):
         head.addWidget(self.as_of, 0)
         head.addWidget(QtWidgets.QLabel("البعد:"))
         head.addWidget(self.dim, 0)
+        head.addWidget(self.btn_names, 0)
+        head.addWidget(btn_clear, 0)
         head.addWidget(btn, 0)
         head.addStretch(1)
         head.addWidget(btn_print, 0)
@@ -64,6 +83,8 @@ class AgingScreen(QtWidgets.QWidget):
 
         self.table = make_table()
         self.note = big_label()
+        self.lbl_sel = QtWidgets.QLabel("المعروض: كل الجهات")
+        self.lbl_sel.setObjectName("cardSub")
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
@@ -72,6 +93,7 @@ class AgingScreen(QtWidgets.QWidget):
             "أعمار الديون — توزيع الأرصدة على فئات عمرية بطريقة "
             "«الأقدم فالأقدم»"))
         lay.addLayout(head)
+        lay.addWidget(self.lbl_sel)
         lay.addWidget(self.table, 1)
         lay.addLayout(cards)
         lay.addWidget(self.note)
@@ -85,23 +107,128 @@ class AgingScreen(QtWidgets.QWidget):
 
     # ══════════════════════════════════════════════════════════════
 
+    # ── اختيار الجهات ──
+
+    def pick_names(self):
+        """نافذة اختيار الجهات: بحث بالاسم وتأشير متعدّد."""
+        try:
+            kind = self.kind.currentData()
+            with db(readonly=True) as conn:
+                rows = [e for e in entities.list_entities(conn)
+                        if e["entity_type"] == kind and not e["is_internal"]]
+            # الجهات ذات الرصيد أولاً — وهي المقصودة في تقرير الأعمار
+            with_bal = {r["entity_id"] for r in self.rows}
+            rows.sort(key=lambda e: (e["id"] not in with_bal, e["name"]))
+
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle("اختيار الجهات")
+            dlg.setMinimumSize(420, 480)
+            search = QtWidgets.QLineEdit()
+            search.setPlaceholderText("اكتب أول حروف الاسم للتصفية…")
+            lst = QtWidgets.QListWidget()
+            chosen = set(self.selected)
+            for e in rows:
+                it = QtWidgets.QListWidgetItem(
+                    e["name"] + ("" if e["id"] in with_bal
+                                 else "   (بلا رصيد)"))
+                it.setData(QtCore.Qt.UserRole, e["id"])
+                it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+                it.setCheckState(QtCore.Qt.Checked if e["id"] in chosen
+                                 else QtCore.Qt.Unchecked)
+                lst.addItem(it)
+
+            def _filter(txt):
+                n = (txt or "").strip()
+                for i in range(lst.count()):
+                    it = lst.item(i)
+                    it.setHidden(bool(n) and n not in it.text())
+            search.textChanged.connect(_filter)
+
+            def _set_all(state):
+                for i in range(lst.count()):
+                    if not lst.item(i).isHidden():
+                        lst.item(i).setCheckState(state)
+
+            btn_all = QtWidgets.QPushButton("تحديد الظاهر")
+            btn_all.setObjectName("ghost")
+            btn_all.clicked.connect(lambda: _set_all(QtCore.Qt.Checked))
+            btn_none = QtWidgets.QPushButton("إلغاء التحديد")
+            btn_none.setObjectName("ghost")
+            btn_none.clicked.connect(lambda: _set_all(QtCore.Qt.Unchecked))
+            box = QtWidgets.QDialogButtonBox(
+                QtWidgets.QDialogButtonBox.Ok
+                | QtWidgets.QDialogButtonBox.Cancel)
+            box.accepted.connect(dlg.accept)
+            box.rejected.connect(dlg.reject)
+
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(btn_all)
+            row.addWidget(btn_none)
+            row.addStretch(1)
+            lay = QtWidgets.QVBoxLayout(dlg)
+            lay.addWidget(search)
+            lay.addWidget(lst, 1)
+            lay.addLayout(row)
+            lay.addWidget(box)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            self.selected = [lst.item(i).data(QtCore.Qt.UserRole)
+                             for i in range(lst.count())
+                             if lst.item(i).checkState() == QtCore.Qt.Checked]
+            self._update_names_label()
+            self.render()
+        except Exception as e:
+            err(self, e)
+
+    def _selected_label(self):
+        if not self.selected:
+            return "كل الجهات"
+        if len(self.selected) == 1:
+            one = [r for r in self.rows
+                   if r["entity_id"] == self.selected[0]]
+            return one[0]["name"] if one else "جهة واحدة"
+        return f"{len(self.selected)} جهات"
+
+    def _update_names_label(self):
+        txt = self._selected_label()
+        self.btn_names.setText(f"الجهات: {txt} ▾")
+        self.lbl_sel.setText(f"المعروض: {txt}")
+
+    def clear_names(self):
+        self.selected = []
+        self._update_names_label()
+        self.render()
+
     def refresh(self):
         try:
             with db(readonly=True) as conn:
                 self.rows = aging.report(conn, self.kind.currentData(),
                                          dstr(self.as_of))
+            self._update_names_label()
             self.render()
         except Exception as e:
             err(self, e)
 
+    def _visible_rows(self):
+        """الصفوف بعد الترشيح بالأسماء — الفراغ يعني الكل."""
+        chosen = set(self.selected)
+        if not chosen:
+            return self.rows
+        return [r for r in self.rows if r["entity_id"] in chosen]
+
+    # عناوين مختصرة على الشاشة: الفئة رقمان لا جملة، فالعمود يضيق
+    # والعنوان يُقرأ كاملاً بدل أن يُقصّ.
+    SHORT = ("0 – 30", "31 – 60", "61 – 90", "+90")
+
     def _headers(self, dim):
-        cols = ["الجهة", "الجوال", "أقدم دين (يوم)"]
+        cols = ["الجهة", "الجوال", "أقدم\nدين"]
+        both = dim == "both"
         if dim in ("both", "cash"):
-            cols += [f"نقد {b}" for b in aging.BUCKET_LABELS]
-            cols += ["إجمالي النقد"]
+            cols += [(f"نقد\n{b}" if both else b) for b in self.SHORT]
+            cols += ["إجمالي\nالنقد"]
         if dim in ("both", "gold"):
-            cols += [f"ذهب {b}" for b in aging.BUCKET_LABELS]
-            cols += [f"إجمالي الذهب ({kv.unit()})"]
+            cols += [(f"ذهب\n{b}" if both else b) for b in self.SHORT]
+            cols += [f"إجمالي\nالذهب"]
         cols += ["له علينا"]
         return cols
 
@@ -126,7 +253,7 @@ class AgingScreen(QtWidgets.QWidget):
     def render(self):
         dim = self.dim.currentData() or "both"
         headers = self._headers(dim)
-        rows = self.rows
+        rows = self._visible_rows()
         t = aging.totals(rows)
 
         self.table.setUpdatesEnabled(False)
@@ -153,7 +280,8 @@ class AgingScreen(QtWidgets.QWidget):
                 if dim in ("both", "gold"):
                     tot += [f"{kv.g(x):,.3f}" for x in t["gold_buckets"]]
                     tot += [f"{kv.g(t['gold']):,.3f}"]
-                tot.append(f"نقد {abs(t['cash_credit']):,.2f}")
+                tot.append(f"نقد {abs(t['cash_credit']):,.2f}"
+                           if t["cash_credit"] else "—")
                 last = len(rows)
                 for c, v in enumerate(tot):
                     it = QtWidgets.QTableWidgetItem(str(v))
@@ -168,7 +296,9 @@ class AgingScreen(QtWidgets.QWidget):
                     self.table.setItem(last, c, it)
         finally:
             self.table.setUpdatesEnabled(True)
-        fit_columns(self.table)
+        # الاسم يأخذ الحصة الأكبر، والأرقام تتساوى
+        w = [20, 9, 7] + [8] * (len(headers) - 4) + [10]
+        fit_columns(self.table, w)
 
         self.c_count.set_value(f"{t['count']:,}")
         self.c_cur.set_value(f"{t['cash_buckets'][0]:,.2f}",
@@ -190,6 +320,7 @@ class AgingScreen(QtWidgets.QWidget):
         try:
             print_manager.preview_document(
                 self, "aging", 0, entity_type=self.kind.currentData(),
-                as_of=dstr(self.as_of), dim=self.dim.currentData())
+                as_of=dstr(self.as_of), dim=self.dim.currentData(),
+                only=list(self.selected))
         except Exception as e:
             err(self, e)

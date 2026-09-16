@@ -52,6 +52,10 @@ QT_INHERITED = {
     "statusBar", "menuBar", "setWindowIcon", "setMinimumSize", "showEvent",
     "closeEvent", "keyPressEvent", "eventFilter", "setWindowState",
     "setEditable", "setInsertPolicy", "lineEdit", "model", "setCompleter",
+    # موروثات QComboBox/QLabel المستعملة في الأصناف المشتقة
+    "setSizeAdjustPolicy", "setMinimumContentsLength", "view",
+    "rect", "alignment", "setAlignment", "text", "setText",
+    "minimumSizeHint", "sizeHint", "paintEvent", "setWordWrap",
     "itemText", "count", "setCurrentIndex", "currentIndex", "itemData",
     "setFrameShape", "setModal", "addItem", "clear", "findData",
     "currentData", "currentText", "setText", "text", "setValue", "value",

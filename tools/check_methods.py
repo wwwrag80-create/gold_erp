@@ -23,6 +23,10 @@ QT_INHERITED = {
     "closeEvent", "keyPressEvent", "eventFilter", "setWindowState",
     # موروثة من QComboBox / QFrame / QDialog / QLineEdit
     "setEditable", "setInsertPolicy", "lineEdit", "model", "setCompleter",
+    # موروثات QComboBox/QLabel المستعملة في الأصناف المشتقة
+    "setSizeAdjustPolicy", "setMinimumContentsLength", "view",
+    "rect", "alignment", "setAlignment", "text", "setText",
+    "minimumSizeHint", "sizeHint", "paintEvent", "setWordWrap",
     "itemText", "count", "setCurrentIndex", "currentIndex", "itemData",
     "setFrameShape", "setModal", "addItem", "clear", "findData",
     "currentData", "currentText", "setText", "text", "setValue", "value",
