@@ -9,11 +9,9 @@ from models import entities, journal
 from models.accounts import list_postable
 from services.audit import soft_delete_entry
 
-from services import browser_print, gold_math
+from services import browser_print, gold_math, karat_view as kv
 from ui.widgets.table_fit import fit_columns
-from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err, fill, info, karat_combo, make_table, save_pref, search_combo, title_label)
-
-KARAT_PREF = "ledger_karat"
+from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err, fill, info, karat_combo, make_table, search_combo, title_label)
 
 from models.editing import EDITABLE
 
@@ -55,13 +53,13 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                            ("مشتريات", "مشتريات")):
             self.op_kind.addItem(label, val)
         # العيارات: يعرض الكشف نفسه بالعيار المختار (عرضٌ محض)
-        self.karat = karat_combo(KARAT_PREF)
+        self.karat = karat_combo()
         self.karat.currentIndexChanged.connect(self._karat_changed)
         btn = QtWidgets.QPushButton("عرض")
         btn.clicked.connect(self.load)
         # ست بطاقات: مدين · دائن · الرصيد — للذهب والنقد
-        self.g_debit = Card("إجمالي المدين — ذهب", "جم عيار 18")
-        self.g_credit = Card("إجمالي الدائن — ذهب", "جم عيار 18")
+        self.g_debit = Card("إجمالي المدين — ذهب", f"جم {kv.label()}")
+        self.g_credit = Card("إجمالي الدائن — ذهب", f"جم {kv.label()}")
         self.g_bal = Card("رصيد الذهب", "")
         self.c_debit = Card("إجمالي المدين — نقد", "ريال")
         self.c_credit = Card("إجمالي الدائن — نقد", "ريال")
@@ -156,13 +154,12 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         return gold_math.from_base_karat(value or 0, self._k())
 
     def _karat_changed(self):
-        """يحفظ آخر عيار مختار ويعيد عرض الكشف به فوراً.
+        """يعيد عرض الكشف بالعيار المختار فوراً.
 
-        الحفظ في قاعدة بيانات المصنع لا في الجلسة: فالاختيار يبقى بعد
-        الخروج من الشاشة وبعد إغلاق النظام كله.
+        الشاشة تفتح على **عيار المصنع** المختار من الشريط العلوي،
+        وهذه القائمة معاينة مؤقتة لهذا الكشف وحده — لقراءة حساب بعيار
+        يختلف عن عيار المصنع دون تبديل النظام كله.
         """
-        save_pref(KARAT_PREF, self._k(),
-                  (self.user or {}).get("username"))
         # لا نعيد الاستعلام إن لم يُعرض شيء بعد
         if self.account.currentData() is not None and self.table.rowCount():
             self.load()

@@ -5,6 +5,7 @@ from datetime import datetime
 from PyQt5 import QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import editing, shrinkage
 from services.accounting_engine import balance_by_code
 from ui.widgets.common import (big_label, date_edit, dstr, err, info,
@@ -29,7 +30,9 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
         self.init_edit_mode(btn_save, "تسوية الفاقد")
 
         form = QtWidgets.QFormLayout()
-        form.addRow("وزن الفاقد بتقرير مدير التصنيع (جم عيار 18):", self.weight)
+        form.addRow(
+            f"وزن الفاقد بتقرير مدير التصنيع ({kv.unit()}):",
+            self.weight)
         form.addRow("الفترة (YYYY-MM):", self.period)
         form.addRow("التاريخ:", self.date)
         form.addRow("ملاحظات (خياسات/جلي/تشغيل):", self.notes)
@@ -60,7 +63,7 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
         try:
             # التحقق من حياة القيد **قبل** فتح المعاملة — لا داخلها
             self.verify_edit_target()
-            args = (self.weight.value(), dstr(self.date),
+            args = (kv.store(self.weight.value()), dstr(self.date),
                     self.period.text().strip(), self.user["username"],
                     self.notes.text())
             with db() as conn:
@@ -71,7 +74,7 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
                 else:
                     res = shrinkage.create_shrinkage(conn, *args)
             info(self, f"تم ترحيل التسوية {res['op_no']} "
-                       f"بوزن {res['weight']:.2f} جم")
+                       f"بوزن {kv.g(res['weight']):.2f} {kv.unit()}")
             self.end_edit()
             self.weight.setValue(0)
             self.notes.clear()
@@ -86,7 +89,7 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
                 if not op:
                     raise ValueError("العملية غير موجودة")
                 eid = editing.entry_of(conn, "shrinkage_ops", source_id)
-            self.weight.setValue(op["weight"])
+            self.weight.setValue(kv.g(op["weight"]))
             self.period.setText(op["period"] or "")
             self.notes.setText(op["notes"] or "")
             self.begin_edit(eid, source_id)
@@ -98,5 +101,6 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
             g = balance_by_code(conn, "1100")[0]
             loss = balance_by_code(conn, "5110")[0]
         self.tazeena.setText(
-            f"رصيد خزينة التصنيع الدفتري: {g:,.2f} جم عيار 18 | "
-            f"مجمع فاقد التصنيع: {loss:,.2f} جم")
+            f"رصيد خزينة التصنيع الدفتري: {kv.g(g):,.2f} جم "
+            f"{kv.label()} | "
+            f"مجمع فاقد التصنيع: {kv.g(loss):,.2f} جم")

@@ -16,11 +16,12 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import models_catalog as mc
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, info,
                                title_label)
 
-HEADERS = ["الموديل / رقم التشغيل", "العدد", "الوزن المقيد (جم)",
+HEADERS = ["الموديل / رقم التشغيل", "العدد", "الوزن المقيد",
            "الجهة / التاريخ"]
 
 
@@ -226,7 +227,7 @@ class ModelsScreen(QtWidgets.QWidget):
                 _img = "🖼 " if mc.image_path(m["model"]) else ""
                 node = self._cells(
                     [f"◄  {_img}الموديل {m['model']}", head_n,
-                     f"{head_w:,.2f}", ""],
+                     f"{kv.g(head_w):,.2f}", ""],
                     bold=True, brush=st["model"],
                     data=("model", m["model"]))
                 # إبراز صف الموديل: خط أكبر وخلفية مميّزة
@@ -241,20 +242,21 @@ class ModelsScreen(QtWidgets.QWidget):
                 if mode in ("all", "sold"):
                     sold = self._cells(
                         ["طرف المناديب", m["out_count"],
-                         f"{m['out_weight']:,.2f}", "عند المناديب"],
+                         f"{kv.g(m['out_weight']):,.2f}", "عند المناديب"],
                         bold=True, brush=st["sold"],
                         data=("branch", m["model"]))
                     node[0].appendRow(sold)
                     for i in data[m["model"]]["sold"]:
                         sold[0].appendRow(self._cells(
-                            [i["wo"], "", f"{i['reg']:,.2f}",
+                            [i["wo"], "", f"{kv.g(i['reg']):,.2f}",
                              f"{i['holder']}  ·  {i['date']}"],
                             data=("wo", i["id"])))
 
                 if mode in ("all", "in_stock"):
                     stock = self._cells(
                         ["الموجود (متاح للبيع)", m["in_count"],
-                         f"{m['in_weight']:,.2f}", "في الذهب المشغول"],
+                         f"{kv.g(m['in_weight']):,.2f}",
+                         "في الذهب المشغول"],
                         bold=True, brush=st["stock"],
                         data=("branch", m["model"]))
                     node[0].appendRow(stock)
@@ -287,14 +289,14 @@ class ModelsScreen(QtWidgets.QWidget):
         n_out = sum(m["out_count"] for m in models)
         if mode == "in_stock":
             txt = (f"{len(models)} موديل   |   المتاح للبيع: "
-                   f"{n_in} طقم · {tot_in:,.2f} جم")
+                   f"{n_in} طقم · {kv.g(tot_in):,.2f} {kv.unit()}")
         elif mode == "sold":
             txt = (f"{len(models)} موديل   |   المباع بالخارج: "
-                   f"{n_out} طقم · {tot_out:,.2f} جم")
+                   f"{n_out} طقم · {kv.g(tot_out):,.2f} {kv.unit()}")
         else:
             txt = (f"{len(models)} موديل   |   المتاح: {n_in} طقم · "
-                   f"{tot_in:,.2f} جم   |   المباع: {n_out} طقم · "
-                   f"{tot_out:,.2f} جم")
+                   f"{kv.g(tot_in):,.2f} {kv.unit()}   |   المباع: "
+                   f"{n_out} طقم · {kv.g(tot_out):,.2f} {kv.unit()}")
         self.summary.setText(txt)
 
     # ══════════ الإجراءات ══════════

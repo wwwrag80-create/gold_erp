@@ -351,6 +351,38 @@ def _w(v, d=2):
         return "—"
 
 
+def _gw(v, d=2):
+    """وزن مخزَّن بمكافئ 18 ← مطبوعاً بعيار المصنع.
+
+    الورقة تخرج بنفس عيار الشاشة — وإلا قرأ العميل رقماً وقرأ
+    المحاسب آخر للحركة نفسها.
+    """
+    from services import karat_view
+    return _w(karat_view.g(v), d)
+
+
+def _kunit():
+    from services import karat_view
+    return karat_view.unit()
+
+
+def _karat_kw(kw):
+    """عيار الطباعة: ما مرّرته الشاشة، وإلا عيار المصنع الفعّال."""
+    from services import karat_view
+    return int(kw.get("karat") or karat_view.active())
+
+
+def _kactive():
+    from services import karat_view
+    return karat_view.active()
+
+
+def _krate(v):
+    """أجر الجرام بعيار المصنع — يتحرك عكس الوزن ليبقى حاصلهما ثابتاً."""
+    from services import karat_view
+    return karat_view.rate(v)
+
+
 # ══════════════════════ قوالب المستندات ══════════════════════
 def _tpl_invoice(conn, invoice_id):
     """فاتورة المبيعات/المرتجعات — الأعمدة تطابق شاشة إدخال الطقم حرفياً:
@@ -401,9 +433,9 @@ def _tpl_invoice(conn, invoice_id):
         body_rows += "<tr>" + cells(
             tdw(en(_mn)),
             tdw(en(wo["work_order_no"] if wo else "—")),
-            tdw(_w(reg)), tdw(_w(standing)), tdw(_w(gold)),
-            tdw(_w(small)), tdw(_w(big)), tdw(_w(after)),
-            tdw(_w(it["wage_per_gram"], 2)),
+            tdw(_gw(reg)), tdw(_gw(standing)), tdw(_gw(gold)),
+            tdw(_gw(small)), tdw(_gw(big)), tdw(_gw(after)),
+            tdw(_w(_krate(it["wage_per_gram"]), 2)),
             tdw(_w(it["wages"], 2))) + "</tr>"
     if not body_rows:
         body_rows = f'<tr><td {TD} colspan="9">لا توجد أصناف</td></tr>'
@@ -414,16 +446,18 @@ def _tpl_invoice(conn, invoice_id):
 
     # نسب الأعمدة (المجموع 100%) تُجبر الجدول على ملء عرض الورقة
     W = (11, 12, 11, 11, 12, 10, 10, 10, 13)
+    _u = _kunit()
     head_cells = cells(
         thw("الموديل"),
-        thw("رقم التشغيل"), thw("الوزن المقيد"), thw("الوزن القائم"),
+        thw("رقم التشغيل"), thw(f"الوزن المقيد<br/>{_u}"),
+        thw(f"الوزن القائم<br/>{_u}"),
         thw("الذهب"), thw("الفصوص"), thw("الأحجار"),
         thw("الأحجار بعد الخصم"), thw("الأجر"), thw("الأجور"))
     total_cells = cells(
         thw(""),
-        thw("الإجمالي"), thw(_w(t_reg)), thw(_w(t_standing)),
-        thw(_w(t_gold)), thw(_w(t_small)), thw(_w(t_big)),
-        thw(_w(t_after)), thw("—"), thw(_w(inv["total_wages"], 2)))
+        thw("الإجمالي"), thw(_gw(t_reg)), thw(_gw(t_standing)),
+        thw(_gw(t_gold)), thw(_gw(t_small)), thw(_gw(t_big)),
+        thw(_gw(t_after)), thw("—"), thw(_w(inv["total_wages"], 2)))
 
     vat_block = ""
     if inv["vat_applied"]:
@@ -438,9 +472,14 @@ def _tpl_invoice(conn, invoice_id):
     </table>'''
 
     time_str = (inv["created_at"] or "")[11:19] or "—"
+    # رمز QR لصور موديلات الفاتورة — يمين الورقة تحت عنوان المستند.
+    # تحسين بصري بحت: تعذّره يعيد "" فتُطبع الفاتورة كما هي.
+    from services import photo_qr
+    qr_html = photo_qr.qr_for_invoice(conn, invoice_id, inv["invoice_no"])
     info = f'''
     {TBL_PLAIN}<tr>
-      <td width="55%"></td>
+      <td width="55%" valign="top" align="right"
+          style="text-align:right;">{qr_html}</td>
       <td width="45%">
         {TBL}
           <tr><th>رقم الفاتورة</th>
@@ -464,12 +503,12 @@ def _tpl_invoice(conn, invoice_id):
       <tr>{total_cells}</tr>
     </table>
     {TBL}
-      <tr><td {TH} width="70%">إجمالي الوزن (المقيد)</td>
-          <td>{_w(t_reg)}</td></tr>
+      <tr><td {TH} width="70%">إجمالي الوزن (المقيد) — {_u}</td>
+          <td>{_gw(t_reg)}</td></tr>
       <tr><th>إجمالي الأجور</th>
           <td>{_w(inv['total_wages'], 2)}</td></tr>
       <tr><th>إجمالي الذهب الكلي في حسابكم بعد الفاتورة</th>
-          <td>{_w(gold_bal)}</td></tr>
+          <td>{_gw(gold_bal)}</td></tr>
       <tr><th>إجمالي الأجور الكلي في حسابكم بعد الفاتورة</th>
           <td>{_w(cash_bal, 2)}</td></tr>
     </table>
@@ -531,20 +570,23 @@ def _tpl_voucher(conn, voucher_id):
             tdw(r["line_notes"] or "", 40, "right"),
             tdw(_w(r["gold_weight"]), 20),
             tdw(en(r["gold_karat"]), 15),
-            tdw(_w(r["gold_equiv18"]), 25)) + "</tr>"
+            tdw(_gw(r["gold_equiv18"]), 25)) + "</tr>"
     if v["disc_gold"]:
         gold_rows += "<tr>" + cells(
-            tdw("خصم وزني", 40, "right"), tdw(_w(v["disc_gold"]), 20),
-            tdw("18", 15), tdw(_w(v["disc_gold"]), 25)) + "</tr>"
+            tdw("خصم وزني", 40, "right"),
+            tdw(_gw(v["disc_gold"]), 20),
+            tdw(en(str(_kactive())), 15),
+            tdw(_gw(v["disc_gold"]), 25)) + "</tr>"
     gold_block = ""
     if gold_rows:
         gold_block = f'''
     {TBL}
       <tr>{cells(thw("التفاصيل", 40), thw("الوزن القائم", 20),
-                 thw("العيار", 15), thw("وزن الذهب المعتمد (عيار 18)", 25))}</tr>
+                 thw("العيار", 15),
+                 thw(f"وزن الذهب المعتمد ({_kunit()})", 25))}</tr>
       {gold_rows}
       <tr>{cells(thw("الإجمالي", 40), thw(_w(tot_w), 20),
-                 thw("—", 15), thw(_w(tot_e), 25))}</tr>
+                 thw("—", 15), thw(_gw(tot_e), 25))}</tr>
     </table>'''
 
     # ── جدول النقد ──
@@ -742,7 +784,7 @@ def _tpl_fixing(conn, op_id):
 
 
 def _tpl_statement(conn, account_id, date_from=None, date_to=None,
-                   karat=18):
+                   karat=None):
     """كشف الحساب بالمعيار التصميمي الموحد: RTL إجباري · الجدول بعرض
     الصفحة ومتوسط · أعمدة مرنة (البيان يأخذ المساحة الأكبر والتواريخ
     والمبالغ تتقلص) · صف رصيد ختامي بارز · توقيعان.
@@ -757,7 +799,8 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
     if not acc:
         raise ValueError("الحساب غير موجود")
     rows = journal.statement(conn, account_id, date_from, date_to)
-    k = int(karat or 18)
+    from services import karat_view
+    k = int(karat or karat_view.active())
 
     def _g(v):
         return gold_math.from_base_karat(v or 0, k)
@@ -835,7 +878,7 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
 
 def _tpl_customer_analytics(conn, customer_id, date_from=None,
                             date_to=None, visible=None, expanded=None,
-                            karat=18):
+                            karat=None):
     """قالب طبق الأصل من شاشة تحليل المبيعات (WYSIWYG).
 
     يحاكي الشاشة تماماً: اللوحة المخفية لا تُطبع، والجدول المطويّ
@@ -855,7 +898,8 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     if not ent:
         raise ValueError("العميل غير موجود")
     p = sa.all_panels(conn, customer_id, date_from, date_to)
-    k = int(karat or 18)
+    from services import karat_view
+    k = int(karat or karat_view.active())
 
     def _g(v):
         return gold_math.from_base_karat(v or 0, k)
@@ -1194,14 +1238,14 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "statement":
             return en(_tpl_statement(conn, doc_id, kw.get("date_from"),
                                      kw.get("date_to"),
-                                     kw.get("karat", 18)))
+                                     _karat_kw(kw)))
         if doc_type == "balances":
             return en(_tpl_balances(conn, doc_id, kw.get("rows") or []))
         if doc_type == "customer_analytics":
             return en(_tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("visible"), kw.get("expanded"),
-                kw.get("karat", 18)))
+                _karat_kw(kw)))
         if doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             return en(_tpl_mfg(conn, doc_id, kw.get("period"),
                                kw.get("targets"), kw.get("salaries"),
@@ -1838,14 +1882,14 @@ def build_html(doc_type, doc_id, **kw):
     with db() as conn:
         if doc_type == "statement":
             html = _tpl_statement(conn, doc_id, kw.get("date_from"),
-                                  kw.get("date_to"), kw.get("karat", 18))
+                                  kw.get("date_to"), _karat_kw(kw))
         elif doc_type == "balances":
             html = _tpl_balances(conn, doc_id, kw.get("rows") or [])
         elif doc_type == "customer_analytics":
             html = _tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("visible"), kw.get("expanded"),
-                kw.get("karat", 18))
+                _karat_kw(kw))
         elif doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             html = _tpl_mfg(conn, doc_id, kw.get("period"),
                             kw.get("targets"), kw.get("salaries"),

@@ -7,7 +7,7 @@ from PyQt5 import QtWidgets
 from database.database import db
 from models import coa, editing, entities, inventory, vouchers
 from models.accounts import list_postable
-from services import gold_math
+from services import gold_math, karat_view as kv
 from services.accounting_engine import account_balance
 from ui.widgets.common import (confirm_post, big_label, posted, date_edit, dstr, enter_chain, err,
                                fill, info, make_table, mspin, reload_combo,
@@ -54,7 +54,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         # الأعيرة من BOX_CODE فيظهر أي عيار يُضاف مستقبلاً تلقائياً
         for k in sorted(inventory.BOX_CODE):
             self.g_karat.addItem(f"عيار {k}", k)
-        self.g_equiv = big_label("المكافئ بعيار 18: 0.00 جم")
+        self.g_equiv = big_label(f"المكافئ بـ{kv.label()}: 0.00 جم")
         self.g_weight.valueChanged.connect(self.recalc_equiv)
         self.g_karat.currentIndexChanged.connect(self.recalc_equiv)
         self.g_note = QtWidgets.QLineEdit()
@@ -109,7 +109,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                   self.net_diff)
         af.addRow(self.adj_enable)
         af.addRow("خصم مسموح نقداً (ريال):", self.disc_cash)
-        af.addRow("خصم مسموح وزناً (جم عيار 18):", self.disc_gold)
+        af.addRow(f"خصم مسموح وزناً ({kv.unit()}):", self.disc_gold)
 
         self.notes = QtWidgets.QLineEdit()
         btn_save = QtWidgets.QPushButton("ترحيل السند")
@@ -173,9 +173,15 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self._apply_measurement()
 
     def recalc_equiv(self):
+        """المكافئ المعروض بعيار المصنع.
+
+        **الوزن المستلم لا يُحوَّل**: هو وزن حقيقي بعياره المختار في
+        الحقل المجاور (كسر 21 مثلاً)، لا مكافئ. المكافئ وحده هو الذي
+        يُقرأ بوحدة المصنع.
+        """
         karat = self.g_karat.currentData() or 18
         eq = gold_math.to_base_karat(self.g_weight.value(), karat)
-        self.g_equiv.setText(f"المكافئ بعيار 18: {eq:.2f} جم")
+        self.g_equiv.setText(f"المكافئ بـ{kv.label()}: {kv.g(eq):.2f} جم")
 
     def _current_target(self):
         if self.target_mode.currentData() == "entity":
@@ -221,7 +227,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             else:
                 g, c = account_balance(conn, val)
         self.balances.setText(
-            f"الرصيد الحالي — ذهب: {g:,.2f} جم عيار 18 "
+            f"الرصيد الحالي — ذهب: {kv.g(g):,.2f} جم {kv.label()} "
             f"({'مدين' if g >= 0 else 'دائن'}) | "
             f"نقد: {c:,.2f} ريال ({'مدين' if c >= 0 else 'دائن'})")
 
@@ -268,16 +274,18 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             if r["kind"] == "gold":
                 eq = gold_math.to_base_karat(r["weight"], r["karat"])
                 tg += eq
-                data.append(("ذهب", f"{r['weight']:,.2f}", f"عيار {r['karat']}",
-                             f"{eq:,.2f}", "—", r["notes"] or "—"))
+                data.append(("ذهب", f"{r['weight']:,.2f}",
+                             f"عيار {r['karat']}",
+                             f"{kv.g(eq):,.2f}", "—", r["notes"] or "—"))
             else:
                 tc += r["amount"]
                 data.append(("نقد", "—", "—", "—",
                              f"{r['amount']:,.2f}", r["notes"] or "—"))
-        fill(self.rows_table, ["النوع", "الوزن", "العيار",
-                               "المكافئ ع18", "المبلغ", "البيان"], data)
+        fill(self.rows_table, ["النوع", "الوزن الفعلي", "العيار",
+                               f"المكافئ ع{kv.active()}", "المبلغ",
+                               "البيان"], data)
         self.rows_total.setText(
-            f"إجمالي السند — ذهب: {tg:,.2f} جم عيار 18   |   "
+            f"إجمالي السند — ذهب: {kv.g(tg):,.2f} جم {kv.label()}   |   "
             f"نقد: {tc:,.2f} ريال   ({len(self.rows)} سطر)")
 
     def toggle_adjustments(self):
@@ -294,7 +302,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             return 0.0, 0.0, 0.0
         return (round(self.net_diff.value(), 2),
                 round(self.disc_cash.value(), 2),
-                round(self.disc_gold.value(), 2))
+                round(kv.store(self.disc_gold.value()), 2))
 
     def _target_label(self):
         """اسم الجهة أو الحساب المختار — لعرضه في تأكيد الترحيل."""

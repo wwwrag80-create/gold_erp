@@ -5,6 +5,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import fixing, inventory, invoices, journal, melting, payroll
 from models import purchases, shrinkage, stocktake, vouchers
 from services.audit import soft_delete_entry
@@ -28,7 +29,7 @@ DOC_TYPES = [
       "الضريبة", "الإجمالي", "رقم القيد"],
      lambda conn, q, f, t: invoices.search_invoices(conn, q, f, t),
      lambda r: (r["invoice_no"], _inv_kind(r), r["customer_name"],
-               r["invoice_date"], r["total_weight"], r["total_wages"],
+               r["invoice_date"], kv.g(r["total_weight"]), r["total_wages"],
                r["vat_amount"], r["grand_total"], r["entry_id"])),
 
     ("receipt", "سندات القبض",
@@ -38,7 +39,7 @@ DOC_TYPES = [
      lambda r: (r["voucher_no"], r["customer_name"], r["voucher_date"],
                f"{r['gold_weight']:.2f} ع{r['gold_karat']}"
                if r["gold_weight"] else "—",
-               r["gold_equiv18"], r["cash_amount"], r["net_diff"],
+               kv.g(r["gold_equiv18"]), r["cash_amount"], r["net_diff"],
                r["entry_id"])),
 
     ("payment", "سندات الصرف",
@@ -48,15 +49,17 @@ DOC_TYPES = [
      lambda r: (r["voucher_no"], r["customer_name"], r["voucher_date"],
                f"{r['gold_weight']:.2f} ع{r['gold_karat']}"
                if r["gold_weight"] else "—",
-               r["gold_equiv18"], r["cash_amount"], r["net_diff"],
+               kv.g(r["gold_equiv18"]), r["cash_amount"], r["net_diff"],
                r["entry_id"])),
 
     ("production", "إدخال إنتاج (توريد أطقم)",
      ["رقم التشغيل", "الإجمالي", "الأحجار", "نسبة الخصم", "الوزن المقيد",
       "الحالة", "تاريخ الإدخال", "رقم القيد"],
      lambda conn, q, f, t: inventory.search_work_orders(conn, q, f, t),
-     lambda r: (r["work_order_no"], r["gross_weight"], r["stones_weight"],
-               f"{r['discount_rate']*100:.0f}%", r["registered_weight"],
+     lambda r: (r["work_order_no"], kv.g(r["gross_weight"]),
+               kv.g(r["stones_weight"]),
+               f"{r['discount_rate']*100:.0f}%",
+               kv.g(r["registered_weight"]),
                _wo_status(r), r["created_at"], r["entry_id"])),
 
     ("journal", "قيود يومية يدوية",
@@ -172,7 +175,8 @@ class TransactionLogScreen(QtWidgets.QWidget):
                              dstr(self.d_from),
                              dstr(self.d_to))
             data = [mapper(r) for r in rows]
-            fill(self.table, columns, data)
+            # عناوين الأعمدة بعيار المصنع («مكافئ 18» ← «مكافئ 21»)
+            fill(self.table, [kv.rename(c) for c in columns], data)
         except Exception as e:
             err(self, e)
 

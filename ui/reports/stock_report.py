@@ -3,6 +3,7 @@
 from PyQt5 import QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models.inventory import stock_snapshot
 from ui.widgets.common import big_label, fill, make_table, title_label
 
@@ -31,13 +32,17 @@ class StockReportScreen(QtWidgets.QWidget):
         with db(readonly=True) as conn:
             s = stock_snapshot(conn)
         self.gold_summary.setText(
-            f"خزينة التصنيع: {s['tazeena_gold']:,.2f} جم عيار 18   |   "
-            f"الذهب المشغول: {s['mashghool_gold']:,.2f} جم "
-            f"({s['wo_count']} طقم بمجموع {s['wo_weight']:,.2f} جم)")
+            f"خزينة التصنيع: {kv.g(s['tazeena_gold']):,.2f} جم "
+            f"{kv.label()}   |   "
+            f"الذهب المشغول: {kv.g(s['mashghool_gold']):,.2f} جم "
+            f"({s['wo_count']} طقم بمجموع "
+            f"{kv.g(s['wo_weight']):,.2f} جم)")
         self.cash_summary.setText(
             f"الصندوق: {s['cash_box']:,.2f} ريال   |   "
             f"البنك: {s['bank']:,.2f} ريال")
-        rows = [(f"عيار {k}", actual, ledger)
+        # الوزن الفعلي وزنٌ حقيقي بعياره — لا يُحوَّل. المكافئ وحده
+        # يُقرأ بوحدة المصنع.
+        rows = [(f"عيار {k}", actual, kv.g(ledger))
                 for k, actual, ledger in s["boxes"]]
         fill(self.boxes, ["الصندوق", "الوزن الفعلي بعياره (جم)",
-                          "المكافئ الدفتري عيار 18 (جم)"], rows)
+                          f"المكافئ الدفتري ({kv.unit()})"], rows)

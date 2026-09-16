@@ -8,6 +8,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import closing, fiscal
 from ui.widgets.common import (ask, big_label, dstr, err, fill, info, make_table, title_label)
 
@@ -103,14 +104,14 @@ class YearEndScreen(QtWidgets.QWidget):
             p = self.preview
             data = [(i["code"], i["name"],
                      "إيراد" if i["type"] == "revenue" else "مصروف",
-                     f"{i['cash']:,.2f}", f"{i['gold']:,.2f}")
+                     f"{i['cash']:,.2f}", f"{kv.g(i['gold']):,.2f}")
                     for i in p["items"]]
             fill(self.table, COLS, data)
             kind = "ربح" if p["net_cash"] >= 0 else "خسارة"
             self.summary.setText(
                 f"سنة {p['year']}: {len(p['items'])} حساب نتيجة   |   "
                 f"صافي ال{kind}: {p['net_cash']:,.2f} ريال · "
-                f"{p['net_gold']:,.2f} جم 18")
+                f"{kv.g(p['net_gold']):,.2f} {kv.unit()}")
         except Exception as e:
             err(self, e)
 
@@ -128,7 +129,8 @@ class YearEndScreen(QtWidgets.QWidget):
                        f"• تصفير {len(self.preview['items'])} حساب نتيجة\n"
                        f"• ترحيل صافي "
                        f"{self.preview['net_cash']:,.2f} ريال و"
-                       f"{self.preview['net_gold']:,.2f} جم إلى {target}\n\n"
+                       f"{kv.g(self.preview['net_gold']):,.2f} "
+                       f"{kv.unit()} إلى {target}\n\n"
                        f"هل تريد المتابعة؟"):
                 return
             with db() as conn:
@@ -140,7 +142,7 @@ class YearEndScreen(QtWidgets.QWidget):
                    f"قيد الإقفال: #{res['close_entry']}\n"
                    f"الحسابات المُقفلة: {res['closed_accounts']}\n"
                    f"صافي النتيجة: {res['net_cash']:,.2f} ريال · "
-                   f"{res['net_gold']:,.2f} جم → {target}")
+                   f"{kv.g(res['net_gold']):,.2f} {kv.unit()} → {target}")
             if res["opening_entry"]:
                 msg += f"\nقيد افتتاحي لسنة {year + 1}: #{res['opening_entry']}"
             info(self, msg)

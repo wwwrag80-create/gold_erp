@@ -11,11 +11,17 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import balance_tree
 from ui.widgets.common import (big_label, date_edit, dstr, err, make_table,
                                title_label)
 
 COLS = ["الحساب", "الكود", "النقد / الأجور (ريال)", "الذهب (جم 18)"]
+
+
+def _cols():
+    return ["الحساب", "الكود", "النقد / الأجور (ريال)",
+            f"الذهب ({kv.unit()})"]
 
 
 class BalanceSheetScreen(QtWidgets.QWidget):
@@ -105,20 +111,22 @@ class BalanceSheetScreen(QtWidgets.QWidget):
                 continue
             marks.append((len(rows), True, 0))
             rows.append((f"◄ {sec['title']}", sec["code"],
-                         f"{sec['cash']:,.2f}", f"{sec['gold']:,.2f}"))
+                         f"{sec['cash']:,.2f}",
+                         f"{kv.g(sec['gold']):,.2f}"))
             for r in sec["rows"]:
                 if r["level"] == 1:
                     continue          # الجذر معروض في العنوان
                 indent = "    " * (r["level"] - 1)
                 marks.append((len(rows), False, r["level"]))
                 rows.append((f"{indent}{r['name']}", r["code"],
-                             f"{r['cash']:,.2f}", f"{r['gold']:,.2f}"))
+                             f"{r['cash']:,.2f}",
+                             f"{kv.g(r['gold']):,.2f}"))
             rows.append(("", "", "", ""))
 
         self.table.setUpdatesEnabled(False)
         try:
             self.table.setColumnCount(len(COLS))
-            self.table.setHorizontalHeaderLabels(COLS)
+            self.table.setHorizontalHeaderLabels(_cols())
             self.table.setRowCount(len(rows))
             for i, row in enumerate(rows):
                 for c, val in enumerate(row):
@@ -157,14 +165,15 @@ class BalanceSheetScreen(QtWidgets.QWidget):
         ag, ac = b["assets"]
         rg, rc = b["right_side"]
         self.summary.setText(
-            f"الأصول — نقد: {ac:,.2f} ريال · ذهب: {ag:,.2f} جم"
+            f"الأصول — نقد: {ac:,.2f} ريال · ذهب: "
+            f"{kv.g(ag):,.2f} {kv.unit()}"
             f"       |       الخصوم + حقوق الملكية + النتيجة — "
-            f"نقد: {rc:,.2f} ريال · ذهب: {rg:,.2f} جم")
+            f"نقد: {rc:,.2f} ريال · ذهب: {kv.g(rg):,.2f} {kv.unit()}")
         ok = b["balanced_cash"] and b["balanced_gold"]
         self.check.setText(
             "✔ الميزانية متوازنة في البعدين" if ok else
             f"✘ عجز — فرق النقد: {b['diff_cash']:,.2f} ريال · "
-            f"فرق الذهب: {b['diff_gold']:,.2f} جم")
+            f"فرق الذهب: {kv.g(b['diff_gold']):,.2f} {kv.unit()}")
         try:
             self.check.setStyleSheet(
                 "color:#1E6B33;font-weight:bold" if ok

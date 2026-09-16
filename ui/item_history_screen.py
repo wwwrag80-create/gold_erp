@@ -8,6 +8,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import inventory
 
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
@@ -63,7 +64,8 @@ class TurnoverPanel(QtWidgets.QFrame):
 
     def fill_panel(self, data):
         self.value.setText(
-            f"{data['count']} طقم  ·  {data['total_reg']:,.2f} جم")
+            f"{data['count']} طقم  ·  "
+            f"{kv.g(data['total_reg']):,.2f} {kv.unit()}")
         # لوحات الصادر تعرض «البائع» (من أخذ الطقم)، ولوحات الوارد
         # تعرض «المُرجِع» (من أعاده) — كلٌّ بما يناسب طبيعته.
         ret = "مرتجعة" in (self.title_text or "")
@@ -162,10 +164,11 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         lay.addWidget(tabs, 1)
 
     def _w(self, v):
+        """وزن مخزَّن بمكافئ 18 ← معروضاً بعيار المصنع."""
         if v == "" or v is None:
             return ""
         try:
-            return f"{float(v):,.2f}"
+            return f"{kv.g(float(v)):,.2f}"
         except (TypeError, ValueError):
             return str(v)
 
@@ -178,7 +181,8 @@ class ItemHistoryScreen(QtWidgets.QWidget):
                 wo, rows = inventory.item_history(conn, no)
             self.info.setText(
                 f"الطقم {wo['work_order_no']}  ·  النوع: {wo['item_type'] or '—'}"
-                f"  ·  الوزن المقيد الحالي: {wo['registered_weight']:,.2f} جم 18"
+                f"  ·  الوزن المقيد الحالي: "
+                f"{kv.g(wo['registered_weight']):,.2f} {kv.unit()}"
                 f"  ·  الحالة: {'بالمخزون' if wo['status'] == 'in_stock' else 'خارج/مباع'}")
             data = [(r["kind"], r["date"], r["party"], self._w(r["gold"]),
                      self._w(r["small"]), self._w(r["big"]), self._w(r["reg"]),

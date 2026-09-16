@@ -14,12 +14,10 @@ from services import gold_math
 
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
                                karat_combo, make_table, reload_combo,
-                               save_pref, search_combo, title_label)
+                               search_combo, title_label)
 
 PANELS = [("sales", "إجمالي المبيعات"), ("returns", "إجمالي المرتجعات"),
           ("net_sold", "إجمالي المباع الفعلي"), ("collection", "إجمالي التحصيل")]
-
-KARAT_PREF = "analytics_karat"
 
 
 class PanelColumn(QtWidgets.QFrame):
@@ -86,7 +84,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-6))
         self.d_to = date_edit()
         # العيارات: اللوحات والتقرير المطبوع يخرجان بالعيار المختار
-        self.karat = karat_combo(KARAT_PREF)
+        self.karat = karat_combo()
         self.karat.currentIndexChanged.connect(self._karat_changed)
         btn_run = QtWidgets.QPushButton("تحديث اللوحات")
         btn_run.clicked.connect(self.reload_panels)
@@ -136,8 +134,11 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         return gold_math.from_base_karat(value or 0, self._k())
 
     def _karat_changed(self):
-        """يحفظ آخر عيار مختار ويعيد بناء اللوحات به."""
-        save_pref(KARAT_PREF, self._k(), (self.user or {}).get("username"))
+        """يعيد بناء اللوحات بالعيار المختار.
+
+        الشاشة تفتح على عيار المصنع، وهذه القائمة معاينة مؤقتة لهذا
+        التقرير وحده.
+        """
         self.reload_panels()
 
     def reload_panels(self):

@@ -14,6 +14,7 @@ from datetime import date
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models.reports import income_statement_consignment
 from ui.widgets.common import (date_edit, dstr, err, fill, make_table, title_label)
 
@@ -115,12 +116,13 @@ class IncomeStatementScreen(QtWidgets.QWidget):
             return f"{v:,.2f}"
 
         def g(v):
-            return f"{v:,.2f}"
+            """وزن بمكافئ 18 ← بعيار المصنع (كل أوزان القائمة)."""
+            return f"{kv.g(v):,.2f}"
 
         # الشريط العلوي: حجم حركة البضاعة (وزني، عرض فقط)
         self.movement.setText(
             f"حجم حركة البضاعة (للعرض فقط) — صافي الذهب المباع: "
-            f"{g(r['net_gold_sold'])} جم 18   "
+            f"{g(r['net_gold_sold'])} {kv.unit()}   "
             f"(مبيعات {g(r['sales_weight'])} − مرتجعات {g(r['returns_weight'])})")
         self.movement.setStyleSheet(
             "background:#f3ece0; color:#7a5c1e; font-size:12pt;"
@@ -149,7 +151,8 @@ class IncomeStatementScreen(QtWidgets.QWidget):
              m(r["expenses_cash"]), "—"),
             ("    إجمالي المصروفات", m(r["expenses_cash"]), "—"),
         ]
-        fill(self.table, ["البند", "النقد / الأجور (ريال)", "الذهب (جم 18)"],
+        fill(self.table, ["البند", "النقد / الأجور (ريال)",
+                          f"الذهب ({kv.unit()})"],
              rows)
 
         # الشريط السفلي: النتيجة النهائية

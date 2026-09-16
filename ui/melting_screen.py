@@ -12,6 +12,7 @@ from PyQt5 import QtCore, QtWidgets
 
 import config
 from database.database import db
+from services import karat_view as kv
 from models import editing, melting
 from models.inventory import scrap_actuals
 from services import gold_math
@@ -20,8 +21,19 @@ from ui.widgets.common import (confirm_post, posted, ask, big_label, date_edit, 
                                wspin)
 from ui.widgets.edit_mode import EditModeMixin
 
+# الوزن الفعلي وزنٌ حقيقي بعياره المُدخل — لا يُحوَّل أبداً.
+# المعادل وحده هو الذي يُقرأ بوحدة المصنع.
 COLS = ["العيار", "الوزن الفعلي (جم)", "معادل عيار 18 (جم)"]
 LOG_COLS = ["المستند", "النوع", "التاريخ", "معادل 18 (جم)", "البيان"]
+
+
+def _cols():
+    return ["العيار", "الوزن الفعلي (جم)", f"المعادل ({kv.unit()})"]
+
+
+def _log_cols():
+    return ["المستند", "النوع", "التاريخ", f"المعادل ({kv.unit()})",
+            "البيان"]
 
 
 class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
@@ -71,7 +83,8 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         entry_row = QtWidgets.QHBoxLayout()
         entry_row.addLayout(col("العيار", self.karat, 130))
         entry_row.addLayout(col("الوزن الفعلي (جم)", self.weight, 130))
-        entry_row.addLayout(col("معادل عيار 18", self.equiv_label, 120))
+        entry_row.addLayout(col(f"المعادل ({kv.unit()})",
+                                self.equiv_label, 120))
         entry_row.addLayout(col("", btn_add, 130))
         entry_row.addStretch(1)
 
@@ -155,7 +168,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
     def recalc_line(self):
         k = self.karat.currentData() or 18
         self.equiv_label.setText(
-            f"{gold_math.to_base_karat(self.weight.value(), k):.2f}")
+            f"{kv.g(gold_math.to_base_karat(self.weight.value(), k)):.2f}")
 
     def add_line(self):
         try:
@@ -186,12 +199,13 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         for ln in self.lines:
             eq = gold_math.to_base_karat(ln["weight"], ln["karat"])
             total = round(total + eq, 3)
-            rows.append((f"عيار {ln['karat']}", ln["weight"], eq))
-        fill(self.table, COLS, rows)
+            rows.append((f"عيار {ln['karat']}", ln["weight"], kv.g(eq)))
+        fill(self.table, _cols(), rows)
         side = "مدين حساب الصب والتصفية" if self.mode == "disbursement" \
             else "دائن حساب الصب والتصفية"
         self.totals.setText(
-            f"إجمالي معادل عيار 18: {total:.2f} جم  →  {side}")
+            f"إجمالي المعادل بـ{kv.label()}: {kv.g(total):.2f} جم"
+            f"  →  {side}")
         self.recalc_line()
 
     # ── الترحيل ──
@@ -214,10 +228,11 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
                                          self.user["username"], fn, *args)
                 else:
                     res = fn(conn, *args)
-            posted(self, f"تم ترحيل {res['op_no']} بمعادل 18 = "
-                       f"{res['equiv18']:.2f} جم\n"
+            posted(self, f"تم ترحيل {res['op_no']} بمعادل "
+                       f"{kv.active()} = {kv.g(res['equiv18']):.2f} جم\n"
                        f"رصيد حساب الصب والتصفية الآن: "
-                       f"{res['refining_balance']:.2f} جم", "melting_ops", res["id"])
+                       f"{kv.g(res['refining_balance']):.2f} جم",
+                   "melting_ops", res["id"])
             self.end_edit()
             self.lines = []
             self.notes.clear()
@@ -231,14 +246,16 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
             with db() as conn:
                 s = melting.cycle_summary(conn)
             if not ask(self, f"إقفال حساب الصب والتصفية وترحيل الفرق "
-                             f"({s['outstanding']:.2f} جم معادل 18) إلى "
+                             f"({kv.g(s['outstanding']):.2f} جم معادل "
+                             f"{kv.active()}) إلى "
                              "حساب الفاقد الفني للصب؟"):
                 return
             with db() as conn:
                 res = melting.close_cycle(conn, dstr(self.close_date),
                                           self.user["username"])
             msg = (f"تم ترحيل قيد الإقفال {res['op_no']}\n"
-                   f"الفاقد الفني للصب: {res['loss18']:.2f} جم معادل 18 "
+                   f"الفاقد الفني للصب: {kv.g(res['loss18']):.2f} جم "
+                   f"معادل {kv.active()} "
                    f"({res['loss_ratio']*100:.2f}%)")
             if res["exceeded"]:
                 msg += (f"\n\n⚠ تنبيه: النسبة تجاوزت الحد المسموح "
@@ -289,16 +306,18 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
             actuals = scrap_actuals(conn)
             s = melting.cycle_summary(conn)
             rows = [(o["op_no"], melting.KIND_LABELS.get(o["kind"], o["kind"]),
-                     o["op_date"], round(o["equiv18"], 3), o["notes"] or "—")
+                     o["op_date"], kv.g(o["equiv18"]), o["notes"] or "—")
                     for o in melting.recent_melting(conn)]
         self.boxes_label.setText(
             "أرصدة صناديق الكسر الفعلية — "
             + " | ".join(f"عيار {k}: {actuals.get(k, 0.0):.2f} جم"
                          for k in melting.KARATS))
         self.cycle_label.setText(
-            f"المصروف للصب: {s['disbursed']:.2f} جم معادل 18   |   "
-            f"المقبوض مصفى: {s['received']:.2f} جم   |   "
-            f"الرصيد القائم (الفاقد المرشح): {s['outstanding']:.2f} جم")
+            f"المصروف للصب: {kv.g(s['disbursed']):.2f} جم معادل "
+            f"{kv.active()}   |   "
+            f"المقبوض مصفى: {kv.g(s['received']):.2f} جم   |   "
+            f"الرصيد القائم (الفاقد المرشح): "
+            f"{kv.g(s['outstanding']):.2f} جم")
         if abs(s["outstanding"]) < 0.001:
             self.cycle_note.setText(
                 "حساب الصب والتصفية متزن — لا يوجد فاقد بانتظار الإقفال.")
@@ -307,5 +326,5 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
                 f"نسبة الفاقد الحالية {s['loss_ratio']*100:.2f}% "
                 f"(الحد المسموح {config.MELTING_LOSS_LIMIT*100:.1f}%)"
                 + ("  ⚠ تجاوز الحد" if s["exceeded"] else ""))
-        fill(self.log, LOG_COLS, rows)
+        fill(self.log, _log_cols(), rows)
         self.render()

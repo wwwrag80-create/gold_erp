@@ -11,6 +11,7 @@ from pathlib import Path
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, search_combo, title_label)
 
@@ -206,7 +207,8 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
               "مدين نقد", "دائن نقد", "رصيد النقد"], data)
         self.summary.setText(
             f"{len(self.rows)} حساب   |   مجموع أرصدة الذهب: "
-            f"{tg:,.3f} جم   |   مجموع أرصدة النقد: {tc:,.2f} ريال")
+            f"{kv.g(tg):,.3f} {kv.unit()}   |   "
+            f"مجموع أرصدة النقد: {tc:,.2f} ريال")
 
     def print_cmp(self):
         try:

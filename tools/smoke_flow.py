@@ -11,6 +11,7 @@
 الفائدة: فحص `verify_all` يثبت أن الشاشات تُبنى وتُستدعى بلا خطأ، لكنه
 لا يثبت أن الأرقام صحيحة. هذا الملف يثبت الأرقام.
 """
+import base64
 import os
 import pathlib
 import shutil
@@ -701,6 +702,117 @@ def main():
               karat_combo("no_such_pref_key").currentData() == 18)
     except ImportError:
         check("فحوص تفضيل العيار", True, "تخطّي — PyQt5 غير مثبّت")
+
+    step("21) عيار المصنع — وحدة العرض والإدخال في النظام كله")
+    # القيد يبقى بمكافئ 18 مهما كان عيار العرض. هذه الفحوص تحرس
+    # الحدّ الفاصل: ما يعبر إلى القاعدة محوَّل دائماً، والنقد لا يتأثر.
+    from services import karat_view as _kv
+
+    check("العيار الافتراضي 18", _kv.active() == 18)
+    _kv.set_active(21, "admin")
+    check("العيار يُحفظ في قاعدة المصنع", _kv.active() == 21)
+    with db(readonly=True) as conn:
+        saved = fiscal.get_setting(conn, _kv.SETTING_KEY, "")
+    check("العيار مقروء من app_settings", str(saved) == "21", str(saved))
+
+    check("الإدخال يتحوّل للتخزين",
+          abs(_kv.store(100.0) - 116.667) < 0.001, str(_kv.store(100.0)))
+    check("التخزين يعود للعرض كما كان",
+          abs(_kv.g(_kv.store(100.0)) - 100.0) < 0.01,
+          str(_kv.g(_kv.store(100.0))))
+    check("أجر الجرام يتحرك عكس الوزن",
+          abs(_kv.rate(_kv.rate_store(23.0)) - 23.0) < 0.001)
+    # الحاصل (المبلغ النقدي) لا يتغيّر بتغيّر وحدة الوزن — وهو الضابط
+    check("المبلغ النقدي لا يتأثر بالعيار",
+          abs(_kv.store(100.0) * _kv.rate_store(23.0) - 100.0 * 23.0) < 0.02,
+          f"{_kv.store(100.0) * _kv.rate_store(23.0):.4f}")
+    expect_error("عيار غير مدعوم يُرفض",
+                 lambda: _kv.set_active(19), "غير مدعوم")
+    check("العيار لم يتغيّر بعد الرفض", _kv.active() == 21)
+    check("المسمّيات تتبع العيار",
+          _kv.rename("رصيد الذهب (جم عيار 18)") == "رصيد الذهب (جم عيار 21)",
+          _kv.rename("رصيد الذهب (جم عيار 18)"))
+    check("وحدة العرض", _kv.unit() == "جم 21" and _kv.label() == "عيار 21")
+
+    # دورة كاملة بعيار 21: التوريد ثم البيع — الأجور كما هي
+    with db() as conn:
+        _batch(conn, [{"wo_no": "K21", "gold": _kv.store(100.0),
+                       "wage_per_gram": _kv.rate_store(23.0)}],
+               "2026-04-01", "admin")
+        kwo = conn.execute(
+            "SELECT * FROM work_orders WHERE work_order_no='K21'").fetchone()
+    check("المخزَّن بمكافئ 18 لا بعيار العرض",
+          abs(kwo["registered_weight"] - 116.667) < 0.01,
+          str(kwo["registered_weight"]))
+    check("الطقم يُقرأ بعيار المصنع كما أُدخل",
+          abs(_kv.g(kwo["registered_weight"]) - 100.0) < 0.01)
+    with db() as conn:
+        kinv = create_sale(conn, cust,
+                           [{"work_order_id": kwo["id"],
+                             "weight": kwo["registered_weight"],
+                             "wage_override": kwo["wage_per_gram"]}],
+                           "2026-04-05", "admin", apply_vat=False)
+    check("أجور الفاتورة = الأجر × الوزن كما أدخلهما المستخدم",
+          abs(kinv["total_wages"] - 2300.0) < 0.05,
+          f"{kinv['total_wages']:.2f}")
+    with db(readonly=True) as conn:
+        gk, ck, gvk, cvk = ledger_balanced(conn)
+    check("الدفتر متوازن بعد دورة عيار 21", gk and ck,
+          f"ذهب {gvk} · نقد {cvk}")
+
+    # الأوزان الفيزيائية لا تُحوَّل: وزن الكسر بعياره ووزن سطر السند
+    with db(readonly=True) as conn:
+        vrow = conn.execute(
+            "SELECT gold_weight, gold_karat, gold_equiv18 FROM vouchers"
+            " WHERE gold_weight > 0 LIMIT 1").fetchone()
+    if vrow:
+        check("وزن سطر السند يبقى بعياره الفعلي",
+              abs(gold_math.to_base_karat(vrow["gold_weight"],
+                                          vrow["gold_karat"])
+                  - vrow["gold_equiv18"]) < 0.02,
+              f"{vrow['gold_weight']} ع{vrow['gold_karat']}")
+    else:
+        check("وزن سطر السند يبقى بعياره الفعلي", True, "لا سند ذهب")
+
+    # قالب الفاتورة يخرج بعيار المصنع ويحمل رمز صور الموديلات
+    from services import photo_qr as _pq, photo_server as _ps, print_manager
+    with db(readonly=True) as conn:
+        html_inv = print_manager._tpl_invoice(conn, kinv["id"])
+    check("الفاتورة المطبوعة بعيار المصنع", "جم 21" in html_inv)
+
+    png = _pq.qr_png_data_uri("http://127.0.0.1:1/inv/t")
+    check("رمز QR يُبنى بلا مكتبة صور خارجية",
+          png.startswith("data:image/png;base64,") and len(png) > 200,
+          f"{len(png)} حرفاً")
+    img_file = pathlib.Path(_TMP) / "mdl_test.png"
+    img_file.write_bytes(base64.b64decode(png.split(",", 1)[1]))
+    url = _ps.publish_invoice("S-1", [("MDL-1", str(img_file))])
+    check("خادم الصور يعطي رابطاً على الشبكة المحلية",
+          bool(url) and "/inv/" in str(url), str(url))
+    if url:
+        import urllib.request
+        page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
+        check("صفحة الصور تعرض الموديل", "MDL-1" in page)
+        raw = urllib.request.urlopen(
+            url.replace("/inv/", "/img/") + "/0", timeout=5).read()
+        check("الصورة تُخدم كاملة", raw == img_file.read_bytes(),
+              f"{len(raw)} بايت")
+        base = url.rsplit("/inv/", 1)[0]
+        try:
+            urllib.request.urlopen(base + "/inv/NOPE", timeout=5)
+            check("الرمز المجهول يُرفض", False, "قُبل رابط غير صالح")
+        except Exception as e:
+            check("الرمز المجهول يُرفض", "404" in str(e), str(e)[:40])
+        try:
+            urllib.request.urlopen(base + "/etc/passwd", timeout=5)
+            check("لا مسار آخر على الجهاز يُخدم", False, "قُبل مسار خارجي")
+        except Exception as e:
+            check("لا مسار آخر على الجهاز يُخدم", "404" in str(e),
+                  str(e)[:40])
+    _ps.stop()
+    check("خادم الصور يُغلق", _ps._state["server"] is None)
+    _kv.set_active(18, "admin")
+    check("العودة إلى 18 سليمة", _kv.active() == 18 and _kv.is_base())
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

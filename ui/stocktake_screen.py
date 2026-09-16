@@ -5,6 +5,7 @@
 from PyQt5 import QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import inventory, stocktake
 from services.accounting_engine import account_balance
 from ui.widgets.common import (search_combo, ask, big_label, date_edit, dstr, err, fill,
@@ -42,7 +43,8 @@ class StocktakeScreen(QtWidgets.QWidget):
         form = QtWidgets.QFormLayout()
         form.addRow("الحساب:", self.b_account)
         form.addRow(self.b_ledger)
-        form.addRow("الوزن الفعلي على الميزان (جم):", self.b_actual)
+        form.addRow(f"الوزن الفعلي على الميزان ({kv.unit()}):",
+                    self.b_actual)
         form.addRow(self.b_diff)
         form.addRow("تاريخ الجرد:", self.b_date)
         form.addRow("ملاحظات:", self.b_notes)
@@ -76,28 +78,39 @@ class StocktakeScreen(QtWidgets.QWidget):
             from models.accounts import acc_id
             ledger = account_balance(conn, acc_id(conn, code))[0]
         self._ledger_value = ledger
-        self.b_ledger.setText(f"الرصيد الدفتري الحالي: {ledger:,.2f} جم عيار 18")
+        # الرصيد الدفتري والوزن المُدخل بوحدة واحدة — وإلا بدا فرقٌ
+        # حيث لا فرق وقُيّد عجزٌ وهميّ.
+        self._ledger_value = ledger
+        self.b_ledger.setText(
+            f"الرصيد الدفتري الحالي: {kv.g(ledger):,.2f} جم {kv.label()}")
         self.show_diff()
 
     def show_diff(self):
         actual = self.b_actual.value()
-        diff = round(actual - getattr(self, "_ledger_value", 0.0), 3)
+        ledger = kv.g(getattr(self, "_ledger_value", 0.0))
+        diff = round(actual - ledger, 3)
+        u = kv.unit()
         if diff == 0:
-            self.b_diff.setText("الفرق: 0.000 جم (مطابق تماماً — لا حاجة لقيد)")
+            self.b_diff.setText(
+                f"الفرق: 0.000 {u} (مطابق تماماً — لا حاجة لقيد)")
         elif diff < 0:
-            self.b_diff.setText(f"عجز: {abs(diff):,.2f} جم (سيُقيَّد كخسارة)")
+            self.b_diff.setText(
+                f"عجز: {abs(diff):,.2f} {u} (سيُقيَّد كخسارة)")
         else:
-            self.b_diff.setText(f"زيادة: {diff:,.2f} جم (سيُقيَّد كتخفيض فاقد سابق)")
+            self.b_diff.setText(
+                f"زيادة: {diff:,.2f} {u} (سيُقيَّد كتخفيض فاقد سابق)")
 
     def save_bulk(self):
         try:
             with db() as conn:
                 res = stocktake.create_bulk_stocktake(
-                    conn, self.b_account.currentData(), self.b_actual.value(),
+                    conn, self.b_account.currentData(),
+                    kv.store(self.b_actual.value()),
                     dstr(self.b_date), self.user["username"], self.b_notes.text())
             if res["entry_id"]:
                 info(self, f"تم ترحيل جرد {res['stocktake_no']} — الفرق "
-                           f"{res['diff']:+.2f} جم (قيد رقم {res['entry_id']})")
+                           f"{kv.g(res['diff']):+.2f} {kv.unit()} "
+                           f"(قيد رقم {res['entry_id']})")
             else:
                 info(self, f"تم تسجيل جرد {res['stocktake_no']} — مطابق تماماً، "
                            "بلا قيد تسوية")
@@ -199,7 +212,8 @@ class StocktakeScreen(QtWidgets.QWidget):
             missing_w = sum(r["registered_weight"] for r in system_rows
                             if r["work_order_no"] in missing)
             msg = (f"مطابق: {len(scanned_set & system_nos)} | "
-                  f"عجز/مفقود: {len(missing)} (وزن {missing_w:.2f} جم) | "
+                  f"عجز/مفقود: {len(missing)} "
+                  f"(وزن {kv.g(missing_w):.2f} {kv.unit()}) | "
                   f"زيادة/غير مسجَّل: {len(excess)}\n\n"
                   "سيُرحَّل قيد عجز بوزن المفقود تلقائياً (إن وُجد) وتُخرَج "
                   "أرقامه من الرصيد المتاح. متابعة؟")
@@ -215,7 +229,8 @@ class StocktakeScreen(QtWidgets.QWidget):
             fill(self.result_table, ["رقم التشغيل", "الحالة", "ملاحظة"], rows)
             if res["entry_id"]:
                 info(self, f"تم ترحيل الجرد {res['stocktake_no']} — عجز "
-                           f"{res['missing_weight']:.2f} جم (قيد رقم {res['entry_id']})")
+                           f"{kv.g(res['missing_weight']):.2f} {kv.unit()} "
+                           f"(قيد رقم {res['entry_id']})")
             else:
                 info(self, f"تم تسجيل الجرد {res['stocktake_no']} — لا عجز، بلا قيد")
             self.clear_scans()
