@@ -22,6 +22,9 @@ jobs:
     env:
       # الشاشات تُبنى بلا خادم عرض؛ بدون هذا يفشل Qt عند أول QWidget
       QT_QPA_PLATFORM: offscreen
+      # تثبيت مجلد البيانات: الفحص لا يتأثر بما قد يوجد على المشغّل،
+      # ولا يكتب خارج مساحة العمل.
+      JADEITE_DATA_DIR: ${{ github.workspace }}/.ci-data
 
     steps:
       - uses: actions/checkout@v4

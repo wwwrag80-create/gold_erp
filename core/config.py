@@ -46,16 +46,52 @@ def _persistent_dir():
         return None
 
 
+DATA_DIR_ENV = "JADEITE_DATA_DIR"
+
+
+def _has_database(base):
+    """هل في هذا المجلد قاعدة بيانات فعلية؟
+
+    يفحص التخطيطين معاً: الملف القديم المفرد، وملفات المصانع المعزولة
+    (`data/tenants/<هوية>/`). وجود مجلد `data` فارغ لا يكفي — الاستنساخ
+    النظيف ينشئه فارغاً، فاعتباره «بيانات» يخفي بيانات المستخدم الحقيقية.
+    """
+    try:
+        d = Path(base) / "data"
+        if (d / "gold_erp.db").exists():
+            return True
+        t = d / "tenants"
+        return t.is_dir() and any(t.glob("*/gold_erp.db"))
+    except Exception:
+        return False
+
+
 def _data_dir():
     """مجلد البيانات **الدائم** — لا يُحذف مع إغلاق التطبيق.
 
-    * نسخة الملف الواحد: %LOCALAPPDATA%/JadeiteERP (أو ~/.jadeite_erp)
-      لأن مجلد التنفيذ مؤقت.
-    * النسخة المصدرية أو المجلدية: مجلد `data` بجانب التطبيق.
+    **مكان واحد للبيانات مهما اختلفت طريقة التشغيل.** كان المجلد يختلف
+    باختلاف طريقة الإقلاع: نسخة exe تكتب في `D:/TreeSoft_System/Data`،
+    والتشغيل من المصدر يكتب بجوار المشروع. فمن يشغّل النظام بالطريقتين
+    يرى محاسبتين منفصلتين ويظن أن بياناته ضاعت — بينما `services.storage`
+    ينسخ احتياطياً إلى مسار القرص الدائم في الحالتين، فلا يطابق أيٌّ
+    منهما الآخر. الترتيب أدناه يجعل المكان واحداً:
 
-    بهذا يستطيع صاحب المصنع تشغيل ملف exe واحد من أي مكان، وتبقى
-    محاسبته محفوظة بين الجلسات.
+      1. `JADEITE_DATA_DIR` — تجاوز صريح (تشغيل نسخ متعددة، أو اختبار).
+      2. نسخة exe → المجلد الدائم على القرص كما كان.
+      3. من المصدر وبجواره بيانات فعلية → تُحترم ولا تُهجر.
+      4. من المصدر بلا بيانات، وعلى الجهاز بيانات دائمة → تُستعمل،
+         فتكفي نسخة جديدة من الكود بلا نقل أي ملف يدوياً.
+      5. تثبيت جديد تماماً → مجلد المشروع.
     """
+    override = (os.environ.get(DATA_DIR_ENV) or "").strip()
+    if override:
+        d = Path(override).expanduser()
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        return d
+
     if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
         d = _persistent_dir()
         if d:
@@ -67,8 +103,18 @@ def _data_dir():
         return d
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
+
     # هذا الملف داخل core/ فجذر المشروع أعلاه
-    return Path(__file__).resolve().parent.parent
+    project = Path(__file__).resolve().parent.parent
+    if _has_database(project):
+        return project
+    try:
+        persistent = _persistent_dir()
+        if persistent and _has_database(persistent):
+            return persistent
+    except Exception:
+        pass
+    return project
 
 
 BUNDLE_DIR = _bundle_dir()      # للقراءة: الأصول والقوالب

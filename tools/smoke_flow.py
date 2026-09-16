@@ -12,6 +12,7 @@
 لا يثبت أن الأرقام صحيحة. هذا الملف يثبت الأرقام.
 """
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -315,6 +316,49 @@ def main():
     check("الشجرة الفرعية تشمل الأب وفروعه",
           bool(ids) and direct.issubset(set(ids)),
           f"{len(ids)} حساب")
+
+    step("12) اختيار مجلد البيانات")
+    # النظام يُشغَّل بطريقتين (exe ومن المصدر)، وكان كلٌّ منهما يكتب في
+    # مجلد مختلف — فترى محاسبتين منفصلتين وتظن بياناتك ضاعت. هذه
+    # الفحوص تحرس القاعدة: مكان واحد للبيانات مهما اختلف الإقلاع.
+    import subprocess
+    import shutil as _sh
+    from core.config import DATA_DIR_ENV, _has_database
+
+    def _resolved(env_extra=None):
+        e = dict(os.environ)
+        e.pop(DATA_DIR_ENV, None)
+        if env_extra:
+            e.update(env_extra)
+        r = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {ROOT!r});"
+             " import config; print(config.BASE_DIR)"],
+            capture_output=True, text=True, env=e, cwd=ROOT)
+        return r.stdout.strip()
+
+    pin = tempfile.mkdtemp(prefix="gold_pin_")
+    try:
+        check("متغيّر البيئة يثبّت المجلد",
+              _resolved({DATA_DIR_ENV: pin}) == pin, pin)
+        fake = tempfile.mkdtemp(prefix="gold_fake_")
+        try:
+            check("مجلد بلا قاعدة لا يُعدّ بيانات",
+                  _has_database(fake) is False)
+            (pathlib.Path(fake) / "data").mkdir(parents=True, exist_ok=True)
+            check("مجلد data فارغ لا يُعدّ بيانات",
+                  _has_database(fake) is False)
+            (pathlib.Path(fake) / "data" / "gold_erp.db").write_bytes(b"x")
+            check("الملف المفرد يُكتشف", _has_database(fake) is True)
+            _sh.rmtree(pathlib.Path(fake) / "data")
+            t = pathlib.Path(fake) / "data" / "tenants" / "F-1"
+            t.mkdir(parents=True, exist_ok=True)
+            (t / "gold_erp.db").write_bytes(b"x")
+            check("قاعدة المصنع المعزول تُكتشف", _has_database(fake) is True)
+        finally:
+            _sh.rmtree(fake, ignore_errors=True)
+    finally:
+        _sh.rmtree(pin, ignore_errors=True)
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

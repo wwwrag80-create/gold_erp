@@ -333,7 +333,15 @@ def restore(backup_path, target=None):
 
 def info():
     """معلومات المسارات — لعرضها في شاشة الصيانة."""
+    try:
+        import config
+        base = str(config.BASE_DIR)
+    except Exception:
+        base = ""
     return {
+        # مجلد العمل الفعلي: هو ما يحدّد مكان القاعدة، وقد يختلف عن
+        # `data_dir` أدناه. إظهاره يجيب سؤال «أين بياناتي؟» بلا تخمين.
+        "base_dir": base,
         "data_dir": str(data_dir()),
         "backup_dir": str(backup_dir()),
         "db_path": str(db_path()),
