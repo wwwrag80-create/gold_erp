@@ -1273,6 +1273,12 @@ def build_body(doc_type, doc_id, **kw):
                 kw.get("kind", "accounts"), kw.get("codes"),
                 kw.get("ratios"), kw.get("date_from"),
                 kw.get("date_to")))
+        if doc_type == "aging":
+            return en(_tpl_aging(conn, doc_id,
+                                 kw.get("entity_type", "customer"),
+                                 kw.get("as_of"), kw.get("dim", "both")))
+        if doc_type == "day_close":
+            return en(_tpl_day_close(conn, doc_id, kw.get("date")))
         if doc_type == "balance_tree":
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
@@ -1850,6 +1856,177 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az"):
 
 # خريطة نوع المستند ← قالبه. تُبنى من الدوال الموجودة فعلاً،
 # فلا تنكسر إن أُعيد ترتيب الملف.
+def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both"):
+    """تقرير أعمار الديون — الأقدم أولاً وصف إجمالي بارز."""
+    from models import aging
+    from services import karat_view
+    rows = aging.report(conn, entity_type, as_of)
+    t = aging.totals(rows)
+    today = _qd(QtCore.QDate.currentDate())
+    label = {"customer": "العملاء", "supplier": "الموردين",
+             "other": "جهات أخرى"}.get(entity_type, entity_type)
+    u = karat_view.unit()
+
+    show_cash = dim in ("both", "cash")
+    show_gold = dim in ("both", "gold")
+    heads = [thw("الجهة"), thw("أقدم دين (يوم)")]
+    if show_cash:
+        heads += [thw(f"نقد {b}") for b in aging.BUCKET_LABELS]
+        heads += [thw("إجمالي النقد")]
+    if show_gold:
+        heads += [thw(f"ذهب {b}") for b in aging.BUCKET_LABELS]
+        heads += [thw(f"إجمالي الذهب ({u})")]
+    ncols = len(heads)
+
+    body = ""
+    for r in rows:
+        tds = [tdw(r["name"], align="right"),
+               tdw(en(str(r["days"] or "—")))]
+        if show_cash:
+            tds += [tdw(_w(x, 2) if x else "—") for x in r["cash_buckets"]]
+            tds += [tdw(_w(r["cash"], 2))]
+        if show_gold:
+            tds += [tdw(_gw(x) if x else "—") for x in r["gold_buckets"]]
+            tds += [tdw(_gw(r["gold"]))]
+        body += "<tr>" + cells(*tds) + "</tr>"
+    if not body:
+        body = f'<tr><td {TD} colspan="{ncols}">لا توجد أرصدة قائمة</td></tr>'
+
+    tot = [thw("الإجمالي"), thw("—")]
+    if show_cash:
+        tot += [thw(_w(x, 2)) for x in t["cash_buckets"]]
+        tot += [thw(_w(t["cash"], 2))]
+    if show_gold:
+        tot += [thw(_gw(x)) for x in t["gold_buckets"]]
+        tot += [thw(_gw(t["gold"]))]
+
+    pct_rows = ""
+    for i, lbl in enumerate(aging.BUCKET_LABELS):
+        pct = en(f"{t['cash_pct'][i]:,.1f}%")
+        pct_rows += "<tr>" + cells(
+            thw(lbl), tdw(_w(t["cash_buckets"][i], 2)), tdw(pct)) + "</tr>"
+
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="25%">الفئة</td><td>{label}</td>
+          <th>حتى تاريخ</th><td>{en(as_of or today)}</td></tr>
+      <tr><th>عدد الجهات المدينة</th><td>{en(f"{t['count']:,}")}</td>
+          <th>تاريخ الطباعة</th><td>{en(today)}</td></tr>
+    </table>
+
+    {TBL}
+      <tr>{cells(*heads)}</tr>
+      {body}
+      <tr>{cells(*tot)}</tr>
+    </table>
+
+    <br/>
+    {TBL_PLAIN}<tr>
+      <td width="50%" valign="top">
+        {TBL}
+          <tr>{cells(thw("الفئة العمرية"), thw("المبلغ (ريال)"),
+                     thw("النسبة"))}</tr>
+          {pct_rows}
+        </table>
+      </td>
+      <td width="50%"></td>
+    </tr></table>
+
+    <div class="note">طريقة الاحتساب: الأقدم فالأقدم — كل مدين يفتح
+      دفعة بتاريخها وكل دائن يُسدّد أقدم الدفعات المفتوحة. الرصيد
+      الدائن (له علينا) لا عمر له فلا يظهر في الفئات.</div>
+    '''
+    return (_header(f"أعمار الديون — {label}", "—", today, show_meta=False)
+            + html + _footer(""))
+
+
+def _tpl_day_close(conn, _id=0, date=None):
+    """ورقة الإغلاق اليومي — حركة اليوم وأرصدته في صفحة واحدة."""
+    from models import day_close
+    from services import karat_view
+    d = day_close.summary(conn, date)
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+
+    kinds = "".join(
+        "<tr>" + cells(tdw(k["op"], align="right"),
+                       tdw(en(f"{k['count']:,}")),
+                       tdw(_gw(k["gold"])),
+                       tdw(_w(k["cash"], 2))) + "</tr>"
+        for k in d["kinds"])
+    if not kinds:
+        kinds = f'<tr><td {TD} colspan="4">لا حركة في هذا اليوم</td></tr>'
+
+    # الأرقام بقيمتها المطلقة وحالتها في عمودها: إشارة السالب في نصٍّ
+    # عربي تُطبع في آخر الرقم فتُقرأ خطأً.
+    bal = "".join(
+        "<tr>" + cells(
+            tdw(b["name"], align="right"), tdw(en(b["code"])),
+            tdw(_gw(abs(b["gold"])) if b["dim"] != "cash" else "—"),
+            tdw(_w(abs(b["cash"]), 2) if b["dim"] != "gold" else "—"),
+            tdw("مدين" if (b["gold"] > 0 or b["cash"] > 0)
+                else ("دائن" if (b["gold"] < 0 or b["cash"] < 0)
+                      else "متزن"))) + "</tr>"
+        for b in d["balances"])
+
+    docs = "".join(
+        "<tr>" + cells(
+            tdw(en((r["when"] or "")[11:16] or "—")),
+            tdw(r["op"]), tdw(en(r["doc_no"] or "—")),
+            tdw(r["accounts"], align="right"),
+            tdw(_gw(r["gold"]) if r["gold"] else "—"),
+            tdw(_w(r["cash"], 2) if r["cash"] else "—"),
+            tdw(r["who"] or "—")) + "</tr>"
+        for r in d["docs"])
+    if not docs:
+        docs = f'<tr><td {TD} colspan="7">لا مستندات</td></tr>'
+
+    who = "   ·   ".join(f"{x['user']}: {x['count']}" for x in d["users"])
+
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="25%">اليوم</td><td>{en(d["date"])}</td>
+          <th>عدد العمليات</th><td>{en(f"{d['count']:,}")}</td></tr>
+      <tr><th>حركة الذهب</th><td>{_gw(d["gold_total"])} {u}</td>
+          <th>حركة النقد</th><td>{_w(d["cash_total"], 2)} ريال</td></tr>
+      <tr><th>داخل الصندوق</th><td>{_w(d["cash_in"], 2)}</td>
+          <th>خارج الصندوق</th><td>{_w(d["cash_out"], 2)}
+             (الصافي {_w(d["cash_net"], 2)})</td></tr>
+      <tr><th>الإدخال</th><td {TD} colspan="3">{who or "—"}</td></tr>
+    </table>
+
+    <div class="party">حركة اليوم بأنواعها</div>
+    {TBL}
+      <tr>{cells(thw("نوع العملية"), thw("العدد"), thw(f"الذهب ({u})"),
+                 thw("النقد (ريال)"))}</tr>
+      {kinds}
+    </table>
+
+    <div class="party">الأرصدة الختامية بنهاية اليوم</div>
+    {TBL}
+      <tr>{cells(thw("الحساب"), thw("الكود"), thw(f"الذهب ({u})"),
+                 thw("النقد (ريال)"), thw("الحالة"))}</tr>
+      {bal}
+    </table>
+
+    <div class="party">مستندات اليوم</div>
+    {TBL}
+      <tr>{cells(thw("الوقت"), thw("العملية"), thw("رقم السند"),
+                 thw("الحسابات"), thw(f"الذهب ({u})"), thw("النقد"),
+                 thw("المستخدم"))}</tr>
+      {docs}
+    </table>
+
+    <table class="sig" width="100%" cellspacing="0" cellpadding="6">
+      <tr><td width="50%" align="center" style="text-align:center;">
+            أمين الصندوق<br/>........................</td>
+          <td width="50%" align="center" style="text-align:center;">
+            المحاسب<br/>........................</td></tr>
+    </table>
+    '''
+    return (_header("الإغلاق اليومي", d["date"], today, show_meta=False)
+            + html)
+
 BUILDERS = {
     "invoice": _tpl_invoice, "invoices": _tpl_invoice,
     "voucher": _tpl_voucher, "vouchers": _tpl_voucher,
@@ -1867,6 +2044,8 @@ BUILDERS = {
     "models_catalog": _tpl_models_catalog,
     "dash_panel": _tpl_dash_panel,
     "model_photos": _tpl_model_photos,
+    "aging": _tpl_aging,
+    "day_close": _tpl_day_close,
 }
 
 DOC_LABELS = {
@@ -1897,6 +2076,12 @@ def build_html(doc_type, doc_id, **kw):
         elif doc_type == "turnover":
             html = _tpl_turnover(conn, doc_id, kw.get("date_from"),
                                  kw.get("date_to"))
+        elif doc_type == "aging":
+            html = _tpl_aging(conn, doc_id,
+                              kw.get("entity_type", "customer"),
+                              kw.get("as_of"), kw.get("dim", "both"))
+        elif doc_type == "day_close":
+            html = _tpl_day_close(conn, doc_id, kw.get("date"))
         else:
             fn = BUILDERS.get(doc_type)
             if not fn:
@@ -1976,8 +2161,8 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     """معاينة Qt الاحتياطية (تُستخدم فقط إن تعذّر فتح المتصفح)."""
     html = build_html(doc_type, doc_id, **kw)
     wide = doc_type in ("statement", "journal", "manual", "balances",
-                        "customer_analytics", "turnover",
-                        "mfg_target", "mfg_salary")
+                        "customer_analytics", "turnover", "aging",
+                        "day_close", "mfg_target", "mfg_salary")
     printer = _printer(wide if landscape is None else landscape)
     dlg = QtPrintSupport.QPrintPreviewDialog(printer, parent)
     dlg.setWindowTitle("معاينة قبل الطباعة")

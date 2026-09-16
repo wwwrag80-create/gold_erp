@@ -78,6 +78,41 @@ class YearEndScreen(QtWidgets.QWidget):
         lock_lay.addLayout(lock_row)
         lock_lay.addWidget(self.lock_state)
 
+        # ══ حارس الأرصدة السالبة ══
+        # ضابط من جنس القفل: كلاهما يمنع خطأً صامتاً قبل وقوعه، فمكانه
+        # هنا لا في شاشة منفصلة لا يفتحها أحد.
+        self.guard = QtWidgets.QComboBox()
+        self.guard.setMaximumWidth(260)
+        self.guard.addItem("تنبيه بعد الترحيل (الافتراضي)", "warn")
+        self.guard.addItem("منع العملية نهائياً", "block")
+        self.guard.addItem("بلا فحص", "off")
+        btn_guard = QtWidgets.QPushButton("حفظ وضع الحارس")
+        btn_guard.clicked.connect(self.apply_guard)
+        self.guard_state = QtWidgets.QLabel("—")
+        self.guard_state.setObjectName("cardSub")
+        self.guard_state.setWordWrap(True)
+        guard_row = QtWidgets.QHBoxLayout()
+        guard_row.addWidget(QtWidgets.QLabel("عند نقص الرصيد:"))
+        guard_row.addWidget(self.guard)
+        guard_row.addWidget(btn_guard)
+        guard_row.addStretch(1)
+        guard_box = QtWidgets.QGroupBox(
+            "حارس الأرصدة السالبة — خزينة التصنيع · الذهب المشغول · "
+            "الكسر · الصب · الصندوق")
+        guard_lay = QtWidgets.QVBoxLayout(guard_box)
+        guard_note = QtWidgets.QLabel(
+            "هذه حسابات مادية: ما لا يوجد فيها لا يُصرف منه. بعد كل قيد "
+            "يمسّها يُقرأ رصيدها، فإن صار سالباً نُبّه المستخدم فوراً — "
+            "أو أُلغيت العملية كاملةً إن اخترت المنع. حسابات الجهات لا "
+            "تُحرس لأن السالب فيها مشروع (له علينا)."
+        )
+        guard_note.setObjectName("cardSub")
+        guard_note.setWordWrap(True)
+        guard_lay.addWidget(guard_note)
+        guard_lay.addLayout(guard_row)
+        guard_lay.addWidget(self.guard_state)
+        self._guard_box = guard_box
+
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("الإقفال السنوي — إغلاق الفترة المالية"))
         note = QtWidgets.QLabel(
@@ -94,7 +129,9 @@ class YearEndScreen(QtWidgets.QWidget):
         lay.addWidget(self.summary)
         lay.addWidget(self.table, 1)
         lay.addWidget(lock_box)
+        lay.addWidget(self._guard_box)
         self.load_lock()
+        self.load_guard()
 
     def load_preview(self):
         try:
@@ -171,6 +208,54 @@ class YearEndScreen(QtWidgets.QWidget):
         else:
             self.lock_state.setText(
                 "🔓 لا يوجد قفل — كل الفترات مفتوحة للترحيل والتعديل.")
+
+    def load_guard(self):
+        """يعرض وضع الحارس الحالي وأي رصيد سالب قائم الآن."""
+        try:
+            from services import stock_guard
+            from services import karat_view as kv2
+            with db(readonly=True) as conn:
+                m = stock_guard.mode(conn)
+                neg = stock_guard.negatives(conn)
+            i = self.guard.findData(m)
+            if i >= 0:
+                self.guard.setCurrentIndex(i)
+            if neg:
+                parts = []
+                for r in neg:
+                    bits = []
+                    if r["gold"]:
+                        bits.append(f"ذهب {kv2.g(r['gold']):,.3f}")
+                    if r["cash"]:
+                        bits.append(f"نقد {r['cash']:,.2f}")
+                    parts.append(f"{r['name']} ({' · '.join(bits)})")
+                self.guard_state.setText(
+                    "⚠ أرصدة سالبة قائمة الآن: " + "   ·   ".join(parts))
+            else:
+                self.guard_state.setText(
+                    "✔ لا رصيد سالب في أي حساب مادي.")
+        except Exception:
+            self.guard_state.setText("")
+
+    def apply_guard(self):
+        try:
+            from services import stock_guard
+            v = self.guard.currentData()
+            if v == "block":
+                with db(readonly=True) as conn:
+                    neg = stock_guard.negatives(conn)
+                if neg and not ask(
+                        self,
+                        "يوجد رصيد سالب قائم الآن. تفعيل المنع سيرفض أي "
+                        "عملية جديدة تزيده سوءاً — وقد يوقف عملاً "
+                        "قائماً حتى تُصحَّح الأرصدة.\n\nالمتابعة؟"):
+                    return
+            with db() as conn:
+                stock_guard.set_mode(conn, v, self.user["username"])
+            self.load_guard()
+            info(self, "حُفظ وضع الحارس.")
+        except Exception as e:
+            err(self, e)
 
     def apply_lock(self):
         try:

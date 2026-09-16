@@ -157,6 +157,16 @@ class DashboardScreen(QtWidgets.QWidget):
             self.use_period.stateChanged.connect(self._period_changed)
         except Exception:
             pass          # بيئة بلا إشارات Qt حقيقية
+        # مقارنة بالفترة السابقة المساوية طولاً — الرقم وحده لا يقول
+        # إن كان النشاط يصعد أو يهبط.
+        self.compare = QtWidgets.QCheckBox("مقارنة بالفترة السابقة")
+        self.compare.setToolTip(
+            "يضيف أعمدة الفترة السابقة (بنفس الطول) والفرق ونسبته.\n"
+            "المقارنة على حجم الحركة لا على الرصيد التراكمي.")
+        try:
+            self.compare.stateChanged.connect(lambda *_: self.refresh())
+        except Exception:
+            pass
         per = QtWidgets.QHBoxLayout()
         per.setSpacing(6)
         per.addWidget(self.use_period)
@@ -164,6 +174,7 @@ class DashboardScreen(QtWidgets.QWidget):
         per.addWidget(self.d_from)
         per.addWidget(QtWidgets.QLabel("إلى:"))
         per.addWidget(self.d_to)
+        per.addWidget(self.compare)
         per.addStretch(1)
         self._period_row = per
 
@@ -577,6 +588,9 @@ class DashboardScreen(QtWidgets.QWidget):
     def _render_accounts(self, conn, p):
         d1 = p.get("date_from") or None
         d2 = p.get("date_to") or None
+        if (self.compare.isChecked() and d1 and d2
+                and p.get("kind") != "scrap"):
+            return self._render_compare(conn, p, d1, d2)
         rows = dp.account_rows(conn, p["accounts"], d1, d2)
         self._rows = rows
         bars = dp.ratio_bars(rows, p.get("ratios") or [])
@@ -623,6 +637,45 @@ class DashboardScreen(QtWidgets.QWidget):
             f"جم {kv.label()}"
             f"   ·   الرصيد النقدي: {t['cash_balance']:,.2f} ريال")
         self._render_ratios(rows, p)
+
+    def _render_compare(self, conn, p, d1, d2):
+        """يعرض اللوحة نفسها مقارنةً بالفترة السابقة المساوية طولاً."""
+        cmp_ = dp.compare_rows(conn, p["accounts"], d1, d2)
+        rows = cmp_["rows"]
+        self._rows = [{"code": r["code"]} for r in rows]
+        t = dp.compare_totals(rows)
+
+        def _pct(v):
+            return "—" if v is None else f"{v:+,.1f}%"
+
+        cols = ["الحساب",
+                f"حركة الذهب ({kv.unit()})", "السابقة", "الفرق", "%",
+                "حركة النقد (ريال)", "السابقة", "الفرق", "%"]
+        data = []
+        for r in rows:
+            data.append((
+                f"{r['code']} — {r['name']}",
+                f"{kv.g(r['gold']):,.2f}", f"{kv.g(r['gold_prev']):,.2f}",
+                f"{kv.g(r['gold_diff']):+,.2f}", _pct(r["gold_pct"]),
+                f"{r['cash']:,.2f}", f"{r['cash_prev']:,.2f}",
+                f"{r['cash_diff']:+,.2f}", _pct(r["cash_pct"])))
+        data.append(("الإجمالي",
+                     f"{kv.g(t['gold']):,.2f}",
+                     f"{kv.g(t['gold_prev']):,.2f}",
+                     f"{kv.g(t['gold_diff']):+,.2f}", _pct(t["gold_pct"]),
+                     f"{t['cash']:,.2f}", f"{t['cash_prev']:,.2f}",
+                     f"{t['cash_diff']:+,.2f}", _pct(t["cash_pct"])))
+        self._fill(cols, data, bold_last=True,
+                   weights=[22, 11, 10, 10, 8, 11, 10, 10, 8])
+        self.tbl_title.setText(
+            f"◄ {p['title']}   ({d1} → {d2})  مقابل  "
+            f"({cmp_['from']} → {cmp_['to']})")
+        self.totals.setText(
+            f"الفترة الحالية — ذهب: {kv.g(t['gold']):,.2f} {kv.unit()} "
+            f"({_pct(t['gold_pct'])})   ·   "
+            f"نقد: {t['cash']:,.2f} ريال ({_pct(t['cash_pct'])})"
+            f"   |   المقارنة على حجم الحركة لا على الرصيد")
+        self._render_ratios([], p)
 
     def _render_scrap(self, conn, p):
         rows = dp.scrap_rows(conn)

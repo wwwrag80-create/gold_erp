@@ -202,3 +202,85 @@ def scrap_rows(conn):
         out.append({"karat": k, "actual": w,
                     "eq18": round(to_base_karat(w, k), 3)})
     return out
+
+
+# ══════════════════════════════════════════════════════════════════
+#  مقارنة فترتين
+# ------------------------------------------------------------------
+#  رقم الفترة وحده لا يقول إن كان النشاط يصعد أو يهبط. المقارنة
+#  بالفترة السابقة **المساوية لها طولاً** هي ما يحوّل الرقم إلى خبر.
+# ══════════════════════════════════════════════════════════════════
+
+def previous_period(date_from, date_to):
+    """الفترة السابقة المساوية في الطول، المنتهية قبل بداية الحالية.
+
+    فترة 1–31 يناير تُقارَن بـ1–31 ديسمبر لا بشهر تقويمي ناقص: طول
+    الفترتين يجب أن يتساوى وإلا كانت المقارنة كذباً مهذّباً.
+    """
+    import datetime as _dt
+    try:
+        d1 = _dt.date.fromisoformat(str(date_from)[:10])
+        d2 = _dt.date.fromisoformat(str(date_to)[:10])
+    except Exception:
+        return None, None
+    if d2 < d1:
+        d1, d2 = d2, d1
+    span = (d2 - d1).days
+    p2 = d1 - _dt.timedelta(days=1)
+    p1 = p2 - _dt.timedelta(days=span)
+    return p1.isoformat(), p2.isoformat()
+
+
+def _pct(cur, prev):
+    """نسبة التغيّر. `None` حين لا معنى لها (القسمة على صفر)."""
+    if abs(prev) < 1e-9:
+        return None
+    return round((cur - prev) / abs(prev) * 100.0, 1)
+
+
+def compare_rows(conn, codes, date_from, date_to):
+    """صفوف اللوحة مع نظيرتها من الفترة السابقة والفرق والنسبة.
+
+    المقارنة على **حجم الحركة** (المدين والدائن) لا على الرصيد
+    التراكمي: الرصيد يحمل تاريخ ما قبل الفترة كله، فمقارنته بفترة
+    أخرى تقارن أعماراً لا نشاطاً.
+    """
+    p1, p2 = previous_period(date_from, date_to)
+    cur = {r["code"]: r for r in account_rows(conn, codes, date_from,
+                                              date_to)}
+    prev = ({r["code"]: r for r in account_rows(conn, codes, p1, p2)}
+            if p1 else {})
+    out = []
+    for code in codes:
+        c = cur.get(code)
+        if not c:
+            continue
+        p = prev.get(code) or {"gold_debit": 0.0, "gold_credit": 0.0,
+                               "cash_debit": 0.0, "cash_credit": 0.0,
+                               "gold_balance": 0.0, "cash_balance": 0.0}
+        cur_g = round(c["gold_debit"] + c["gold_credit"], 3)
+        prev_g = round(p["gold_debit"] + p["gold_credit"], 3)
+        cur_c = round(c["cash_debit"] + c["cash_credit"], 2)
+        prev_c = round(p["cash_debit"] + p["cash_credit"], 2)
+        out.append({
+            "code": code, "name": c["name"],
+            "gold": cur_g, "gold_prev": prev_g,
+            "gold_diff": round(cur_g - prev_g, 3),
+            "gold_pct": _pct(cur_g, prev_g),
+            "cash": cur_c, "cash_prev": prev_c,
+            "cash_diff": round(cur_c - prev_c, 2),
+            "cash_pct": _pct(cur_c, prev_c),
+        })
+    return {"rows": out, "from": p1, "to": p2}
+
+
+def compare_totals(rows):
+    """إجمالي المقارنة — صف الإجمالي أسفل الجدول."""
+    cg = round(sum(r["gold"] for r in rows), 3)
+    pg = round(sum(r["gold_prev"] for r in rows), 3)
+    cc = round(sum(r["cash"] for r in rows), 2)
+    pc = round(sum(r["cash_prev"] for r in rows), 2)
+    return {"gold": cg, "gold_prev": pg, "gold_diff": round(cg - pg, 3),
+            "gold_pct": _pct(cg, pg),
+            "cash": cc, "cash_prev": pc, "cash_diff": round(cc - pc, 2),
+            "cash_pct": _pct(cc, pc)}
