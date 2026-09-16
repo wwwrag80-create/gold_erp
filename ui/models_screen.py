@@ -374,29 +374,10 @@ class ModelsScreen(QtWidgets.QWidget):
             err(self, e)
 
     def view_image(self, model_no):
-        """يعرض صورة الموديل في نافذة."""
+        """يعرض صورة الموديل — بالتطبيق المشترك نفسه في كل الشاشات."""
         try:
-            p = mc.image_path(model_no)
-            if p is None:
-                raise ValueError("لا توجد صورة لهذا الموديل")
-            dlg = QtWidgets.QDialog(self)
-            dlg.setWindowTitle(f"صورة الموديل {model_no}")
-            lbl = QtWidgets.QLabel()
-            pix = QtGui.QPixmap(str(p))
-            try:
-                if pix.width() > 900 or pix.height() > 700:
-                    pix = pix.scaled(900, 700, QtCore.Qt.KeepAspectRatio,
-                                     QtCore.Qt.SmoothTransformation)
-            except Exception:
-                pass
-            lbl.setPixmap(pix)
-            lbl.setAlignment(QtCore.Qt.AlignCenter)
-            btn = QtWidgets.QPushButton("إغلاق")
-            btn.clicked.connect(dlg.accept)
-            lay = QtWidgets.QVBoxLayout(dlg)
-            lay.addWidget(lbl, 1)
-            lay.addWidget(btn)
-            dlg.exec_()
+            from ui.widgets.common import show_model_image
+            show_model_image(self, model_no)
         except Exception as e:
             err(self, e)
 

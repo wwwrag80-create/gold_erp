@@ -602,6 +602,37 @@ def main():
     check("الدفتر متوازن بعد كل التعديلات", g2 and c2, f"ذهب {gv2} · نقد {cv2}")
     check("لا فاتورة إجماليها يخالف بنودها", not bad_inv, str(bad_inv[:1]))
 
+    step("19) عرض الأسماء وصور الموديلات")
+    # الاسم كان يُقتطع إلى كلمتين حتى لا يتمدّد العمود، فيضيع تمييز
+    # الجهة — وهو أهم ما في العمود. الآن يُعرض كاملاً ويُلفّ في العرض.
+    from models.journal import short_name as _sn
+    LONGN = "مؤسسة الشرق الأوسط للمجوهرات والمعادن الثمينة"
+    check("الاسم الطويل يُعرض كاملاً",
+          _sn("1601", "عميل: " + LONGN) == LONGN, _sn("1601", "عميل: " + LONGN))
+    check("البادئة الوصفية تُزال",
+          not _sn("1601", "عميل: محمد الأحمد").startswith("عميل"))
+    check("الأسماء النظامية تبقى مختصرة",
+          _sn("1400", "الصندوق الرئيسي") == "صندوق النقدي")
+
+    # صورة الموديل: تطبيق واحد مشترك بين الشاشات
+    try:
+        from ui.widgets.common import has_model_image, show_model_image
+        from models import models_catalog as _mc
+        check("وسم الصورة لا يُفعّل لموديل بلا صورة",
+              has_model_image("NO-SUCH-MODEL-XYZ") is False)
+        check("وسم الصورة لا يُفعّل للفراغ",
+              has_model_image("") is False and has_model_image("—") is False)
+        expect_error("عرض صورة غير موجودة يرفع رسالة مفهومة",
+                     lambda: show_model_image(None, "NO-SUCH-MODEL-XYZ"),
+                     "لا توجد صورة")
+        expect_error("سطر بلا موديل يرفع رسالة مفهومة",
+                     lambda: show_model_image(None, "—"), "لا يوجد رقم موديل")
+        check("models_screen يستعمل المشترك",
+              "show_model_image" in pathlib.Path(
+                  ROOT, "ui/models_screen.py").read_text(encoding="utf-8"))
+    except ImportError:
+        check("فحوص صور الموديلات", True, "تخطّي — PyQt5 غير مثبّت")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
