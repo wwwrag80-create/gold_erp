@@ -360,6 +360,44 @@ def main():
     finally:
         _sh.rmtree(pin, ignore_errors=True)
 
+    step("13) هوية المصنع عبر الخيوط")
+    # كانت الهوية في threading.local، فتُضبط على خيط الواجهة وحده ويرى
+    # كل خيط خلفي (النسخ الاحتياطي · المزامنة · مراقب السلامة) قاعدةً
+    # أخرى — فيُنسخ ملف غير الذي يعمل عليه المستخدم. هذا الفحص يحرسه.
+    import threading as _th
+    from services import tenant_db as _td
+
+    _prev = _td.active_tenant()
+    try:
+        _td.set_active_tenant("F-SMOKE-TEST")
+        ui_path = str(config.DB_PATH)
+        box = {}
+
+        def _bg():
+            box["path"] = str(config.DB_PATH)
+            box["tid"] = _td.active_tenant()
+
+        th = _th.Thread(target=_bg)
+        th.start()
+        th.join(timeout=10)
+        check("الخيط الخلفي يرى هوية المصنع نفسها",
+              box.get("tid") == "F-SMOKE-TEST", str(box.get("tid")))
+        check("الخيط الخلفي يفتح قاعدة المصنع نفسها",
+              box.get("path") == ui_path,
+              f"الواجهة={ui_path} · الخلفي={box.get('path')}")
+        # المسار يُبنى من الهوية (هذا الملف يثبّت config.DB_PATH على
+        # ملف مؤقت، فنفحص بانيَ المسار مباشرةً لا القيمة المثبّتة)
+        built = str(_td.tenant_db_path(_TMP, "F-SMOKE-TEST"))
+        check("مسار المصنع يحمل هويته", "F-SMOKE-TEST" in built, built)
+        legacy = str(_td.tenant_db_path(_TMP, ""))
+        check("بلا هوية يُستعمل الملف القديم",
+              legacy.endswith("data/gold_erp.db")
+              or legacy.endswith("data\\gold_erp.db"), legacy)
+    finally:
+        _td.set_active_tenant(_prev or "")
+        if not _prev:
+            _td.clear_active_tenant()
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
