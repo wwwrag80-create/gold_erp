@@ -307,8 +307,25 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             self.c_bal.set_value(
                 f"{abs(c):,.2f}",
                 "مدين/عليه" if c >= 0 else "دائن/له")
+            self._show_latest()
         except Exception as e:
             err(self, e)
+
+    def _show_latest(self):
+        """ينزل بالكشف إلى **آخر** العمليات عند العرض.
+
+        الكشف مرتّب زمنياً تصاعدياً، فيفتح على أقدم حركة — وهي أبعد ما
+        يُسأل عنه. المحاسب يريد آخر ما جرى على الحساب ورصيده الأخير،
+        وهما في آخر الصفوف. فيُنزل الجدول إليها ويُحدَّد آخر صف.
+        """
+        try:
+            n = self.table.rowCount()
+            if n <= 0:
+                return
+            self.table.setCurrentCell(n - 1, 0)
+            self.table.scrollToBottom()
+        except Exception:
+            pass          # التمرير رفاهية عرض لا تُفشل الكشف
 
     def _selected(self):
         r = self.table.currentRow()
@@ -517,6 +534,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.c_debit.set_value(f"{tc:,.2f}")
         self.c_credit.set_value("—")
         self.c_bal.set_value(f"{len(rows):,}", "عدد المستندات")
+        self._show_latest()
         if not rows:
             info(self, f"لا توجد عمليات بين {d1} و{d2}.")
 

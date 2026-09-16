@@ -635,9 +635,23 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                 "delta_weight": 0.0, "delta_wages": 0.0,
                 "entry_id": inv["entry_id"], "unchanged": True}
 
-    # ── تعديل إجماليات الفاتورة ──
-    tw = round(float(inv["total_weight"] or 0) + dw, 3)
-    tg = round(float(inv["total_wages"] or 0) + dg, 2)
+    # ── إجماليات الفاتورة: تُحسب من بنودها بعد التعديل ──
+    # **لماذا لا نجمع الفروق**: `القديم + الفرق` يفترض أن إجمالي
+    # الفاتورة كان مطابقاً لمجموع بنودها. فإن كان بينهما فرق لأي سبب
+    # سابق، ورثه الإجمالي الجديد وتفاقم مع كل تعديل — فيظهر للمستخدم
+    # وزن لا يطابق ما يراه في شاشة التعديل، ولو لم يمسّ الوزن أصلاً.
+    # الحساب من البنود يجعل الإجمالي **هو** مجموعها بالتعريف، ويصحّح
+    # أي انحراف سابق من تلقاء نفسه.
+    row = conn.execute(
+        "SELECT COALESCE(SUM(registered_weight),0) w,"
+        " COALESCE(SUM(wages),0) g FROM invoice_items WHERE invoice_id=?",
+        (invoice_id,)).fetchone()
+    tw = round(float(row["w"] or 0), 3)
+    tg = round(float(row["g"] or 0), 2)
+    # والفرق المُرحَّل للقيد يُشتقّ من الإجمالي الجديد لا العكس، فيبقى
+    # القيد موافقاً للفاتورة تماماً.
+    dw = round(tw - float(inv["total_weight"] or 0), 3)
+    dg = round(tg - float(inv["total_wages"] or 0), 2)
     dvat = round(gold_math.wages_vat(dg), 2) if vat else 0.0
     tvat = round(float(inv["vat_amount"] or 0) + dvat, 2)
     tgrand = round(tg + tvat, 2)

@@ -641,8 +641,14 @@ class SalesScreen(QtWidgets.QWidget):
                                f"جم).\n\nالمتابعة؟"):
                         return
             else:
+                # حالة الطقم تُشترط عند **إنشاء** فاتورة جديدة فقط.
+                # أما تعديل فاتورة قائمة فتصحيح لمستند سابق: حالة
+                # الطقم اليوم نتيجة آخر حركة له — وقد تكون حركةً بعد
+                # هذه الفاتورة — و`update_invoice` لا يمسّ المخزون إلا
+                # إن كانت هذه الفاتورة آخر حركة فعلاً. فاشتراط الحالة
+                # هنا يمنع تصحيحاً مشروعاً (كتعديل أجر) بلا سبب.
                 need = "in_stock" if is_sale else "sold"
-                if wo["status"] != need:
+                if self.editing_id is None and wo["status"] != need:
                     raise ValueError(
                         f"الطقم {no} حالته لا تسمح: "
                         + ("يجب أن يكون بالمخزون للبيع/التحويل" if is_sale
