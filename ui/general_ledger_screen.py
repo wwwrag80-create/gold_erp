@@ -207,7 +207,11 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         try:
             code = self.account.currentData()
             if code is None:
-                raise ValueError("اختر الحساب")
+                raise ValueError(
+                    "اختر الحساب — أو اختر «★ كل الحسابات» لعرض عمليات "
+                    "الفترة كلها")
+            if code == journal.ALL_ACCOUNTS:
+                return self._load_day_book()
             with db(readonly=True) as conn:
                 acc = conn.execute("SELECT id FROM accounts WHERE code=?",
                                    (code,)).fetchone()
@@ -456,12 +460,76 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    # ══════════════════════════════════════════════════════════════
+    #  دفتر اليومية — كل عمليات الفترة بلا تحديد حساب
+    # ══════════════════════════════════════════════════════════════
+
+    def _load_day_book(self):
+        """يعرض كل مستندات الفترة على جميع الحسابات.
+
+        الغرض عملي: بعد جرد أو مراجعة يظهر فرق، فيُراد معرفة ما جرى
+        في يوم بعينه دون معرفة حسابه مسبقاً. كشف الحساب لا يجيب عن
+        هذا لأنه يشترط حساباً، والرصيد التراكمي بلا معنى عبر الحسابات.
+        """
+        d1, d2 = dstr(self.d_from), dstr(self.d_to)
+        if d1 > d2:
+            raise ValueError("تاريخ «من» بعد تاريخ «إلى»")
+        kind = self.op_kind.currentData()
+        with db(readonly=True) as conn:
+            rows = journal.day_book(conn, d1, d2, kind)
+        self.rows = rows
+
+        headers = ["التاريخ", "نوع\nالعملية", "رقم\nالسند",
+                   "الحسابات المتأثرة", "البيان",
+                   "إجمالي\nذهب", "إجمالي\nنقد", "المستخدم", "معاينة"]
+        self.table.setRowCount(0)
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        fit_columns(self.table, [9, 8, 8, 26, 20, 8, 8, 8, 5])
+
+        self.table.setUpdatesEnabled(False)
+        self.table.setSortingEnabled(False)
+        try:
+            self.table.setRowCount(len(rows))
+            for i, r in enumerate(rows):
+                vals = (r["date"], r["op"], r["doc_no"], r["accounts"],
+                        r["desc"],
+                        f"{r['gold']:,.3f}" if r["gold"] else "",
+                        f"{r['cash']:,.2f}" if r["cash"] else "",
+                        r["who"],
+                        "👁" if (r.get("src") and r.get("sid")) else "")
+                for c, v in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    self.table.setItem(i, c, it)
+        finally:
+            self.table.setUpdatesEnabled(True)
+        self.table.setWordWrap(True)
+        self.table.setTextElideMode(QtCore.Qt.ElideNone)
+        self.table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        fit_columns(self.table)
+
+        tg = sum(r["gold"] for r in rows)
+        tc = sum(r["cash"] for r in rows)
+        self.g_debit.set_value(f"{tg:,.2f}")
+        self.g_credit.set_value("—")
+        self.g_bal.set_value(f"{len(rows):,}", "عدد المستندات")
+        self.c_debit.set_value(f"{tc:,.2f}")
+        self.c_credit.set_value("—")
+        self.c_bal.set_value(f"{len(rows):,}", "عدد المستندات")
+        if not rows:
+            info(self, f"لا توجد عمليات بين {d1} و{d2}.")
+
     def refresh(self):
         with db(readonly=True) as conn:
             self.accounts = list_postable(conn)
         current = self.account.currentData()
         self.account.blockSignals(True)
         self.account.clear()
+        # خيار «كل الحسابات» أولاً: يعرض عمليات الفترة كلها بلا تحديد
+        # حساب — للبحث عن خطأ لا يُعرف حسابه مسبقاً.
+        self.account.addItem("★ كل الحسابات — عمليات الفترة كاملةً",
+                             journal.ALL_ACCOUNTS)
         for a in self.accounts:
             self.account.addItem(f"{a['code']} — {a['name']}", a["code"])
         if current is not None:

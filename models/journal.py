@@ -299,3 +299,65 @@ def statement(conn, account_id, date_from=None, date_to=None):
                      "gd": r["gd"], "gc": r["gc"], "gbal": gb,
                      "cd": r["cd"], "cc": r["cc"], "cbal": cb})
     return rows
+
+
+# ══════════════════════════════════════════════════════════════════
+#  دفتر اليومية — كل الحركات في فترة، بلا تحديد حساب
+# ══════════════════════════════════════════════════════════════════
+
+ALL_ACCOUNTS = "*"
+
+
+def day_book(conn, date_from=None, date_to=None, kind=None, limit=3000):
+    """كل عمليات الفترة على **جميع الحسابات** — سطر لكل مستند.
+
+    كشف الحساب يتطلب اختيار حساب، والرصيد التراكمي فيه لا معنى له
+    عبر الحسابات. لكن السؤال المتكرر بعد كل جرد أو مراجعة هو: «ماذا
+    جرى في هذا اليوم؟» — لمعرفة مصدر خطأ دون معرفة حسابه مسبقاً.
+
+    فهذا عرض مختلف: سطر واحد لكل قيد، فيه رقم السند ونوع العملية
+    والحسابات التي مسّها وإجمالي وزنه ونقده ومن أنشأه. بلا أرصدة
+    تراكمية لأنها بلا معنى هنا.
+    """
+    q = ("SELECT e.id eid, e.entry_date d, e.doc_no jdoc, e.user_note un,"
+         " e.description dsc, e.source_table st, e.source_id sid,"
+         " e.created_by who, e.created_at whn,"
+         " ROUND(SUM(l.gold_debit),3) gd, ROUND(SUM(l.cash_debit),2) cd,"
+         " COUNT(l.id) nlines"
+         " FROM journal_entries e JOIN journal_lines l ON l.entry_id=e.id"
+         " WHERE e.is_deleted=0")
+    params = []
+    if date_from:
+        q += " AND e.entry_date>=?"
+        params.append(date_from)
+    if date_to:
+        q += " AND e.entry_date<=?"
+        params.append(date_to)
+    q += (" GROUP BY e.id"
+          " ORDER BY e.entry_date, COALESCE(e.sort_key, e.id), e.id"
+          " LIMIT ?")
+    params.append(int(limit))
+
+    dcache = {}
+    out = []
+    for r in conn.execute(q, params):
+        doc_no, label = _doc_info(conn, r["st"], r["sid"], dcache)
+        if kind and kind not in (label or ""):
+            continue
+        # الحسابات التي مسّها القيد — مختصرةً فتُقرأ في سطر
+        accs = [f"{a['code']} {a['name']}" for a in conn.execute(
+            "SELECT DISTINCT a.code, a.name FROM journal_lines l"
+            " JOIN accounts a ON a.id=l.account_id"
+            " WHERE l.entry_id=? ORDER BY a.code", (r["eid"],))]
+        shown = " · ".join(accs[:3])
+        if len(accs) > 3:
+            shown += f" … (+{len(accs) - 3})"
+        out.append({
+            "date": r["d"], "eid": r["eid"], "op": label,
+            "doc_no": doc_no or r["jdoc"] or f"#{r['eid']}",
+            "accounts": shown, "n_accounts": len(accs),
+            "desc": (r["un"] or "").strip() or (r["dsc"] or "").strip(),
+            "gold": r["gd"] or 0.0, "cash": r["cd"] or 0.0,
+            "who": r["who"] or "", "when": r["whn"] or "",
+            "src": r["st"], "sid": r["sid"]})
+    return out

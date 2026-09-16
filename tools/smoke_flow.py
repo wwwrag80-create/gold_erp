@@ -513,6 +513,28 @@ def main():
     except ImportError:
         check("فحوص الواجهة", True, "تخطّي — PyQt5 غير مثبّت")
 
+    step("17) دفتر اليومية — كل الحسابات")
+    # كشف الحساب يشترط حساباً، والسؤال بعد كل جرد هو «ماذا جرى في هذا
+    # اليوم؟» بلا معرفة الحساب مسبقاً. هذه الفحوص تحرس العرض الجديد.
+    from models import journal as _j
+    with db(readonly=True) as conn:
+        day = _j.day_book(conn, "2026-01-15", "2026-01-15")
+        wide = _j.day_book(conn, "2026-01-01", "2026-12-31")
+        none_ = _j.day_book(conn, "2030-01-01", "2030-01-02")
+    check("يعرض مستندات اليوم المحدد", len(day) >= 1, f"{len(day)} مستند")
+    check("يُرشّح بالفترة", len(wide) >= len(day),
+          f"{len(wide)} في السنة مقابل {len(day)} في اليوم")
+    check("يوم بلا عمليات يعيد فارغاً", none_ == [])
+    if day:
+        r = day[0]
+        check("لكل سطر رقم سند ونوع عملية",
+              bool(r["doc_no"]) and bool(r["op"]), f"{r['doc_no']} · {r['op']}")
+        check("لكل سطر الحسابات المتأثرة",
+              bool(r["accounts"]) and r["n_accounts"] >= 2,
+              f"{r['n_accounts']} حساب")
+        check("سطر واحد لكل مستند لا لكل حساب",
+              len({x["eid"] for x in day}) == len(day))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
