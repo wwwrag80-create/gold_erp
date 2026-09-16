@@ -76,18 +76,28 @@ def _png_gray(matrix, scale=4, border=2):
             + chunk(b"IEND", b""))
 
 
-def qr_png_data_uri(text, box_size=4, border=2):
-    """صورة QR كـ data-URI، أو "" إن تعذّر بناؤها."""
+def qr_png_bytes(text, box_size=4, border=2):
+    """بايتات صورة PNG لرمز QR، أو b"" إن تعذّر بناؤها.
+
+    تستعملها فاتورة الضريبة (`services.zatca`) وصفحة صور الموديلات
+    معاً — بناءٌ واحد بلا مكتبات خارجية غير `qrcode` الخالصة.
+    """
     try:
         import qrcode
         q = qrcode.QRCode(border=border, box_size=box_size)
         q.add_data(text)
         q.make(fit=True)
-        raw = _png_gray(q.get_matrix(), scale=box_size, border=0)
-        return ("data:image/png;base64,"
-                + base64.b64encode(raw).decode("ascii"))
+        return _png_gray(q.get_matrix(), scale=box_size, border=0)
     except Exception:
+        return b""
+
+
+def qr_png_data_uri(text, box_size=4, border=2):
+    """صورة QR كـ data-URI، أو "" إن تعذّر بناؤها."""
+    raw = qr_png_bytes(text, box_size, border)
+    if not raw:
         return ""
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
 
 
 def qr_for_invoice(conn, invoice_id, invoice_no, size=112):

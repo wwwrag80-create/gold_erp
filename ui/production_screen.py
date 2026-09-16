@@ -8,7 +8,7 @@ import config
 from database.database import db
 from models import editing, inventory
 from services import gold_math, karat_view as kv
-from ui.widgets.common import (confirm_post, posted, ask, big_label, date_edit, dstr, enter_chain,
+from ui.widgets.common import (busy, confirm_post, posted, ask, big_label, date_edit, dstr, enter_chain,
                                err, fill, info, make_table, mspin,
                                title_label, wspin)
 
@@ -376,17 +376,19 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             # الحد الفاصل: ما تحته يُخزَّن بمكافئ 18 دائماً مهما كان
             # عيار العرض — فالميزان لا يتزن إلا بوحدة واحدة.
             batch = [_to_store(b) for b in self.batch]
-            with db() as conn:
-                if self.is_editing:
-                    # تحديث **تفاضلي** لا إعادة إنشاء: المباع يبقى
-                    # كما هو، والموجود يُعدَّل، والجديد يُضاف —
-                    # والقيد يُعدَّل بالفرق الصافي وحده.
-                    res = inventory.update_supply_batch(
-                        conn, self.editing_entry_id, batch,
-                        dstr(self.date), self.user["username"])
-                else:
-                    res = inventory.create_work_orders_batch(
-                        conn, batch, dstr(self.date), self.user["username"])
+            with busy(self, "جارٍ ترحيل الدفعة…", stage="ترحيل توريد"):
+                with db() as conn:
+                    if self.is_editing:
+                        # تحديث **تفاضلي** لا إعادة إنشاء: المباع يبقى
+                        # كما هو، والموجود يُعدَّل، والجديد يُضاف —
+                        # والقيد يُعدَّل بالفرق الصافي وحده.
+                        res = inventory.update_supply_batch(
+                            conn, self.editing_entry_id, batch,
+                            dstr(self.date), self.user["username"])
+                    else:
+                        res = inventory.create_work_orders_batch(
+                            conn, batch, dstr(self.date),
+                            self.user["username"])
             if res.get("delta") is not None:
                 # ملخّص التعديل التفاضلي
                 parts = []

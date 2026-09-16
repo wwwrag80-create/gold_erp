@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 """مكونات واجهة مشتركة: حقول أوزان/مبالغ، جداول، رسائل، مربعات اختيار."""
+import contextlib
+import time
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 
@@ -679,3 +682,59 @@ def karat_combo(pref_key=None, width=112):
     if idx >= 0:
         cb.setCurrentIndex(idx)
     return cb
+
+
+# ══════════════════════════════════════════════════════════════════
+#  مؤشر الانشغال ورصد البطء
+# ══════════════════════════════════════════════════════════════════
+
+SLOW_SECONDS = 1.5
+
+
+@contextlib.contextmanager
+def busy(parent=None, text="جارٍ التنفيذ…", stage="", slow=SLOW_SECONDS):
+    """يُظهر انشغال النظام أثناء عملية قد تطول، ويسجّل بطأها.
+
+    **المشكلة**: عملية تستغرق ثانيتين على خيط الواجهة تجعل ويندوز
+    يعلن «لا يستجيب» ويرسم النافذة سوداء — فيظن المستخدم أن النظام
+    تعطّل، وقد يضغط ثانيةً فيكرّر العملية.
+
+    هنا ثلاثة أشياء معاً:
+    · مؤشر الانتظار يظهر فوراً، ودورة رسم واحدة قبل العمل حتى تُرسم
+      النافذة كاملةً بدل أن تُترك سوداء.
+    · النافذة تُعطَّل أثناء العمل فلا يُقبل ضغطٌ مكرّر ينتج عملية
+      ثانية.
+    · ما تجاوز الحد يُسجَّل في `system_errors.log` باسم مرحلته وزمنها
+      — فالشكوى تصير دليلاً يُقرأ بدل تخمين.
+    """
+    app = QtWidgets.QApplication.instance()
+    t0 = time.time()
+    try:
+        if app is not None:
+            app.setOverrideCursor(QtGui.QCursor(QtCore.Qt.WaitCursor))
+            app.processEvents()
+        if parent is not None:
+            try:
+                parent.setEnabled(False)
+                app and app.processEvents()
+            except Exception:
+                pass
+        yield
+    finally:
+        if parent is not None:
+            try:
+                parent.setEnabled(True)
+            except Exception:
+                pass
+        if app is not None:
+            try:
+                app.restoreOverrideCursor()
+            except Exception:
+                pass
+        took = time.time() - t0
+        if took > slow:
+            try:
+                from services import health
+                health.log_slow(stage or text, took)
+            except Exception:
+                pass

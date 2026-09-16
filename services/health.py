@@ -32,6 +32,24 @@ def _log_path():
     return d / ERROR_LOG
 
 
+def log_slow(stage, seconds, extra=""):
+    """يسجّل عمليةً استغرقت أطول مما ينبغي.
+
+    التجمّد اللحظي («لا يستجيب») أصعب ما يُشخَّص، لأنه يزول قبل أن
+    يصل الخبر. تسجيل مرحلته وزمنها يحوّل الشكوى إلى دليل: نعرف أي
+    خطوة تحديداً أبطأت، على جهاز المستخدم لا على جهاز التطوير.
+    """
+    try:
+        p = _log_path()
+        stamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(f"[{stamp}] بطء: {stage} — {seconds:.1f} ثانية"
+                    + (f" | {extra}" if extra else "") + "\n")
+        return True
+    except Exception:
+        return False
+
+
 def log_error(where, exc, extra=""):
     """يسجّل استثناءً بمكانه وأثره الكامل.
 

@@ -232,7 +232,10 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
             conn.execute("UPDATE work_orders SET status=? WHERE id=?",
                         (new_status, wo["id"]))
 
-    qr_path = zatca.generate_qr_image(qr_b64, inv_no) if apply_vat else None
+    # صورة QR **خارج** المعاملة: بناؤها استيراد مكتبة وكتابة ملف،
+    # وفعلهما داخل المعاملة يحبس قفل الكتابة ويجمّد الواجهة. النص
+    # (TLV) وحده يُحفظ هنا، والصورة تُبنى عند عرضها أو طباعتها.
+    qr_path = None
     # تحقق صريح قبل إنهاء المعاملة: لا فاتورة بلا قيد مرحَّل فعلياً
     _verify_posted(conn, inv_id, entry_id)
     # حزمة المزامنة الذرّية: الفاتورة وبنودها وقيدها وحركة الأطقم معاً

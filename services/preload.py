@@ -22,6 +22,9 @@ HEAVY = [
     "services.print_manager",
     "services.browser_print",
     "PyQt5.QtSvg",
+    # مكتبة رمز QR: أول استيراد لها يقع عند حفظ أول فاتورة ضريبية،
+    # فيتجمّد الحفظ لحظتها. تحميلها هنا يجعله مجانياً.
+    "qrcode",
 ]
 
 _state = {"done": False, "loaded": [], "failed": [], "ms": 0}
@@ -37,6 +40,15 @@ def _load():
             _state["loaded"].append(name)
         except Exception as e:
             _state["failed"].append(f"{name}: {type(e).__name__}")
+    # خادم صور الموديلات: ربط المنفذ (وسؤال جدار الحماية على ويندوز)
+    # يقع أول مرة عند الطباعة، فيبدو النظام متجمّداً خلف نافذة السؤال.
+    # تشغيله هنا — في الخلفية بعد الإقلاع — ينقل ذلك بعيداً عن العمل.
+    try:
+        from services import photo_server
+        photo_server.ensure_running()
+        _state["loaded"].append("photo_server")
+    except Exception as e:
+        _state["failed"].append(f"photo_server: {type(e).__name__}")
     _state["ms"] = int((time.time() - t0) * 1000)
     _state["done"] = True
 
