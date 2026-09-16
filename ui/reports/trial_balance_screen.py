@@ -12,11 +12,12 @@ from datetime import date
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models.reports import trial_balance
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill, info, make_table, title_label)
 
 COLS = ["الكود", "الحساب", "النوع",
-        "افتتاح ذهب", "مدين ذهب", "دائن ذهب", "إقفال ذهب",
+        "افتتاح ذهب 18", "مدين ذهب 18", "دائن ذهب 18", "إقفال ذهب 18",
         "افتتاح نقد", "مدين نقد", "دائن نقد", "إقفال نقد"]
 
 TYPE_AR = {"asset": "أصل", "liability": "خصم", "equity": "حقوق ملكية",
@@ -112,7 +113,7 @@ class TrialBalanceScreen(QtWidgets.QWidget):
                          _g(t["gold_credit"]), _g(t["close_gold"]),
                          _c(t["open_cash"]), _c(t["cash_debit"]),
                          _c(t["cash_credit"]), _c(t["close_cash"])))
-            fill(self.table, COLS, rows)
+            fill(self.table, [kv.rename(c) for c in COLS], rows)
             self._bold_last_row()
             ok_g, ok_c = t["balanced_gold"], t["balanced_cash"]
             msg = [f"{len(tb['rows'])} حساباً متحرّكاً"]
@@ -195,6 +196,11 @@ class TrialBalanceScreen(QtWidgets.QWidget):
 
 
 def _g(v):
+    """وزن مخزَّن بمكافئ 18 ← معروضاً بعيار المصنع.
+
+    كل أوزان الميزان تمرّ من هنا، فالتحويل في موضع واحد.
+    """
+    v = kv.g(v)
     return f"{v:,.3f}" if abs(v) >= 0.0005 else "—"
 
 

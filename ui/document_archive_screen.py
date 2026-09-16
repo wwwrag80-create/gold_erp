@@ -11,6 +11,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from services import browser_print
 from ui.widgets.common import big_label, date_edit, dstr, err, make_table, title_label
 
@@ -25,7 +26,7 @@ DOC_TYPES = [
 ]
 
 COLS = ["نوع المستند", "رقم المستند", "التاريخ", "الجهة / الحساب",
-        "القيمة النقدية", "الوزن (جم 18)", "الحالة", "إجراءات"]
+        "القيمة النقدية", "الوزن", "الحالة", "إجراءات"]
 
 # لكل نوع: استعلام موحّد يعيد الأعمدة نفسها
 QUERIES = {
@@ -158,7 +159,8 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         for i, r in enumerate(self.results):
             self.table.insertRow(i)
             vals = [r["label"], r["doc_no"], r["date"], r["party"],
-                    f"{(r['cash'] or 0):,.2f}", f"{(r['gold'] or 0):,.2f}",
+                    f"{(r['cash'] or 0):,.2f}",
+                    f"{kv.g(r['gold'] or 0):,.2f}",
                     "ملغى" if r["deleted"] else "ساري"]
             for c, v in enumerate(vals):
                 it = QtWidgets.QTableWidgetItem(str(v))
@@ -170,7 +172,8 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         tg = sum(x["gold"] or 0 for x in self.results)
         self.summary.setText(
             f"عدد المستندات: {len(self.results)}   |   إجمالي القيم النقدية: "
-            f"{tc:,.2f} ريال   |   إجمالي الأوزان: {tg:,.2f} جم 18")
+            f"{tc:,.2f} ريال   |   إجمالي الأوزان: "
+            f"{kv.g(tg):,.2f} {kv.unit()}")
 
     def _actions(self, r):
         w = QtWidgets.QWidget()

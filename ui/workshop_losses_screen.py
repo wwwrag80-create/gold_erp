@@ -10,6 +10,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import workshop_losses as wl
 from services.accounting_engine import balance_by_code
 from ui.widgets.common import (ask, big_label, confirm_post, date_edit, dstr,
@@ -48,7 +49,7 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
         form.addWidget(self.doc_no, 0)
         form.addWidget(QtWidgets.QLabel("نوع الفاقد:"))
         form.addWidget(self.kind, 0)
-        form.addWidget(QtWidgets.QLabel("الوزن (جم):"))
+        form.addWidget(QtWidgets.QLabel(f"الوزن ({kv.unit()}):"))
         form.addWidget(self.weight, 0)
         form.addStretch(1)
 
@@ -105,14 +106,15 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
             if not ask(self,
                        f"حذف سند الفاقد {r['doc_no']}؟\n\n"
                        f"النوع: {r['acc_name']}\n"
-                       f"الوزن: {r['weight']:,.3f} جم\n\n"
+                       f"الوزن: {kv.g(r['weight']):,.3f} {kv.unit()}\n\n"
                        f"سيُعكس القيد فيعود الوزن لخزينة التصنيع.\n"
                        f"لا يمكن التراجع."):
                 return
             with db() as conn:
                 d = wl.delete_loss(conn, r["id"], self.user["username"])
             info(self, f"حُذف السند {d['doc_no']}\n"
-                       f"عاد {d['weight']:,.3f} جم لخزينة التصنيع.")
+                       f"عاد {kv.g(d['weight']):,.3f} {kv.unit()} "
+                       f"لخزينة التصنيع.")
             self.refresh()
         except Exception as e:
             err(self, e)
@@ -135,18 +137,18 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
                 if i >= 0:
                     self.kind.setCurrentIndex(i)
             self.treasury.setText(
-                f"رصيد خزينة التصنيع: {g:,.2f} جم عيار 18")
+                f"رصيد خزينة التصنيع: {kv.g(g):,.2f} جم {kv.label()}")
             self.rows = rows
             fill(self.table,
-                 ["رقم السند", "التاريخ", "نوع الفاقد", "الوزن (جم)",
-                  "البيان"],
+                 ["رقم السند", "التاريخ", "نوع الفاقد",
+                  f"الوزن ({kv.unit()})", "البيان"],
                  [(r["doc_no"] or "—", r["loss_date"], r["acc_name"],
-                   f"{r['weight']:,.3f}", r["description"] or "")
+                   f"{kv.g(r['weight']):,.3f}", r["description"] or "")
                   for r in rows])
             tot = sum(float(r["weight"] or 0) for r in rows)
             self.totals.setText(
                 f"{len(rows)} عملية   |   إجمالي الفاقد المُرحَّل: "
-                f"{tot:,.3f} جم")
+                f"{kv.g(tot):,.3f} {kv.unit()}")
         except Exception as e:
             err(self, e)
 
@@ -182,18 +184,19 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
             if not confirm_post(
                     self, f"تسوية فاقد ورشة\n\n"
                           f"النوع: {label}\n"
-                          f"الوزن: {w:,.3f} جم\n"
+                          f"الوزن: {w:,.3f} {kv.unit()}\n"
                           f"التاريخ: {dstr(self.date)}\n\n"
                           f"مدين  حـ/ {label.split('—')[-1].strip()}\n"
                           f"دائن  حـ/ خزينة التصنيع"):
                 return
             with db() as conn:
                 r = wl.create_loss(
-                    conn, aid, w, dstr(self.date), self.user["username"],
+                    conn, aid, kv.store(w), dstr(self.date),
+                    self.user["username"],
                     self.desc.text().strip(),
                     doc_no=self.doc_no.text().strip() or None)
             posted(self, f"رُحّل الفاقد {r['doc_no']} — {r['account']} "
-                         f"بوزن {r['weight']:,.3f} جم",
+                         f"بوزن {kv.g(r['weight']):,.3f} {kv.unit()}",
                    "workshop_losses", r["id"])
             self.weight.setValue(0)
             self.desc.clear()

@@ -9,7 +9,7 @@ import config
 from database.database import db
 from models import entities, inventory, invoices
 from models.inventory import BULK_WO_NO
-from services import gold_math
+from services import gold_math, karat_view as kv
 from ui.widgets.common import (cell, confirm_post, posted, ask, big_label,
                                date_edit, dstr, err, fill, has_model_image,
                                info, make_table, mspin, reload_combo,
@@ -76,11 +76,11 @@ class NewReturnItemDialog(QtWidgets.QDialog):
         note.setWordWrap(True)
         f = QtWidgets.QFormLayout()
         f.addRow(note)
-        f.addRow("الذهب (جم):", self.gold)
-        f.addRow("الفصوص (جم):", self.small)
-        f.addRow("الأحجار (جم):", self.big)
+        f.addRow(f"الذهب ({kv.unit()}):", self.gold)
+        f.addRow(f"الفصوص ({kv.unit()}):", self.small)
+        f.addRow(f"الأحجار ({kv.unit()}):", self.big)
         f.addRow("نسبة خصم الأحجار %:", self.rate)
-        f.addRow("الأجر/جم:", self.wage)
+        f.addRow(f"الأجر/جم {kv.active()}:", self.wage)
         f.addRow(self.preview)
         box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
@@ -96,9 +96,14 @@ class NewReturnItemDialog(QtWidgets.QDialog):
         reg = gold_math.registered_weight(
             self.gold.value(), self.small.value(), self.big.value(),
             self.rate.value() / 100.0)
-        self.preview.setText(f"الوزن المقيد: {reg:,.2f} جم")
+        self.preview.setText(f"الوزن المقيد: {reg:,.2f} {kv.unit()}")
 
     def values(self):
+        """القيم كما أدخلها المستخدم — بعيار المصنع لا بمكافئ 18.
+
+        التحويل عند الحفظ وحده (`add_item`)، فتبقى النافذة تعرض ما
+        كُتب فيها حرفياً.
+        """
         return {"gold": self.gold.value(), "small": self.small.value(),
                 "big": self.big.value(), "rate": self.rate.value() / 100.0,
                 "wage": self.wage.value()}
@@ -113,10 +118,11 @@ class BulkWeightDialog(QtWidgets.QDialog):
         self.w = wspin()
         form = QtWidgets.QFormLayout(self)
         form.addRow(QtWidgets.QLabel(
-            f"الرصيد التجميعي المتاح حالياً: {available:,.2f} جم"
+            f"الرصيد التجميعي المتاح حالياً: {available:,.2f} {kv.unit()}"
             if is_sale else
-            f"الرصيد التجميعي الحالي: {available:,.2f} جم (المرتجع يزيده)"))
-        form.addRow("الوزن المطلوب (جم):", self.w)
+            f"الرصيد التجميعي الحالي: {available:,.2f} {kv.unit()} "
+            "(المرتجع يزيده)"))
+        form.addRow(f"الوزن المطلوب ({kv.unit()}):", self.w)
         box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         box.accepted.connect(self.accept)
@@ -516,8 +522,11 @@ class SalesScreen(QtWidgets.QWidget):
                 for it in items:
                     wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
                                       (it["work_order_id"],)).fetchone()
-                    cart.append({"wo": wo, "weight": it["registered_weight"],
-                                "wage": it["wage_per_gram"]})
+                    # المخزَّن بمكافئ 18 ← المعروض بعيار المصنع
+                    cart.append({
+                        "wo": wo,
+                        "weight": kv.g(it["registered_weight"]),
+                        "wage": kv.rate(it["wage_per_gram"])})
             self.editing_id = invoice_id
             self.refresh()
             # ══ تعطيل الإشارات أثناء التحميل ══
@@ -591,7 +600,7 @@ class SalesScreen(QtWidgets.QWidget):
                 pass
             # استدعاء أجر الطقم تلقائياً ليكون جاهزاً للتعديل أو التأكيد
             if self.line_wage.value() <= 0:
-                self.line_wage.setValue(wo["wage_per_gram"] or 0)
+                self.line_wage.setValue(kv.rate(wo["wage_per_gram"] or 0))
             self.line_wage.setFocus()
             self.line_wage.selectAll()
         except Exception as e:
@@ -618,9 +627,11 @@ class SalesScreen(QtWidgets.QWidget):
                     return
                 d = dlg.values()
                 with db() as conn:
+                    # الطقم يُنشأ بمكافئ 18 مهما كان عيار الإدخال
                     wo = inventory.create_return_stub(
-                        conn, no, d["gold"], d["small"], d["big"],
-                        d["rate"], d["wage"], self.user["username"])
+                        conn, no, kv.store(d["gold"]), kv.store(d["small"]),
+                        kv.store(d["big"]), d["rate"],
+                        kv.rate_store(d["wage"]), self.user["username"])
             if not wo:
                 raise ValueError(
                     f"لا يوجد طقم برقم التشغيل {no}"
@@ -628,7 +639,10 @@ class SalesScreen(QtWidgets.QWidget):
                        if is_sale else ""))
 
             if wo["is_bulk"]:
-                dlg = BulkWeightDialog(self, wo["registered_weight"], is_sale)
+                # الرصيد والمقارنة بعيار العرض معاً — مقارنة رقمٍ
+                # معروضٍ برقمٍ مخزَّنٍ تُنذر خطأً حيث لا خطأ.
+                avail = kv.g(wo["registered_weight"])
+                dlg = BulkWeightDialog(self, avail, is_sale)
                 if dlg.exec_() != QtWidgets.QDialog.Accepted:
                     return
                 weight = dlg.value()
@@ -636,14 +650,14 @@ class SalesScreen(QtWidgets.QWidget):
                     raise ValueError("أدخل وزناً أكبر من صفر")
                 # الرقم التجميعي يقبل التجاوز (يصير رصيده سالباً)،
                 # لكن ننبّه المستخدم فلا يمرّ خطأ إدخال بلا انتباه.
-                if is_sale and weight > wo["registered_weight"] + 0.001:
+                if is_sale and weight > avail + 0.001:
                     if not ask(self,
-                               f"الوزن المطلوب {weight:,.2f} جم يتجاوز "
-                               f"المتاح {wo['registered_weight']:,.2f} جم "
+                               f"الوزن المطلوب {weight:,.2f} {kv.unit()} "
+                               f"يتجاوز المتاح {avail:,.2f} {kv.unit()} "
                                f"في الرقم التجميعي.\n\n"
                                f"سيصبح رصيده سالباً "
-                               f"({wo['registered_weight'] - weight:,.2f} "
-                               f"جم).\n\nالمتابعة؟"):
+                               f"({avail - weight:,.2f} "
+                               f"{kv.unit()}).\n\nالمتابعة؟"):
                         return
             else:
                 # حالة الطقم تُشترط عند **إنشاء** فاتورة جديدة فقط.
@@ -660,12 +674,13 @@ class SalesScreen(QtWidgets.QWidget):
                            else "يجب أن يكون خارجاً/مباعاً للمرتجع"))
                 if any(i["wo"]["id"] == wo["id"] for i in self.items):
                     raise ValueError("الطقم مضاف مسبقاً للفاتورة")
-                weight = wo["registered_weight"]
+                weight = kv.g(wo["registered_weight"])
 
             # الأجر: قيمة الحقل إن أُدخلت، وإلا أجر الطقم الافتراضي.
+            # كلاهما بعيار العرض — والتحويل عند الحفظ وحده.
             wage = self.line_wage.value()
             if wage <= 0:
-                wage = wo["wage_per_gram"] or 0.0
+                wage = kv.rate(wo["wage_per_gram"] or 0.0)
             # ربط الطقم بالموديل المكتوب إن لم يكن له موديل
             self._apply_model(wo)
             with db() as conn:
@@ -723,7 +738,8 @@ class SalesScreen(QtWidgets.QWidget):
         if not wo["is_bulk"]:
             if not ask(self,
                        f"الطقم {wo['work_order_no']} وزنه المقيد "
-                       f"{wo['registered_weight']:,.2f} جم من بطاقته.\n\n"
+                       f"{kv.g(wo['registered_weight']):,.2f} "
+                       f"{kv.unit()} من بطاقته.\n\n"
                        f"تغييره هنا يخالف بطاقة الطقم — الأصح تعديله "
                        f"من شاشة تسوية وزن الطقم.\n\n"
                        f"هل تريد المتابعة على أي حال؟"):
@@ -731,7 +747,8 @@ class SalesScreen(QtWidgets.QWidget):
         cur = float(it.get("weight") or 0)
         val, ok = QtWidgets.QInputDialog.getDouble(
             self, "تعديل الوزن المقيد",
-            f"الوزن المقيد للطقم {wo['work_order_no']} (جم):",
+            f"الوزن المقيد للطقم {wo['work_order_no']} "
+            f"({kv.unit()}):",
             cur, 0.0, 1000000.0, 3)
         if not ok:
             return
@@ -825,9 +842,11 @@ class SalesScreen(QtWidgets.QWidget):
                 gold = small = big = after = 0.0
                 standing = weight
             else:
-                gold, small = wo["gold_weight"], wo["small_stones"]
-                big, after = wo["big_stones"], wo["stones_after_discount"]
-                standing = wo["standing_gold"]
+                gold, small = (kv.g(wo["gold_weight"]),
+                               kv.g(wo["small_stones"]))
+                big = kv.g(wo["big_stones"])
+                after = kv.g(wo["stones_after_discount"])
+                standing = kv.g(wo["standing_gold"])
             mn = (wo["model_no"] if "model_no" in wo.keys() else "") or "—"
             # 🖼 يسبق الموديل الذي له صورة محفوظة — فيُعرف القابل للنقر
             if mn != "—" and has_model_image(mn):
@@ -844,7 +863,8 @@ class SalesScreen(QtWidgets.QWidget):
         w = round(sum(i["weight"] for i in self.items), 3)
         if internal:
             self.totals.setText(
-                f"الوزن: {w:.2f} جم — تحويل داخلي (بلا أجور ولا ضريبة)")
+                f"الوزن: {w:.2f} {kv.unit()} — تحويل داخلي "
+                "(بلا أجور ولا ضريبة)")
             return
         wages = round(sum(gold_math.total_wages(i["wage"] or 0.0, i["weight"])
                           for i in self.items), 2)
@@ -853,7 +873,8 @@ class SalesScreen(QtWidgets.QWidget):
             tail = f"الضريبة 15%: {vat:,.2f} | الإجمالي: {wages + vat:,.2f} ريال"
         else:
             tail = f"الإجمالي: {wages:,.2f} ريال (غير ضريبية — بدون QR)"
-        self.totals.setText(f"الوزن: {w:.2f} جم | الأجور: {wages:,.2f} | {tail}")
+        self.totals.setText(
+            f"الوزن: {w:.2f} {kv.unit()} | الأجور: {wages:,.2f} | {tail}")
         self._update_live_balance(cid, w, wages)
 
     def _update_live_balance(self, cid, weight, wages):
@@ -870,10 +891,12 @@ class SalesScreen(QtWidgets.QWidget):
             self.live_balance.setText("")
             return
         sign = -1 if self.kind.currentData() == "sale_return" else 1
-        gold_after = round(gold_bal + sign * weight, 3)
+        # الحساب بمكافئ 18 (وحدة الرصيد) ثم العرض بعيار المصنع
+        gold_after = round(gold_bal + sign * kv.store(weight), 3)
         cash_after = round(cash_bal + sign * wages, 2)
         self.live_balance.setText(
-            f"إجمالي الوزن المقيد بعد الفاتورة: {gold_after:,.2f} جم 18   |   "
+            f"إجمالي الوزن المقيد بعد الفاتورة: "
+            f"{kv.g(gold_after):,.2f} {kv.unit()}   |   "
             f"إجمالي الأجور بعد الفاتورة: {cash_after:,.2f} ريال")
 
     # ---- الحفظ ----
@@ -886,8 +909,11 @@ class SalesScreen(QtWidgets.QWidget):
                 raise ValueError("أضف طقماً واحداً على الأقل")
             internal = self._is_internal(cid)
             apply_vat = False if internal else self.vat_check.isChecked()
-            cart = [{"work_order_id": i["wo"]["id"], "weight": i["weight"],
-                     "wage_override": None if internal else i["wage"]}
+            # الحد الفاصل: كل ما يعبر إلى القاعدة بمكافئ 18
+            cart = [{"work_order_id": i["wo"]["id"],
+                     "weight": kv.store(i["weight"]),
+                     "wage_override": (None if internal
+                                       else kv.rate_store(i["wage"]))}
                     for i in self.items]
             desc = self.description.text().strip()
             # تأكيد الترحيل: أثر محاسبي لا يُلغى إلا بقيد عكسي
@@ -902,7 +928,7 @@ class SalesScreen(QtWidgets.QWidget):
                     f"{kind_label}\n\n"
                     f"الطرف: {self.customer.currentText()}\n"
                     f"عدد الأطقم: {len(self.items)}\n"
-                    f"الوزن المقيد: {tot_w:,.2f} جم\n"
+                    f"الوزن المقيد: {tot_w:,.2f} {kv.unit()}\n"
                     f"الأجور: {tot_wage:,.2f} ريال\n"
                     f"التاريخ: {dstr(self.date)}"
                     + ("\n\nفاتورة ضريبية (15%)" if apply_vat else "")):
@@ -954,13 +980,16 @@ class SalesScreen(QtWidgets.QWidget):
                 info(self,
                      f"عُدّلت الفاتورة {res['invoice_no']} في مكانها.\n"
                      + ("   ·   ".join(parts) or "لا تغيير")
-                     + f"\n\nالوزن: {res.get('total_weight', 0):,.2f} جم"
+                     + f"\n\nالوزن: "
+                       f"{kv.g(res.get('total_weight', 0)):,.2f} "
+                       f"{kv.unit()}"
                        f"   ·   الأجور: {res.get('total_wages', 0):,.2f} ريال"
                      + stock
                      + "\n\nرقم الفاتورة وتاريخها لم يتغيّرا.")
             elif res["internal"]:
                 posted(self, f"تم ترحيل التحويل الداخلي {res['invoice_no']} — "
-                           f"الوزن: {res['total_weight']:.2f} جم — إلى "
+                           f"الوزن: {kv.g(res['total_weight']):.2f} "
+                           f"{kv.unit()} — إلى "
                            f"{res['customer_name']}", "invoices", res["id"])
             elif res["vat_applied"]:
                 QRDialog(self, res).exec_()

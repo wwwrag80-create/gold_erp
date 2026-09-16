@@ -8,7 +8,7 @@ from PyQt5 import QtWidgets
 import config
 from database.database import db
 from models import inventory
-from services import gold_math
+from services import gold_math, karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, enter_chain,
                                err, fill, info, make_table, mspin,
                                title_label, wspin)
@@ -132,7 +132,7 @@ class OpeningStockScreen(QtWidgets.QWidget):
         reg = gold_math.registered_weight(self.gold.value(), self.small.value(),
                                           self.big.value(), self.rate)
         self.after.setText(f"{after:.2f}")
-        self.reg_label.setText(f"الوزن المقيد: {reg:.2f} جم")
+        self.reg_label.setText(f"الوزن المقيد: {reg:.2f} {kv.unit()}")
 
     def add_row(self):
         try:
@@ -184,7 +184,7 @@ class OpeningStockScreen(QtWidgets.QWidget):
             for b in self.batch), 3)
         self.totals.setText(
             f"عدد الأطقم: {len(self.batch)}   |   إجمالي الوزن المقيد: "
-            f"{total:.2f} جم")
+            f"{total:.2f} {kv.unit()}")
         self.recalc()
 
     def post_batch(self):
@@ -195,11 +195,19 @@ class OpeningStockScreen(QtWidgets.QWidget):
                          "مباشرة إلى الذهب المشغول؟"):
             return
         try:
+            # الحد الفاصل: الإدخال بعيار المصنع والتخزين بمكافئ 18
+            batch = [{**b,
+                      "gold": kv.store(b["gold"]),
+                      "small_stones": kv.store(b["small_stones"]),
+                      "big_stones": kv.store(b["big_stones"]),
+                      "wage_per_gram": kv.rate_store(b["wage_per_gram"])}
+                     for b in self.batch]
             with db() as conn:
                 res = inventory.opening_stock_batch(
-                    conn, self.batch, dstr(self.date), self.user["username"])
+                    conn, batch, dstr(self.date), self.user["username"])
             info(self, f"تم ترحيل الرصيد الافتتاحي بقيد رقم {res['entry_id']}\n"
-                       f"إجمالي الوزن المقيد: {res['total_registered']:.2f} جم")
+                       f"إجمالي الوزن المقيد: "
+                       f"{kv.g(res['total_registered']):.2f} {kv.unit()}")
             self.batch = []
             self.render_batch()
             self.refresh()
@@ -210,6 +218,7 @@ class OpeningStockScreen(QtWidgets.QWidget):
         with db() as conn:
             snap = inventory.stock_snapshot(conn)
         self.stock_label.setText(
-            f"الذهب المشغول حالياً: {snap['mashghool_gold']:.2f} جم عيار 18 "
+            f"الذهب المشغول حالياً: "
+            f"{kv.g(snap['mashghool_gold']):.2f} جم {kv.label()} "
             f"({snap['wo_count']} طقم)")
         self.render_batch()

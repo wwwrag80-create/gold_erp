@@ -5,6 +5,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import entities
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, mspin, title_label, wspin)
@@ -92,7 +93,8 @@ class EntitiesScreen(QtWidgets.QWidget):
         of = QtWidgets.QFormLayout(self.open_box)
         self.lbl_cash = QtWidgets.QLabel("الرصيد النقدي (+ مدين / − دائن):")
         of.addRow(self.lbl_cash, self.open_cash)
-        self.lbl_gold = QtWidgets.QLabel("الرصيد الوزني (ذهب جم عيار 18):")
+        self.lbl_gold = QtWidgets.QLabel(
+            f"الرصيد الوزني (ذهب جم {kv.label()}):")
         of.addRow(self.lbl_gold, gw)
         self.gold_widget = gw
         of.addRow("تاريخ الرصيد الافتتاحي:", self.open_date)
@@ -184,13 +186,15 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.gold_widget.setVisible(not is_emp)
         if is_partner:
             self.lbl_cash.setText("رأس المال التأسيسي نقداً:")
-            self.lbl_gold.setText("رأس المال التأسيسي ذهباً (جم عيار 18):")
+            self.lbl_gold.setText(
+                f"رأس المال التأسيسي ذهباً ({kv.unit()}):")
             self.gold_sign.setVisible(False)
             self.open_box.setTitle("رأس المال التأسيسي (اختياري)")
         else:
             self.gold_sign.setVisible(True)
             self.open_box.setTitle("الأرصدة الافتتاحية (اختيارية)")
-            self.lbl_gold.setText("الرصيد الوزني (ذهب جم عيار 18):")
+            self.lbl_gold.setText(
+                f"الرصيد الوزني (ذهب جم {kv.label()}):")
             self.lbl_cash.setText("الرصيد النقدي — سلف سابقة (+ عليه):"
                                   if is_emp else "الرصيد النقدي (+ مدين / − دائن):")
         self.hint.setText(HINTS.get(t, ""))
@@ -214,7 +218,7 @@ class EntitiesScreen(QtWidgets.QWidget):
                     username=self.user["username"], address=self.address.text(),
                     open_cash=self.open_cash.value(),
                     open_gold=(0.0 if t in ("employee", "worker")
-                              else self.open_gold.value() * sign),
+                              else kv.store(self.open_gold.value()) * sign),
                     opening_date=dstr(self.open_date),
                     share_percent=self.share.value(),
                     job_title=self.job_title.text(),

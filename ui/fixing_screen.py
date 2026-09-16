@@ -5,6 +5,7 @@
 from PyQt5 import QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import editing, entities, fixing
 from ui.widgets.common import (confirm_post, big_label, date_edit, dstr, enter_chain, err,
                                info, mspin, reload_combo, search_combo,
@@ -39,9 +40,10 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
         form = QtWidgets.QFormLayout()
         form.addRow("الجهة (عميل/مورد/شريك/داخلي):", self.customer)
         form.addRow(self.balances)
-        form.addRow("الوزن المراد تسكيره (جم عيار 18):", self.weight)
+        form.addRow(f"الوزن المراد تسكيره ({kv.unit()}):", self.weight)
         form.addRow(self.gold_only)
-        form.addRow("سعر الجرام اليوم (ريال):", self.price)
+        form.addRow(f"سعر الجرام {kv.active()} اليوم (ريال):",
+                    self.price)
         form.addRow(self.amount)
         form.addRow("التاريخ:", self.date)
 
@@ -92,7 +94,8 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
         with db() as conn:
             g, c = entities.balances(conn, cid)
         self.balances.setText(
-            f"الرصيد الحالي — ذهب: {g:,.2f} جم | نقد/جاري: {c:,.2f} ريال")
+            f"الرصيد الحالي — ذهب: {kv.g(g):,.2f} {kv.unit()} | "
+            f"نقد/جاري: {c:,.2f} ريال")
 
     def save(self):
         try:
@@ -105,17 +108,21 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
                 if self.is_editing:
                     res = editing.repost(
                         conn, self.editing_entry_id, self.user["username"],
-                        fixing.create_fixing, cid, self.weight.value(),
+                        fixing.create_fixing, cid,
+                        kv.store(self.weight.value()),
                         (0 if self.gold_only.isChecked()
-                         else self.price.value()),
+                         else kv.rate_store(self.price.value())),
                         dstr(self.date), self.user["username"])
                 else:
+                    # الوزن بعيار المصنع والسعر لجرامه: حاصلهما
+                    # (المبلغ) لا يتغيّر بتغيّر العيار.
                     res = fixing.create_fixing(
-                        conn, cid, self.weight.value(),
+                        conn, cid, kv.store(self.weight.value()),
                         (0 if self.gold_only.isChecked()
-                         else self.price.value()),
+                         else kv.rate_store(self.price.value())),
                         dstr(self.date), self.user["username"])
-            msg = (f"تم تسكير {res['weight']:,.2f} جم ذهباً فقط ({res['op_no']})"
+            msg = (f"تم تسكير {kv.g(res['weight']):,.2f} {kv.unit()} "
+                   f"ذهباً فقط ({res['op_no']})"
                    if res.get("gold_only")
                    else f"تم التسكير {res['op_no']} بمبلغ "
                         f"{res['amount']:,.2f} ريال")
@@ -138,9 +145,9 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
             idx = self.customer.findData(op["entity_id"])
             if idx >= 0:
                 self.customer.setCurrentIndex(idx)
-            self.weight.setValue(op["weight"])
+            self.weight.setValue(kv.g(op["weight"]))
             self.gold_only.setChecked((op["price"] or 0) <= 0)
-            self.price.setValue(op["price"] or 0)
+            self.price.setValue(kv.rate(op["price"] or 0))
             self.begin_edit(eid, source_id)
         except Exception as e:
             err(self, e)

@@ -7,7 +7,7 @@ from PyQt5 import QtCore, QtWidgets
 import config
 from database.database import db
 from models import editing, inventory
-from services import gold_math
+from services import gold_math, karat_view as kv
 from ui.widgets.common import (confirm_post, posted, ask, big_label, date_edit, dstr, enter_chain,
                                err, fill, info, make_table, mspin,
                                title_label, wspin)
@@ -15,6 +15,42 @@ from ui.widgets.common import (confirm_post, posted, ask, big_label, date_edit, 
 COLS = ["رقم الموديل", "رقم التشغيل", "النوع", "الذهب", "الفصوص", "الأحجار",
         "الأحجار بعد الخصم", "نسبة الخصم", "الوزن المقيد", "الذهب القائم",
         "الأجر/جم", "ملاحظات"]
+
+# أعمدة الوزن — تأخذ لاحقة العيار حين يكون المصنع على غير 18
+WEIGHT_COLS = (3, 4, 5, 6, 8, 9)
+
+
+def _headers():
+    """عناوين الجدول بعيار المصنع الفعّال."""
+    if kv.is_base():
+        return list(COLS)
+    out = list(COLS)
+    for i in WEIGHT_COLS:
+        out[i] = f"{out[i]}\n({kv.unit()})"
+    out[10] = f"الأجر/جم {kv.active()}"
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════
+#  حدود التخزين: الدفعة على الشاشة بعيار المصنع، وفي القاعدة بمكافئ 18
+# ══════════════════════════════════════════════════════════════════
+
+def _to_store(b):
+    """سطر دفعة كما يراه المستخدم ← كما يُخزَّن (مكافئ 18)."""
+    return {**b,
+            "gold": kv.store(b.get("gold")),
+            "small_stones": kv.store(b.get("small_stones")),
+            "big_stones": kv.store(b.get("big_stones")),
+            "wage_per_gram": kv.rate_store(b.get("wage_per_gram", 0))}
+
+
+def _to_view(b):
+    """سطر دفعة كما هو مخزَّن ← كما يُعرض بعيار المصنع."""
+    return {**b,
+            "gold": kv.g(b.get("gold")),
+            "small_stones": kv.g(b.get("small_stones")),
+            "big_stones": kv.g(b.get("big_stones")),
+            "wage_per_gram": kv.rate(b.get("wage_per_gram", 0))}
 
 
 class DiscountDialog(QtWidgets.QDialog):
@@ -185,10 +221,12 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                                           self.big.value(), self.rate)
         standing = gold_math.standing_gold(self.gold.value(), self.small.value(),
                                            self.big.value())
+        # الأرقام هنا بعيار المصنع أصلاً: ما يُدخله المستخدم هو ما يراه
         self.after.setText(f"{after:.2f}")
-        self.reg_label.setText(f"الوزن المقيد: {reg:.2f} جم")
+        self.reg_label.setText(f"الوزن المقيد: {reg:.2f} {kv.unit()}")
         self.standing_label.setText(
-            f"الذهب القائم: {standing:.2f} جم (للإحصاء فقط — بلا أثر محاسبي)")
+            f"الذهب القائم: {standing:.2f} {kv.unit()} "
+            "(للإحصاء فقط — بلا أثر محاسبي)")
 
     def add_row(self):
         try:
@@ -311,7 +349,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                         f"{b['discount_rate']*100:.0f}%", reg, standing,
                         b.get("wage_per_gram", config.DEFAULT_WAGE_PER_GRAM),
                         b["notes"] or "—"))
-        fill(self.grid, COLS, rows)
+        fill(self.grid, _headers(), rows)
         # الإجمالي يُحسب من مصدر البيانات لا من فهرس عمود في الجدول:
         # إضافة أي عمود تُزيح الفهارس فيجمع النظام نصاً بدل رقم.
         total = round(sum(
@@ -320,7 +358,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             for b in self.batch), 3)
         self.totals.setText(
             f"عدد أطقم الدفعة: {len(self.batch)}   |   إجمالي الوزن المقيد: "
-            f"{total:.2f} جم")
+            f"{total:.2f} {kv.unit()}")
         self.recalc()
 
     def post_batch(self):
@@ -335,17 +373,20 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             if not confirm_post(self, "دفعة توريد أطقم"):
                 return
 
+            # الحد الفاصل: ما تحته يُخزَّن بمكافئ 18 دائماً مهما كان
+            # عيار العرض — فالميزان لا يتزن إلا بوحدة واحدة.
+            batch = [_to_store(b) for b in self.batch]
             with db() as conn:
                 if self.is_editing:
                     # تحديث **تفاضلي** لا إعادة إنشاء: المباع يبقى
                     # كما هو، والموجود يُعدَّل، والجديد يُضاف —
                     # والقيد يُعدَّل بالفرق الصافي وحده.
                     res = inventory.update_supply_batch(
-                        conn, self.editing_entry_id, self.batch,
+                        conn, self.editing_entry_id, batch,
                         dstr(self.date), self.user["username"])
                 else:
                     res = inventory.create_work_orders_batch(
-                        conn, self.batch, dstr(self.date), self.user["username"])
+                        conn, batch, dstr(self.date), self.user["username"])
             if res.get("delta") is not None:
                 # ملخّص التعديل التفاضلي
                 parts = []
@@ -360,15 +401,16 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                         f"{len(res['kept_sold'])} مباع بقي كما هو")
                 lines = ("   ·   ".join(parts)
                          + f"\nصافي التغيّر في الذهب المشغول: "
-                           f"{res['delta']:+.3f} جم")
+                           f"{kv.g(res['delta']):+.3f} {kv.unit()}")
             else:
                 lines = "\n".join(f"• {i['work_order_no']}: مقيد "
-                                  f"{i['registered_weight']:.2f} / قائم "
-                                  f"{i['standing_gold']:.2f} جم"
+                                  f"{kv.g(i['registered_weight']):.2f} / قائم "
+                                  f"{kv.g(i['standing_gold']):.2f} {kv.unit()}"
                                   for i in res["items"])
             was_editing = bool(self.is_editing)
             posted(self, f"تم ترحيل الدفعة بقيد رقم {res['entry_id']}\n"
-                       f"إجمالي الوزن المقيد: {res['total_registered']:.2f} جم\n"
+                       f"إجمالي الوزن المقيد: "
+                       f"{kv.g(res['total_registered']):.2f} {kv.unit()}\n"
                        f"{lines}", "work_orders",
                    (res.get("items") or [{}])[0].get("id"),
                    editing=was_editing)
@@ -408,17 +450,18 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                         " AND is_deleted=0 ORDER BY id",
                         (wo["entry_id"],)).fetchall()
                     src = "wo"
+            # المخزَّن بمكافئ 18 ← المعروض بعيار المصنع
             if src == "batch":
-                self.batch = [{
+                self.batch = [_to_view({
                     "model_no": r["model_no"] or "",
                     "wo_no": r["wo_no"], "gold": r["gold"],
                     "small_stones": r["small_stones"],
                     "big_stones": r["big_stones"],
                     "discount_rate": r["discount_rate"],
                     "wage_per_gram": r["wage_per_gram"],
-                    "notes": r["notes"] or ""} for r in rows]
+                    "notes": r["notes"] or ""}) for r in rows]
             else:
-                self.batch = [{
+                self.batch = [_to_view({
                     "model_no": (r["model_no"] if "model_no" in r.keys()
                                  else "") or "",
                     "wo_no": r["work_order_no"], "gold": r["gold_weight"],
@@ -426,7 +469,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                     "big_stones": r["big_stones"],
                     "discount_rate": r["discount_rate"],
                     "wage_per_gram": r["wage_per_gram"],
-                    "notes": r["notes"] or ""} for r in rows]
+                    "notes": r["notes"] or ""}) for r in rows]
             # التاريخ يبقى تاريخ العملية الأصلي: التعديل تصحيح لا
             # عملية جديدة، فتغيير تاريخه يُزحزح الأرصدة التاريخية.
             try:
@@ -465,7 +508,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 self.wo_no.setPlaceholderText(f"مقترح: {inventory.next_wo_no(conn)}")
             snap = inventory.stock_snapshot(conn)
         self.tazeena_label.setText(
-            f"رصيد خزينة التصنيع: {snap['tazeena_gold']:.2f} جم عيار 18   |   "
-            f"الذهب المشغول: {snap['mashghool_gold']:.2f} جم "
+            f"رصيد خزينة التصنيع: {kv.g(snap['tazeena_gold']):.2f} "
+            f"جم {kv.label()}   |   "
+            f"الذهب المشغول: {kv.g(snap['mashghool_gold']):.2f} جم "
             f"({snap['wo_count']} طقم)")
         self.render_batch()

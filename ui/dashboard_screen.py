@@ -15,11 +15,24 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
 from models import dash_panels as dp
+from services import karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err,
                                info, make_table, search_combo,
                                title_label)
 
+def ACC_COLS_NOW():
+    """عناوين أعمدة الأرصدة بعيار المصنع الفعّال."""
+    return ["الاسم", f"رصيد الذهب ({kv.unit()})", "الرصيد النقدي (ريال)"]
+
+
 ACC_COLS = ["الاسم", "رصيد الذهب (جم 18)", "الرصيد النقدي (ريال)"]
+def SCRAP_COLS_NOW():
+    """الوزن الفعلي لكل عيار يبقى كما هو — وزنٌ حقيقي لا مكافئ.
+    المكافئ وحده يتحوّل بعيار المصنع."""
+    return ["العيار", "الوزن الفعلي (جم)",
+            f"المكافئ ({kv.unit()})"]
+
+
 SCRAP_COLS = ["العيار", "الوزن الفعلي (جم)", "المكافئ بعيار 18 (جم)"]
 
 
@@ -232,7 +245,7 @@ class DashboardScreen(QtWidgets.QWidget):
             e_name = QtWidgets.QLineEdit()
             e_name.setPlaceholderText("اسم اللوحة")
             cb_unit = QtWidgets.QComboBox()
-            cb_unit.addItem("الوزن (جم عيار 18)", "gold")
+            cb_unit.addItem(f"الوزن ({kv.unit()})", "gold")
             cb_unit.addItem("النقد (ريال)", "cash")
             note = QtWidgets.QLabel(
                 "الوحدة تحدّد الرقم المعروض على واجهة اللوحة.\n"
@@ -576,7 +589,7 @@ class DashboardScreen(QtWidgets.QWidget):
             by_code = {}
             for b in bars:
                 by_code.setdefault(b["second"], []).append(b)
-            cols = ["النسبة"] + ACC_COLS
+            cols = ["النسبة"] + ACC_COLS_NOW()
             data = []
             for r in rows:
                 bl = by_code.get(r["code"]) or []
@@ -585,28 +598,29 @@ class DashboardScreen(QtWidgets.QWidget):
                     + ("—" if x["pct"] is None else f"{x['pct']:,.1f}%")
                     for x in bl) or "—"
                 data.append((txt, f"{r['code']} — {r['name']}",
-                             f"{r['gold_balance']:,.2f}",
+                             f"{kv.g(r['gold_balance']):,.2f}",
                              f"{r['cash_balance']:,.2f}"))
             vals = [x["pct"] for x in bars if x["pct"] is not None]
             tot = (f"{sum(vals):,.1f}%" if vals else "—")
             data.append((f"إجمالي النسب: {tot}", "الإجمالي",
-                         f"{t['gold_balance']:,.2f}",
+                         f"{kv.g(t['gold_balance']):,.2f}",
                          f"{t['cash_balance']:,.2f}"))
             self._fill(cols, data, bold_last=True,
                        weights=[26, 34, 20, 20])
         else:
             data = [(f"{r['code']} — {r['name']}",
-                     f"{r['gold_balance']:,.2f}",
+                     f"{kv.g(r['gold_balance']):,.2f}",
                      f"{r['cash_balance']:,.2f}") for r in rows]
-            data.append(("الإجمالي", f"{t['gold_balance']:,.2f}",
+            data.append(("الإجمالي", f"{kv.g(t['gold_balance']):,.2f}",
                          f"{t['cash_balance']:,.2f}"))
-            self._fill(ACC_COLS, data, bold_last=True,
+            self._fill(ACC_COLS_NOW(), data, bold_last=True,
                        weights=[46, 27, 27])
         span = (f"   ({d1 or 'البداية'} → {d2 or 'الآن'})" if d1 or d2
                 else "")
         self.tbl_title.setText(f"◄ {p['title']}{span}")
         self.totals.setText(
-            f"الإجمالي — رصيد الذهب: {t['gold_balance']:,.2f} جم عيار 18"
+            f"الإجمالي — رصيد الذهب: {kv.g(t['gold_balance']):,.2f} "
+            f"جم {kv.label()}"
             f"   ·   الرصيد النقدي: {t['cash_balance']:,.2f} ريال")
         self._render_ratios(rows, p)
 
@@ -614,15 +628,17 @@ class DashboardScreen(QtWidgets.QWidget):
         rows = dp.scrap_rows(conn)
         self._rows = [{"code": "1310"} for _ in rows]
         data = [(f"عيار {r['karat']}", f"{r['actual']:,.2f}",
-                 f"{r['eq18']:,.2f}") for r in rows]
+                 f"{kv.g(r['eq18']):,.2f}") for r in rows]
         tot_a = round(sum(r["actual"] for r in rows), 3)
         tot_e = round(sum(r["eq18"] for r in rows), 3)
-        data.append(("الإجمالي", f"{tot_a:,.2f}", f"{tot_e:,.2f}"))
-        self._fill(SCRAP_COLS, data, bold_last=True, weights=[34, 33, 33])
+        data.append(("الإجمالي", f"{tot_a:,.2f}", f"{kv.g(tot_e):,.2f}"))
+        self._fill(SCRAP_COLS_NOW(), data, bold_last=True,
+                   weights=[34, 33, 33])
         self.tbl_title.setText(f"◄ {p['title']} — حساب 1310")
         self.totals.setText(
             f"مجموع الأوزان الفعلية: {tot_a:,.2f} جم   ·   "
-            f"الرصيد المحاسبي بمكافئ 18: {tot_e:,.2f} جم")
+            f"الرصيد المحاسبي بمكافئ {kv.active()}: "
+            f"{kv.g(tot_e):,.2f} جم")
         self._render_ratios([], p)
 
     def _fill(self, cols, data, bold_last=False, weights=None):
@@ -665,7 +681,7 @@ class DashboardScreen(QtWidgets.QWidget):
             try:
                 if p.get("kind") == "scrap":
                     v = round(sum(x["eq18"] for x in dp.scrap_rows(conn)), 2)
-                    self.buttons[i].set_value(f"{v:,.2f} جم")
+                    self.buttons[i].set_value(f"{kv.g(v):,.2f} جم")
                     continue
                 t = dp.totals(dp.account_rows(
                     conn, p["accounts"],
@@ -676,7 +692,7 @@ class DashboardScreen(QtWidgets.QWidget):
                         f"{t['cash_balance']:,.2f} ريال")
                 else:
                     self.buttons[i].set_value(
-                        f"{t['gold_balance']:,.2f} جم")
+                        f"{kv.g(t['gold_balance']):,.2f} جم")
             except Exception:
                 self.buttons[i].set_value("—")
 

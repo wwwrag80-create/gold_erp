@@ -8,6 +8,7 @@
 from PyQt5 import QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import coa, entities
 from PyQt5 import QtCore
 
@@ -43,7 +44,7 @@ class SubLedgerScreen(QtWidgets.QWidget):
 
         self.c_count = Card("عدد الجهات المسجلة", "في هذه الفئة")
         self.c_cash = Card("إجمالي الرصيد النقدي", "ريال — موجب مدين / سالب دائن")
-        self.c_gold = Card("إجمالي الرصيد الوزني", "جم عيار 18")
+        self.c_gold = Card("إجمالي الرصيد الوزني", f"جم {kv.label()}")
         cards = QtWidgets.QHBoxLayout()
         for c in (self.c_count, self.c_cash, self.c_gold):
             cards.addWidget(c)
@@ -108,11 +109,12 @@ class SubLedgerScreen(QtWidgets.QWidget):
             headers = ["الشريك", "الجوال", "جاري — نقد", "جاري — ذهب",
                       "رأس المال — نقد", "رأس المال — ذهب", "إجراءات"]
             data = [(d["name"], d["phone"] or "—", f"{d['cash']:,.2f}",
-                     f"{d['gold']:,.2f}", f"{d['cap_cash']:,.2f}",
-                     f"{d['cap_gold']:,.2f}") for d in vis]
+                     f"{kv.g(d['gold']):,.2f}", f"{d['cap_cash']:,.2f}",
+                     f"{kv.g(d['cap_gold']):,.2f}") for d in vis]
         else:
             headers = ["الاسم", "الجوال", "الرصيد النقدي", "الحالة النقدية",
-                      "رصيد الذهب (جم 18)", "الحالة الوزنية", "إجراءات"]
+                      f"رصيد الذهب ({kv.unit()})", "الحالة الوزنية",
+                      "إجراءات"]
             data = []
             for d in vis:
                 cs = ("مدين" if d["cash"] > 0 else
@@ -121,7 +123,7 @@ class SubLedgerScreen(QtWidgets.QWidget):
                       ("دائن" if d["gold"] < 0 else "متزن"))
                 data.append((d["name"], d["phone"] or "—",
                              f"{d['cash']:,.2f}", cs,
-                             f"{d['gold']:,.2f}", gs))
+                             f"{kv.g(d['gold']):,.2f}", gs))
         self.table.setRowCount(0)
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
@@ -216,8 +218,8 @@ class SubLedgerScreen(QtWidgets.QWidget):
                                   f"فئة: {self.category.currentText()}")
             self.c_cash.set_value(f"{summary['total_cash']:,.2f}",
                                  "إجمالي الفئة — ريال")
-            self.c_gold.set_value(f"{summary['total_gold']:,.2f}",
-                                 "إجمالي الفئة — جم عيار 18")
+            self.c_gold.set_value(f"{kv.g(summary['total_gold']):,.2f}",
+                                 f"إجمالي الفئة — جم {kv.label()}")
             self.render()
         except Exception as e:
             err(self, e)

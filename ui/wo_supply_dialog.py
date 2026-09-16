@@ -9,6 +9,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import operations
 from services import gold_math
 from ui.widgets.common import ask, big_label, err, fill, info, make_table, wspin
@@ -53,19 +54,20 @@ class SupplyEditDialog(QtWidgets.QDialog):
         # ── القيد الحالي ──
         self.jt = make_table()
         fill(self.jt, ["الحساب", "مدين (ذهب)", "دائن (ذهب)"],
-             [(l["name"], f"{l['gd']:,.2f}", f"{l['gc']:,.2f}")
+             [(l["name"], f"{kv.g(l['gd']):,.2f}", f"{kv.g(l['gc']):,.2f}")
               for l in self.lines])
         self.jt.setMaximumHeight(150)
 
         # ── الحقول القابلة للتعديل ──
+        # الحقول بعيار المصنع، والتخزين بمكافئ 18 عند الحفظ
         self.gold = wspin()
-        self.gold.setValue(self.wo["gold_weight"])
+        self.gold.setValue(kv.g(self.wo["gold_weight"]))
         self.small = wspin()
-        self.small.setValue(self.wo["small_stones"])
+        self.small.setValue(kv.g(self.wo["small_stones"]))
         self.big = wspin()
-        self.big.setValue(self.wo["big_stones"])
+        self.big.setValue(kv.g(self.wo["big_stones"]))
         self.wage = wspin()
-        self.wage.setValue(self.wo["wage_per_gram"])
+        self.wage.setValue(kv.rate(self.wo["wage_per_gram"]))
         for w in (self.gold, self.small, self.big):
             w.valueChanged.connect(self.recalc)
         self.notes = QtWidgets.QLineEdit()
@@ -73,10 +75,10 @@ class SupplyEditDialog(QtWidgets.QDialog):
 
         edit_box = QtWidgets.QGroupBox("التعديل")
         fl = QtWidgets.QFormLayout(edit_box)
-        fl.addRow("الذهب (جم):", self.gold)
-        fl.addRow("الفصوص (جم):", self.small)
-        fl.addRow("الأحجار (جم):", self.big)
-        fl.addRow("الأجر/جم:", self.wage)
+        fl.addRow(f"الذهب ({kv.unit()}):", self.gold)
+        fl.addRow(f"الفصوص ({kv.unit()}):", self.small)
+        fl.addRow(f"الأحجار ({kv.unit()}):", self.big)
+        fl.addRow(f"الأجر/جم {kv.active()}:", self.wage)
         fl.addRow("السبب:", self.notes)
 
         self.preview = big_label("")
@@ -107,14 +109,15 @@ class SupplyEditDialog(QtWidgets.QDialog):
         """يعرض الأثر المتوقَّع على الخزنتين قبل الحفظ."""
         new_reg = gold_math.registered_weight(
             self.gold.value(), self.small.value(), self.big.value(), self.rate)
-        old = self.wo["registered_weight"]
+        old = kv.g(self.wo["registered_weight"])
         diff = round(new_reg - old, 2)
+        u = kv.unit()
         self.preview.setText(
-            f"الوزن المقيد: {old:,.2f} → {new_reg:,.2f} جم "
+            f"الوزن المقيد: {old:,.2f} → {new_reg:,.2f} {u} "
             f"(فرق {diff:+,.2f})\n\n"
             f"الأثر المحاسبي:\n"
-            f"   خزينة التصنيع  {-diff:+,.2f} جم\n"
-            f"   الذهب المشغول  {diff:+,.2f} جم\n"
+            f"   خزينة التصنيع  {-diff:+,.2f} {u}\n"
+            f"   الذهب المشغول  {diff:+,.2f} {u}\n"
             f"يُعكس القيد القديم ويُرحَّل الجديد داخل معاملة واحدة.")
 
     def save(self):
@@ -125,9 +128,10 @@ class SupplyEditDialog(QtWidgets.QDialog):
                     f"أعد فاتورته أولاً ثم عدّل التوريد")
             with db() as conn:
                 r = operations.edit_supply(
-                    conn, self.wo_id, self.gold.value(), self.small.value(),
-                    self.big.value(), self.user["username"],
-                    wage_per_gram=self.wage.value(),
+                    conn, self.wo_id, kv.store(self.gold.value()),
+                    kv.store(self.small.value()),
+                    kv.store(self.big.value()), self.user["username"],
+                    wage_per_gram=kv.rate_store(self.wage.value()),
                     notes=self.notes.text().strip())
             info(self, f"عُدِّل توريد {r['wo_no']}.\n"
                        f"الوزن المقيد: {r['old_reg']:,.2f} → "

@@ -8,6 +8,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import entities, invoices, operations
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, reload_combo, search_combo,
@@ -343,12 +344,17 @@ class InvoiceItemsDialog(QtWidgets.QDialog):
         self.render()
 
     def render(self):
-        fill(self.table, ["رقم التشغيل", "الوزن المقيد", "الأجر/جم"],
-             [(c["wo"], f"{c['weight']:,.2f}", f"{c['wage_override']:,.2f}")
+        # السلة تبقى بمكافئ 18 كما قُرئت وكما تُحفظ — التحويل عرضٌ
+        # هنا وحده، فلا يمرّ رقم معروض إلى القاعدة.
+        fill(self.table, ["رقم التشغيل", f"الوزن المقيد ({kv.unit()})",
+                          f"الأجر/جم {kv.active()}"],
+             [(c["wo"], f"{kv.g(c['weight']):,.2f}",
+               f"{kv.rate(c['wage_override']):,.2f}")
               for c in self.cart])
         self.total.setText(
             f"{len(self.cart)} بند — إجمالي الوزن: "
-            f"{sum(c['weight'] for c in self.cart):,.2f} جم")
+            f"{kv.g(sum(c['weight'] for c in self.cart)):,.2f} "
+            f"{kv.unit()}")
 
     def add_item(self):
         try:

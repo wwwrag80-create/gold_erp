@@ -51,7 +51,8 @@ from ui.stocktake_screen import StocktakeScreen
 from ui.subledger_screen import SubLedgerScreen
 from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
-from ui.widgets.common import ask, err, info
+from services import karat_view as kv
+from ui.widgets.common import ask, err, info, search_combo
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -188,6 +189,23 @@ class MainWindow(QtWidgets.QMainWindow):
         h.addWidget(t)
         h.addStretch(1)
         h.addWidget(u)
+        # ══ عيار المصنع ══
+        # وحدة القراءة والكتابة في النظام كله. التخزين يبقى بمكافئ 18
+        # مهما اختير — وهذا ما يجعل الأرصدة قابلة للجمع والمقارنة.
+        h.addWidget(QtWidgets.QLabel("عيار المصنع:"))
+        self.karat_box = QtWidgets.QComboBox()
+        self.karat_box.setObjectName("karatBox")
+        self.karat_box.setMaximumWidth(110)
+        self.karat_box.setToolTip(
+            "وحدة عرض وإدخال الأوزان في كل شاشات النظام.\n"
+            "القيد يُخزَّن بمكافئ عيار 18 دائماً — لا تتغيّر البيانات.")
+        for _k in kv.KARATS:
+            self.karat_box.addItem(f"عيار {_k}", _k)
+        _idx = self.karat_box.findData(kv.active())
+        if _idx >= 0:
+            self.karat_box.setCurrentIndex(_idx)
+        self.karat_box.currentIndexChanged.connect(self._change_karat)
+        h.addWidget(self.karat_box)
         btn_reset_nav = QtWidgets.QPushButton("↺ ترتيب القائمة الافتراضي")
         btn_reset_nav.setVisible(True)
         btn_reset_nav.setObjectName("ghost")
@@ -212,6 +230,23 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         h.addWidget(btn_update)
         h.addWidget(btn_backup)
+        # ══ البحث السريع — أقصى يسار الشريط ══
+        # السؤال الأكثر تكراراً في أي نظام محاسبي: «كم على فلان؟».
+        # كان يتطلب فتح دفتر الأستاذ ثم البحث في قائمة الحسابات. الآن
+        # اسم من أي مكان ← كشف حسابه مباشرةً.
+        self.quick = search_combo("🔍 بحث سريع باسم الجهة أو الحساب…")
+        self.quick.setMinimumWidth(240)
+        self.quick.setMaximumWidth(280)
+        self.quick.setToolTip(
+            "اكتب أول حروف الاسم ثم اختر — يفتح كشف الحساب مباشرةً")
+        self.quick.activated.connect(self._quick_open)
+        try:
+            self.quick.lineEdit().returnPressed.connect(self._quick_open)
+        except Exception:
+            pass
+        h.addWidget(self.quick)
+        # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة
+        QtCore.QTimer.singleShot(400, self._load_quick_index)
 
         # الشريط الفرعي: عنوان الشاشة الحالية وزر إغلاقها. يُبنى قبل
         # الشريط الجانبي لأن switch() تستخدم self.crumb و self.btn_close.
@@ -805,6 +840,107 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             err(self, e)
 
+    # ══════════════════════════════════════════════════════════════
+    #  عيار المصنع
+    # ══════════════════════════════════════════════════════════════
+
+    def _change_karat(self):
+        """يبدّل وحدة عرض وإدخال الأوزان في النظام كله.
+
+        **لا يُكتب رقم واحد في قاعدة البيانات**: القيد يبقى بمكافئ
+        عيار 18، والعيار المختار وحدةُ قراءة وكتابة في الواجهة فقط.
+        لذلك التبديل قابل للرجوع في أي لحظة بلا أي أثر على الأرصدة.
+
+        الشاشة الحالية تُعاد بناؤها بالعيار الجديد. وبقية الشاشات
+        تُبنى عند فتحها أصلاً (شاشة واحدة حيّة في كل لحظة) فتقرأ
+        العيار الجديد تلقائياً.
+        """
+        try:
+            k = self.karat_box.currentData()
+            cur = kv.active()
+            if k is None or int(k) == cur:
+                return
+            if not ask(self,
+                       f"تحويل عرض النظام كله إلى عيار {k}؟\n\n"
+                       "• كل الأوزان تُعرض وتُدخل بعيار "
+                       f"{k} في جميع الشاشات والتقارير.\n"
+                       "• المبالغ النقدية لا تتغيّر إطلاقاً.\n"
+                       "• القيد يبقى مخزَّناً بمكافئ عيار 18، فلا يتغيّر "
+                       "رقم واحد في قاعدة البيانات والتبديل قابل "
+                       "للرجوع.\n\n"
+                       "أي إدخال لم يُرحَّل في الشاشة المفتوحة سيُفقد."):
+                idx = self.karat_box.findData(cur)
+                self.karat_box.blockSignals(True)
+                if idx >= 0:
+                    self.karat_box.setCurrentIndex(idx)
+                self.karat_box.blockSignals(False)
+                return
+            kv.set_active(k, self.user.get("username"))
+            try:
+                with db() as conn:
+                    log_action(conn, self.user.get("username"), "update",
+                               "app_settings", None, f"factory_karat={k}")
+            except Exception:
+                pass
+            row = getattr(self, "_current_row", 0)
+            if row > 0:
+                scr = self.screens[row]
+                rel = getattr(scr, "release", None)
+                if callable(rel):
+                    rel()
+                self._current_row = 0
+                self.switch(row)
+            info(self, f"النظام يعرض الآن كل الأوزان بعيار {k}.")
+        except Exception as e:
+            err(self, e)
+
+    # ══════════════════════════════════════════════════════════════
+    #  البحث السريع
+    # ══════════════════════════════════════════════════════════════
+
+    def _load_quick_index(self):
+        """يبني فهرس البحث السريع: الجهات أولاً ثم بقية الحسابات.
+
+        الجهات أولاً لأنها المقصودة في تسعة من كل عشرة أسئلة، وبقية
+        الحسابات بعدها فلا يضطر أحد لفتح شجرة الحسابات ليقرأ كشفاً.
+        """
+        try:
+            from models.accounts import list_postable
+            with db(readonly=True) as conn:
+                ents = conn.execute(
+                    "SELECT e.name, a.code FROM entities e"
+                    " JOIN accounts a ON a.id=e.account_id"
+                    " WHERE e.is_deleted=0 ORDER BY e.name").fetchall()
+                accs = list_postable(conn)
+            seen = set()
+            self.quick.blockSignals(True)
+            self.quick.clear()
+            for e in ents:
+                if e["code"] in seen:
+                    continue
+                seen.add(e["code"])
+                self.quick.addItem(e["name"], e["code"])
+            for a in accs:
+                if a["code"] in seen:
+                    continue
+                self.quick.addItem(f"{a['code']} — {a['name']}", a["code"])
+            self.quick.setCurrentIndex(-1)
+            if self.quick.lineEdit():
+                self.quick.lineEdit().clear()
+            self.quick.blockSignals(False)
+        except Exception:
+            pass          # البحث السريع رفاهية لا تُعطّل الإقلاع
+
+    def _quick_open(self, *_):
+        """يفتح كشف حساب الاسم المختار في دفتر الأستاذ."""
+        try:
+            code = self.quick.currentData()
+            if code is None:
+                return
+            self.open_ledger(code)
+        except Exception as e:
+            err(self, e)
+
     def open_ledger_by_account(self, account_id):
         """Drill-down من شاشة أرصدة الأستاذ المساعد إلى دفتر أستاذ الجهة."""
         if not self.gl_screen:
@@ -862,6 +998,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # ضمان أخير: يُحفظ ترتيب القائمة وأسماؤها قبل الإغلاق
         try:
             self._save_nav_layout()
+        except Exception:
+            pass
+        try:
+            # خادم صور الموديلات يُغلق مع النظام — فلا يبقى منفذ
+            # مفتوحاً بعد الخروج.
+            from services import photo_server
+            photo_server.stop()
         except Exception:
             pass
         try:

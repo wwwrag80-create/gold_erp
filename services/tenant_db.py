@@ -42,6 +42,14 @@ def set_active_tenant(tenant_id):
     global _active_tenant_id
     with _lock:
         _active_tenant_id = (tenant_id or "").strip() or None
+    # عيار العرض يخصّ قاعدة المصنع نفسه، وهو محفوظ في الذاكرة تسريعاً.
+    # تبديل المصنع يوجب نسيانه، وإلا قرأ مصنعٌ أرقامه بعيار غيره.
+    try:
+        from services import karat_view
+        karat_view.reset_cache()
+    except Exception:
+        pass
+    with _lock:
         return _active_tenant_id
 
 

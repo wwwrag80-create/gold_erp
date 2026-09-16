@@ -8,6 +8,7 @@
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 import config
 from models import closing, inventory
 from models.accounts import list_postable
@@ -16,6 +17,11 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                search_combo, title_label, wspin)
 
 COLS = ["الحساب", "الرصيد النقدي (ريال)", "رصيد الذهب (جم 18)", "البيان"]
+
+
+def _cols():
+    return ["الحساب", "الرصيد النقدي (ريال)",
+            f"رصيد الذهب ({kv.unit()})", "البيان"]
 
 
 class OpeningBalancesScreen(QtWidgets.QWidget):
@@ -97,7 +103,7 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
         wrow = QtWidgets.QHBoxLayout()
         wrow.addWidget(QtWidgets.QLabel("رقم التشغيل:"))
         wrow.addWidget(self.wo_no, 1)
-        wrow.addWidget(QtWidgets.QLabel("الوزن المقيد (جم):"))
+        wrow.addWidget(QtWidgets.QLabel(f"الوزن المقيد ({kv.unit()}):"))
         wrow.addWidget(self.wo_reg, 1)
         wrow.addWidget(btn_wo_add)
         wrow.addWidget(btn_wo_del)
@@ -153,12 +159,14 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
             self.render_wo()
 
     def render_wo(self):
-        fill(self.wo_table, ["رقم التشغيل", "الوزن المقيد (جم)"],
+        # صفوف الشاشة بعيار المصنع، والتحويل عند الترحيل وحده
+        fill(self.wo_table, ["رقم التشغيل", f"الوزن المقيد ({kv.unit()})"],
              [(r["wo_no"], f"{r['reg']:,.2f}") for r in self.wo_rows])
         tot = round(sum(r["reg"] for r in self.wo_rows), 2)
         self.wo_total.setText(
             f"عدد الأطقم: {len(self.wo_rows)}   |   "
-            f"إجمالي الوزن المقيد (الرصيد الافتتاحي): {tot:,.2f} جم 18")
+            f"إجمالي الوزن المقيد (الرصيد الافتتاحي): "
+            f"{tot:,.2f} {kv.unit()}")
 
     def save_wo(self):
         """يرحّل الأطقم إلى مخزون الذهب المشغول بقيد افتتاحي واحد."""
@@ -167,11 +175,12 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
                 raise ValueError("أضف طقماً واحداً على الأقل")
             tot = round(sum(r["reg"] for r in self.wo_rows), 2)
             if not ask(self, f"ترحيل {len(self.wo_rows)} طقماً بإجمالي "
-                             f"{tot:,.2f} جم إلى الذهب المشغول بتاريخ "
+                             f"{tot:,.2f} {kv.unit()} إلى الذهب المشغول "
+                             f"بتاريخ "
                              f"{dstr(self.date)}؟"):
                 return
             # الوزن المقيد يُدخل كذهب صافٍ بلا أحجار، فيتطابق المقيد معه
-            rows = [{"wo_no": r["wo_no"], "gold": r["reg"],
+            rows = [{"wo_no": r["wo_no"], "gold": kv.store(r["reg"]),
                      "small_stones": 0, "big_stones": 0,
                      "discount_rate": 0.5,
                      "wage_per_gram": config.DEFAULT_WAGE_PER_GRAM}
@@ -179,7 +188,8 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
             with db() as conn:
                 res = inventory.opening_stock_batch(
                     conn, rows, dstr(self.date), self.user["username"])
-            info(self, f"تم ترحيل {len(res)} طقماً بإجمالي {tot:,.2f} جم.\n"
+            info(self, f"تم ترحيل {len(res)} طقماً بإجمالي "
+                       f"{tot:,.2f} {kv.unit()}.\n"
                        f"الأطقم متاحة الآن للبيع في مخزون الذهب المشغول.")
             self.wo_rows = []
             self.render_wo()
@@ -192,7 +202,7 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
             if not code:
                 raise ValueError("اختر الحساب")
             cash = round(self.cash.value(), 2)
-            gold = round(self.gold.value(), 3)
+            gold = round(kv.store(self.gold.value()), 3)
             if not cash and not gold:
                 raise ValueError("أدخل رصيداً نقدياً أو وزنياً")
             name = self.account.currentText()
@@ -212,13 +222,15 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
             self.render()
 
     def render(self):
-        data = [(r["name"], f"{r['cash']:,.2f}", f"{r['gold']:,.2f}",
+        # الصفوف مخزَّنة بمكافئ 18 منذ إضافتها — تُعرض بعيار المصنع
+        data = [(r["name"], f"{r['cash']:,.2f}", f"{kv.g(r['gold']):,.2f}",
                  r["desc"] or "—") for r in self.rows]
-        fill(self.table, COLS, data)
+        fill(self.table, _cols(), data)
         tc = round(sum(r["cash"] for r in self.rows), 2)
         tg = round(sum(r["gold"] for r in self.rows), 3)
         self.totals.setText(
-            f"مجموع المُدخل — نقد: {tc:,.2f} ريال   |   ذهب: {tg:,.2f} جم 18"
+            f"مجموع المُدخل — نقد: {tc:,.2f} ريال   |   ذهب: "
+            f"{kv.g(tg):,.2f} {kv.unit()}"
             + ("   (سيُرحَّل الفرق لحساب التسوية تلقائياً)"
                if abs(tc) > 0.01 or abs(tg) > 0.001 else "   (متوازن)"))
 

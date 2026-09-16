@@ -3,6 +3,7 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
+from services import karat_view as kv
 from models import editing, journal
 from models.accounts import list_postable
 from services.accounting_engine import validate_lines
@@ -12,6 +13,15 @@ from ui.widgets.common import (confirm_post, posted, ask, big_label, cell, date_
                                mspin, search_combo, title_label, wspin)
 
 COLS = ["الحساب", "مدين ذهب", "دائن ذهب", "مدين نقد", "دائن نقد"]
+
+
+def _cols():
+    """عناوين الأعمدة بعيار المصنع."""
+    if kv.is_base():
+        return list(COLS)
+    k = kv.active()
+    return ["الحساب", f"مدين ذهب {k}", f"دائن ذهب {k}",
+            "مدين نقد", "دائن نقد"]
 
 
 class EntryLinesDialog(QtWidgets.QDialog):
@@ -25,10 +35,10 @@ class EntryLinesDialog(QtWidgets.QDialog):
 
         with db() as conn:
             rows = [(f"{l['acode']} — {l['aname']}",
-                     l["gold_debit"], l["gold_credit"], l["cash_debit"],
-                     l["cash_credit"], l["line_desc"])
+                     kv.g(l["gold_debit"]), kv.g(l["gold_credit"]),
+                     l["cash_debit"], l["cash_credit"], l["line_desc"])
                     for l in journal.entry_lines(conn, entry_id)]
-        fill(table, COLS + ["البيان"], rows)
+        fill(table, _cols() + ["البيان"], rows)
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(table)
 
@@ -46,7 +56,7 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         self.desc = QtWidgets.QLineEdit()
         self.lines = QtWidgets.QTableWidget()
         self.lines.setColumnCount(len(COLS))
-        self.lines.setHorizontalHeaderLabels(COLS)
+        self.lines.setHorizontalHeaderLabels(_cols())
         self.lines.verticalHeader().setVisible(False)
         self.lines.horizontalHeader().setSectionResizeMode(
             0, QtWidgets.QHeaderView.Stretch)
@@ -218,9 +228,11 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
             vals = [self.lines.cellWidget(r, c).value() for c in (1, 2, 3, 4)]
             if not any(vals):
                 continue
+            # الحد الفاصل: الذهب يُدخل بعيار المصنع ويُقيَّد بمكافئ 18
             out.append({
                 "account_id": self.lines.cellWidget(r, 0).currentData(),
-                "gold_debit": vals[0], "gold_credit": vals[1],
+                "gold_debit": kv.store(vals[0]),
+                "gold_credit": kv.store(vals[1]),
                 "cash_debit": vals[2], "cash_credit": vals[3]})
         return out
 
@@ -233,7 +245,8 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         ok = abs(gd - gc) < 0.011 and abs(cd - cc) < 0.011 and lines
         state = "متوازن ✔" if ok else "غير متوازن ✘"
         self.totals.setText(
-            f"ذهب: {gd:.2f} / {gc:.2f} | نقد: {cd:,.2f} / {cc:,.2f} — {state}")
+            f"ذهب {kv.active()}: {kv.g(gd):.2f} / {kv.g(gc):.2f} | "
+            f"نقد: {cd:,.2f} / {cc:,.2f} — {state}")
         self.totals.setStyleSheet(
             "color:#1E6B33;font-weight:bold" if ok
             else "color:#B02A2A;font-weight:bold")
@@ -312,7 +325,10 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
                     acc.setCurrentIndex(i)
                 for col, key in ((1, "gold_debit"), (2, "gold_credit"),
                                 (3, "cash_debit"), (4, "cash_credit")):
-                    self.lines.cellWidget(r, col).setValue(ln[key] or 0)
+                    val = ln[key] or 0
+                    if col in (1, 2):      # الذهب يُعرض بعيار المصنع
+                        val = kv.g(val)
+                    self.lines.cellWidget(r, col).setValue(val)
             self.begin_edit(e["id"], e["id"])
             self.recalc()
         except Exception as ex:

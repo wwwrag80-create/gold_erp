@@ -598,12 +598,21 @@ def karat_combo(pref_key=None, width=112):
     cb.setToolTip("عيار عرض الأوزان — القيد يبقى بمكافئ عيار 18")
     for k in (18, 21, 22, 24):
         cb.addItem(f"عيار {k}", k)
+    # بلا مفتاح تفضيل: يتبع عيار المصنع المختار من الشريط العلوي،
+    # ويبقى تغييره هنا معاينةً مؤقتة لهذه الشاشة وحدها.
+    default = 18
     if pref_key:
         try:
-            saved = int(str(load_pref(pref_key, "18")).strip() or 18)
+            default = int(str(load_pref(pref_key, "18")).strip() or 18)
         except (TypeError, ValueError):
-            saved = 18
-        idx = cb.findData(saved)
-        if idx >= 0:
-            cb.setCurrentIndex(idx)
+            default = 18
+    else:
+        try:
+            from services import karat_view
+            default = karat_view.active()
+        except Exception:
+            default = 18
+    idx = cb.findData(default)
+    if idx >= 0:
+        cb.setCurrentIndex(idx)
     return cb
