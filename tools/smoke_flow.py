@@ -814,6 +814,139 @@ def main():
     _kv.set_active(18, "admin")
     check("العودة إلى 18 سليمة", _kv.active() == 18 and _kv.is_base())
 
+    step("22) حارس الأرصدة السالبة")
+    # الحسابات المادية: ما لا يوجد فيها لا يُصرف منه.
+    from services import stock_guard as _sg
+    from services.accounting_engine import balance_by_code as _bal
+
+    with db(readonly=True) as conn:
+        check("الوضع الافتراضي تنبيه", _sg.mode(conn) == "warn")
+    with db() as conn:
+        tz, lossacc = acc_id(conn, "1100"), acc_id(conn, "5300")
+        before = _bal(conn, "1100")[0]
+
+    def _post(desc, dr, cr, amount):
+        with db() as conn:
+            return post_entry(conn, "2026-05-01", desc, [
+                {"account_id": dr, "gold_debit": amount},
+                {"account_id": cr, "gold_credit": amount}], username="admin")
+
+    _sg.take_warning()
+    _post("سحب يتجاوز الرصيد", lossacc, tz, before + 500.0)
+    warn = _sg.take_warning()
+    check("ينبّه حين يصير الرصيد سالباً",
+          "سالب" in warn and "1100" in warn, warn.split("\n")[0])
+
+    _post("توريد يُصلح العجز", tz, lossacc, 100.0)
+    check("لا ينبّه على قيد يُقلّل العجز", _sg.take_warning() == "")
+
+    with db() as conn:
+        _sg.set_mode(conn, "block", "admin")
+    expect_error("يمنع قيداً يزيد العجز",
+                 lambda: _post("سحب آخر", lossacc, tz, 10.0),
+                 "الرصيد لا يكفي")
+    with db(readonly=True) as conn:
+        left = conn.execute(
+            "SELECT COUNT(*) c FROM journal_entries"
+            " WHERE description='سحب آخر'").fetchone()["c"]
+    check("العملية الممنوعة لا تترك أثراً", left == 0, str(left))
+    _post("تصحيح في وضع المنع", tz, lossacc, 50.0)
+    check("القيد المصحِّح يمرّ في وضع المنع", True)
+    with db() as conn:
+        _sg.set_mode(conn, "warn", "admin")
+        n_neg = len(_sg.negatives(conn))
+    check("يرصد الأرصدة السالبة القائمة", n_neg >= 1, f"{n_neg} حساب")
+    expect_error("وضع غير مدعوم يُرفض",
+                 lambda: _sg.set_mode(conn, "maybe", "admin"), "غير مدعوم")
+    # إعادة الخزينة إلى موجب حتى لا تتأثر بقية الفحوص
+    _post("إعادة الرصيد", tz, lossacc, 1000.0)
+
+    step("23) أعمار الديون")
+    import datetime as _dt
+    from models import aging as _ag
+
+    _today = _dt.date.today()
+
+    def _ago(n):
+        return (_today - _dt.timedelta(days=n)).isoformat()
+
+    with db() as conn:
+        a_old = add_entity(conn, "عميل الأعمار", "customer",
+                           username="admin")
+        _batch(conn, [{"wo_no": "AG1", "gold": 100.0, "wage_per_gram": 20.0},
+                      {"wo_no": "AG2", "gold": 50.0, "wage_per_gram": 20.0}],
+               _ago(200), "admin")
+        agids = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no IN ('AG1','AG2')")}
+        create_sale(conn, a_old, [{"work_order_id": agids["AG1"]}],
+                    _ago(120), "admin", apply_vat=False)   # 2000 ريال
+        create_sale(conn, a_old, [{"work_order_id": agids["AG2"]}],
+                    _ago(10), "admin", apply_vat=False)    # 1000 ريال
+        create_voucher(conn, "receipt", _ago(2), "admin", entity_id=a_old,
+                       rows=[{"kind": "cash", "amount": 500.0}])
+    with db(readonly=True) as conn:
+        arows = _ag.report(conn, "customer")
+    mine = [r for r in arows if r["name"] == "عميل الأعمار"]
+    check("الجهة تظهر في التقرير", len(mine) == 1)
+    r0 = mine[0]
+    check("السداد يُطفئ الأقدم أولاً (FIFO)",
+          abs(r0["cash_buckets"][3] - 1500.0) < 0.02,
+          f"أكثر من 90: {r0['cash_buckets'][3]}")
+    check("الفاتورة الحديثة في فئتها",
+          abs(r0["cash_buckets"][0] - 1000.0) < 0.02,
+          f"0-30: {r0['cash_buckets'][0]}")
+    check("أقدم دين يُحسب بالأيام", r0["days"] >= 119, str(r0["days"]))
+    check("إجمالي الفئات = الرصيد",
+          abs(sum(r0["cash_buckets"]) - r0["cash"]) < 0.02)
+    at = _ag.totals(arows)
+    check("نسب الفئات تجمع 100%",
+          abs(sum(at["cash_pct"]) - 100.0) < 0.2, str(at["cash_pct"]))
+    check("المتعثّرون يُرصدون",
+          any(r["name"] == "عميل الأعمار"
+              for r in _ag.overdue(conn, 90, "customer")))
+
+    step("24) مقارنة الفترتين والإغلاق اليومي")
+    from models import dash_panels as _dp, day_close as _dc
+
+    p1, p2 = _dp.previous_period("2026-02-01", "2026-02-28")
+    check("الفترة السابقة مساوية في الطول",
+          (p1, p2) == ("2026-01-04", "2026-01-31"), f"{p1} → {p2}")
+    with db(readonly=True) as conn:
+        cmp_ = _dp.compare_rows(conn, ["1600"], _ago(30),
+                                _today.isoformat())
+        ct = _dp.compare_totals(cmp_["rows"])
+    check("المقارنة تعيد فترة سابقة", bool(cmp_["from"] and cmp_["to"]))
+    check("المقارنة تحسب الفرق",
+          abs((ct["cash"] - ct["cash_prev"]) - ct["cash_diff"]) < 0.02)
+    check("النسبة تُحسب أو تُترك فارغة عند القسمة على صفر",
+          ct["cash_pct"] is None or isinstance(ct["cash_pct"], float))
+
+    with db(readonly=True) as conn:
+        dcs = _dc.summary(conn, _ago(10))
+    check("الإغلاق اليومي يرصد مستندات اليوم", dcs["count"] >= 1,
+          f"{dcs['count']} مستند")
+    check("الحركة مصنّفة بأنواعها", len(dcs["kinds"]) >= 1,
+          str([k["op"] for k in dcs["kinds"]]))
+    check("الأرصدة الختامية تشمل الحسابات المادية والذمم",
+          len(dcs["balances"]) >= 5, f"{len(dcs['balances'])} حساب")
+    codes = {b["code"] for b in dcs["balances"]}
+    check("رصيد الذمم يشمل الفروع",
+          "1600" in codes
+          and any(abs(b["cash"]) > 0 for b in dcs["balances"]
+                  if b["code"] == "1600"))
+    check("مجموع المستندات = العدد المعلن",
+          len(dcs["docs"]) == dcs["count"])
+
+    # القوالب المطبوعة للتقريرين
+    with db(readonly=True) as conn:
+        h_age = print_manager._tpl_aging(conn, 0, "customer", None, "both")
+        h_day = print_manager._tpl_day_close(conn, 0, _ago(10))
+    check("قالب الأعمار يُبنى", "أعمار الديون" in h_age
+          and "الأقدم فالأقدم" in h_age)
+    check("قالب الإغلاق اليومي يُبنى", "الإغلاق اليومي" in h_day
+          and "الأرصدة الختامية" in h_day)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

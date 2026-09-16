@@ -449,9 +449,21 @@ def posted(parent, message, doc_type=None, doc_id=None,
     صب · تسكير · قيد يومي · مشتريات) فتوحّد التجربة: رسالة تأكيد
     واضحة، ثم سؤال عن الطباعة بدل البحث عن المستند لاحقاً.
     """
+    # تنبيه الرصيد السالب يظهر مع رسالة الترحيل نفسها — لا في شاشة
+    # أخرى ولا بعد أسابيع. الموضع واحد لكل الشاشات لأنها كلها تمرّ
+    # من هنا بعد الترحيل.
+    try:
+        from services import stock_guard
+        warn_txt = stock_guard.take_warning()
+    except Exception:
+        warn_txt = ""
+    if warn_txt:
+        message = f"{message}\n\n{warn_txt}"
+
     box = QtWidgets.QMessageBox(parent)
     box.setWindowTitle("تم الترحيل")
-    box.setIcon(QtWidgets.QMessageBox.Information)
+    box.setIcon(QtWidgets.QMessageBox.Warning if warn_txt
+                else QtWidgets.QMessageBox.Information)
     box.setText(message)
     if not (doc_type and doc_id):
         box.setStandardButtons(QtWidgets.QMessageBox.Ok)

@@ -41,6 +41,8 @@ from ui.reports.income_statement import IncomeStatementScreen
 from ui.reports.khazina_report_screen import KhazinaReportScreen
 from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
+from ui.reports.aging_screen import AgingScreen
+from ui.reports.day_close_screen import DayCloseScreen
 from ui.item_history_screen import ItemHistoryScreen
 from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
@@ -105,6 +107,8 @@ class MainWindow(QtWidgets.QMainWindow):
             groups = [
                 (None, [
                     ("دفتر الأستاذ العام", self.gl_screen),
+                    ("الإغلاق اليومي", Lazy(lambda: DayCloseScreen(user),
+                                            "الإغلاق اليومي")),
                     ("تقارير مبيعات وإنتاج المصنع", Lazy(lambda: FactoryReportsScreen(user), "تقارير مبيعات وإنتاج المصنع")),
                     ("حركة الطقم", Lazy(lambda: ItemHistoryScreen(user), "حركة الطقم")),
                     ("دليل الموديلات", Lazy(lambda: ModelsScreen(user), "دليل الموديلات")),
@@ -126,6 +130,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("دليل الحسابات (شجرة الحسابات)", self.coa_screen),
                     ("التكويد الموحّد لجهات التعامل", self.entities_screen),
                     ("أرصدة الأستاذ المساعد", self.subledger_screen),
+                    ("أعمار الديون (30/60/90)",
+                     Lazy(lambda: AgingScreen(user), "أعمار الديون")),
                     ("الجرد الفعلي", self.stocktake_screen),
                     ("إدارة وتحويل العمليات", Lazy(lambda: OperationsScreen(user), "إدارة وتحويل العمليات")),
                     ("سجل العمليات", self.txlog_screen),

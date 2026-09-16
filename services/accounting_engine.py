@@ -164,6 +164,24 @@ def post_entry(conn, entry_date, description, lines,
                                sync_queue.bundle_entry(conn, entry_id))
     except Exception:
         pass          # المزامنة لا تعطّل العملية المحلية أبداً
+
+    # ══ حارس الأرصدة السالبة ══
+    # يُفحص أثر القيد على الحسابات المادية وحدها (خزينة · مشغول ·
+    # كسر · صندوق). في وضع المنع يرفع خطأً فتُلغى المعاملة كاملةً
+    # قبل إغلاقها، فلا يبقى أثر لعملية صرفٍ من رصيد غير موجود.
+    # التنبيه يُخزَّن ليعرضه المستخدمُ فور الترحيل.
+    try:
+        from services import stock_guard
+        _warn = stock_guard.check_entry(conn, entry_id)
+    except ValueError:
+        raise             # المنع مقصود — يمرّ كما هو فتُلغى العملية
+    except Exception:
+        _warn = []        # أي خلل في الحارس لا يمنع قيداً سليماً
+    if _warn:
+        try:
+            stock_guard.set_warning(stock_guard.message(_warn))
+        except Exception:
+            pass
     return entry_id
 
 
