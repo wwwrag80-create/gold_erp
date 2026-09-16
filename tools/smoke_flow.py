@@ -633,6 +633,75 @@ def main():
     except ImportError:
         check("فحوص صور الموديلات", True, "تخطّي — PyQt5 غير مثبّت")
 
+    step("20) العيارات وقالب تقرير العميل")
+    # القيد كله بمكافئ عيار 18 — لا يتغيّر. العيار تحويل **عرض** فقط:
+    # الوزن18 × 18 ÷ العيار، ويعود كما كان إن حُوّل عكسياً.
+    from services import gold_math as _gm
+
+    check("عيار 18 لا يغيّر الرقم",
+          _gm.from_base_karat(100.0, 18) == 100.0)
+    check("التحويل إلى 21 صحيح حسابياً",
+          abs(_gm.from_base_karat(100.0, 21) - 85.714) < 0.001,
+          str(_gm.from_base_karat(100.0, 21)))
+    check("التحويل إلى 24 صحيح حسابياً",
+          abs(_gm.from_base_karat(120.0, 24) - 90.0) < 0.001,
+          str(_gm.from_base_karat(120.0, 24)))
+    check("التحويل عكوس بلا فقد",
+          all(abs(_gm.to_base_karat(_gm.from_base_karat(w, k), k) - w) < 0.002
+              for w in (10.0, 100.0, 1234.567) for k in _gm.KARATS))
+    check("عيار غير صالح لا يكسر العرض",
+          _gm.from_base_karat(50.0, 0) == 50.0
+          and _gm.from_base_karat(50.0, None) == 50.0
+          and _gm.from_base_karat(50.0, "س") == 50.0)
+
+    from services import print_manager as _pm
+    with db(readonly=True) as conn:
+        cacc = conn.execute("SELECT account_id a FROM entities WHERE id=?",
+                            (cust,)).fetchone()["a"]
+        st18 = _pm._tpl_statement(conn, cacc, None, None, 18)
+        st21 = _pm._tpl_statement(conn, cacc, None, None, 21)
+        ca18 = _pm._tpl_customer_analytics(conn, cust, None, None,
+                                           None, None, 18)
+        ca21 = _pm._tpl_customer_analytics(conn, cust, None, None,
+                                           None, None, 21)
+    check("كشف الحساب يعنون بالعيار المختار",
+          "مدين ذهب 21" in st21 and "رصيد ذهب 21" in st21
+          and "مدين ذهب 18" in st18)
+    check("أرقام الكشف تختلف باختلاف العيار", st18 != st21)
+
+    # مسمّيات ورقة العميل مسمّيات كشف الحساب لا التحليل الداخلي
+    for lbl in ("المصروف", "المرتجع", "المباع الصافي", "السداد"):
+        check(f"قالب التقرير يسمّي اللوحة «{lbl}»", lbl in ca18)
+    check("مسمّيات التحليل الداخلي لا تخرج للعميل",
+          "إجمالي المبيعات" not in ca18 and "إجمالي التحصيل" not in ca18)
+
+    # جدولا الرصيد الصغيران بدل الشريط العريض
+    check("جدولا الرصيد موجودان", ca18.count('class="ca-bal"') == 2)
+    check("جدول الذهب يحمل العيار المختار",
+          "ذهب 18" in ca18 and "ذهب 21" in ca21)
+    check("جدول النقد بعنوانه", "نقد ريال" in ca18)
+    check("حالة كل رصيد معروضة",
+          any(s in ca18 for s in ("مدين", "دائن", "متوازن")))
+    check("الشريط العريض القديم أُزيل",
+          "الرصيد المتبقي — ذهب" not in ca18)
+    check("العيار ينتقل إلى تفاصيل اللوحات", "الوزن 21" in ca21)
+
+    try:
+        from ui.widgets.common import karat_combo, load_pref, save_pref
+        from PyQt5 import QtWidgets as _QW
+        _app = _QW.QApplication.instance() or _QW.QApplication([])
+        save_pref("test_karat_pref", 22, "admin")
+        check("تفضيل العيار يُحفظ ويُستعاد",
+              str(load_pref("test_karat_pref", "18")) == "22")
+        cb = karat_combo("test_karat_pref")
+        check("قائمة العيارات فيها 18 و21 و22 و24",
+              [cb.itemData(i) for i in range(cb.count())] == [18, 21, 22, 24])
+        check("القائمة تفتح على آخر عيار محفوظ", cb.currentData() == 22)
+        check("تفضيل غير محفوظ يعود إلى 18",
+              karat_combo("no_such_pref_key").currentData() == 18)
+    except ImportError:
+        check("فحوص تفضيل العيار", True, "تخطّي — PyQt5 غير مثبّت")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

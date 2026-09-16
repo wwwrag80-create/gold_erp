@@ -12,6 +12,30 @@ def to_base_karat(weight: float, karat: int) -> float:
     return round(weight * karat / BASE_KARAT, WEIGHT_DECIMALS)
 
 
+# العيارات المتداولة في السوق — تُعرض للاختيار في الكشوف والتقارير
+KARATS = (18, 21, 22, 24)
+
+
+def from_base_karat(weight18: float, karat: int) -> float:
+    """عكس `to_base_karat`: يعرض وزناً مقيداً بعيار 18 بعيار آخر.
+
+    القيد في النظام كله بمكافئ عيار 18 — وهذا هو الصحيح محاسبياً لأن
+    الميزان لا يتزن إلا بوحدة واحدة. لكن السوق يتعامل بـ21 و22 و24،
+    فيُراد **عرض** الرقم نفسه بالعيار المتداول:  الوزن18 × 18 ÷ العيار.
+
+    التحويل عرضٌ محض لا يمسّ القيد: `to_base_karat(from_base_karat(w, k), k)`
+    تُعيد `w` نفسه.
+    """
+    try:
+        k = int(karat or BASE_KARAT)
+    except (TypeError, ValueError):
+        k = BASE_KARAT
+    w = float(weight18 or 0)
+    if k <= 0 or k == BASE_KARAT:
+        return round(w, WEIGHT_DECIMALS)
+    return round(w * BASE_KARAT / k, WEIGHT_DECIMALS)
+
+
 def stones_after_discount(big_stones: float,
                           discount_rate: float = STONE_DISCOUNT_RATE) -> float:
     """الأحجار بعد الخصم التجاري = وزن الأحجار × (1 − نسبة الخصم)."""

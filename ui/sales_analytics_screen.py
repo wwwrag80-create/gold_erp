@@ -10,12 +10,16 @@ from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import entities, sales_analytics as sa
+from services import gold_math
 
-from ui.widgets.common import (big_label, date_edit, dstr, err, fill, make_table,
-                               reload_combo, search_combo, title_label)
+from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
+                               karat_combo, make_table, reload_combo,
+                               save_pref, search_combo, title_label)
 
 PANELS = [("sales", "إجمالي المبيعات"), ("returns", "إجمالي المرتجعات"),
           ("net_sold", "إجمالي المباع الفعلي"), ("collection", "إجمالي التحصيل")]
+
+KARAT_PREF = "analytics_karat"
 
 
 class PanelColumn(QtWidgets.QFrame):
@@ -81,6 +85,9 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-6))
         self.d_to = date_edit()
+        # العيارات: اللوحات والتقرير المطبوع يخرجان بالعيار المختار
+        self.karat = karat_combo(KARAT_PREF)
+        self.karat.currentIndexChanged.connect(self._karat_changed)
         btn_run = QtWidgets.QPushButton("تحديث اللوحات")
         btn_run.clicked.connect(self.reload_panels)
         btn_print = QtWidgets.QPushButton("🖨 طباعة تقرير العميل")
@@ -93,6 +100,8 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         filt.addWidget(self.d_from)
         filt.addWidget(QtWidgets.QLabel("إلى:"))
         filt.addWidget(self.d_to)
+        filt.addWidget(QtWidgets.QLabel("العيارات:"))
+        filt.addWidget(self.karat)
         filt.addWidget(btn_run)
         filt.addWidget(btn_print)
 
@@ -113,6 +122,24 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         self.customer_id = self.customer.currentData()
         self.reload_panels()
 
+    # ══════════════════════════════════════════════════════════════
+    #  العيار: تحويل عرضٍ محض — القيد يبقى بمكافئ عيار 18
+    # ══════════════════════════════════════════════════════════════
+
+    def _k(self):
+        try:
+            return int(self.karat.currentData() or 18)
+        except (TypeError, ValueError):
+            return 18
+
+    def _g(self, value):
+        return gold_math.from_base_karat(value or 0, self._k())
+
+    def _karat_changed(self):
+        """يحفظ آخر عيار مختار ويعيد بناء اللوحات به."""
+        save_pref(KARAT_PREF, self._k(), (self.user or {}).get("username"))
+        self.reload_panels()
+
     def reload_panels(self):
         if self.customer_id is None:
             return
@@ -123,15 +150,17 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                 details = {k: sa.panel_details(conn, k, self.customer_id,
                                                dstr(self.d_from), dstr(self.d_to))
                            for k, _ in PANELS}
+            k = self._k()
             self.columns["sales"].set_value(
-                f"{p['sales']['weight']:,.2f} جم")
+                f"{self._g(p['sales']['weight']):,.2f} جم {k}")
             self.columns["returns"].set_value(
-                f"{p['returns']['weight']:,.2f} جم")
+                f"{self._g(p['returns']['weight']):,.2f} جم {k}")
             self.columns["net_sold"].set_value(
-                f"{p['net_sold']['weight']:,.2f} جم")
+                f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
             coll = p["collection"]
             self.columns["collection"].set_value(
-                f"ذهب {coll['gold']:,.2f} · نقد {coll['cash']:,.2f}")
+                f"ذهب {self._g(coll['gold']):,.2f} · "
+                f"نقد {coll['cash']:,.2f}")
             # الرصيد المتبقي = رصيد حساب العميل في الدليل
             with db(readonly=True) as conn:
                 acc = conn.execute(
@@ -148,29 +177,31 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                         (acc["account_id"],)).fetchone()
                     g, c = round(r["g"], 2), round(r["c"], 2)
             self.remaining.setText(
-                f"الرصيد المتبقي على العميل — ذهب: {g:,.2f} جم عيار 18   "
-                f"|   نقد: {c:,.2f} ريال      "
+                f"الرصيد المتبقي على العميل — ذهب: {self._g(g):,.2f} جم "
+                f"عيار {k}   |   نقد: {c:,.2f} ريال      "
                 f"({'مدين/عليه' if (g > 0 or c > 0) else 'دائن/له'})")
             for key, _ in PANELS:
                 if key == "collection":
                     # التحصيل: عمود المبلغ النقدي بجانب الذهب
-                    rows = [(d["wo"], f"{d['weight']:,.2f}",
+                    rows = [(d["wo"], f"{self._g(d['weight']):,.2f}",
                              f"{d.get('cash', 0):,.2f}")
                             for d in details[key]]
                     self.columns[key].set_rows(
-                        rows, ["رقم السند", "الذهب (جم)", "المبلغ (ريال)"])
+                        rows, ["رقم السند", f"الذهب (جم {k})",
+                               "المبلغ (ريال)"])
                 elif key == "net_sold":
                     # المباع الفعلي: المبيعات والمرتجعات والصافي
-                    rows = [(d["wo"], f"{d.get('sold', 0):,.2f}",
-                             f"{d.get('returned', 0):,.2f}",
-                             f"{d['weight']:,.2f}")
+                    rows = [(d["wo"], f"{self._g(d.get('sold', 0)):,.2f}",
+                             f"{self._g(d.get('returned', 0)):,.2f}",
+                             f"{self._g(d['weight']):,.2f}")
                             for d in details[key]]
                     self.columns[key].set_rows(
                         rows, ["رقم التشغيل", "المباع", "المرتجع", "الصافي"])
                 else:
-                    rows = [(d["wo"], f"{d['weight']:,.2f}")
+                    rows = [(d["wo"], f"{self._g(d['weight']):,.2f}")
                             for d in details[key]]
-                    self.columns[key].set_rows(rows)
+                    self.columns[key].set_rows(
+                        rows, ["رقم التشغيل", f"الوزن المقيد (جم {k})"])
         except Exception as e:
             err(self, e)
 
@@ -187,7 +218,8 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                 self, "customer_analytics", self.customer_id,
                 date_from=dstr(self.d_from), date_to=dstr(self.d_to),
                 visible=self._visible_panels(),
-                expanded=self._expanded_panels())
+                expanded=self._expanded_panels(),
+                karat=self._k())
         except Exception as e:
             err(self, e)
 

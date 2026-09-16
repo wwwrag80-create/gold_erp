@@ -9,9 +9,11 @@ from models import entities, journal
 from models.accounts import list_postable
 from services.audit import soft_delete_entry
 
-from services import browser_print
+from services import browser_print, gold_math
 from ui.widgets.table_fit import fit_columns
-from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err, fill, info, make_table, search_combo, title_label)
+from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err, fill, info, karat_combo, make_table, save_pref, search_combo, title_label)
+
+KARAT_PREF = "ledger_karat"
 
 from models.editing import EDITABLE
 
@@ -52,6 +54,9 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                            ("تسكير", "تسكير"), ("صب وتصفية", "صب"),
                            ("مشتريات", "مشتريات")):
             self.op_kind.addItem(label, val)
+        # العيارات: يعرض الكشف نفسه بالعيار المختار (عرضٌ محض)
+        self.karat = karat_combo(KARAT_PREF)
+        self.karat.currentIndexChanged.connect(self._karat_changed)
         btn = QtWidgets.QPushButton("عرض")
         btn.clicked.connect(self.load)
         # ست بطاقات: مدين · دائن · الرصيد — للذهب والنقد
@@ -79,6 +84,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         head.addWidget(self.d_to, 0)
         head.addWidget(QtWidgets.QLabel("العملية:"))
         head.addWidget(self.op_kind, 0)
+        head.addWidget(QtWidgets.QLabel("العيارات:"))
+        head.addWidget(self.karat, 0)
         head.addWidget(btn, 0)
         head.addStretch(1)
 
@@ -133,6 +140,33 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         note.setWordWrap(True)
         lay.addWidget(note)
 
+    # ══════════════════════════════════════════════════════════════
+    #  العيار: تحويل عرضٍ محض — القيد يبقى بمكافئ عيار 18
+    # ══════════════════════════════════════════════════════════════
+
+    def _k(self):
+        """العيار المختار حالياً (18 افتراضاً)."""
+        try:
+            return int(self.karat.currentData() or 18)
+        except (TypeError, ValueError):
+            return 18
+
+    def _g(self, value):
+        """يحوّل وزناً من مكافئ 18 إلى العيار المعروض."""
+        return gold_math.from_base_karat(value or 0, self._k())
+
+    def _karat_changed(self):
+        """يحفظ آخر عيار مختار ويعيد عرض الكشف به فوراً.
+
+        الحفظ في قاعدة بيانات المصنع لا في الجلسة: فالاختيار يبقى بعد
+        الخروج من الشاشة وبعد إغلاق النظام كله.
+        """
+        save_pref(KARAT_PREF, self._k(),
+                  (self.user or {}).get("username"))
+        # لا نعيد الاستعلام إن لم يُعرض شيء بعد
+        if self.account.currentData() is not None and self.table.rowCount():
+            self.load()
+
     def open_for_code(self, account_code):
         """تُستدعى من لوحة التحكم عند الضغط على بطاقة — تفتح الكشف
         مفلتراً جاهزاً على حساب البطاقة."""
@@ -180,7 +214,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             print_manager.preview_document(
                 self, "statement", acc["id"],
                 date_from=dstr(self.d_from),
-                date_to=dstr(self.d_to))
+                date_to=dstr(self.d_to),
+                karat=self._k())
         except Exception as e:
             err(self, e)
 
@@ -199,7 +234,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             print_manager.print_document(
                 self, "statement", acc["id"],
                 date_from=dstr(self.d_from),
-                date_to=dstr(self.d_to))
+                date_to=dstr(self.d_to),
+                karat=self._k())
         except Exception as e:
             err(self, e)
 
@@ -238,9 +274,11 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             self.rows = rows
             # عناوين مختصرة على سطرين — تُقلّص عرض الأعمدة فيظهر
             # الجدول كاملاً بلا تمرير أفقي.
+            k = self._k()
             headers = ["التاريخ", "نوع\nالعملية", "رقم\nالسند",
                        "الجهة /\nالحساب المقابل", "البيان",
-                       "مدين\nذهب", "دائن\nذهب", "رصيد\nذهب",
+                       f"مدين\nذهب {k}", f"دائن\nذهب {k}",
+                       f"رصيد\nذهب {k}",
                        "مدين\nنقد", "دائن\nنقد", "رصيد\nنقد", "معاينة"]
             self.table.setRowCount(0)
             self.table.setColumnCount(len(headers))
@@ -269,8 +307,11 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 self.table.setRowCount(len(rows))
                 for i, r in enumerate(rows):
                     vals = (r["date"], r["op"], r["doc_no"], r["name"],
-                            r["desc"], r["gd"] or "", r["gc"] or "",
-                            r["gbal"], r["cd"] or "", r["cc"] or "",
+                            r["desc"],
+                            self._g(r["gd"]) if r["gd"] else "",
+                            self._g(r["gc"]) if r["gc"] else "",
+                            self._g(r["gbal"]),
+                            r["cd"] or "", r["cc"] or "",
                             r["cbal"],
                             "👁" if (r.get("src") and r.get("sid")) else "")
                     for c, v in enumerate(vals):
@@ -297,11 +338,11 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                       if r["op"] != "رصيد سابق")
             tcc = sum(float(r.get("cc") or 0) for r in rows
                       if r["op"] != "رصيد سابق")
-            self.g_debit.set_value(f"{tgd:,.2f}")
-            self.g_credit.set_value(f"{tgc:,.2f}")
+            self.g_debit.set_value(f"{self._g(tgd):,.2f}", f"جم عيار {k}")
+            self.g_credit.set_value(f"{self._g(tgc):,.2f}", f"جم عيار {k}")
             self.g_bal.set_value(
-                f"{abs(g):,.2f}",
-                "مدين/عليه" if g >= 0 else "دائن/له")
+                f"{abs(self._g(g)):,.2f}",
+                f"{'مدين/عليه' if g >= 0 else 'دائن/له'} — عيار {k}")
             self.c_debit.set_value(f"{tcd:,.2f}")
             self.c_credit.set_value(f"{tcc:,.2f}")
             self.c_bal.set_value(
@@ -535,9 +576,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             rows = journal.day_book(conn, d1, d2, kind)
         self.rows = rows
 
+        k = self._k()
         headers = ["التاريخ", "نوع\nالعملية", "رقم\nالسند",
                    "الحسابات المتأثرة", "البيان",
-                   "إجمالي\nذهب", "إجمالي\nنقد", "المستخدم", "معاينة"]
+                   f"إجمالي\nذهب {k}", "إجمالي\nنقد", "المستخدم", "معاينة"]
         self.table.setRowCount(0)
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
@@ -550,7 +592,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             for i, r in enumerate(rows):
                 vals = (r["date"], r["op"], r["doc_no"], r["accounts"],
                         r["desc"],
-                        f"{r['gold']:,.3f}" if r["gold"] else "",
+                        f"{self._g(r['gold']):,.3f}" if r["gold"] else "",
                         f"{r['cash']:,.2f}" if r["cash"] else "",
                         r["who"],
                         "👁" if (r.get("src") and r.get("sid")) else "")
@@ -567,7 +609,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
 
         tg = sum(r["gold"] for r in rows)
         tc = sum(r["cash"] for r in rows)
-        self.g_debit.set_value(f"{tg:,.2f}")
+        self.g_debit.set_value(f"{self._g(tg):,.2f}", f"جم عيار {k}")
         self.g_credit.set_value("—")
         self.g_bal.set_value(f"{len(rows):,}", "عدد المستندات")
         self.c_debit.set_value(f"{tc:,.2f}")

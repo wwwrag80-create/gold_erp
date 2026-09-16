@@ -551,3 +551,59 @@ def has_model_image(model_no):
         return bool(no and no != "—" and mc.image_path(no) is not None)
     except Exception:
         return False
+
+
+# ══════════════════════════════════════════════════════════════════
+#  تفضيلات العرض — تُحفظ في قاعدة بيانات المصنع نفسها
+# ------------------------------------------------------------------
+#  تُخزَّن في `app_settings` لا في ملف على الجهاز: فالتفضيل يتبع بيانات
+#  المصنع أينما فُتحت، ويبقى بعد إعادة بناء التطبيق (وهو ما يجري هنا
+#  كل تحديث). وهي تفضيلات **عرض** محضة لا تمسّ قيداً.
+# ══════════════════════════════════════════════════════════════════
+
+def load_pref(key, default=""):
+    """يقرأ تفضيل عرض. لا يُفشل الشاشة أبداً — يعود بالافتراضي."""
+    try:
+        from database.database import db
+        from models import fiscal
+        with db(readonly=True) as conn:
+            return fiscal.get_setting(conn, key, default) or default
+    except Exception:
+        return default
+
+
+def save_pref(key, value, username=None):
+    """يحفظ تفضيل عرض. الفشل لا يمنع المستخدم من متابعة عمله."""
+    try:
+        from database.database import db
+        from models import fiscal
+        with db() as conn:
+            fiscal.set_setting(conn, key, value, username)
+        return True
+    except Exception:
+        return False
+
+
+def karat_combo(pref_key=None, width=112):
+    """قائمة اختيار العيار (18 · 21 · 22 · 24).
+
+    القيد كله بمكافئ عيار 18 — وهذا لا يتغيّر. لكن العميل قد يُحوَّل
+    حسابه إلى 21 أو 22 أو 24، فيريد قراءة الكشف نفسه بعياره. الاختيار
+    **عرضٌ محض**: نفس الأرقام مقسومة على العيار، والقيد لا يُمسّ.
+
+    `pref_key` يجعل آخر اختيار يُحفظ فيُستعاد عند العودة للشاشة.
+    """
+    cb = QtWidgets.QComboBox()
+    cb.setMaximumWidth(width)
+    cb.setToolTip("عيار عرض الأوزان — القيد يبقى بمكافئ عيار 18")
+    for k in (18, 21, 22, 24):
+        cb.addItem(f"عيار {k}", k)
+    if pref_key:
+        try:
+            saved = int(str(load_pref(pref_key, "18")).strip() or 18)
+        except (TypeError, ValueError):
+            saved = 18
+        idx = cb.findData(saved)
+        if idx >= 0:
+            cb.setCurrentIndex(idx)
+    return cb
