@@ -513,6 +513,95 @@ def main():
     except ImportError:
         check("فحوص الواجهة", True, "تخطّي — PyQt5 غير مثبّت")
 
+    step("17) دفتر اليومية — كل الحسابات")
+    # كشف الحساب يشترط حساباً، والسؤال بعد كل جرد هو «ماذا جرى في هذا
+    # اليوم؟» بلا معرفة الحساب مسبقاً. هذه الفحوص تحرس العرض الجديد.
+    from models import journal as _j
+    with db(readonly=True) as conn:
+        day = _j.day_book(conn, "2026-01-15", "2026-01-15")
+        wide = _j.day_book(conn, "2026-01-01", "2026-12-31")
+        none_ = _j.day_book(conn, "2030-01-01", "2030-01-02")
+    check("يعرض مستندات اليوم المحدد", len(day) >= 1, f"{len(day)} مستند")
+    check("يُرشّح بالفترة", len(wide) >= len(day),
+          f"{len(wide)} في السنة مقابل {len(day)} في اليوم")
+    check("يوم بلا عمليات يعيد فارغاً", none_ == [])
+    if day:
+        r = day[0]
+        check("لكل سطر رقم سند ونوع عملية",
+              bool(r["doc_no"]) and bool(r["op"]), f"{r['doc_no']} · {r['op']}")
+        check("لكل سطر الحسابات المتأثرة",
+              bool(r["accounts"]) and r["n_accounts"] >= 2,
+              f"{r['n_accounts']} حساب")
+        check("سطر واحد لكل مستند لا لكل حساب",
+              len({x["eid"] for x in day}) == len(day))
+
+    step("18) تعديل الفاتورة — الإجمالي = مجموع بنودها")
+    # كان الإجمالي يُحسب «القديم + الفرق»، فيفترض تطابقاً سابقاً بين
+    # الإجمالي والبنود. أي انحراف سابق كان يُورَّث ويتفاقم مع كل تعديل
+    # — فيظهر وزن لا يطابق ما في شاشة التعديل ولو لم يُمسّ الوزن.
+    from models.invoices import update_invoice as _upd
+    from models.inventory import create_work_orders_batch as _batch
+    from services import health as _h
+
+    with db() as conn:
+        _batch(conn, [{"wo_no": "E-1", "gold": 100.0, "wage_per_gram": 23.0},
+                      {"wo_no": "E-2", "gold": 50.0, "wage_per_gram": 23.0}],
+               "2026-03-01", "admin")
+        eids = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no IN ('E-1','E-2')")}
+        esale = create_sale(conn, cust, [{"work_order_id": eids["E-1"]}],
+                            "2026-03-05", "admin", apply_vat=False)
+    eid = esale["id"]
+
+    def _totals():
+        with db(readonly=True) as conn:
+            return conn.execute(
+                "SELECT total_weight tw, total_wages tg,"
+                " (SELECT COALESCE(SUM(registered_weight),0) FROM invoice_items"
+                "  WHERE invoice_id=?) sw,"
+                " (SELECT COALESCE(SUM(wages),0) FROM invoice_items"
+                "  WHERE invoice_id=?) sg FROM invoices WHERE id=?",
+                (eid, eid, eid)).fetchone()
+
+    # انحراف سابق مصطنع — يجب أن يُصحَّح من تلقائه عند أول تعديل
+    with db() as conn:
+        conn.execute("UPDATE invoices SET total_weight=total_weight+530"
+                     " WHERE id=?", (eid,))
+    with db() as conn:
+        _upd(conn, eid, [{"work_order_id": eids["E-1"], "weight": 100.0,
+                          "wage_override": 27.0}], "admin")
+    t = _totals()
+    check("تعديل الأجر وحده لا يغيّر الوزن",
+          abs(t["tw"] - 100.0) < 0.011, f"{t['tw']}")
+    check("الإجمالي يساوي مجموع البنود",
+          abs(t["tw"] - t["sw"]) < 0.011 and abs(t["tg"] - t["sg"]) < 0.011,
+          f"وزن {t['tw']}/{t['sw']} · أجور {t['tg']}/{t['sg']}")
+
+    with db() as conn:
+        _upd(conn, eid, [
+            {"work_order_id": eids["E-1"], "weight": 100.0, "wage_override": 27.0},
+            {"work_order_id": eids["E-2"], "weight": 50.0, "wage_override": 23.0}],
+            "admin")
+    t = _totals()
+    check("إضافة صف تعتمد وزن الفاتورة الحالي",
+          abs(t["tw"] - 150.0) < 0.011 and abs(t["tw"] - t["sw"]) < 0.011,
+          f"{t['tw']}")
+
+    with db() as conn:
+        _upd(conn, eid, [{"work_order_id": eids["E-2"], "weight": 50.0,
+                          "wage_override": 23.0}], "admin")
+    t = _totals()
+    check("حذف صف يعتمد المتبقي",
+          abs(t["tw"] - 50.0) < 0.011 and abs(t["tw"] - t["sw"]) < 0.011,
+          f"{t['tw']}")
+
+    with db(readonly=True) as conn:
+        g2, c2, gv2, cv2 = ledger_balanced(conn)
+        bad_inv = _h.check_invoice_totals(conn)
+    check("الدفتر متوازن بعد كل التعديلات", g2 and c2, f"ذهب {gv2} · نقد {cv2}")
+    check("لا فاتورة إجماليها يخالف بنودها", not bad_inv, str(bad_inv[:1]))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
