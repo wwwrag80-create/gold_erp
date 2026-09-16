@@ -430,6 +430,39 @@ def main():
     check("المحرك يحفظ التاريخ إنجليزياً", saved == "2027-03-04", saved)
     check("القيد يظهر في فلتر الفترة", seen == 1)
 
+    step("15) تبديل القاعدة عند تغيّر المصنع")
+    # الاتصال محفوظ لكل خيط، ومسار القاعدة يتغيّر عند تسجيل الدخول.
+    # لو لم يلاحظ الاتصال المحفوظ التغيّر لظلّ النظام كله يكتب في
+    # الملف الافتراضي بدل قاعدة المصنع — بلا أي رسالة خطأ.
+    import sqlite3 as _sq
+    from database.database import close_thread_connection
+
+    _swap = tempfile.mkdtemp(prefix="gold_swap_")
+    _orig_path = config.DB_PATH
+    try:
+        a = pathlib.Path(_swap) / "a.db"
+        b = pathlib.Path(_swap) / "b.db"
+        for f in (a, b):
+            config.DB_PATH = f
+            close_thread_connection()
+            create_tables()
+            with db() as conn:
+                conn.execute("CREATE TABLE IF NOT EXISTS mark(v TEXT)")
+                conn.execute("INSERT INTO mark(v) VALUES(?)", (f.name,))
+        # بلا إغلاق يدوي: التبديل وحده يجب أن يكفي
+        config.DB_PATH = a
+        with db(readonly=True) as conn:
+            got_a = conn.execute("SELECT v FROM mark").fetchone()["v"]
+        config.DB_PATH = b
+        with db(readonly=True) as conn:
+            got_b = conn.execute("SELECT v FROM mark").fetchone()["v"]
+        check("تبديل مسار القاعدة يُتبع فوراً",
+              got_a == "a.db" and got_b == "b.db", f"{got_a} · {got_b}")
+    finally:
+        config.DB_PATH = _orig_path
+        close_thread_connection()
+        shutil.rmtree(_swap, ignore_errors=True)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
