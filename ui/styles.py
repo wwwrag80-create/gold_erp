@@ -255,6 +255,17 @@ QLabel#panelSub { font-size: 9.5pt; color: #7A7266; }
 
 def apply(app):
     app.setLayoutDirection(QtCore.Qt.RightToLeft)
+    # ══ شكل الأرقام: إنجليزية دائماً ══
+    # على ويندوز بلغة عربية تُنتج Qt أرقاماً عربية-هندية في حقول
+    # التاريخ (٢٠٢٦-٠٩-١٦). والتواريخ تُحفظ نصاً وتُقارَن نصاً، ورمز
+    # الرقم العربي أكبر من الإنجليزي في يونيكود — فيفشل شرط «أصغر من
+    # أو يساوي» ويسقط القيد من كل فلتر تاريخ. ومن هنا كُتبت تواريخ
+    # عربية في القاعدة، ومن هنا صارت الفلاتر نفسها عربية فلا تطابق
+    # شيئاً وتظهر كل الحركات «رصيداً سابقاً».
+    # لغة الواجهة نصوصها مكتوبة في الكود، فضبط اللغة هنا لا يغيّر
+    # كلمةً واحدة — يضبط شكل الأرقام والتواريخ وحدها.
+    QtCore.QLocale.setDefault(
+        QtCore.QLocale(QtCore.QLocale.English, QtCore.QLocale.UnitedStates))
     font = QtGui.QFont("Segoe UI", 10)
     app.setFont(font)
     app.setStyleSheet(QSS)

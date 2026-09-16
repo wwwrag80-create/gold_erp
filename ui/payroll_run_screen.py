@@ -17,8 +17,7 @@ from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import payroll
-from ui.widgets.common import (ask, big_label, date_edit, err, fill,
-                               info, make_table, title_label)
+from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
 
 MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو",
           "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
@@ -87,7 +86,7 @@ class PayrollRunScreen(QtWidgets.QWidget):
 
     def accrual_date(self):
         """التاريخ الفعلي للإجراء (يختاره المستخدم، واليوم افتراضياً)."""
-        return self.date.date().toString("yyyy-MM-dd")
+        return dstr(self.date)
 
     # ── الجلب الآلي ──
     def load(self):

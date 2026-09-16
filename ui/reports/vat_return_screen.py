@@ -8,8 +8,7 @@ from PyQt5 import QtWidgets
 
 from database.database import db
 from models.reports import vat_return
-from ui.widgets.common import (Card, big_label, date_edit, err, fill, info,
-                               make_table, title_label)
+from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -99,8 +98,8 @@ class VatReturnScreen(QtWidgets.QWidget):
     def load(self):
         try:
             with db(readonly=True) as conn:
-                r = vat_return(conn, self.d_from.date().toString("yyyy-MM-dd"),
-                              self.d_to.date().toString("yyyy-MM-dd"))
+                r = vat_return(conn, dstr(self.d_from),
+                              dstr(self.d_to))
             self.last = r
             self.c_out.set_value(f"{r['output_vat']:,.2f}",
                                 f"وعاء خاضع: {r['sales_base']:,.2f} ريال "

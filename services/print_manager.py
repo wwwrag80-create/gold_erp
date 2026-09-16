@@ -25,6 +25,15 @@ from models.inventory import BULK_WO_NO
 from database.database import db
 from models import melting
 
+def _qd(qdate):
+    """نص تاريخ بأرقام إنجليزية دائماً (انظر ui.widgets.common.qdstr)."""
+    from services.dates import normalize_digits
+    return normalize_digits(qdate.toString("yyyy-MM-dd"))
+
+
+def _qd_w(w):
+    return _qd(w.date())
+
 # ══════════════════════ التفقيط (الرقم بالحروف) ══════════════════════
 _ONES = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة",
          "ثمانية", "تسعة", "عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر",
@@ -760,7 +769,7 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None):
     c = rows[-1]["cbal"] if rows else 0.0
     gside = "مدين" if g > 0 else ("دائن" if g < 0 else "متوازن")
     cside = "مدين" if c > 0 else ("دائن" if c < 0 else "متوازن")
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
 
     body = f'''
     {TBL}
@@ -907,7 +916,7 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     <table class="ca-wrap" style="margin-top:6px"><tr>{''.join(detail_cells)}</tr></table>
     '''
     return (_header("تقرير المبيعات", ent["name"],
-                    QtCore.QDate.currentDate().toString("yyyy-MM-dd"))
+                    _qd(QtCore.QDate.currentDate()))
             + body + _footer(""))
 
 
@@ -916,7 +925,7 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
     """قوالب طباعة شاشة تكاليف ورواتب قسم التصنيع (ثلاثة تبويبات)."""
     from models import mfg_costs
     period = period or ""
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
 
     def _table(headers, rows, totals=None):
         """جدول مضغوط: `table-layout:fixed` وخط صغير — فتظهر كل
@@ -1010,7 +1019,7 @@ def _tpl_turnover(conn, _id=0, date_from=None, date_to=None):
     باسمها وإجمالَي الوزن المقيد والقائم في نهايته."""
     from models import inventory
     data = inventory.turnover_all(conn, date_from, date_to)
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
 
     blocks = ""
     for key, title, hint in inventory.TURNOVER_PANELS:
@@ -1083,7 +1092,7 @@ def _tpl_balances(conn, entity_type, rows):
     ng = round(dg - cg, 3)
     nc = round(dc - cc, 2)
 
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
     label = TYPE_LABELS.get(entity_type, entity_type or "")
     body = f'''
     <div {WIDE}>تاريخ الكشف: <b>{en(today)}</b></div>
@@ -1267,7 +1276,7 @@ def _tpl_workshop_losses(conn, _id=0, date_from=None, date_to=None):
     """سجل فواقد الورشة خلال الفترة."""
     from models import workshop_losses as wl
     rows = wl.list_losses(conn, date_from, date_to)
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
     body = "".join(
         "<tr>" + cells(
             tdw(en(r["doc_no"] or "—")), tdw(en(r["loss_date"])),
@@ -1291,7 +1300,7 @@ def _tpl_workshop_accounts(conn, _id=0, rows=None, date_from=None,
                            date_to=None):
     """مقارنة أرصدة حسابات الورشة."""
     rows = rows or []
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
     body = ""
     tg = tc = 0.0
     for x in rows:
@@ -1330,7 +1339,7 @@ def _tpl_balance_tree(conn, _id=0, date_to=None, max_level=3,
     b = balance_tree.balance_sheet_tree(
         conn, date_to=date_to, max_level=int(max_level or 3),
         hide_zero=bool(hide_zero))
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
 
     body = ""
     for sec in b["sections"]:
@@ -1395,7 +1404,7 @@ def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
     """قالب ميزان المراجعة — أرصدة أول المدة والحركة والإقفال."""
     from models.reports import trial_balance
     tb = trial_balance(conn, date_from, date_to, bool(include_zero))
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
     types = {"asset": "أصل", "liability": "خصم", "equity": "حقوق ملكية",
              "revenue": "إيراد", "expense": "مصروف", "bridge": "وسيط"}
 
@@ -1477,7 +1486,7 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
     else:
         models.sort(key=lambda m: str(m["model"]))
 
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
     labels = {"all": "الكل", "in_stock": "المتاح للبيع",
               "sold": "طرف المناديب"}
     body = ""
@@ -1540,7 +1549,7 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
                     ratios=None, date_from=None, date_to=None):
     """قالب لوحة التحكم — مطابق لما يظهر على الشاشة."""
     from models import dash_panels as dp
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
 
     if kind == "scrap":
         rows = dp.scrap_rows(conn)
@@ -1663,7 +1672,7 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az"):
     else:
         picked.sort(key=lambda x: str(x[0]["model"]))
 
-    today = QtCore.QDate.currentDate().toString("yyyy-MM-dd")
+    today = _qd(QtCore.QDate.currentDate())
     if not picked:
         body = ('<div style="text-align:center;padding:40px">'
                 'لا توجد موديلات بصور تبلغ الحدّ المطلوب '

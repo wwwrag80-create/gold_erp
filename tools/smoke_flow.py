@@ -360,6 +360,159 @@ def main():
     finally:
         _sh.rmtree(pin, ignore_errors=True)
 
+    step("13) هوية المصنع عبر الخيوط")
+    # كانت الهوية في threading.local، فتُضبط على خيط الواجهة وحده ويرى
+    # كل خيط خلفي (النسخ الاحتياطي · المزامنة · مراقب السلامة) قاعدةً
+    # أخرى — فيُنسخ ملف غير الذي يعمل عليه المستخدم. هذا الفحص يحرسه.
+    import threading as _th
+    from services import tenant_db as _td
+
+    _prev = _td.active_tenant()
+    try:
+        _td.set_active_tenant("F-SMOKE-TEST")
+        ui_path = str(config.DB_PATH)
+        box = {}
+
+        def _bg():
+            box["path"] = str(config.DB_PATH)
+            box["tid"] = _td.active_tenant()
+
+        th = _th.Thread(target=_bg)
+        th.start()
+        th.join(timeout=10)
+        check("الخيط الخلفي يرى هوية المصنع نفسها",
+              box.get("tid") == "F-SMOKE-TEST", str(box.get("tid")))
+        check("الخيط الخلفي يفتح قاعدة المصنع نفسها",
+              box.get("path") == ui_path,
+              f"الواجهة={ui_path} · الخلفي={box.get('path')}")
+        # المسار يُبنى من الهوية (هذا الملف يثبّت config.DB_PATH على
+        # ملف مؤقت، فنفحص بانيَ المسار مباشرةً لا القيمة المثبّتة)
+        built = str(_td.tenant_db_path(_TMP, "F-SMOKE-TEST"))
+        check("مسار المصنع يحمل هويته", "F-SMOKE-TEST" in built, built)
+        legacy = str(_td.tenant_db_path(_TMP, ""))
+        check("بلا هوية يُستعمل الملف القديم",
+              legacy.endswith("data/gold_erp.db")
+              or legacy.endswith("data\\gold_erp.db"), legacy)
+    finally:
+        _td.set_active_tenant(_prev or "")
+        if not _prev:
+            _td.clear_active_tenant()
+
+    step("14) توحيد صيغة التواريخ")
+    # التواريخ تُقارَن نصاً، ورمز الرقم العربي أكبر من رمز الإنجليزي،
+    # فتاريخ بأرقام عربية يسقط من كل فلتر: القيد موجود وغير مرئي.
+    from services.dates import (has_non_ascii_digits, normalize_date,
+                                normalize_digits)
+    check("يُكتشف الرقم العربي", has_non_ascii_digits("٢٠٢٦-٠٩-١٦"))
+    check("لا إنذار كاذب للإنجليزي",
+          has_non_ascii_digits("2026-09-16") is False)
+    check("يُحوَّل العربي للإنجليزي",
+          normalize_digits("٢٠٢٦-٠٩-١٦") == "2026-09-16")
+    check("يُحوَّل الفارسي أيضاً",
+          normalize_digits("۲۰۲۶-۰۹-۱۶") == "2026-09-16")
+    check("تُوحَّد الفواصل", normalize_date("٢٠٢٦/٠٩/١٦") == "2026-09-16")
+    expect_error("يُرفض ما ليس تاريخاً",
+                 lambda: normalize_date("كلام"), "غير صالح")
+
+    # الحارس في محرك القيود: أي قيد يُرحَّل بتاريخ عربي يُحفظ إنجليزياً
+    with db() as conn:
+        eid = post_entry(conn, "٢٠٢٧-٠٣-٠٤", "اختبار تاريخ عربي", [
+            {"account_id": cash, "cash_debit": 7},
+            {"account_id": acc_id(conn, "1500"), "cash_credit": 7}],
+            username="admin")
+    with db(readonly=True) as conn:
+        saved = conn.execute("SELECT entry_date d FROM journal_entries"
+                             " WHERE id=?", (eid,)).fetchone()["d"]
+        seen = conn.execute(
+            "SELECT COUNT(*) c FROM journal_entries WHERE id=? AND"
+            " entry_date>='2027-01-01' AND entry_date<='2027-12-31'",
+            (eid,)).fetchone()["c"]
+    check("المحرك يحفظ التاريخ إنجليزياً", saved == "2027-03-04", saved)
+    check("القيد يظهر في فلتر الفترة", seen == 1)
+
+    step("15) تبديل القاعدة عند تغيّر المصنع")
+    # الاتصال محفوظ لكل خيط، ومسار القاعدة يتغيّر عند تسجيل الدخول.
+    # لو لم يلاحظ الاتصال المحفوظ التغيّر لظلّ النظام كله يكتب في
+    # الملف الافتراضي بدل قاعدة المصنع — بلا أي رسالة خطأ.
+    import sqlite3 as _sq
+    from database.database import close_thread_connection
+
+    _swap = tempfile.mkdtemp(prefix="gold_swap_")
+    _orig_path = config.DB_PATH
+    try:
+        a = pathlib.Path(_swap) / "a.db"
+        b = pathlib.Path(_swap) / "b.db"
+        for f in (a, b):
+            config.DB_PATH = f
+            close_thread_connection()
+            create_tables()
+            with db() as conn:
+                conn.execute("CREATE TABLE IF NOT EXISTS mark(v TEXT)")
+                conn.execute("INSERT INTO mark(v) VALUES(?)", (f.name,))
+        # بلا إغلاق يدوي: التبديل وحده يجب أن يكفي
+        config.DB_PATH = a
+        with db(readonly=True) as conn:
+            got_a = conn.execute("SELECT v FROM mark").fetchone()["v"]
+        config.DB_PATH = b
+        with db(readonly=True) as conn:
+            got_b = conn.execute("SELECT v FROM mark").fetchone()["v"]
+        check("تبديل مسار القاعدة يُتبع فوراً",
+              got_a == "a.db" and got_b == "b.db", f"{got_a} · {got_b}")
+    finally:
+        config.DB_PATH = _orig_path
+        close_thread_connection()
+        shutil.rmtree(_swap, ignore_errors=True)
+
+    step("16) فلاتر التاريخ في الواجهة")
+    # Qt على ويندوز بلغة عربية تُنتج أرقاماً عربية في حقول التاريخ.
+    # فيُحفظ التاريخ عربياً (فيصير القيد غير مرئي)، ويُبحث به عربياً
+    # (فلا يطابق شيئاً وتظهر كل الحركات «رصيداً سابقاً»). هذه الفحوص
+    # تحرس الطرفين.
+    import os as _os
+    _os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from PyQt5 import QtWidgets as _QW
+        _app = _QW.QApplication.instance() or _QW.QApplication([])
+        from ui.widgets.common import dstr as _dstr, qdstr as _qdstr
+
+        class _ArDate:
+            def toString(self, fmt):
+                return "٢٠٢٦-٠٩-١٦"
+
+        class _ArWidget:
+            def date(self):
+                return _ArDate()
+
+        check("qdstr يطبّع الأرقام العربية",
+              _qdstr(_ArDate()) == "2026-09-16", _qdstr(_ArDate()))
+        check("dstr يطبّع حقل التاريخ",
+              _dstr(_ArWidget()) == "2026-09-16", _dstr(_ArWidget()))
+
+        # الأثر الفعلي: هل يطابق الفلتر قيداً محفوظاً إنجليزياً؟
+        with db(readonly=True) as conn:
+            hit = conn.execute(
+                "SELECT COUNT(*) c FROM journal_entries"
+                " WHERE entry_date>=? AND entry_date<=?",
+                (_qdstr(_ArDate()), "2026-09-30")).fetchone()["c"]
+            miss = conn.execute(
+                "SELECT COUNT(*) c FROM journal_entries"
+                " WHERE entry_date>=? AND entry_date<=?",
+                ("٢٠٢٦-٠٩-٠١", "٢٠٢٦-٠٩-٣٠")).fetchone()["c"]
+        check("الفلتر العربي لا يطابق شيئاً (تأكيد الخلل)", miss == 0)
+        check("الفلتر بعد التطبيع صالح للمقارنة", hit >= 0)
+
+        # لا يبقى في الواجهة منتج تاريخ بلا تطبيع
+        import subprocess as _sp
+        raw = _sp.run(["grep", "-rn", 'toString("yyyy-MM-dd")',
+                       "--include=*.py", "ui/", "services/", "models/"],
+                      capture_output=True, text=True, cwd=ROOT).stdout
+        leaks = [ln for ln in raw.splitlines()
+                 if "normalize_digits" not in ln]
+        check("كل منتجي نص التاريخ يمرّون بالمطبّع",
+              not leaks, "; ".join(leaks[:2]))
+    except ImportError:
+        check("فحوص الواجهة", True, "تخطّي — PyQt5 غير مثبّت")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

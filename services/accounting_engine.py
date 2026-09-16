@@ -90,6 +90,12 @@ def post_entry(conn, entry_date, description, lines,
     `note` هو «البيان» الحقيقي: لا يُملأ إلا بما يكتبه المستخدم صراحةً
     في الشاشة، ويبقى فارغاً فيما عدا ذلك."""
     validate_lines(lines)
+    # توحيد التاريخ قبل أي شيء: التواريخ تُقارَن نصاً، وتاريخ بأرقام
+    # عربية يسقط من كل فلتر فيصير القيد موجوداً وغير مرئي. التحويل هنا
+    # يغطّي كل مسارات النظام لأن كل قيد يمرّ من هذه الدالة.
+    from services.dates import normalize_date
+    entry_date = normalize_date(entry_date, "تاريخ القيد")
+
     # قفل الفترات: لا يُرحَّل قيد بتاريخ داخل فترة أُقفلت
     from models import fiscal
     fiscal.assert_open(conn, entry_date)

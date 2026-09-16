@@ -447,21 +447,41 @@ _local = threading.local()
 def _state():
     st = getattr(_local, "st", None)
     if st is None:
-        st = _local.st = {"conn": None, "depth": 0, "readonly": False}
+        st = _local.st = {"conn": None, "depth": 0, "readonly": False,
+                          "path": None}
     return st
 
 
 def _thread_conn():
+    """اتصال هذا الخيط بالقاعدة **النشطة حالياً**.
+
+    مسار القاعدة ليس ثابتاً: `config.DB_PATH` يُحسب من هوية المصنع
+    التي يضبطها تسجيل الدخول. والإقلاع يهيّئ الجداول قبل الدخول على
+    الملف الافتراضي، فلو احتفظ الخيط باتصاله الأول لظلّ يقرأ ويكتب
+    في الملف القديم بعد الدخول — فيعمل النظام كله على قاعدة غير
+    قاعدة المصنع بلا أي رسالة خطأ.
+
+    لذلك نقارن المسار المحفوظ بالمسار المطلوب عند كل فتح معاملة،
+    ونجدّد الاتصال إن تغيّر. (لا يُستدعى إلا خارج أي معاملة، فلا
+    يُستبدل اتصال وسط عملية.)
+    """
     st = _state()
+    try:
+        want = str(config.DB_PATH)
+    except Exception:
+        want = st["path"]
+    if st["conn"] is not None and st["path"] != want:
+        _drop_thread_conn()
     if st["conn"] is None:
         st["conn"] = get_connection()
+        st["path"] = want
     return st["conn"]
 
 
 def _drop_thread_conn():
     """يتخلّص من اتصال صار في حالة غير معروفة بعد خطأ."""
     st = _state()
-    conn, st["conn"] = st["conn"], None
+    conn, st["conn"], st["path"] = st["conn"], None, None
     if conn is not None:
         try:
             conn.close()

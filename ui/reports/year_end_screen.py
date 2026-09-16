@@ -9,8 +9,7 @@ from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import closing, fiscal
-from ui.widgets.common import (ask, big_label, err, fill, info, make_table,
-                               title_label)
+from ui.widgets.common import (ask, big_label, dstr, err, fill, info, make_table, title_label)
 
 COLS = ["الكود", "الحساب", "النوع", "الرصيد النقدي", "رصيد الذهب"]
 
@@ -173,7 +172,7 @@ class YearEndScreen(QtWidgets.QWidget):
 
     def apply_lock(self):
         try:
-            d = self.lock_date.date().toString("yyyy-MM-dd")
+            d = dstr(self.lock_date)
             with db(readonly=True) as conn:
                 n = conn.execute(
                     "SELECT COUNT(*) c FROM journal_entries"

@@ -18,24 +18,42 @@ import os
 import threading
 from pathlib import Path
 
-# هوية المصنع النشطة في هذه الجلسة (تُضبط بعد تسجيل الدخول)
-_active = threading.local()
+# هوية المصنع النشطة في هذه الجلسة (تُضبط بعد تسجيل الدخول).
+#
+# **على مستوى البرنامج لا الخيط.** كانت محفوظة في `threading.local()`،
+# وتسجيل الدخول يضبطها على خيط الواجهة وحده. فكل خيط خلفي — النسخ
+# الاحتياطي والمزامنة ومراقب السلامة والنسخ السحابي — كان يراها فارغة
+# فيسقط إلى الملف القديم المشترك `data/gold_erp.db` بدل قاعدة المصنع.
+#
+# أثر ذلك أخطر ما يكون: **النسخ الاحتياطي التلقائي كان ينسخ ملفاً غير
+# الذي يعمل عليه المستخدم** — فيظن بياناته محفوظة وهي ليست كذلك، وهو
+# نفس الخطأ الصامت الذي تحذّر منه `services/storage.py` في توثيقها.
+#
+# الجلسة الواحدة فيها مستخدم واحد، فالهوية خاصية للبرنامج كله. القفل
+# يضمن أن كل خيط يرى القيمة فور ضبطها.
+_lock = threading.Lock()
+_active_tenant_id = None
 
 LEGACY_NAME = "gold_erp.db"
 
 
 def set_active_tenant(tenant_id):
     """يضبط هوية المصنع للجلسة الحالية — تُستدعى بعد تسجيل الدخول."""
-    _active.tenant_id = (tenant_id or "").strip() or None
-    return _active.tenant_id
+    global _active_tenant_id
+    with _lock:
+        _active_tenant_id = (tenant_id or "").strip() or None
+        return _active_tenant_id
 
 
 def active_tenant():
-    return getattr(_active, "tenant_id", None)
+    with _lock:
+        return _active_tenant_id
 
 
 def clear_active_tenant():
-    _active.tenant_id = None
+    global _active_tenant_id
+    with _lock:
+        _active_tenant_id = None
 
 
 def _safe_id(tid):
