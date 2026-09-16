@@ -112,6 +112,12 @@ PRINT_CSS = """
   table.ca-tbl th, table.ca-tbl td { border: 1px solid #999; padding: 3px;
                                      text-align: center; font-size: 9pt; }
 
+  /* جدولا الرصيد الصغيران أعلى اللوحات (ذهب · نقد) */
+  table.ca-bal { border-collapse: collapse; font-size: 9.5pt; }
+  table.ca-bal th, table.ca-bal td { border: 1px solid #777; padding: 4px;
+                                     text-align: center; white-space: nowrap; }
+  table.ca-bal th { background: #EFEFEF; font-weight: bold; }
+
   @media print {
     .noprint { display: none !important; }
     .sheet { border: 1.5px solid #333; }

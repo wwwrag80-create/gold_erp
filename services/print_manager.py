@@ -192,6 +192,14 @@ BASE_CSS = """
   table.ca-tbl td { border: 1px solid #999; padding: 3px;
                     text-align: center; }
   table.ca-tbl tr.total td { background-color: #EFEFEF; font-weight: bold; }
+
+  /* جدولا الرصيد الصغيران أعلى لوحات التحليل (ذهب · نقد) */
+  table.ca-bal { border-collapse: collapse; font-size: 9pt; }
+  table.ca-bal th { background-color: #EFEFEF; border: 1px solid #777;
+                    padding: 3px; font-weight: bold; text-align: center;
+                    white-space: nowrap; }
+  table.ca-bal td { border: 1px solid #777; padding: 3px;
+                    text-align: center; white-space: nowrap; }
 </style>
 """
 
@@ -733,17 +741,26 @@ def _tpl_fixing(conn, op_id):
                     f["op_date"]) + body + _footer(""))
 
 
-def _tpl_statement(conn, account_id, date_from=None, date_to=None):
+def _tpl_statement(conn, account_id, date_from=None, date_to=None,
+                   karat=18):
     """كشف الحساب بالمعيار التصميمي الموحد: RTL إجباري · الجدول بعرض
     الصفحة ومتوسط · أعمدة مرنة (البيان يأخذ المساحة الأكبر والتواريخ
     والمبالغ تتقلص) · صف رصيد ختامي بارز · توقيعان.
+
+    `karat` عيار **عرض** الأوزان: الورقة تخرج بنفس عيار الشاشة فلا
+    يقرأ المستخدم رقمين مختلفين للحركة الواحدة. القيد لا يتغيّر.
     """
     from models import journal
+    from services import gold_math
     acc = conn.execute("SELECT code, name FROM accounts WHERE id=?",
                        (account_id,)).fetchone()
     if not acc:
         raise ValueError("الحساب غير موجود")
     rows = journal.statement(conn, account_id, date_from, date_to)
+    k = int(karat or 18)
+
+    def _g(v):
+        return gold_math.from_base_karat(v or 0, k)
 
     body_rows = ""
     tot_gd = tot_gc = tot_cd = tot_cc = 0.0
@@ -756,9 +773,9 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None):
             tdw(en(r["date"]), 9), tdw(r["op"], 9),
             tdw(en(r["doc_no"] or ""), 9), tdw(r["name"] or "", 12),
             tdw(r["desc"] or "", 16, "right"),
-            tdw(_w(r["gd"]) if r["gd"] else "", 7),
-            tdw(_w(r["gc"]) if r["gc"] else "", 7),
-            tdw(_w(r["gbal"]), 8),
+            tdw(_w(_g(r["gd"])) if r["gd"] else "", 7),
+            tdw(_w(_g(r["gc"])) if r["gc"] else "", 7),
+            tdw(_w(_g(r["gbal"])), 8),
             tdw(_w(r["cd"], 2) if r["cd"] else "", 7),
             tdw(_w(r["cc"], 2) if r["cc"] else "", 7),
             tdw(_w(r["cbal"], 2), 9)) + "</tr>"
@@ -786,20 +803,22 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None):
     {TBL}
       <tr>{cells(thw("التاريخ", 9), thw("نوع العملية", 9),
                  thw("رقم المستند", 9), thw("الجهة المقابلة", 12),
-                 thw("البيان", 16), thw("مدين ذهب", 7), thw("دائن ذهب", 7),
-                 thw("رصيد ذهب", 8), thw("مدين نقد", 7), thw("دائن نقد", 7),
+                 thw("البيان", 16), thw(f"مدين ذهب {en(k)}", 7),
+                 thw(f"دائن ذهب {en(k)}", 7),
+                 thw(f"رصيد ذهب {en(k)}", 8),
+                 thw("مدين نقد", 7), thw("دائن نقد", 7),
                  thw("رصيد نقد", 9))}</tr>
       {body_rows}
       <tr><td {TD_TOT} colspan="5">إجمالي الحركة</td>
-        <td>{_w(tot_gd)}</td><td>{_w(tot_gc)}</td>
+        <td>{_w(_g(tot_gd))}</td><td>{_w(_g(tot_gc))}</td>
         <td>—</td>
         <td>{_w(tot_cd, 2)}</td><td>{_w(tot_cc, 2)}</td>
         <td>—</td></tr>
     </table>
 
     {TBL}
-      <tr><td {TH} width="60%">الرصيد الختامي للذهب</td>
-          <td>{_w(abs(g))}</td><td>{gside}</td></tr>
+      <tr><td {TH} width="60%">الرصيد الختامي للذهب (عيار {en(k)})</td>
+          <td>{_w(abs(_g(g)))}</td><td>{gside}</td></tr>
       <tr><th>الرصيد الختامي للنقد</th>
           <td>{_w(abs(c), 2)}</td><td>{cside}</td></tr>
     </table>
@@ -815,27 +834,41 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None):
 
 
 def _tpl_customer_analytics(conn, customer_id, date_from=None,
-                            date_to=None, visible=None, expanded=None):
+                            date_to=None, visible=None, expanded=None,
+                            karat=18):
     """قالب طبق الأصل من شاشة تحليل المبيعات (WYSIWYG).
 
     يحاكي الشاشة تماماً: اللوحة المخفية لا تُطبع، والجدول المطويّ
     يُطبع بإجمالياته بلا تفاصيله — فالورقة تطابق ما يراه المستخدم.
+
+    مسمّيات الورقة مسمّيات كشف الحساب لا مسمّيات الشاشة: ما يخرج
+    للعميل «مصروف» و«مرتجع» و«مباع صافي» و«سداد» — وهي لغته التي
+    يوقّع عليها، لا لغة التحليل الإداري الداخلي.
+
+    `karat` عيار عرض الأوزان: القيد بمكافئ 18 دائماً، والورقة تخرج
+    بعيار العميل المتفق عليه.
     """
     from models import sales_analytics as sa
+    from services import gold_math
     ent = conn.execute("SELECT * FROM entities WHERE id=?",
                        (customer_id,)).fetchone()
     if not ent:
         raise ValueError("العميل غير موجود")
     p = sa.all_panels(conn, customer_id, date_from, date_to)
+    k = int(karat or 18)
 
-    # نفس ترتيب الشاشة: المبيعات · المرتجعات · المباع الفعلي · التحصيل
+    def _g(v):
+        return gold_math.from_base_karat(v or 0, k)
+
+    # نفس ترتيب الشاشة: المصروف · المرتجع · المباع الصافي · السداد
     coll = p["collection"]
     panels = [
-        ("إجمالي المبيعات", f"{_w(p['sales']['weight'])} جم", "sales"),
-        ("إجمالي المرتجعات", f"{_w(p['returns']['weight'])} جم", "returns"),
-        ("إجمالي المباع", f"{_w(p['net_sold']['weight'])} جم", "net_sold"),
-        ("إجمالي التحصيل",
-         f"ذهب {_w(coll['gold'])}<br/>نقد {_w(coll['cash'], 2)}",
+        ("المصروف", f"{_w(_g(p['sales']['weight']))} جم", "sales"),
+        ("المرتجع", f"{_w(_g(p['returns']['weight']))} جم", "returns"),
+        ("المباع الصافي", f"{_w(_g(p['net_sold']['weight']))} جم",
+         "net_sold"),
+        ("السداد",
+         f"ذهب {_w(_g(coll['gold']))}<br/>نقد {_w(coll['cash'], 2)}",
          "collection"),
     ]
 
@@ -856,13 +889,13 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
             body_rows = "".join(
                 "<tr>" + cells(
                     f'<td>{en(r["wo"])}</td>',
-                    f'<td>{_w(r["weight"])}</td>',
+                    f'<td>{_w(_g(r["weight"]))}</td>',
                     f'<td>{_w(r.get("cash", 0), 2)}</td>') + "</tr>"
                 for r in rows)
         else:
             body_rows = "".join(
                 "<tr>" + cells(f'<td>{en(r["wo"])}</td>',
-                               f'<td>{_w(r["weight"])}</td>') + "</tr>"
+                               f'<td>{_w(_g(r["weight"]))}</td>') + "</tr>"
                 for r in rows)
         if not body_rows:
             body_rows = '<tr><td colspan="3">لا يوجد</td></tr>'
@@ -871,16 +904,18 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
                  p["net_sold"]["weight"] if key == "net_sold" else
                  coll["gold"])
         if key == "collection":
-            head = "<tr>" + cells(thw("رقم السند"), thw("تحصيل ذهب"),
-                                  thw("تحصيل نقد")) + "</tr>"
+            head = "<tr>" + cells(thw("رقم السند"),
+                                  thw(f"سداد ذهب {en(k)}"),
+                                  thw("سداد نقد")) + "</tr>"
             foot = ("<tr class=\"total\">" + cells(
-                f'<td>الإجمالي</td>', f'<td>{_w(coll["gold"])}</td>',
+                f'<td>الإجمالي</td>', f'<td>{_w(_g(coll["gold"]))}</td>',
                 f'<td>{_w(coll["cash"], 2)}</td>') + "</tr>")
         else:
-            head = ("<tr>" + cells(thw("رقم التشغيل"), thw("الوزن"))
-                    + "</tr>")
+            head = ("<tr>" + cells(thw("رقم التشغيل"),
+                                   thw(f"الوزن {en(k)}")) + "</tr>")
             foot = ("<tr class=\"total\">" + cells(
-                f'<td>الإجمالي</td>', f'<td>{_w(total)}</td>') + "</tr>")
+                f'<td>الإجمالي</td>', f'<td>{_w(_g(total))}</td>')
+                + "</tr>")
         detail_cells.append(
             f'<td class="ca-detail"><table class="ca-tbl">'
             f'{head}{body_rows}{foot}</table></td>')
@@ -895,7 +930,32 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
             " WHERE e.is_deleted=0 AND l.account_id=?",
             (ent["account_id"],)).fetchone()
         rem_g, rem_c = round(rb["g"], 2), round(rb["c"], 2)
-    side = "مدين / عليه" if (rem_g > 0 or rem_c > 0) else "دائن / له"
+
+    # كل رصيد وحالته: الذهب قد يكون عليه والنقد له في آنٍ واحد، فحالة
+    # واحدة مشتركة للاثنين تكون خاطئة في نصف الحالات.
+    def _side(v):
+        return "مدين" if v > 0 else ("دائن" if v < 0 else "متوازن")
+
+    # جدولان صغيران متلاصقان أعلى اليمين: الذهب والنقد. كل جدول سطر
+    # عنوان وسطر قيمة من خانتين (الرقم · مدين/دائن) — الرصيد يُقرأ في
+    # لمحة بلا شريط عريض يزاحم اللوحات.
+    def _mini(title, value, side_txt):
+        return (
+            '<table class="ca-bal" width="100%" cellspacing="0"'
+            ' cellpadding="3">'
+            f'<tr><th colspan="2">{title}</th></tr>'
+            '<tr>' + cells(f'<td class="num"><b>{value}</b></td>',
+                           f'<td>{side_txt}</td>') + '</tr>'
+            '</table>')
+
+    bal_pair = (
+        '<table class="plain" width="100%" cellspacing="0" cellpadding="0">'
+        '<tr>' + cells(
+            f'<td width="50%" valign="top">'
+            f'{_mini(f"ذهب {en(k)}", _w(abs(_g(rem_g))), _side(rem_g))}</td>',
+            f'<td width="50%" valign="top">'
+            f'{_mini("نقد ريال", _w(abs(rem_c), 2), _side(rem_c))}</td>')
+        + '</tr></table>')
 
     body = f'''
     <div class="party">اسم العميل:
@@ -904,13 +964,10 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
       <span class="num">{date_from or 'جميع التواريخ المسجلة'}</span>
       {('إلى <span class="num">' + str(date_to) + '</span>') if date_to else ''}
     </div>
-    <table class="items" width="100%" cellspacing="0" cellpadding="5"
+    <table class="plain" width="100%" cellspacing="0" cellpadding="0"
            style="margin-top:6px">
-      <tr>{cells(thw("الرصيد المتبقي — ذهب (جم 18)"),
-                 f'<td class="num"><b>{_w(rem_g)}</b></td>',
-                 thw("الرصيد المتبقي — نقد (ريال)"),
-                 f'<td class="num"><b>{_w(rem_c, 2)}</b></td>',
-                 thw("الحالة"), f'<td>{side}</td>')}</tr>
+      <tr>{cells(f'<td width="38%" valign="top">{bal_pair}</td>',
+                 '<td width="62%"></td>')}</tr>
     </table><br/>
     <table class="ca-wrap"><tr>{''.join(head_cells)}</tr></table>
     <table class="ca-wrap" style="margin-top:6px"><tr>{''.join(detail_cells)}</tr></table>
@@ -1136,13 +1193,15 @@ def build_body(doc_type, doc_id, **kw):
     with db() as conn:
         if doc_type == "statement":
             return en(_tpl_statement(conn, doc_id, kw.get("date_from"),
-                                     kw.get("date_to")))
+                                     kw.get("date_to"),
+                                     kw.get("karat", 18)))
         if doc_type == "balances":
             return en(_tpl_balances(conn, doc_id, kw.get("rows") or []))
         if doc_type == "customer_analytics":
             return en(_tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
-                kw.get("visible"), kw.get("expanded")))
+                kw.get("visible"), kw.get("expanded"),
+                kw.get("karat", 18)))
         if doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             return en(_tpl_mfg(conn, doc_id, kw.get("period"),
                                kw.get("targets"), kw.get("salaries"),
@@ -1779,13 +1838,14 @@ def build_html(doc_type, doc_id, **kw):
     with db() as conn:
         if doc_type == "statement":
             html = _tpl_statement(conn, doc_id, kw.get("date_from"),
-                                  kw.get("date_to"))
+                                  kw.get("date_to"), kw.get("karat", 18))
         elif doc_type == "balances":
             html = _tpl_balances(conn, doc_id, kw.get("rows") or [])
         elif doc_type == "customer_analytics":
             html = _tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
-                kw.get("visible"), kw.get("expanded"))
+                kw.get("visible"), kw.get("expanded"),
+                kw.get("karat", 18))
         elif doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             html = _tpl_mfg(conn, doc_id, kw.get("period"),
                             kw.get("targets"), kw.get("salaries"),
