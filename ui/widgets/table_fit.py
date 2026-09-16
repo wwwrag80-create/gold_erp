@@ -26,6 +26,7 @@ class ColumnFitter(QtCore.QObject):
         self.min_px = min_px
         self._busy = False
         self._last_w = -1
+        self._last_n = -1
         # مؤقّت تهدئة: تغييرات الحجم المتتالية تُجمَّع في نداء واحد.
         # بدونه يُطلق كل `setColumnWidth` حدثَ تغيير حجم جديداً فتنشأ
         # سلسلة لا تنتهي تُجمّد الواجهة عند إظهار/إخفاء الشريط الجانبي.
@@ -48,12 +49,12 @@ class ColumnFitter(QtCore.QObject):
 
     def set_weights(self, weights):
         self.weights = list(weights)
-        self._last_w = -1
+        self._last_w = self._last_n = -1
         self.apply()
 
     def refit(self):
         """يُجبر إعادة الحساب — بعد تعبئة بيانات جديدة."""
-        self._last_w = -1
+        self._last_w = self._last_n = -1
         self.apply()
 
     def eventFilter(self, obj, ev):
@@ -95,10 +96,14 @@ class ColumnFitter(QtCore.QObject):
             avail = t.viewport().width()
             if not isinstance(avail, int) or avail < 200:
                 avail = max(200, t.width() - 22)
-            # لا نعيد الحساب إن لم يتغيّر العرض فعلياً — يمنع الدوران
-            if avail == self._last_w:
+            # لا نعيد الحساب إن لم يتغيّر العرض فعلياً — يمنع الدوران.
+            # **وعدد الأعمدة شرطٌ مثله**: شاشة تبدّل أعمدتها (كشف
+            # الحساب ↔ اليومية · تقرير يغيّر بعده) كانت تحتفظ بعروض
+            # الأعمدة القديمة، فيبقى الجدول أضيق من إطاره ويظهر فراغ
+            # أبيض في طرفه لا يملؤه شيء.
+            if avail == self._last_w and n == self._last_n:
                 return
-            self._last_w = avail
+            self._last_w, self._last_n = avail, n
             total = float(sum(w)) or 1.0
             used = 0
             for i in range(n - 1):

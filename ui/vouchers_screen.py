@@ -9,7 +9,7 @@ from models import coa, editing, entities, inventory, vouchers
 from models.accounts import list_postable
 from services import gold_math, karat_view as kv
 from services.accounting_engine import account_balance
-from ui.widgets.common import (confirm_post, big_label, posted, date_edit, dstr, enter_chain, err,
+from ui.widgets.common import (busy, confirm_post, big_label, posted, date_edit, dstr, enter_chain, err,
                                fill, info, make_table, mspin, reload_combo,
                                search_combo, title_label, wspin)
 
@@ -359,17 +359,18 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                     cash_account_code=self.c_target.currentData(),
                     net_diff=nd, disc_cash=dc, disc_gold=dg,
                     notes=self.notes.text())
-            with db() as conn:
-                if self.is_editing:
-                    # تعديل **في مكانه**: نفس رقم السند وتاريخه وقيده
-                    res = vouchers.update_voucher(
-                        conn, self.editing_source_id,
-                        self.user["username"],
-                        kind=self.kind.currentData(), **kw)
-                else:
-                    res = vouchers.create_voucher(
-                        conn, self.kind.currentData(), dstr(self.date),
-                        self.user["username"], **kw)
+            with busy(self, "جارٍ ترحيل السند…", stage="ترحيل سند"):
+                with db() as conn:
+                    if self.is_editing:
+                        # تعديل **في مكانه**: نفس رقم السند وتاريخه وقيده
+                        res = vouchers.update_voucher(
+                            conn, self.editing_source_id,
+                            self.user["username"],
+                            kind=self.kind.currentData(), **kw)
+                    else:
+                        res = vouchers.create_voucher(
+                            conn, self.kind.currentData(), dstr(self.date),
+                            self.user["username"], **kw)
             if res.get("in_place"):
                 info(self, f"عُدّل السند {res['voucher_no']} في مكانه.\n\n"
                            f"رقم السند وتاريخه وقيده لم تتغيّر.")

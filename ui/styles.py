@@ -3,253 +3,234 @@
 from PyQt5 import QtCore, QtGui
 
 QSS = """
-QWidget { background: #FBF9F4; color: #2B2723; font-size: 14px; }
+/* ══════════════════════════════════════════════════════════════════
+   الهوية البصرية — نظام تصميم واحد لا مجموعة ألوان متفرّقة
+   ------------------------------------------------------------------
+   الركائز:
+   · الأسطح بيضاء والخلفية رملية فاتحة، والحدود رفيعة بلون واحد —
+     فالشاشة تُقرأ بالتباين لا بالخطوط الثقيلة.
+   · الذهب لون **الفعل والعناوين** لا لون كل شيء؛ استعماله في كل
+     موضع يُفقده معناه.
+   · نصف قطر موحّد: 10 للبطاقات و8 للحقول والأزرار.
+   · حالة كل عنصر معلومة: عادي · تمرير · تركيز · معطّل — والتركيز
+     يُرى دائماً (حلقة ذهبية) لأن الإدخال هنا بلوحة المفاتيح غالباً.
+
+   الألوان:
+   الحبر #1F1B17 · الخافت #6B6459 · الخلفية #F7F5F0 · السطح #FFFFFF
+   الحد #E3DDD0 · الحد البارز #CFC7B6 · الذهب #9A7B22 · الذهب الفاتح
+   #EFE6CE · أخضر #1E6B33 · أحمر #B02A2A
+   ══════════════════════════════════════════════════════════════════ */
+
+QWidget { background: #F7F5F0; color: #1F1B17; font-size: 14px; }
 QLabel { background: transparent; }
-QLabel#title { font-size: 21px; font-weight: bold; color: #8A6D1D; padding: 4px; }
-QLabel#big { font-size: 16px; font-weight: bold; color: #2B2723; }
-QLabel#warn { font-size: 16px; font-weight: bold; color: #B02A2A; }
-QGroupBox { border: 1px solid #DCD5C6; border-radius: 8px;
-            margin-top: 20px; padding: 10px; font-weight: bold; }
+QLabel#title { font-size: 19px; font-weight: bold; color: #7A611A;
+               padding: 6px 2px 2px 2px; }
+QLabel#big { font-size: 15px; font-weight: bold; color: #1F1B17; }
+QLabel#warn { font-size: 15px; font-weight: bold; color: #B02A2A; }
+QToolTip { background: #2B2723; color: #F3EEE2; border: none;
+           padding: 6px 9px; border-radius: 6px; }
+
+/* ══ الحاويات ══ */
+QGroupBox { border: 1px solid #E3DDD0; border-radius: 10px;
+            margin-top: 18px; padding: 12px 10px 10px 10px;
+            font-weight: bold; background: #FFFFFF; }
 QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top right;
-                   right: 14px; padding: 0 6px; color: #8A6D1D; }
-QPushButton { background: #8A6D1D; color: white; border: none;
-              border-radius: 6px; padding: 9px 20px; font-weight: bold; }
-QPushButton:hover { background: #A5831F; }
-QPushButton:disabled { background: #C9C2B2; }
-QPushButton#danger { background: #8C2F2F; }
-QPushButton#danger:hover { background: #A63A3A; }
-QPushButton#ghost { background: #EFEAE0; color: #5A5346; }
+                   right: 14px; padding: 0 6px; color: #7A611A;
+                   background: transparent; }
+
+/* ══ الأزرار ══
+   الأساسي ذهبي ممتلئ، والثانوي محدّد بإطار، والخفيف بلا لون —
+   ثلاث درجات تكفي لتُعرف أهمية كل زر من شكله. */
+QPushButton { background: #9A7B22; color: #FFFFFF; border: none;
+              border-radius: 8px; padding: 9px 18px; font-weight: bold; }
+QPushButton:hover { background: #B08E2A; }
+QPushButton:pressed { background: #7A611A; }
+QPushButton:disabled { background: #DED8CB; color: #9A9384; }
+QPushButton:focus { border: 2px solid #E4C665; }
+QPushButton#ghost { background: #FFFFFF; color: #5A5346;
+                    border: 1px solid #D6CFC0; }
+QPushButton#ghost:hover { background: #F3EFE6; border-color: #C0B79F; }
+QPushButton#danger, QPushButton#dangerBtn { background: #A33131; }
+QPushButton#danger:hover, QPushButton#dangerBtn:hover { background: #BE3C3C; }
+
+/* ══ الحقول ══ */
 QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox, QDateEdit, QTextEdit {
-  background: white; border: 1px solid #CFC8BA; border-radius: 6px;
-  padding: 6px 8px; selection-background-color: #C9A227; }
-QTableWidget { background: white; alternate-background-color: #FAFAFA;
-  font-size: 12pt; gridline-color: #E4E4E4; selection-background-color: #E8DCC0;
-  selection-color: #1A1A1A;
-  gridline-color: #E6E0D2; border: 1px solid #DCD5C6; border-radius: 6px; }
-QTableWidget::item { padding: 4px 6px; }
-QHeaderView::section { background: #2B2723; color: #EFE7D3; padding: 9px;
-  font-size: 11.5pt; font-weight: bold; border: none;
-  border-left: 1px solid #443E37;
-  border: none; font-weight: bold; }
+  background: #FFFFFF; border: 1px solid #D6CFC0; border-radius: 8px;
+  padding: 6px 9px; selection-background-color: #E4C665;
+  selection-color: #1F1B17; }
+QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus,
+QDateEdit:focus, QTextEdit:focus { border: 2px solid #C9A227;
+  background: #FFFDF6; }
+QLineEdit:disabled, QDoubleSpinBox:disabled, QComboBox:disabled,
+QDateEdit:disabled { background: #F2EFE8; color: #9A9384; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView { background: #FFFFFF; border: 1px solid #D6CFC0;
+  selection-background-color: #F3E9CE; selection-color: #1F1B17;
+  outline: none; padding: 2px; }
+QCheckBox { spacing: 7px; }
+QCheckBox::indicator { width: 17px; height: 17px; border-radius: 4px;
+  border: 1px solid #C0B79F; background: #FFFFFF; }
+QCheckBox::indicator:checked { background: #9A7B22; border-color: #7A611A; }
+
+/* ══ الجداول ══
+   الرأس فاتح لا أسود: الرأس الداكن يسحب العين إليه وهي يجب أن تكون
+   على الأرقام. التمييز بالثقل والخط الفاصل يكفي. */
+QTableWidget, QTreeWidget, QListWidget {
+  background: #FFFFFF; alternate-background-color: #FAF8F3;
+  gridline-color: #EDE8DC; border: 1px solid #E3DDD0; border-radius: 10px;
+  selection-background-color: #F3E9CE; selection-color: #1F1B17;
+  font-size: 12pt; }
+QTableWidget::item { padding: 5px 6px; }
+QTableWidget::item:hover { background: #FBF7EC; }
+QHeaderView::section { background: #F1ECE0; color: #4A4237; padding: 9px 6px;
+  font-size: 11pt; font-weight: bold; border: none;
+  border-bottom: 2px solid #D8CDB4; border-left: 1px solid #E6E0D2; }
+QHeaderView::section:first { border-left: none; }
+
+/* ══ التبويبات: خط سفلي بدل الحبّات الممتلئة ══ */
+QTabWidget::pane { border: 1px solid #E3DDD0; border-radius: 10px;
+                   background: #FFFFFF; top: -1px; }
+QTabBar::tab { background: transparent; padding: 9px 20px; margin: 0 2px;
+  color: #6B6459; font-weight: bold; border-bottom: 3px solid transparent; }
+QTabBar::tab:hover { color: #7A611A; }
+QTabBar::tab:selected { color: #7A611A; border-bottom: 3px solid #9A7B22; }
+
+/* ══ أشرطة التمرير: رفيعة محايدة ══ */
+QScrollBar:vertical { background: transparent; width: 11px; margin: 2px; }
+QScrollBar::handle:vertical { background: #D8D1C2; border-radius: 5px;
+  min-height: 34px; }
+QScrollBar::handle:vertical:hover { background: #C0B79F; }
+QScrollBar:horizontal { background: transparent; height: 11px; margin: 2px; }
+QScrollBar::handle:horizontal { background: #D8D1C2; border-radius: 5px;
+  min-width: 34px; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
 /* ══════════ الشريط الجانبي ══════════
-   خلفية بيضاء وأسماء سوداء بارزة لأقصى وضوح، وإطار ذهبي زجاجي
-   بلمعة متدرّجة. المؤشَّر عليه يتوهّج ذهبياً، والمحدَّد ذهب ثابت. */
+   خلفية بيضاء وأسماء سوداء بارزة، وإطار ذهبي على الحافة. البطاقة
+   المحدَّدة ذهبٌ هادئ لا متدرّج صارخ — التمييز بالوضوح لا باللمعان. */
 QListWidget#sidebar, QTreeWidget#sidebar {
   background: #FFFFFF;
-  color: #1A1A1A;
+  color: #1F1B17;
   border: none;
   border-left: 3px solid qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0    #FFF3C4,
-      stop:0.18 #E8C766,
-      stop:0.38 #C9A227,
-      stop:0.52 #FFF8DC,
-      stop:0.66 #C9A227,
-      stop:0.86 #E8C766,
-      stop:1    #FFF3C4);
-  font-size: 15px;
+      stop:0 #F0E0AE, stop:0.5 #C9A227, stop:1 #F0E0AE);
+  border-radius: 0;
+  font-size: 14.5px;
   font-weight: bold;
   outline: none;
-  padding: 4px 0;
+  padding: 6px 0;
 }
-/* كل شاشة بطاقة زجاجية قائمة بذاتها: برواز ذهبي خفيف ولمعة
-   علوية — فتُعرف كشاشة مستقلة بلا حاجة للتمرير عليها. */
 QListWidget#sidebar::item, QTreeWidget#sidebar::item {
-  padding: 10px 13px;
-  margin: 3px 6px;
-  border-radius: 7px;
-  color: #1A1A1A;
-  font-weight: bold;
-  border: 1px solid #E4D3A4;
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0    #FFFFFF,
-      stop:0.16 #FEFCF6,
-      stop:0.50 #FAF6EA,
-      stop:0.84 #F5EEDC,
-      stop:1    #F0E6CF);
+  padding: 10px 12px;
+  margin: 2px 7px;
+  border-radius: 8px;
+  color: #1F1B17;
+  border: 1px solid transparent;
+  background: #FCFAF5;
 }
-/* التمرير بالماوس: البطاقة نفسها تُضاء ذهباً زجاجياً */
 QTreeWidget#sidebar::item:hover, QListWidget#sidebar::item:hover {
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0    #FFFDF2,
-      stop:0.14 #FCF0CE,
-      stop:0.42 #F3E0A6,
-      stop:0.58 #FFF9E2,
-      stop:0.80 #EBD48A,
-      stop:1    #E0C36B);
-  border: 1px solid #C9A227;
-  color: #1A1A1A;
+  background: #F7EFD9;
+  border: 1px solid #E0CC8F;
 }
-/* المحدَّد: ذهب أعمق بإطار بارز — والخط أسود لبقاء الوضوح */
 QListWidget#sidebar::item:selected, QTreeWidget#sidebar::item:selected {
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0    #FBEFC4,
-      stop:0.16 #F2DC9A,
-      stop:0.46 #E4C665,
-      stop:0.60 #FFF6D8,
-      stop:0.82 #DDBB50,
-      stop:1    #CFA936);
-  border: 2px solid #A98A22;
+  background: #EFDFAE;
+  border: 1px solid #B99B33;
   color: #14100A;
 }
 QTreeWidget#sidebar::branch { background: transparent; }
-QTreeWidget#sidebar QScrollBar:vertical {
-  background: #FAF7EF; width: 10px; margin: 0;
-}
-QTreeWidget#sidebar QScrollBar::handle:vertical {
-  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-      stop:0 #E8C766, stop:0.5 #C9A227, stop:1 #E8C766);
-  border-radius: 5px; min-height: 30px;
-}
-QTreeWidget#sidebar QScrollBar::add-line:vertical,
-QTreeWidget#sidebar QScrollBar::sub-line:vertical { height: 0; }
 
-/* الشريط الفرعي: عنوان الشاشة الحالية وزر الرجوع للرئيسية */
-QFrame#subbar { background: #F4F0E7; border-bottom: 1px solid #DCD5C6; }
-QLabel#crumb { font-size: 14pt; font-weight: bold; color: #4A4237; }
-QPushButton#homeBtn { background: #8A6D1D; color: white; font-weight: bold;
-  padding: 7px 18px; border-radius: 6px; font-size: 12pt; }
+/* ══ الشريطان العلوي والفرعي ══ */
+QFrame#header { background: #2B2723; border-bottom: 2px solid #9A7B22; }
+QLabel#headerTitle { color: #F3EEE2; font-size: 17px; font-weight: bold; }
+QLabel#headerUser { color: #E4C665; font-size: 13px; font-weight: bold; }
+QFrame#header QPushButton { background: #3A342D; color: #F3EEE2;
+  border: 1px solid #4E463C; border-radius: 7px; padding: 7px 12px; }
+QFrame#header QPushButton:hover { background: #4A4239; border-color: #9A7B22; }
+QFrame#header QPushButton#ghost { background: #3A342D; color: #E8E1D2; }
+QFrame#header QComboBox, QFrame#header QLineEdit {
+  background: #FFFFFF; border: 1px solid #4E463C; }
+QFrame#subbar { background: #FFFFFF; border-bottom: 1px solid #E3DDD0; }
+QLabel#crumb { font-size: 13pt; font-weight: bold; color: #3F382E; }
+QPushButton#homeBtn { background: #9A7B22; color: white; font-weight: bold;
+  padding: 7px 16px; border-radius: 8px; font-size: 11.5pt; }
+QPushButton#homeBtn:hover { background: #B08E2A; }
+QPushButton#closeBtn { background: #FFFFFF; color: #A33131; font-weight: bold;
+  padding: 7px 16px; border-radius: 8px; font-size: 11.5pt;
+  border: 1px solid #E2C3C3; }
+QPushButton#closeBtn:hover { background: #A33131; color: #FFFFFF; }
 
-/* لوحات لوحة التحكم: بطاقة مضغوطة قابلة للتحديد */
+/* ══ لوحات لوحة التحكم ══ */
 QPushButton#dashPanel {
-  background: #FBF9F4;
-  border: 1px solid #D8CDB4;
-  border-radius: 6px;
-  padding: 5px 9px;
-  font-size: 10pt;
-  font-weight: bold;
-  color: #4A3A1E;
+  background: #FFFFFF; border: 1px solid #E3DDD0; border-radius: 9px;
+  padding: 7px 11px; font-size: 10pt; font-weight: bold; color: #4A4237;
   text-align: center;
 }
-QPushButton#dashPanel:hover {
-  background: #F3EDDF;
-  border-color: #B79A5E;
-}
-/* زر التحديثات حين يتوفّر إصدار جديد: يلمع ذهبياً ليُلفت النظر */
+QPushButton#dashPanel:hover { background: #FBF7EC; border-color: #D8CDB4; }
+QPushButton#dashPanel:checked { background: #EFDFAE; border: 1px solid #B99B33;
+  color: #1F1B17; }
 QPushButton#updateReady {
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0    #FFF7D6,
-      stop:0.30 #F2DC9A,
-      stop:0.60 #E4C665,
-      stop:1    #CFA936);
-  border: 2px solid #A98A22;
-  border-radius: 6px;
-  color: #14100A;
-  font-weight: bold;
-  padding: 5px 12px;
+  background: #E4C665; border: 1px solid #B99B33; border-radius: 7px;
+  color: #14100A; font-weight: bold; padding: 6px 12px;
 }
-QPushButton#updateReady:hover {
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0 #FFFDF2, stop:0.5 #F5DE9B, stop:1 #D9B84A);
-}
+QPushButton#updateReady:hover { background: #EFD98F; }
+QFrame#ratioBar { background: #FFFFFF; border: 1px solid #E3DDD0;
+  border-right: 4px solid #C9A227; border-radius: 8px; }
+QFrame#ratioBar QLabel { font-size: 11pt; font-weight: bold; color: #4A4237; }
 
-QFrame#ratioBar {
-  background: #F3EDDF;
-  border: 1px solid #C7B48A;
-  border-right: 4px solid #B79A5E;
-  border-radius: 5px;
-}
-QFrame#ratioBar QLabel {
-  font-size: 11pt;
-  font-weight: bold;
-  color: #4A3A1E;
-}
-
-QPushButton#dashPanel:checked {
-  background: #B79A5E;
-  border: 2px solid #8B7333;
-  color: #FFFFFF;
-}
-
-QPushButton#homeBtn:hover { background: #A6842A; }
-QPushButton#closeBtn { background: #8A3A2A; color: white; font-weight: bold;
-  padding: 7px 18px; border-radius: 6px; font-size: 12pt; }
-QPushButton#closeBtn:hover { background: #A6472F; }
-
-/* شاشة الترحيب */
-QWidget#welcomeRoot { background: #FBF9F4; }
-QLabel#welcomeName { font-size: 24pt; font-weight: bold; color: #C6A227;
+/* ══ شاشة الترحيب والبطاقات ══ */
+QWidget#welcomeRoot { background: #F7F5F0; }
+QLabel#welcomeName { font-size: 23pt; font-weight: bold; color: #B08E2A;
   padding-top: 14px; }
-QLabel#welcomeSub { font-size: 12pt; color: #7A7266; }
-QLabel#welcomeHint { font-size: 12pt; color: #9aa0a6; }
-
-/* بطاقات الشاشة الرئيسية */
-QFrame#tile { background: white; border: 1px solid #DCD5C6; border-radius: 10px; }
-QFrame#tile:hover { border: 2px solid #C9A227; background: #FFFDF6; }
-QLabel#tileIcon { font-size: 26pt; }
-QLabel#tileTitle { font-size: 13.5pt; font-weight: bold; color: #2B2723; }
-QLabel#tileSub { font-size: 10.5pt; color: #7A7266; }
-QLabel#groupTitle { font-size: 13pt; font-weight: bold; color: #8A6D1D;
+QLabel#welcomeSub { font-size: 12pt; color: #6B6459; }
+QLabel#welcomeHint { font-size: 11.5pt; color: #9A9384; }
+QFrame#tile { background: #FFFFFF; border: 1px solid #E3DDD0;
+  border-radius: 12px; }
+QFrame#tile:hover { border: 1px solid #C9A227; background: #FFFDF6; }
+QLabel#tileIcon { font-size: 25pt; }
+QLabel#tileTitle { font-size: 13pt; font-weight: bold; color: #1F1B17; }
+QLabel#tileSub { font-size: 10.5pt; color: #6B6459; }
+QLabel#groupTitle { font-size: 12.5pt; font-weight: bold; color: #7A611A;
   padding-top: 6px; }
-QTabWidget::pane { border: 1px solid #DCD5C6; border-radius: 6px; }
-QTabBar::tab { background: #EFEAE0; padding: 8px 22px; margin: 2px;
-  border-radius: 6px; font-weight: bold; }
-QTabBar::tab:selected { background: #8A6D1D; color: white; }
-QFrame#header { background: #2B2723; }
-QLabel#headerTitle { color: #EFE7D3; font-size: 18px; font-weight: bold; }
-QLabel#headerUser { color: #C9A227; font-size: 14px; font-weight: bold; }
-QFrame#card { background: white; border: 1px solid #DCD5C6; border-radius: 10px;
-  padding: 4px; }
-QFrame#card:hover { border: 1px solid #C9A227; background: #FBF6E8; }
-QLabel#cardTitle { color: #8A6D1D; font-size: 13px; font-weight: bold; }
-QLabel#cardValue { color: #2B2723; font-size: 20px; font-weight: bold; }
-QLabel#cardSub { color: #7A7364; font-size: 12px; }
-QPushButton#dangerBtn { background: #8B1E1E; color: #fff; font-weight: bold;
-  padding: 8px 18px; border: none; border-radius: 5px; }
-QPushButton#dangerBtn:hover { background: #A32424; }
-QGroupBox { border: 1px solid #C9C2B4; border-radius: 5px;
-  margin-top: 10px; padding-top: 8px; }
 
-/* شريط سعر الأونصة العالمية الحي */
-/* ══ شريط سعر الذهب — بلغة الشريط الجانبي نفسها ══
-   خلفية زجاجية فاتحة، برواز ذهبي، وخط أسود بارز؛ وبطاقات
-   الأعيرة نسخة مصغّرة من بطاقة الشاشة في الشريط الجانبي. */
-QFrame#goldBar {
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0    #FFFFFF,
-      stop:0.16 #FEFCF6,
-      stop:0.50 #FAF6EA,
-      stop:0.84 #F5EEDC,
-      stop:1    #F0E6CF);
-  border: 1px solid #E4D3A4;
-  border-top: 3px solid qlineargradient(x1:0, y1:0, x2:1, y2:0,
-      stop:0    #FFF3C4,
-      stop:0.18 #E8C766,
-      stop:0.38 #C9A227,
-      stop:0.52 #FFF8DC,
-      stop:0.66 #C9A227,
-      stop:0.86 #E8C766,
-      stop:1    #FFF3C4);
-  border-radius: 7px;
-  padding: 8px;
-  margin: 3px 6px;
-}
-QLabel#goldBarTitle {
-  color: #6B5518; font-size: 12px; font-weight: bold;
-}
-QLabel#goldBarValue {
-  color: #1A1A1A; font-size: 17px; font-weight: bold;
-}
-QLabel#goldBarSub   { color: #4A3A1E; font-size: 11px; }
-QLabel#goldBarStamp { color: #8A7F66; font-size: 10px; }
-QLabel#goldKarat {
-  color: #1A1A1A; font-size: 13px; font-weight: bold;
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-      stop:0    #FFFBEA,
-      stop:0.35 #F7E7B4,
-      stop:0.70 #EFD98F,
-      stop:1    #E4C867);
-  border: 1px solid #C9A227;
-  border-radius: 5px;
-  padding: 5px 7px;
-}
-
-/* لوحات تحليل المبيعات */
-QFrame#statPanel { background: white; border: 1px solid #DCD5C6;
+QFrame#card { background: #FFFFFF; border: 1px solid #E3DDD0;
   border-radius: 10px; padding: 6px; }
+QFrame#card:hover { border: 1px solid #C9A227; background: #FFFDF6; }
+QLabel#cardTitle { color: #7A611A; font-size: 12.5px; font-weight: bold; }
+QLabel#cardValue { color: #1F1B17; font-size: 19px; font-weight: bold; }
+QLabel#cardSub { color: #6B6459; font-size: 11.5px; }
+
+/* ══ شريط سعر الذهب الحي ══ */
+QFrame#goldBar {
+  background: #FFFFFF;
+  border: 1px solid #E3DDD0;
+  border-top: 3px solid #C9A227;
+  border-radius: 10px;
+  padding: 8px;
+  margin: 4px 7px;
+}
+QLabel#goldBarTitle { color: #7A611A; font-size: 12px; font-weight: bold; }
+QLabel#goldBarValue { color: #1F1B17; font-size: 17px; font-weight: bold; }
+QLabel#goldBarSub   { color: #4A4237; font-size: 11px; }
+QLabel#goldBarStamp { color: #9A9384; font-size: 10px; }
+QLabel#goldKarat {
+  color: #1F1B17; font-size: 13px; font-weight: bold;
+  background: #F7EFD9; border: 1px solid #E0CC8F;
+  border-radius: 7px; padding: 5px 7px;
+}
+
+/* ══ لوحات تحليل المبيعات ══ */
+QFrame#statPanel { background: #FFFFFF; border: 1px solid #E3DDD0;
+  border-radius: 12px; padding: 6px; }
 QFrame#statPanel:hover { border: 1px solid #C9A227; }
-QLabel#panelTitle { font-size: 12pt; font-weight: bold; color: #8A6D1D; }
-QLabel#panelValue { font-size: 18pt; font-weight: bold; color: #2B2723; }
-QLabel#panelSub { font-size: 9.5pt; color: #7A7266; }
+QLabel#panelTitle { font-size: 11.5pt; font-weight: bold; color: #7A611A; }
+QLabel#panelValue { font-size: 18pt; font-weight: bold; color: #1F1B17; }
+QLabel#panelSub { font-size: 9.5pt; color: #6B6459; }
+
+/* ══ الحوارات ══ */
+QDialog { background: #F7F5F0; }
+QMessageBox { background: #FFFFFF; }
+QMessageBox QLabel { font-size: 13px; }
 """
 
 

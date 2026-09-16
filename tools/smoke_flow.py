@@ -1065,6 +1065,69 @@ def main():
     except ImportError:
         check("فحوص القائمة والواجهة", True, "تخطّي — PyQt5 غير مثبّت")
 
+    step("26) لا تجمّد عند الترحيل")
+    # **الخلل**: صورة QR للفاتورة الضريبية كانت تُبنى **داخل** معاملة
+    # القاعدة. وأول استيراد لمكتبة الصور على ويندوز يستغرق ثوانيَ،
+    # فيتجمّد خيط الواجهة («لا يستجيب» وشاشة سوداء) ويُحبس معه قفل
+    # الكتابة — فتتعطّل النسخ الاحتياطي والمزامنة أيضاً.
+    from services import zatca as _z
+
+    with db() as conn:
+        _b = _batch(conn, [{"wo_no": "VT1", "gold": 40.0,
+                            "wage_per_gram": 20.0}], "2026-06-01", "admin")
+        vwo = conn.execute("SELECT id FROM work_orders"
+                           " WHERE work_order_no='VT1'").fetchone()["id"]
+        vinv = create_sale(conn, cust, [{"work_order_id": vwo}],
+                           "2026-06-05", "admin", apply_vat=True)
+    check("الفاتورة الضريبية تحمل نص QR", bool(vinv.get("qr_base64")))
+    check("ولا تبني صورته داخل المعاملة",
+          vinv.get("qr_path") is None,
+          str(vinv.get("qr_path")))
+
+    _png = _z.generate_qr_image(vinv["qr_base64"], vinv["invoice_no"])
+    check("صورة QR تُبنى عند الطلب بلا مكتبة صور خارجية",
+          bool(_png) and pathlib.Path(_png).exists(), str(_png))
+    if _png:
+        head = pathlib.Path(_png).read_bytes()[:8]
+        check("الملف صورة PNG صحيحة", head == b"\x89PNG\r\n\x1a\n")
+        try:
+            pathlib.Path(_png).unlink()   # لا يُخلّف الفحص ملفاً
+        except Exception:
+            pass
+
+    # رصد البطء: الشكوى تصير دليلاً في السجل
+    from services import health as _h2
+    _h2.log_slow("مرحلة اختبار", 9.9, "من الفحص")
+    logp = pathlib.Path(config.BASE_DIR) / "data" / _h2.ERROR_LOG
+    check("البطء يُسجَّل باسم مرحلته",
+          logp.exists() and "مرحلة اختبار" in logp.read_text(encoding="utf-8"))
+
+    try:
+        from PyQt5 import QtWidgets as _QW3
+        from ui.widgets.common import busy as _busy
+        _app3 = _QW3.QApplication.instance() or _QW3.QApplication([])
+        holder = _QW3.QWidget()
+        with _busy(holder, "اختبار", stage="اختبار الانشغال"):
+            inside = holder.isEnabled()
+        check("النافذة تُعطَّل أثناء العمل ثم تعود",
+              inside is False and holder.isEnabled() is True)
+        check("مؤشر الانتظار يُستعاد",
+              _app3.overrideCursor() is None)
+
+        # المُحجِّم يعيد الحساب عند تغيّر عدد الأعمدة لا العرض وحده
+        from ui.widgets.table_fit import ColumnFitter
+        t = _QW3.QTableWidget()
+        t.setColumnCount(4)
+        t.show()                      # المُحجِّم لا يعمل على جدول مخفيّ
+        f = ColumnFitter(t, [1, 1, 1, 1])
+        f._last_w, f._last_n = 500, 4
+        t.setColumnCount(7)
+        f._do_apply()
+        check("تغيّر عدد الأعمدة يُعيد توزيع العرض",
+              f._last_n == 7, f"{f._last_n}")
+    except ImportError:
+        check("فحوص الانشغال والتحجيم", True, "تخطّي — PyQt5 غير مثبّت")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

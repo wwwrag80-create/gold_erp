@@ -10,11 +10,11 @@ from database.database import db
 from models import entities, inventory, invoices
 from models.inventory import BULK_WO_NO
 from services import gold_math, karat_view as kv
-from ui.widgets.common import (cell, confirm_post, posted, ask, big_label,
-                               date_edit, dstr, err, fill, has_model_image,
-                               info, make_table, mspin, reload_combo,
-                               search_combo, show_model_image, title_label,
-                               wspin)
+from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
+                               big_label, date_edit, dstr, err, fill,
+                               has_model_image, info, make_table, mspin,
+                               reload_combo, search_combo, show_model_image,
+                               title_label, wspin)
 
 # نفس أعمدة جدول التوريد + الأجر والأجرة
 COLS = ["الموديل", "رقم التشغيل", "الذهب", "الفصوص", "الأحجار", "الأحجار بعد الخصم",
@@ -299,6 +299,14 @@ class QRDialog(QtWidgets.QDialog):
         lay.addWidget(big_label(
             f"الإجمالي شامل الضريبة: {res['grand_total']:,.2f} ريال — "
             f"الضريبة: {res['vat']:,.2f} ريال"))
+        # الصورة تُبنى الآن لا عند الحفظ — فالحفظ يبقى فورياً
+        if not res.get("qr_path") and res.get("qr_base64"):
+            try:
+                from services import zatca
+                res["qr_path"] = zatca.generate_qr_image(
+                    res["qr_base64"], res["invoice_no"])
+            except Exception:
+                res["qr_path"] = None
         if res.get("qr_path"):
             img = QtWidgets.QLabel()
             img.setAlignment(QtCore.Qt.AlignCenter)
@@ -944,23 +952,26 @@ class SalesScreen(QtWidgets.QWidget):
                 if not alive:
                     self.editing_id = None
                     self._update_mode()
-            with db() as conn:
-                if self.editing_id is not None:
-                    # تعديل **في مكانه**: نفس رقم الفاتورة وتاريخها،
-                    # والفرق وحده يُرحَّل — لا فاتورة جديدة ولا قيد
-                    # عكسي، فتبقى العملية عمليةً واحدة في السجل.
-                    res = invoices.update_invoice(
-                        conn, self.editing_id, cart,
-                        self.user["username"], apply_vat=apply_vat,
-                        description=desc)
-                elif self.kind.currentData() == "sale":
-                    res = invoices.create_sale(conn, cid, cart, dstr(self.date),
-                                               self.user["username"], apply_vat,
-                                               desc)
-                else:
-                    res = invoices.create_sale_return(
-                        conn, cid, cart, dstr(self.date),
-                        self.user["username"], apply_vat, desc)
+            # الترحيل داخل مؤشر انشغال: النافذة تُرسم وتُعطَّل فلا
+            # يظهر «لا يستجيب» ولا يُقبل ضغطٌ مكرّر ينتج فاتورة ثانية.
+            with busy(self, "جارٍ ترحيل الفاتورة…", stage="ترحيل فاتورة"):
+                with db() as conn:
+                    if self.editing_id is not None:
+                        # تعديل **في مكانه**: نفس رقم الفاتورة وتاريخها،
+                        # والفرق وحده يُرحَّل — لا فاتورة جديدة ولا قيد
+                        # عكسي، فتبقى العملية عمليةً واحدة في السجل.
+                        res = invoices.update_invoice(
+                            conn, self.editing_id, cart,
+                            self.user["username"], apply_vat=apply_vat,
+                            description=desc)
+                    elif self.kind.currentData() == "sale":
+                        res = invoices.create_sale(
+                            conn, cid, cart, dstr(self.date),
+                            self.user["username"], apply_vat, desc)
+                    else:
+                        res = invoices.create_sale_return(
+                            conn, cid, cart, dstr(self.date),
+                            self.user["username"], apply_vat, desc)
             if res.get("added") is not None and self.editing_id is not None:
                 parts = []
                 if res.get("added"):
@@ -1002,7 +1013,8 @@ class SalesScreen(QtWidgets.QWidget):
             self.description.clear()
             self.clear_items()
             self._update_mode()
-            self.refresh()
+            with busy(self, "جارٍ تحديث الشاشة…", stage="تحديث المبيعات"):
+                self.refresh()
         except Exception as e:
             err(self, e)
 
