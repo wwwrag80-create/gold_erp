@@ -15,6 +15,7 @@ from services import gold_math
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
                                karat_combo, make_table, reload_combo,
                                search_combo, title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 PANELS = [("sales", "إجمالي المبيعات"), ("returns", "إجمالي المرتجعات"),
           ("net_sold", "إجمالي المباع الفعلي"), ("collection", "إجمالي التحصيل")]
@@ -50,6 +51,7 @@ class PanelColumn(QtWidgets.QFrame):
         lay.addWidget(self.toggle)
 
         self.table = make_table()
+        _enhance(self.table, key="sales_analytics")
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["رقم التشغيل", "الوزن المقيد"])
         lay.addWidget(self.table, 1)

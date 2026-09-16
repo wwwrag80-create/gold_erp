@@ -89,7 +89,17 @@ class ColumnFitter(QtCore.QObject):
             n = t.columnCount()
             if n <= 0:
                 return
+            # ══ اختيار المستخدم يسبق أوزان الشاشة ══
+            # من وسّع عمود «البيان» يريده موسَّعاً في كل مرة. وأوزان
+            # الشاشة تُمرَّر مع كل إعادة تعبئة، فلولا هذه الأسبقية
+            # لمحت كلُّ عملية تحديث ما اختاره بعد ثوانٍ من اختياره.
             w = self.weights
+            try:
+                saved = t.property("_user_weights")
+            except Exception:
+                saved = None
+            if saved and len(saved) == n:
+                w = list(saved)
             # أوزان متساوية إن لم تُحدَّد أو تغيّر عدد الأعمدة
             if len(w) != n:
                 w = [1] * n

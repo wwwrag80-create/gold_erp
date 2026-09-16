@@ -13,6 +13,7 @@ from services import karat_view as kv
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err,
                                make_table, title_label)
 from ui.widgets.table_fit import fit_columns
+from ui.widgets.table_tools import enhance as _enhance
 
 TYPES = [("العملاء", "customer"), ("الموردون", "supplier"),
          ("جهات أخرى", "other")]
@@ -82,6 +83,7 @@ class AgingScreen(QtWidgets.QWidget):
             cards.addWidget(c)
 
         self.table = make_table()
+        _enhance(self.table, key="aging")
         self.note = big_label()
         self.lbl_sel = QtWidgets.QLabel("المعروض: كل الجهات")
         self.lbl_sel.setObjectName("cardSub")

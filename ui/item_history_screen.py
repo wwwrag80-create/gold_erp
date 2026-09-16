@@ -172,6 +172,11 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         except (TypeError, ValueError):
             return str(v)
 
+    def open_for_wo(self, wo_no):
+        """يفتح تاريخ رقم تشغيلٍ بعينه — من شريط الأوامر الموحّد."""
+        self.search.setText(str(wo_no or "").strip())
+        self.load()
+
     def load(self):
         no = self.search.text().strip()
         if not no:

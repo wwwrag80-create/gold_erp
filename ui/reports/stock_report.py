@@ -6,6 +6,7 @@ from database.database import db
 from services import karat_view as kv
 from models.inventory import stock_snapshot
 from ui.widgets.common import big_label, fill, make_table, title_label
+from ui.widgets.table_tools import enhance as _enhance
 
 
 class StockReportScreen(QtWidgets.QWidget):
@@ -14,6 +15,7 @@ class StockReportScreen(QtWidgets.QWidget):
         self.gold_summary = big_label()
         self.cash_summary = big_label()
         self.boxes = make_table()
+        _enhance(self.boxes, key="stock_boxes")
         btn = QtWidgets.QPushButton("تحديث الجرد")
         btn.clicked.connect(self.refresh)
 

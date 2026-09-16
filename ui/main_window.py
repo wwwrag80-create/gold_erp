@@ -4,7 +4,7 @@
 الأستاذ العام الموحّد لأي حساب في الشجرة."""
 import json
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from pathlib import Path
 
@@ -54,6 +54,7 @@ from ui.subledger_screen import SubLedgerScreen
 from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
 from services import karat_view as kv
+from ui import theme
 from ui.widgets.common import ElidedLabel, ask, err, info, search_combo
 
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
@@ -243,12 +244,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── الأدوات ──
         # نصوص قصيرة وشرحها في التلميح: الشريط أداةٌ لا صفحة شرح.
-        btn_reset_nav = QtWidgets.QPushButton("↺")
-        btn_reset_nav.setObjectName("ghost")
-        btn_reset_nav.setToolTip(
-            "القائمة الجانبية قابلة للسحب والإفلات وإعادة التسمية — "
-            "هذا الزر يعيدها لترتيبها الأصلي")
-        btn_reset_nav.clicked.connect(self.reset_nav_layout)
+        # زر «عرض» يجمع ما كان مبعثراً: المظهر ومقاس الخط والبحث
+        # الموحّد وإعادة ترتيب القائمة. الشريط أداةٌ لا لوحة أزرار،
+        # وكل زرٍّ يُضاف إليه يُضيّق ما قبله.
+        btn_view = self._view_menu_button()
         btn_update = QtWidgets.QPushButton("⬆ تحديث")
         btn_update.setToolTip(
             "تحقّق من التحديثات عبر الإنترنت، أو ثبّت حزمة محفوظة")
@@ -266,7 +265,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     0, self._on_update_checked))
         except Exception:
             pass
-        for b in (btn_reset_nav, btn_update, btn_backup):
+        for b in (btn_view, btn_update, btn_backup):
             b.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
                             QtWidgets.QSizePolicy.Fixed)
 
@@ -278,9 +277,17 @@ class MainWindow(QtWidgets.QMainWindow):
         h.addWidget(lbl_karat)
         h.addWidget(self.karat_box)
         h.addSpacing(8)
-        h.addWidget(btn_reset_nav)
+        h.addWidget(btn_view)
         h.addWidget(btn_update)
         h.addWidget(btn_backup)
+
+        # ── شريط الأوامر الموحّد ──
+        # اختصارٌ واحد من أي شاشة، ومن أي حقل — فلا يحتاج المستخدم
+        # إلى إغلاق ما هو فيه ليبحث عن شيء.
+        for seq in ("Ctrl+K", "Ctrl+Space"):
+            sc = QtWidgets.QShortcut(QtGui.QKeySequence(seq), self)
+            sc.setContext(QtCore.Qt.ApplicationShortcut)
+            sc.activated.connect(self.open_palette)
 
         # الشريط الفرعي: عنوان الشاشة الحالية وزر إغلاقها. يُبنى قبل
         # الشريط الجانبي لأن switch() تستخدم self.crumb و self.btn_close.
@@ -305,8 +312,13 @@ class MainWindow(QtWidgets.QMainWindow):
         sb.addWidget(self.screen_tools)
         sb.addWidget(self.btn_close)
 
-        # شاشة الترحيب: مساحة فارغة يتوسّطها شعار جاديت (الفهرس 0)
-        self.welcome = WelcomeScreen(user)
+        # شاشة البداية الحيّة (الفهرس 0): أرقام اليوم وتنبيهاته، وكل
+        # رقمٍ فيها بابٌ إلى تفصيله عبر هذه الوصلات الثلاث.
+        self.welcome = WelcomeScreen(
+            user,
+            on_open_ledger=self.open_ledger,
+            on_open_doc=self.open_document_for_edit,
+            on_open_screen=self.goto_by_name)
 
         self.sidebar = QtWidgets.QTreeWidget()
         # قائمة ديناميكية: سحب وإفلات لإعادة الترتيب والتجميع،
@@ -946,6 +958,163 @@ class MainWindow(QtWidgets.QMainWindow):
             info(self, f"النظام يعرض الآن كل الأوزان بعيار {k}.")
         except Exception as e:
             err(self, e)
+
+    # ══════════════════════════════════════════════════════════════
+    #  المظهر ومقاس الخط
+    # ══════════════════════════════════════════════════════════════
+
+    def _view_menu_button(self):
+        """زر «عرض» وقائمته: المظهر · مقاس الخط · البحث · ترتيب القائمة.
+
+        التبديل فوريّ بلا إعادة تشغيل: Qt يعيد رسم كل النوافذ المفتوحة
+        عند تغيير ورقة الأنماط، فيرى المستخدم أثر اختياره في اللحظة
+        نفسها ويعدل عنه إن لم يعجبه.
+        """
+        btn = QtWidgets.QToolButton()
+        btn.setText("⚙ عرض")
+        btn.setToolTip("المظهر (فاتح/ليلي) · مقاس الخط · البحث الموحّد")
+        btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        menu = QtWidgets.QMenu(btn)
+
+        cur_theme = theme.current_theme()
+        m_theme = menu.addMenu("🎨 المظهر")
+        gt = QtWidgets.QActionGroup(menu)
+        gt.setExclusive(True)
+        for key, label, _tk in theme.THEMES:
+            a = m_theme.addAction(label)
+            a.setCheckable(True)
+            a.setChecked(key == cur_theme)
+            gt.addAction(a)
+            a.triggered.connect(lambda _c=False, k=key: self._set_theme(k))
+
+        cur_scale = theme.current_scale()
+        m_font = menu.addMenu("🔠 مقاس الخط")
+        gf = QtWidgets.QActionGroup(menu)
+        gf.setExclusive(True)
+        for val, label in theme.SCALES:
+            a = m_font.addAction(f"{label}  ({int(val * 100)}%)")
+            a.setCheckable(True)
+            a.setChecked(abs(val - cur_scale) < 0.01)
+            gf.addAction(a)
+            a.triggered.connect(lambda _c=False, v=val: self._set_scale(v))
+
+        menu.addSeparator()
+        a_find = menu.addAction("🔍 بحث موحّد…        Ctrl+K")
+        a_find.triggered.connect(self.open_palette)
+        a_nav = menu.addAction("↺ إعادة القائمة الجانبية لترتيبها الأصلي")
+        a_nav.triggered.connect(self.reset_nav_layout)
+
+        btn.setMenu(menu)
+        self._view_menu = menu          # مرجع يمنع جمعه مبكّراً
+        return btn
+
+    def _set_theme(self, name):
+        try:
+            theme.set_theme(name, self.user.get("username"))
+            theme.apply(QtWidgets.QApplication.instance(), theme=name)
+        except Exception as e:
+            err(self, e)
+
+    def _set_scale(self, value):
+        try:
+            theme.set_scale(value, self.user.get("username"))
+            theme.apply(QtWidgets.QApplication.instance(), scale=value)
+        except Exception as e:
+            err(self, e)
+
+    # ══════════════════════════════════════════════════════════════
+    #  شريط الأوامر الموحّد (Ctrl+K)
+    # ══════════════════════════════════════════════════════════════
+
+    def _palette_static(self):
+        """ما يُبحث فيه بلا استعلام: الشاشات والأسماء المفهرسة سلفاً."""
+        from ui.widgets import palette as pal
+        items = []
+        for idx, name in sorted(getattr(self, "_screen_keys", {}).items()):
+            node = self._items.get(self.screens[idx]) \
+                if 0 <= idx < len(self.screens) else None
+            shown = node.text(0) if node is not None else name
+            hint = "" if shown == name else name
+            items.append((pal.SCREEN, shown, hint, idx))
+        try:
+            for i in range(self.quick.count()):
+                items.append((pal.ACCOUNT, self.quick.itemText(i), "",
+                              self.quick.itemData(i)))
+        except Exception:
+            pass
+        return items
+
+    def open_palette(self):
+        """يفتح نافذة البحث الموحّد — من أي شاشة وأي حقل."""
+        try:
+            from database.database import db as _db
+            from ui.widgets import palette as pal
+
+            def lookup(text):
+                with _db(readonly=True) as conn:
+                    return pal.db_lookup(conn, text)
+
+            dlg = pal.CommandPalette(self, self._palette_static(),
+                                     self._palette_pick, lookup)
+            dlg.exec_()
+        except Exception as e:
+            err(self, e)
+
+    def _palette_pick(self, kind, payload):
+        """ينفّذ ما اختاره المستخدم من شريط الأوامر."""
+        from ui.widgets import palette as pal
+        try:
+            if kind == pal.SCREEN:
+                self.switch(int(payload))
+            elif kind == pal.ACCOUNT:
+                self.open_ledger(payload)
+            elif kind == pal.WORK_ORDER:
+                self._open_named("حركة الطقم", "open_for_wo", payload)
+            elif kind == pal.INVOICE:
+                self._open_named("أرشيف المستندات والطباعة",
+                                 "open_for_term", payload)
+        except Exception as e:
+            err(self, e)
+
+    def goto_by_name(self, name):
+        """ينتقل إلى شاشة باسمها الافتراضي — للوصلات داخل الشاشات.
+
+        يُطابَق بالاسم الافتراضي لا بالفهرس: الفهرس يتغيّر مع كل
+        إضافة شاشة، وقد أفسد ترتيب القائمة مرةً من قبل.
+        """
+        idx = self._index_of(name)
+        if idx is not None:
+            self.switch(idx)
+        return idx is not None
+
+    def _index_of(self, name):
+        keys = getattr(self, "_screen_keys", {})
+        for idx, key in keys.items():
+            if key == name:
+                return idx
+        for idx, key in keys.items():
+            if name in key or key in name:
+                return idx
+        return None
+
+    def _open_named(self, name, method, arg):
+        """يفتح شاشةً باسمها ثم يستدعي دالتها بالوسيط بعد اكتمال بنائها."""
+        if not self.goto_by_name(name):
+            err(self, f"الشاشة «{name}» غير متاحة لهذا المستخدم")
+            return
+
+        def _run():
+            try:
+                idx = self._index_of(name)
+                scr = self.screens[idx]
+                real = getattr(scr, "real", scr)
+                fn = getattr(real, method, None)
+                if callable(fn):
+                    fn(arg)
+            except Exception as e:
+                err(self, e)
+
+        QtCore.QTimer.singleShot(0, _run)
 
     # ══════════════════════════════════════════════════════════════
     #  البحث السريع

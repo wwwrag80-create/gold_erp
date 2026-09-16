@@ -56,6 +56,9 @@ QT_INHERITED = {
     "setSizeAdjustPolicy", "setMinimumContentsLength", "view",
     "rect", "alignment", "setAlignment", "text", "setText",
     "minimumSizeHint", "sizeHint", "paintEvent", "setWordWrap",
+    # موروثات QDialog/QWidget في نوافذ الأدوات (شريط الأوامر)
+    "setWindowFlags", "setWindowTitle", "accept", "reject", "resize",
+    "move", "width", "height", "parent", "window", "setFocus", "selectAll",
     "itemText", "count", "setCurrentIndex", "currentIndex", "itemData",
     "setFrameShape", "setModal", "addItem", "clear", "findData",
     "currentData", "currentText", "setText", "text", "setValue", "value",

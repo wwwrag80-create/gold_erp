@@ -181,6 +181,14 @@ def make_table(stretch_last=True):
         fit_columns(t)
     except Exception:
         pass
+    # النسخ والتصدير في كل جدول بلا استثناء (الزر الأيمن): حاجةٌ
+    # يوميّة لا ميزةَ تقرير. والفرز بالنقر يُطلب صراحةً في شاشات
+    # العرض وحدها — شرحه في `table_tools.attach_sorter`.
+    try:
+        from ui.widgets.table_tools import attach_menu
+        attach_menu(t)
+    except Exception:
+        pass
     return t
 
 

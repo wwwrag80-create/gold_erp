@@ -8,6 +8,7 @@ from database.database import db
 from services import karat_view as kv
 from models.reports import khazina_tiles, production_inputs_summary
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, make_table, title_label)
+from ui.widgets.table_tools import enhance as _enhance
 
 
 class KhazinaReportScreen(QtWidgets.QWidget):
@@ -37,6 +38,7 @@ class KhazinaReportScreen(QtWidgets.QWidget):
         self.tiles_layout = tiles
         self.summary = big_label()
         self.table = make_table()
+        _enhance(self.table, key="khazina")
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label(

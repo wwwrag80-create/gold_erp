@@ -227,3 +227,20 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
 
     def refresh(self):
         self.search()
+
+    def open_for_term(self, term, months=36):
+        """يفتح الأرشيف على رقم مستندٍ أو اسم جهةٍ بعينه.
+
+        يُستدعى من شريط الأوامر الموحّد (Ctrl+K): المستند المطلوب قد
+        يكون أقدم من نطاق البحث الافتراضي (ستة أشهر)، فيُوسَّع النطاق
+        هنا وإلا ظهر «لا نتائج» لمستندٍ موجود.
+        """
+        try:
+            self.q.setText(str(term or ""))
+            self.kind.setCurrentIndex(0)          # كل الأنواع
+            self.d_from.setDate(
+                QtCore.QDate.currentDate().addMonths(-int(months)))
+            self.d_to.setDate(QtCore.QDate.currentDate())
+            self.search()
+        except Exception as e:
+            err(self, e)
