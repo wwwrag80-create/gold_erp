@@ -6,8 +6,7 @@ from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models.reports import khazina_tiles, production_inputs_summary
-from ui.widgets.common import (Card, big_label, date_edit, err, fill,
-                               make_table, title_label)
+from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, make_table, title_label)
 
 
 class KhazinaReportScreen(QtWidgets.QWidget):
@@ -57,11 +56,11 @@ class KhazinaReportScreen(QtWidgets.QWidget):
         try:
             with db(readonly=True) as conn:
                 r = khazina_tiles(
-                    conn, self.d_from.date().toString("yyyy-MM-dd"),
-                    self.d_to.date().toString("yyyy-MM-dd"))
+                    conn, dstr(self.d_from),
+                    dstr(self.d_to))
                 pin = production_inputs_summary(
-                    conn, self.d_from.date().toString("yyyy-MM-dd"),
-                    self.d_to.date().toString("yyyy-MM-dd"))
+                    conn, dstr(self.d_from),
+                    dstr(self.d_to))
                 # رصيد مخزن الفصوص والأحجار (1150) داخل نفس الاتصال
                 try:
                     from models.accounts import acc_id

@@ -13,8 +13,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
 from models.reports import trial_balance
-from ui.widgets.common import (big_label, date_edit, err, fill, info,
-                               make_table, title_label)
+from ui.widgets.common import (big_label, date_edit, dstr, err, fill, info, make_table, title_label)
 
 COLS = ["الكود", "الحساب", "النوع",
         "افتتاح ذهب", "مدين ذهب", "دائن ذهب", "إقفال ذهب",
@@ -89,8 +88,8 @@ class TrialBalanceScreen(QtWidgets.QWidget):
     def _range(self):
         if self.all_time.isChecked():
             return None, None
-        return (self.d_from.date().toString("yyyy-MM-dd"),
-                self.d_to.date().toString("yyyy-MM-dd"))
+        return (dstr(self.d_from),
+                dstr(self.d_to))
 
     def load(self):
         try:

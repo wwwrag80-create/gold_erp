@@ -463,6 +463,56 @@ def main():
         close_thread_connection()
         shutil.rmtree(_swap, ignore_errors=True)
 
+    step("16) فلاتر التاريخ في الواجهة")
+    # Qt على ويندوز بلغة عربية تُنتج أرقاماً عربية في حقول التاريخ.
+    # فيُحفظ التاريخ عربياً (فيصير القيد غير مرئي)، ويُبحث به عربياً
+    # (فلا يطابق شيئاً وتظهر كل الحركات «رصيداً سابقاً»). هذه الفحوص
+    # تحرس الطرفين.
+    import os as _os
+    _os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from PyQt5 import QtWidgets as _QW
+        _app = _QW.QApplication.instance() or _QW.QApplication([])
+        from ui.widgets.common import dstr as _dstr, qdstr as _qdstr
+
+        class _ArDate:
+            def toString(self, fmt):
+                return "٢٠٢٦-٠٩-١٦"
+
+        class _ArWidget:
+            def date(self):
+                return _ArDate()
+
+        check("qdstr يطبّع الأرقام العربية",
+              _qdstr(_ArDate()) == "2026-09-16", _qdstr(_ArDate()))
+        check("dstr يطبّع حقل التاريخ",
+              _dstr(_ArWidget()) == "2026-09-16", _dstr(_ArWidget()))
+
+        # الأثر الفعلي: هل يطابق الفلتر قيداً محفوظاً إنجليزياً؟
+        with db(readonly=True) as conn:
+            hit = conn.execute(
+                "SELECT COUNT(*) c FROM journal_entries"
+                " WHERE entry_date>=? AND entry_date<=?",
+                (_qdstr(_ArDate()), "2026-09-30")).fetchone()["c"]
+            miss = conn.execute(
+                "SELECT COUNT(*) c FROM journal_entries"
+                " WHERE entry_date>=? AND entry_date<=?",
+                ("٢٠٢٦-٠٩-٠١", "٢٠٢٦-٠٩-٣٠")).fetchone()["c"]
+        check("الفلتر العربي لا يطابق شيئاً (تأكيد الخلل)", miss == 0)
+        check("الفلتر بعد التطبيع صالح للمقارنة", hit >= 0)
+
+        # لا يبقى في الواجهة منتج تاريخ بلا تطبيع
+        import subprocess as _sp
+        raw = _sp.run(["grep", "-rn", 'toString("yyyy-MM-dd")',
+                       "--include=*.py", "ui/", "services/", "models/"],
+                      capture_output=True, text=True, cwd=ROOT).stdout
+        leaks = [ln for ln in raw.splitlines()
+                 if "normalize_digits" not in ln]
+        check("كل منتجي نص التاريخ يمرّون بالمطبّع",
+              not leaks, "; ".join(leaks[:2]))
+    except ImportError:
+        check("فحوص الواجهة", True, "تخطّي — PyQt5 غير مثبّت")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -15,7 +15,7 @@ from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models.reports import income_statement_consignment
-from ui.widgets.common import date_edit, err, fill, make_table, title_label
+from ui.widgets.common import (date_edit, dstr, err, fill, make_table, title_label)
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -102,8 +102,8 @@ class IncomeStatementScreen(QtWidgets.QWidget):
 
     def load(self):
         try:
-            f = self.d_from.date().toString("yyyy-MM-dd")
-            t = self.d_to.date().toString("yyyy-MM-dd")
+            f = dstr(self.d_from)
+            t = dstr(self.d_to)
             with db(readonly=True) as conn:
                 r = income_statement_consignment(conn, f, t)
             self._render(r)

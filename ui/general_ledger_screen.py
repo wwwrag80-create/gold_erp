@@ -11,8 +11,7 @@ from services.audit import soft_delete_entry
 
 from services import browser_print
 from ui.widgets.table_fit import fit_columns
-from ui.widgets.common import (Card, ask, big_label, date_edit, err, fill, info,
-                               make_table, search_combo, title_label)
+from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err, fill, info, make_table, search_combo, title_label)
 
 from models.editing import EDITABLE
 
@@ -180,8 +179,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                     raise ValueError("الحساب غير موجود")
             print_manager.preview_document(
                 self, "statement", acc["id"],
-                date_from=self.d_from.date().toString("yyyy-MM-dd"),
-                date_to=self.d_to.date().toString("yyyy-MM-dd"))
+                date_from=dstr(self.d_from),
+                date_to=dstr(self.d_to))
         except Exception as e:
             err(self, e)
 
@@ -199,8 +198,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                     raise ValueError("الحساب غير موجود")
             print_manager.print_document(
                 self, "statement", acc["id"],
-                date_from=self.d_from.date().toString("yyyy-MM-dd"),
-                date_to=self.d_to.date().toString("yyyy-MM-dd"))
+                date_from=dstr(self.d_from),
+                date_to=dstr(self.d_to))
         except Exception as e:
             err(self, e)
 
@@ -216,8 +215,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                     raise ValueError("الحساب غير موجود")
                 rows = journal.statement(
                     conn, acc["id"],
-                    self.d_from.date().toString("yyyy-MM-dd"),
-                    self.d_to.date().toString("yyyy-MM-dd"))
+                    dstr(self.d_from),
+                    dstr(self.d_to))
             # ترشيح بنوع العملية — مع إبقاء سطر الرصيد السابق دائماً
             kind = self.op_kind.currentData()
             if kind:

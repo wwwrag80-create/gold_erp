@@ -16,8 +16,7 @@ from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import mfg_costs
-from ui.widgets.common import (ask, big_label, err, info, make_table,
-                               title_label)
+from ui.widgets.common import (ask, big_label, dstr, err, info, make_table, title_label)
 
 MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو",
           "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
@@ -555,7 +554,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 raise ValueError(
                     "لا توجد رواتب معلّقة — ربما رُحّلت مسبقاً")
             tot = sum(float(r["net_salary"]) for r in pending)
-            date = self.s_date.date().toString("yyyy-MM-dd")
+            date = dstr(self.s_date)
             if not ask(self,
                        f"ترحيل رواتب عمال التصنيع لشهر {self.period()}؟\n\n"
                        f"عدد العمال: {len(pending)}\n"

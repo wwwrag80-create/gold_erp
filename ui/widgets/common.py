@@ -82,8 +82,24 @@ def date_edit():
     return d
 
 
+def qdstr(qdate) -> str:
+    """نص التاريخ `YYYY-MM-DD` **بأرقام إنجليزية دائماً**.
+
+    على ويندوز بلغة عربية يُنتج `QDate.toString` أرقاماً عربية-هندية
+    (`٢٠٢٦-٠٩-١٦`). والتواريخ تُحفظ نصاً وتُقارَن نصاً، ورمز الرقم
+    العربي في يونيكود أكبر من الإنجليزي — فالتاريخ العربي يفشل في
+    شرط «أصغر من أو يساوي» ويسقط من كل فلتر.
+
+    وهذا يضرب من طرفين معاً: ما يُحفظ (فيصير القيد غير مرئي)، وما
+    يُبحث به (فلا يطابق الفلتر شيئاً ويظهر كل شيء «رصيداً سابقاً»).
+    كل نص تاريخ في النظام يمرّ من هنا.
+    """
+    from services.dates import normalize_digits
+    return normalize_digits(qdate.toString("yyyy-MM-dd"))
+
+
 def dstr(date_widget) -> str:
-    return date_widget.date().toString("yyyy-MM-dd")
+    return qdstr(date_widget.date())
 
 
 def make_table(stretch_last=True):

@@ -8,8 +8,7 @@ from database.database import db
 from models import fixing, inventory, invoices, journal, melting, payroll
 from models import purchases, shrinkage, stocktake, vouchers
 from services.audit import soft_delete_entry
-from ui.widgets.common import (ask, date_edit, err, fill, info, make_table,
-                               title_label)
+from ui.widgets.common import (ask, date_edit, dstr, err, fill, info, make_table, title_label)
 
 
 def _inv_kind(r):
@@ -170,8 +169,8 @@ class TransactionLogScreen(QtWidgets.QWidget):
             _, _, columns, loader, mapper = self._current_spec()
             with db(readonly=True) as conn:
                 rows = loader(conn, self.q.text().strip(),
-                             self.d_from.date().toString("yyyy-MM-dd"),
-                             self.d_to.date().toString("yyyy-MM-dd"))
+                             dstr(self.d_from),
+                             dstr(self.d_to))
             data = [mapper(r) for r in rows]
             fill(self.table, columns, data)
         except Exception as e:
