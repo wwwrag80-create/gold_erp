@@ -54,7 +54,10 @@ from ui.subledger_screen import SubLedgerScreen
 from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
 from services import karat_view as kv
-from ui.widgets.common import ask, err, info, search_combo
+from ui.widgets.common import ElidedLabel, ask, err, info, search_combo
+
+# دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
+NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -178,30 +181,49 @@ class MainWindow(QtWidgets.QMainWindow):
                       "النظام السحابي وإدارة المصانع")),
             ]))
 
+        # ══════════════════════════════════════════════════════════
+        #  الشريط العلوي
+        # ----------------------------------------------------------
+        #  ترتيب ثابت لا يتزاحم: الهوية والبحث يميناً، ثم فراغ مرن،
+        #  ثم أدوات النظام يساراً. كل عنصر بعرض محدود فلا يدفع جاره
+        #  ولا يتمدّد الشريط بطول اسمٍ في قائمة.
+        # ══════════════════════════════════════════════════════════
         header = QtWidgets.QFrame()
         header.setObjectName("header")
         h = QtWidgets.QHBoxLayout(header)
-        h.setContentsMargins(16, 10, 16, 10)
-        t = QtWidgets.QLabel(config.APP_NAME)
+        h.setContentsMargins(14, 8, 14, 8)
+        h.setSpacing(10)
+
+        # العنوان واسم المستخدم يُقصّان عند الضيق ولا يفرضان عرضاً
+        t = ElidedLabel(config.APP_NAME, minimum=90)
         t.setObjectName("headerTitle")
-        role_label = ("المدير العام" if self.is_super
-                      else f"مصنع: {tenant.factory_name()}")
-        u = QtWidgets.QLabel(
-            f"المستخدم: {user.get('full_name') or user['username']} — "
-            f"{role_label}")
-        u.setObjectName("headerUser")
-        btn_backup = QtWidgets.QPushButton("نسخة احتياطية الآن")
-        btn_backup.clicked.connect(self.do_backup)
-        h.addWidget(t)
-        h.addStretch(1)
-        h.addWidget(u)
-        # ══ عيار المصنع ══
+
+        # ── البحث السريع ──
+        # السؤال الأكثر تكراراً في أي نظام محاسبي: «كم على فلان؟».
+        # اسمٌ من أي مكان ← كشف حسابه مباشرةً.
+        self.quick = search_combo("🔍 بحث باسم الجهة أو الحساب…")
+        self.quick.setFixedWidth(200)
+        self.quick.setMinimumWidth(200)
+        self.quick.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                                 QtWidgets.QSizePolicy.Fixed)
+        self.quick.setToolTip(
+            "اكتب أول حروف الاسم ثم اختر — يفتح كشف الحساب مباشرةً")
+        self.quick.activated.connect(self._quick_open)
+        try:
+            self.quick.lineEdit().returnPressed.connect(self._quick_open)
+        except Exception:
+            pass
+        # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة
+        QtCore.QTimer.singleShot(400, self._load_quick_index)
+
+        # ── عيار المصنع ──
         # وحدة القراءة والكتابة في النظام كله. التخزين يبقى بمكافئ 18
         # مهما اختير — وهذا ما يجعل الأرصدة قابلة للجمع والمقارنة.
-        h.addWidget(QtWidgets.QLabel("عيار المصنع:"))
+        lbl_karat = QtWidgets.QLabel("العيار:")
+        lbl_karat.setObjectName("headerUser")
         self.karat_box = QtWidgets.QComboBox()
         self.karat_box.setObjectName("karatBox")
-        self.karat_box.setMaximumWidth(110)
+        self.karat_box.setFixedWidth(96)
         self.karat_box.setToolTip(
             "وحدة عرض وإدخال الأوزان في كل شاشات النظام.\n"
             "القيد يُخزَّن بمكافئ عيار 18 دائماً — لا تتغيّر البيانات.")
@@ -211,20 +233,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if _idx >= 0:
             self.karat_box.setCurrentIndex(_idx)
         self.karat_box.currentIndexChanged.connect(self._change_karat)
-        h.addWidget(self.karat_box)
-        btn_reset_nav = QtWidgets.QPushButton("↺ ترتيب القائمة الافتراضي")
-        btn_reset_nav.setVisible(True)
+
+        role_label = ("المدير العام" if self.is_super
+                      else f"مصنع: {tenant.factory_name()}")
+        u = ElidedLabel(
+            f"{user.get('full_name') or user['username']} — {role_label}",
+            minimum=110)
+        u.setObjectName("headerUser")
+
+        # ── الأدوات ──
+        # نصوص قصيرة وشرحها في التلميح: الشريط أداةٌ لا صفحة شرح.
+        btn_reset_nav = QtWidgets.QPushButton("↺")
         btn_reset_nav.setObjectName("ghost")
         btn_reset_nav.setToolTip(
             "القائمة الجانبية قابلة للسحب والإفلات وإعادة التسمية — "
             "هذا الزر يعيدها لترتيبها الأصلي")
         btn_reset_nav.clicked.connect(self.reset_nav_layout)
-        h.addWidget(btn_reset_nav)
-        btn_update = QtWidgets.QPushButton("⬆ التحديثات")
+        btn_update = QtWidgets.QPushButton("⬆ تحديث")
         btn_update.setToolTip(
             "تحقّق من التحديثات عبر الإنترنت، أو ثبّت حزمة محفوظة")
         btn_update.clicked.connect(self.do_update)
         self.btn_update = btn_update
+        btn_backup = QtWidgets.QPushButton("💾 نسخة")
+        btn_backup.setToolTip("ينشئ نسخة احتياطية كاملة الآن")
+        btn_backup.clicked.connect(self.do_backup)
         # فحص صامت عند الإقلاع: يضيء الزر إن وُجد تحديث
         try:
             from services import update_channel
@@ -234,25 +266,21 @@ class MainWindow(QtWidgets.QMainWindow):
                     0, self._on_update_checked))
         except Exception:
             pass
+        for b in (btn_reset_nav, btn_update, btn_backup):
+            b.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                            QtWidgets.QSizePolicy.Fixed)
+
+        h.addWidget(t)
+        h.addWidget(self.quick)
+        h.addStretch(1)                  # الفراغ يفصل الهوية عن الأدوات
+        h.addWidget(u)
+        h.addSpacing(8)
+        h.addWidget(lbl_karat)
+        h.addWidget(self.karat_box)
+        h.addSpacing(8)
+        h.addWidget(btn_reset_nav)
         h.addWidget(btn_update)
         h.addWidget(btn_backup)
-        # ══ البحث السريع — أقصى يسار الشريط ══
-        # السؤال الأكثر تكراراً في أي نظام محاسبي: «كم على فلان؟».
-        # كان يتطلب فتح دفتر الأستاذ ثم البحث في قائمة الحسابات. الآن
-        # اسم من أي مكان ← كشف حسابه مباشرةً.
-        self.quick = search_combo("🔍 بحث سريع باسم الجهة أو الحساب…")
-        self.quick.setMinimumWidth(240)
-        self.quick.setMaximumWidth(280)
-        self.quick.setToolTip(
-            "اكتب أول حروف الاسم ثم اختر — يفتح كشف الحساب مباشرةً")
-        self.quick.activated.connect(self._quick_open)
-        try:
-            self.quick.lineEdit().returnPressed.connect(self._quick_open)
-        except Exception:
-            pass
-        h.addWidget(self.quick)
-        # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة
-        QtCore.QTimer.singleShot(400, self._load_quick_index)
 
         # الشريط الفرعي: عنوان الشاشة الحالية وزر إغلاقها. يُبنى قبل
         # الشريط الجانبي لأن switch() تستخدم self.crumb و self.btn_close.
@@ -300,11 +328,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.screens = [self.welcome]     # Index 0 = شاشة الترحيب
         self.stack.addWidget(self.welcome)
         self._items = {}
+        # مفتاح ثابت لكل شاشة = اسمها الافتراضي في القائمة. الفهرس
+        # الرقمي يتغيّر مع كل إضافة شاشة، فحفظ الترتيب به يفتح شاشةً
+        # غير المقصودة بعد أي تحديث. الاسم الافتراضي لا يتغيّر.
+        self._screen_keys = {}
         for group_name, items in groups:
             parent = None
             if group_name:
                 parent = QtWidgets.QTreeWidgetItem(self.sidebar, [group_name])
                 parent.setData(0, QtCore.Qt.UserRole, -1)
+                parent.setData(0, NAV_KEY_ROLE, f"::group::{group_name}")
                 parent.setFlags(parent.flags() | QtCore.Qt.ItemIsEditable)
                 f = parent.font(0)
                 f.setBold(True)
@@ -314,6 +347,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 node = (QtWidgets.QTreeWidgetItem(parent, [name]) if parent
                         else QtWidgets.QTreeWidgetItem(self.sidebar, [name]))
                 node.setData(0, QtCore.Qt.UserRole, idx)
+                node.setData(0, NAV_KEY_ROLE, name)
+                self._screen_keys[idx] = name
                 node.setFlags(node.flags() | QtCore.Qt.ItemIsEditable)
                 self.screens.append(w)
                 self.stack.addWidget(self._scrollable(w))
@@ -387,6 +422,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _nav_node(self, item):
         return {
             "idx": item.data(0, QtCore.Qt.UserRole),
+            "key": item.data(0, NAV_KEY_ROLE) or "",
             "text": item.text(0),
             "expanded": item.isExpanded(),
             "children": [self._nav_node(item.child(i))
@@ -425,8 +461,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _restore_nav_layout(self):
         """يعيد بناء الشجرة من ملف الإعدادات إن وُجد.
 
-        يُطابَق كل عنصر بفهرس شاشته (idx)، فلو حُذفت شاشة أو أُضيفت
-        جديدة يبقى الباقي سليماً وتُلحق الشاشات الجديدة في النهاية.
+        **الخلل الذي عُولج هنا**: الملف كان يُطابَق بالفهرس الرقمي
+        للشاشة. والفهرس ترتيبٌ لا هوية: إضافة شاشة واحدة في وسط
+        القائمة تُزيح كل ما بعدها، فيصير البند المحفوظ يشير إلى جارته
+        — «المبيعات» تفتح «التوريد»، وتتكرر بنود، وتختفي أخرى.
+
+        العلاج: مفتاح ثابت لكل شاشة هو اسمها الافتراضي، يُحفظ مع
+        البند ويُطابَق به أولاً. ثم الاسم المعروض (للملفات القديمة
+        التي لا مفتاح فيها). **ولا يُطابَق بالفهرس إطلاقاً** — فهو
+        أصل الخلل. البند الذي لا يُطابق يُسقَط، وشاشته تُلحق في
+        نهاية القائمة باسمها الافتراضي، فتُصلح القائمة نفسها بنفسها
+        عند أول فتح.
         """
         path = self._nav_layout_path()
         if not path.exists():
@@ -447,11 +492,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._nav_loading = True
         try:
             used = set()
-
-            # خريطة الاسم ← الفهرس الحالي.
-            # الملف المحفوظ يخزّن فهرساً رقمياً، لكن إضافة أو حذف أي
-            # شاشة تُزيح كل الفهارس فتُفتح شاشة غير المقصودة. لذلك
-            # نطابق بالاسم أولاً — وهو ثابت — ونعود للفهرس عند تطابقه.
+            keys = getattr(self, "_screen_keys", {})
+            by_key = {k: i for i, k in keys.items()}
             by_text = {}
             for i, t in current.items():
                 by_text.setdefault(t, i)
@@ -460,28 +502,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 for n in nodes:
                     idx = n.get("idx")
                     text = n.get("text", "")
+                    key = n.get("key") or ""
                     if idx is not None and idx >= 0:
-                        # ══ مطابقة الشاشة المحفوظة ══
-                        # الاسم أولاً (يصمد أمام إعادة الترتيب)، ثم
-                        # الفهرس المحفوظ إن كان ما يزال متاحاً.
-                        # **الخلل السابق**: الشاشة المُعاد تسميتها لا
-                        # يطابق اسمها المحفوظ أي اسم أصلي، فكانت
-                        # تُسقَط كلياً — فيضيع الترتيب والتسمية معاً.
-                        real = by_text.get(text)
+                        # المفتاح الثابت أولاً، ثم الاسم المعروض.
+                        real = by_key.get(key)
                         if real is None or real in used:
-                            # الاسم مُعاد تسميته أو مستهلك: نعتمد
-                            # الفهرس المحفوظ ما دام حرّاً وصالحاً
-                            if idx in current and idx not in used:
-                                real = idx
-                            else:
-                                real = None
+                            real = by_text.get(text)
                         if real is None or real in used:
-                            continue
+                            continue      # لا مطابقة — تُلحق لاحقاً
                         idx = real
                         used.add(idx)
                     it = QtWidgets.QTreeWidgetItem([text])
                     it.setData(0, QtCore.Qt.UserRole,
                                idx if idx is not None else -1)
+                    it.setData(0, NAV_KEY_ROLE,
+                               keys.get(idx, key) if idx is not None
+                               and idx >= 0 else key)
                     it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
                     if parent is None:
                         self.sidebar.addTopLevelItem(it)
@@ -492,12 +528,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self.sidebar.clear()
             build(saved, None)
-            # أي شاشة جديدة لم تكن في الملف تُلحق في النهاية
+            # أي شاشة لم تُطابق (جديدة أو ضاع بندها) تُلحق في النهاية
+            # باسمها الافتراضي — فلا تختفي شاشة من القائمة أبداً.
             for idx, text in sorted(current.items()):
                 if idx in used:
                     continue
                 it = QtWidgets.QTreeWidgetItem([text])
                 it.setData(0, QtCore.Qt.UserRole, idx)
+                it.setData(0, NAV_KEY_ROLE, keys.get(idx, text))
                 it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
                 self.sidebar.addTopLevelItem(it)
             # إعادة بناء خريطة العناصر
@@ -536,6 +574,15 @@ class MainWindow(QtWidgets.QMainWindow):
         area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         area.setWidget(widget)
+        # ══ النافذة لا تتمدّد لتُرضي شاشةً عريضة ══
+        # منطقة التمرير تُورّث أدنى عرضٍ تطلبه الشاشة داخلها، فشاشة
+        # ذات جدول كثير الأعمدة كانت تدفع النافذة لتتّسع أفقياً —
+        # فيضطر المستخدم لتصغيرها يدوياً بعد كل فتح. الحد الأدنى هنا
+        # صغير صريح: الشاشة الأعرض تُمرَّر أفقياً داخل إطارها، والنافذة
+        # تبقى بحجمها الذي اختاره المستخدم.
+        area.setMinimumWidth(360)
+        area.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                           QtWidgets.QSizePolicy.Expanding)
         return area
 
     def _close_screen(self):

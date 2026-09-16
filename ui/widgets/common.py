@@ -35,6 +35,43 @@ class Card(QtWidgets.QFrame):
         super().mousePressEvent(event)
 
 
+class ElidedLabel(QtWidgets.QLabel):
+    """ملصق يقصّ نصّه بثلاث نقاط بدل أن يفرض عرضه على النافذة.
+
+    **لماذا**: `QLabel` يطلب عرضاً بطول نصّه كاملاً، ولا يقبل أقلّ
+    منه. فاسم مصنع طويل في الشريط العلوي كان يجعل أدنى عرضٍ للنافذة
+    أكبر من الشاشة — فتُفتح النافذة متمدّدة أفقياً ويضطر المستخدم
+    لتصغيرها بعد كل فتح.
+
+    هنا: أدنى عرض صغير ثابت، والنص يُقصّ في العرض المتاح، وكامله في
+    التلميح. فالشريط يضيق ويتّسع مع النافذة بلا أن يفرض عليها شيئاً.
+    """
+
+    def __init__(self, text="", minimum=90, parent=None):
+        super().__init__(text, parent)
+        self._full = text
+        self._min = int(minimum)
+        self.setToolTip(text)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
+                           QtWidgets.QSizePolicy.Preferred)
+
+    def setText(self, text):
+        self._full = text or ""
+        self.setToolTip(self._full)
+        super().setText(self._full)
+
+    def minimumSizeHint(self):
+        sh = super().minimumSizeHint()
+        return QtCore.QSize(min(self._min, sh.width()), sh.height())
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        fm = QtGui.QFontMetrics(self.font())
+        txt = fm.elidedText(self._full, QtCore.Qt.ElideRight,
+                            max(10, self.width() - 2))
+        painter.drawText(self.rect(), int(self.alignment()), txt)
+
+
 class _BlankZeroSpin(QtWidgets.QDoubleSpinBox):
     """QDoubleSpinBox يظهر فارغاً تماماً عند القيمة صفر (بدل "0.00") —
     يمنع أخطاء التداخل أثناء الإدخال السريع، ويعمل بلا أثر جانبي على
@@ -279,7 +316,21 @@ class SearchCombo(QtWidgets.QComboBox):
         super().__init__()
         self.setEditable(True)
         self.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
-        self.setMinimumWidth(240)
+        self.setMinimumWidth(200)
+        # ══ العرض لا يتبع أطول عنصر ══
+        # السياسة الافتراضية (AdjustToContentsOnFirstShow) تجعل عرض
+        # القائمة بعرض أطول اسم فيها. وقوائم الحسابات تحوي أسماءً
+        # طويلة («1602 — عميل: مؤسسة الشرق الأوسط للمجوهرات…»)، فتتمدّد
+        # القائمة ويتمدّد معها الشريط ثم النافذة كلها أفقياً — وهو سبب
+        # اتساع النظام عند فتح الشاشات. العرض الآن ثابت والنص الطويل
+        # يُقصّ في العرض وحده بلا أي تأثير على الاختيار.
+        self.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        try:
+            self.setMinimumContentsLength(16)
+            self.view().setTextElideMode(QtCore.Qt.ElideRight)
+        except Exception:
+            pass
         self.lineEdit().setPlaceholderText(placeholder)
         comp = QtWidgets.QCompleter(self)
         comp.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)

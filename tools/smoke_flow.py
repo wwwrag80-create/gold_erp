@@ -947,6 +947,124 @@ def main():
     check("قالب الإغلاق اليومي يُبنى", "الإغلاق اليومي" in h_day
           and "الأرصدة الختامية" in h_day)
 
+    # ترشيح التقرير بجهات مختارة — الورقة تطابق الشاشة
+    if arows:
+        one = arows[0]["entity_id"]
+        with db(readonly=True) as conn:
+            h_one = print_manager._tpl_aging(conn, 0, "customer", None,
+                                             "both", [one])
+        others = [r["name"] for r in arows if r["entity_id"] != one]
+        check("ورقة الأعمار تحترم الترشيح بالأسماء",
+              all(n not in h_one for n in others) and "جهات مختارة" in h_one,
+              f"{len(others)} جهة مستبعدة")
+
+    step("25) سلامة القائمة الجانبية والواجهة")
+    # **الخلل الذي عُولج**: ترتيب القائمة كان يُحفظ بفهرس الشاشة
+    # الرقمي. وإضافة شاشة في وسط القائمة تُزيح كل ما بعدها، فيصير
+    # البند يفتح جارته — «المبيعات» تفتح «التوريد» — وتتكرر بنود.
+    try:
+        from PyQt5 import QtCore as _QC, QtWidgets as _QW
+        _app2 = _QW.QApplication.instance() or _QW.QApplication([])
+        import json as _json
+        from ui.main_window import MainWindow as _MW, NAV_KEY_ROLE as _KEY
+        from ui.widgets.common import ElidedLabel as _EL, search_combo as _sc
+
+        _user = {"id": 1, "username": "admin", "full_name": "م",
+                 "role": "admin", "role_local": "accountant"}
+        w1 = _MW(_user)
+
+        def _tree(win):
+            out = []
+            for it, _p in win._iter_nav():
+                i = it.data(0, _QC.Qt.UserRole)
+                if i is not None and i >= 0:
+                    out.append((it.text(0), i))
+            return out
+
+        base = _tree(w1)
+        check("القائمة تُبنى كاملةً", len(base) > 25, f"{len(base)} بنداً")
+        check("لكل بند مفتاح ثابت",
+              all(it.data(0, _KEY) for it, _p in w1._iter_nav()))
+
+        # ملف قديم بفهارس مُزاحة وبندٍ مُعاد تسميته
+        legacy = [{"idx": max(0, i - 2), "text": t, "expanded": True,
+                   "children": []} for t, i in base]
+        legacy[3]["text"] = "اسم غيّرته بنفسي"
+        path = w1._nav_layout_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_json.dumps(legacy, ensure_ascii=False),
+                        encoding="utf-8")
+
+        w2 = _MW(_user)
+        after = _tree(w2)
+        idxs = [i for _t, i in after]
+        by_name = dict(base)
+        wrong = [t for t, i in after if t in by_name and by_name[t] != i]
+        check("لا بند يفتح شاشةً غير شاشته", not wrong, str(wrong[:3]))
+        check("لا تكرار في البنود", len(idxs) == len(set(idxs)))
+        check("لا تختفي شاشة من القائمة",
+              set(idxs) == {i for _t, i in base},
+              f"{len(set(idxs))} من {len(base)}")
+
+        # الملف الجديد يُستعاد كما هو تماماً
+        w2._save_nav_layout()
+        saved_nav = _json.loads(path.read_text(encoding="utf-8"))
+
+        def _keys(nodes):
+            out = []
+            for n in nodes:
+                out.append(n.get("key", ""))
+                out += _keys(n.get("children", []))
+            return out
+
+        check("المفاتيح تُحفظ في الملف",
+              len([k for k in _keys(saved_nav)
+                   if k and not k.startswith("::group::")]) == len(base))
+        w3 = _MW(_user)
+        check("الاستعادة بالمفاتيح مطابقة", _tree(w3) == after)
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+        # الواجهة لا تتمدّد أفقياً بطول الأسماء
+        cb = _sc("بحث")
+        for i in range(60):
+            cb.addItem("1600 — عميل: مؤسسة الشرق الأوسط للمجوهرات "
+                       "والمعادن الثمينة رقم %d" % i, i)
+        check("قائمة البحث لا تتمدّد بطول أسمائها",
+              cb.sizeHint().width() < 400, f"{cb.sizeHint().width()} بكسل")
+        lbl = _EL("اسم طويل جداً لمصنع ذهب ومجوهرات وأحجار كريمة",
+                  minimum=90)
+        check("الملصق القصّاص لا يفرض عرضه",
+              lbl.minimumSizeHint().width() <= 90,
+              f"{lbl.minimumSizeHint().width()} بكسل")
+        check("الشريط العلوي لا يفرض عرضاً كبيراً",
+              w1.centralWidget().minimumSizeHint().width() < 1000,
+              f"{w1.centralWidget().minimumSizeHint().width()} بكسل")
+
+        # شاشة الأعمار: الترشيح بالأسماء
+        from ui.reports.aging_screen import AgingScreen as _AG
+        ag = _AG(_user)
+        ag.refresh()
+        total_rows = len(ag.rows)
+        check("شاشة الأعمار تعرض الكل افتراضاً",
+              len(ag._visible_rows()) == total_rows and not ag.selected)
+        if total_rows:
+            ag.selected = [ag.rows[0]["entity_id"]]
+            ag._update_names_label()
+            check("الترشيح يقصر الجدول على المختار",
+                  len(ag._visible_rows()) == 1,
+                  f"{len(ag._visible_rows())} من {total_rows}")
+            check("الملصق يعلن المعروض",
+                  ag.rows[0]["name"] in ag.lbl_sel.text(), ag.lbl_sel.text())
+            ag.clear_names()
+            check("مسح التحديد يعيد الكل",
+                  len(ag._visible_rows()) == total_rows
+                  and "كل الجهات" in ag.lbl_sel.text())
+    except ImportError:
+        check("فحوص القائمة والواجهة", True, "تخطّي — PyQt5 غير مثبّت")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
