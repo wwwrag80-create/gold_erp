@@ -10,9 +10,10 @@ from database.database import db
 from models import entities, inventory, invoices
 from models.inventory import BULK_WO_NO
 from services import gold_math
-from ui.widgets.common import (confirm_post, posted, ask, big_label, date_edit, dstr,
-                               err, fill, info, make_table, mspin,
-                               reload_combo, search_combo, title_label,
+from ui.widgets.common import (cell, confirm_post, posted, ask, big_label,
+                               date_edit, dstr, err, fill, has_model_image,
+                               info, make_table, mspin, reload_combo,
+                               search_combo, show_model_image, title_label,
                                wspin)
 
 # نفس أعمدة جدول التوريد + الأجر والأجرة
@@ -408,6 +409,10 @@ class SalesScreen(QtWidgets.QWidget):
         top.addLayout(entry, 4, 0, 1, 6)
 
         self.items_table = make_table()
+        # النقر على خانة الموديل يفتح صورته المحفوظة
+        self.items_table.cellClicked.connect(self._model_clicked)
+        self.items_table.setToolTip(
+            "انقر خانة الموديل لعرض صورته المحفوظة في دليل الموديلات")
         btn_remove = QtWidgets.QPushButton("حذف الطقم المحدد من الفاتورة")
         btn_remove.setObjectName("ghost")
         btn_remove.clicked.connect(self.remove_item)
@@ -794,6 +799,20 @@ class SalesScreen(QtWidgets.QWidget):
         except Exception:
             pass
 
+    def _model_clicked(self, row, col):
+        """النقر على خانة الموديل يفتح صورته المحفوظة.
+
+        من يبيع أو يرتجع يحتاج التأكد من شكل الموديل، وكان ذلك يتطلب
+        ترك الشاشة والبحث في دليل الموديلات. الصورة وصفية بحتة بلا أي
+        أثر محاسبي، فعرضها هنا لا يمسّ شيئاً.
+        """
+        if col != 0:
+            return
+        try:
+            show_model_image(self, cell(self.items_table, row, 0))
+        except Exception as e:
+            info(self, str(e), "صورة الموديل")
+
     def render_items(self):
         cid = self.customer.currentData()
         internal = cid is not None and self._is_internal(cid)
@@ -810,6 +829,9 @@ class SalesScreen(QtWidgets.QWidget):
                 big, after = wo["big_stones"], wo["stones_after_discount"]
                 standing = wo["standing_gold"]
             mn = (wo["model_no"] if "model_no" in wo.keys() else "") or "—"
+            # 🖼 يسبق الموديل الذي له صورة محفوظة — فيُعرف القابل للنقر
+            if mn != "—" and has_model_image(mn):
+                mn = f"🖼 {mn}"
             rows.append((mn, wo["work_order_no"], gold, small, big, after,
                         weight, standing, wage,
                         gold_math.total_wages(wage, weight)))

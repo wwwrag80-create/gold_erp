@@ -307,9 +307,48 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             self.c_bal.set_value(
                 f"{abs(c):,.2f}",
                 "مدين/عليه" if c >= 0 else "دائن/له")
+            # الجهة/الحساب المقابل (3) والبيان (4): يُلفّان على أسطر
+            self._fit_rows((3, 4))
             self._show_latest()
         except Exception as e:
             err(self, e)
+
+    def _fit_rows(self, cols, max_lines=4):
+        """يلفّ نص أعمدة بعينها على أسطر داخل عرضها الثابت.
+
+        الاسم الطويل كان يُقتطع إلى كلمتين حتى لا يتمدّد العمود، فيضيع
+        تمييز الجهة — وهو أهم ما في العمود. الآن يُعرض كاملاً ملفوفاً
+        داخل العرض نفسه، فلا يتمدّد الجدول أفقياً ولا يُخفى شيء.
+
+        القياس على الأعمدة المطلوبة وحدها — لا `resizeRowsToContents`
+        الذي يقرأ كل خلية في كل عمود فيتجمّد على مئات الصفوف.
+        """
+        try:
+            from PyQt5 import QtGui
+            fm = QtGui.QFontMetrics(self.table.font())
+            line = max(14, fm.lineSpacing())
+            pad = 10
+            base = line + pad
+            vh = self.table.verticalHeader()
+            vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+            widths = {c: max(40, self.table.columnWidth(c) - 12)
+                      for c in cols}
+            flag = QtCore.Qt.TextWordWrap
+            for i in range(self.table.rowCount()):
+                need = 1
+                for c in cols:
+                    it = self.table.item(i, c)
+                    txt = it.text() if it else ""
+                    if not txt or len(txt) < 12:
+                        continue
+                    h = fm.boundingRect(0, 0, widths[c], 0, flag,
+                                        txt).height()
+                    need = max(need, min(max_lines,
+                                         max(1, -(-h // line))))
+                self.table.setRowHeight(i, base if need == 1
+                                        else need * line + pad)
+        except Exception:
+            pass          # اللفّ تحسين عرض لا يُفشل الكشف
 
     def _show_latest(self):
         """ينزل بالكشف إلى **آخر** العمليات عند العرض.
@@ -534,6 +573,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.c_debit.set_value(f"{tc:,.2f}")
         self.c_credit.set_value("—")
         self.c_bal.set_value(f"{len(rows):,}", "عدد المستندات")
+        # الحسابات المتأثرة (3) والبيان (4)
+        self._fit_rows((3, 4))
         self._show_latest()
         if not rows:
             info(self, f"لا توجد عمليات بين {d1} و{d2}.")

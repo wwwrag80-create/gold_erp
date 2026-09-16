@@ -501,3 +501,53 @@ def posted(parent, message, doc_type=None, doc_id=None,
     except Exception as e:
         err(parent, f"تعذّرت الطباعة: {e}")
     return None
+
+
+def show_model_image(parent, model_no):
+    """يعرض صورة الموديل في نافذة — من أي شاشة.
+
+    الصورة **وصفية بحتة** بلا أثر محاسبي. كانت متاحة من شاشة دليل
+    الموديلات وحدها، فمن يبيع أو يرتجع لا يرى شكل الموديل إلا بترك
+    شاشته والبحث فيه. هذه الدالة تجعل العرض متاحاً حيثما ظهر رقم
+    الموديل، بتطبيق واحد لا بنسختين تتباعدان.
+    """
+    from PyQt5 import QtGui
+    from models import models_catalog as mc
+
+    no = (str(model_no or "").strip().lstrip("🖼").strip())
+    if not no or no == "—":
+        raise ValueError("لا يوجد رقم موديل لهذا السطر")
+    p = mc.image_path(no)
+    if p is None:
+        raise ValueError(
+            f"لا توجد صورة محفوظة للموديل {no}.\n\n"
+            "تُضاف الصور من شاشة «دليل الموديلات».")
+    dlg = QtWidgets.QDialog(parent)
+    dlg.setWindowTitle(f"صورة الموديل {no}")
+    lbl = QtWidgets.QLabel()
+    pix = QtGui.QPixmap(str(p))
+    try:
+        if pix.width() > 900 or pix.height() > 700:
+            pix = pix.scaled(900, 700, QtCore.Qt.KeepAspectRatio,
+                             QtCore.Qt.SmoothTransformation)
+    except Exception:
+        pass
+    lbl.setPixmap(pix)
+    lbl.setAlignment(QtCore.Qt.AlignCenter)
+    btn = QtWidgets.QPushButton("إغلاق")
+    btn.clicked.connect(dlg.accept)
+    lay = QtWidgets.QVBoxLayout(dlg)
+    lay.addWidget(lbl, 1)
+    lay.addWidget(btn)
+    dlg.exec_()
+    return True
+
+
+def has_model_image(model_no):
+    """هل للموديل صورة محفوظة؟ — لوسم الخلية القابلة للنقر."""
+    try:
+        from models import models_catalog as mc
+        no = str(model_no or "").strip()
+        return bool(no and no != "—" and mc.image_path(no) is not None)
+    except Exception:
+        return False
