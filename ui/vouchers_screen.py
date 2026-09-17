@@ -2,12 +2,12 @@
 """شاشة السندات: تسديد ذهب (تحويل عيار آلي) ونقد وفرق صافي وخصومات —
 توجيه شامل: إلى جهة تعامل (عميل/مورد/شريك/داخلي) أو أي حساب مباشر من
 شجرة الحسابات — أداة التسوية المالية والوزنية الوحيدة لسداد الموردين."""
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import coa, editing, entities, inventory, vouchers
 from models.accounts import list_postable
-from services import gold_math, karat_view as kv
+from services import drafts, gold_math, karat_view as kv
 from services.accounting_engine import account_balance
 from ui.widgets.common import (busy, confirm_post, big_label, posted, date_edit, dstr, enter_chain, err,
                                fill, info, make_table, mspin, reload_combo,
@@ -15,6 +15,8 @@ from ui.widgets.common import (busy, confirm_post, big_label, posted, date_edit,
 
 
 from ui.widgets.edit_mode import EditModeMixin
+
+DRAFT_KEY = "vouchers"
 
 
 class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
@@ -144,6 +146,13 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         lay.addWidget(self.rows_table, 1)
         lay.addWidget(btn_del_row)
         lay.addWidget(self.rows_total)
+        # يظهر حين يُستعاد سند لم يُرحَّل — فلا يظن المستخدم أن أسطراً
+        # ظهرت من تلقاء نفسها.
+        self.draft_note = QtWidgets.QLabel("")
+        self.draft_note.setObjectName("ok")
+        self.draft_note.setWordWrap(True)
+        self.draft_note.setVisible(False)
+        lay.addWidget(self.draft_note)
         lay.addWidget(self.edit_banner)
         srow = QtWidgets.QHBoxLayout()
         srow.addWidget(btn_save, 1)
@@ -376,6 +385,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                            f"رقم السند وتاريخه وقيده لم تتغيّر.")
                 self.end_edit()
                 self.rows = []
+                self._drop_draft()
                 self.render_rows()
                 self.refresh()
                 return
@@ -387,6 +397,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                    editing=bool(res.get("replaced_id")))
             self.end_edit()
             self.rows = []
+            self._drop_draft()
             self.adj_enable.setChecked(False)
             self.toggle_adjustments()
             self.render_rows()
@@ -461,6 +472,74 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    # ══════════════════════════════════════════════════════════════
+    #  مسوّدة السند غير المرحَّل
+    #  الشرح كاملاً في `services/drafts.py`.
+    # ══════════════════════════════════════════════════════════════
+
+    def draft_state(self):
+        """أسطر السند ورأسه — والأوزان بأعيارها الفعلية كما أُدخلت."""
+        if getattr(self, "is_editing", False):
+            return None          # وضع التعديل لا يُحفظ مسوّدةً
+        if not self.rows:
+            return None
+        return {
+            "kind": self.kind.currentData(),
+            "target_mode": self.target_mode.currentData(),
+            "entity_id": self.entity_combo.currentData(),
+            "account_id": self.account_combo.currentData(),
+            "date": dstr(self.date),
+            "notes": self.notes.text().strip(),
+            "rows": [dict(r) for r in self.rows],
+        }
+
+    def apply_draft(self, d):
+        if not d or not d.get("rows"):
+            return False
+        for combo, key in ((self.kind, "kind"),
+                           (self.target_mode, "target_mode"),
+                           (self.entity_combo, "entity_id"),
+                           (self.account_combo, "account_id")):
+            i = combo.findData(d.get(key))
+            if i >= 0:
+                combo.setCurrentIndex(i)
+        if d.get("date"):
+            self.date.setDate(QtCore.QDate.fromString(d["date"],
+                                                      "yyyy-MM-dd"))
+        self.notes.setText(d.get("notes") or "")
+        self.rows = [dict(r) for r in d["rows"]]
+        self.render_rows()
+        return True
+
+    def _restore_draft(self):
+        if getattr(self, "_draft_done", False):
+            return
+        self._draft_done = True
+        try:
+            if self.apply_draft(drafts.load(DRAFT_KEY,
+                                            self.user.get("username"))):
+                self.draft_note.setText(
+                    "↩ استُعيد سند لم يُرحَّل بعد — أكمله أو احذف أسطره.")
+                self.draft_note.setVisible(True)
+        except Exception:
+            pass
+
+    def _drop_draft(self):
+        """يمحو المسوّدة — فور الترحيل."""
+        try:
+            drafts.clear(DRAFT_KEY, self.user.get("username"))
+            self.draft_note.setVisible(False)
+        except Exception:
+            pass
+
+    def on_close(self):
+        """يُستدعى من `LazyScreen.release` عند مغادرة الشاشة."""
+        try:
+            drafts.save(DRAFT_KEY, self.user.get("username"),
+                        self.draft_state())
+        except Exception:
+            pass
+
     def refresh(self):
         with db() as conn:
             reload_combo(self.entity_combo, entities.list_entities(conn),
@@ -473,3 +552,4 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self._apply_measurement()
         self.kind_changed()
         self.recalc_equiv()
+        self._restore_draft()

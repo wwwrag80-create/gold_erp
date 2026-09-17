@@ -1336,6 +1336,140 @@ def main():
         check("المساحة المستعملة تُحسب وتُعرض",
               _u["images"] >= 1 and _u["total_mb"] >= 0, str(_u))
 
+    step("27ج) رمز QR بقرارٍ لكل فاتورة · ومسوّدات شاشات الإدخال")
+    # **الطلب**: ليست كل فاتورة تحتاج رمزاً. وإنشاؤه يعني رفع صورٍ
+    # تستهلك مساحة — فلا يُبنى إلا لفاتورة طُلب لها صراحةً.
+    with db() as conn:
+        _b = _batch(conn, [{"wo_no": "QR1", "gold": 15.0,
+                            "wage_per_gram": 20.0},
+                           {"wo_no": "QR2", "gold": 15.0,
+                            "wage_per_gram": 20.0}],
+                    "2026-09-10", "admin")
+        qids = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no IN ('QR1','QR2')")}
+        inv_off = create_sale(conn, cust, [{"work_order_id": qids["QR1"]}],
+                              "2026-09-11", "admin")
+        inv_on = create_sale(conn, cust, [{"work_order_id": qids["QR2"]}],
+                             "2026-09-11", "admin", qr_enabled=True)
+    with db(readonly=True) as conn:
+        check("الفاتورة بلا تفعيل لا رمز لها",
+              not _ish.enabled_for(conn, inv_off["id"]))
+        check("والمفعَّلة لها رمز", _ish.enabled_for(conn, inv_on["id"]))
+        check("غير المفعَّلة لا تُنشر ولا تستهلك مساحة",
+              _ish.publish(conn, inv_off["id"]) == ("", ""))
+        check("ولا يُطبع لها وسم QR",
+              _ish_qr.qr_for_invoice(conn, inv_off["id"],
+                                     inv_off["invoice_no"]) == "")
+    with db(readonly=True) as conn:
+        check("الفواتير السابقة تبقى بلا رمز افتراضياً",
+              conn.execute(
+                  "SELECT COUNT(*) n FROM invoices WHERE qr_enabled=1"
+              ).fetchone()["n"] == 1)
+
+    # ── المسوّدات: ما أُدخل ولم يُرحَّل يبقى بعد مغادرة الشاشة ──
+    from services import drafts as _dr
+    _dr.save("اختبار", "admin", {"a": 1, "b": ["س", "ص"]})
+    check("المسوّدة تُحفظ وتُستعاد كما هي",
+          _dr.load("اختبار", "admin") == {"a": 1, "b": ["س", "ص"]})
+    check("ومسوّدة مستخدمٍ لا تظهر لغيره",
+          _dr.load("اختبار", "other") == {})
+    _dr.clear("اختبار", "admin")
+    check("والمحو يمسحها", _dr.load("اختبار", "admin") == {})
+
+    try:
+        from PyQt5 import QtWidgets as _QW5
+        _app5 = _QW5.QApplication.instance() or _QW5.QApplication([])
+        _u5 = {"id": 1, "username": "admin", "full_name": "م",
+               "role": "admin", "role_local": "accountant"}
+        from ui.production_screen import (DRAFT_KEY as _PK,
+                                          ProductionScreen as _PS)
+        _dr.clear(_PK, "admin")
+        ps = _PS(_u5)
+        ps.refresh()
+        ps.batch = [{"model_no": "M1", "wo_no": "DR-1", "gold": 10.0,
+                     "small_stones": 0.0, "big_stones": 0.0,
+                     "discount_rate": 0.5, "wage_per_gram": 20.0,
+                     "notes": ""}]
+        ps.on_close()                      # مغادرة الشاشة
+        check("مغادرة شاشة التوريد تحفظ الدفعة",
+              bool(_dr.load(_PK, "admin").get("batch")))
+        ps2 = _PS(_u5)                     # العودة إليها
+        ps2.refresh()
+        check("والعودة تستعيدها كما تُركت",
+              len(ps2.batch) == 1 and ps2.batch[0]["wo_no"] == "DR-1",
+              str(ps2.batch))
+        check("ويُنبَّه المستخدم أنها استُعيدت",
+              ps2.draft_note.isVisible() or bool(ps2.draft_note.text()))
+        _dr.clear(_PK, "admin")
+        ps3 = _PS(_u5)
+        ps3.refresh()
+        check("وبعد المحو تُفتح فارغة", ps3.batch == [])
+
+        # مسوّدة السند
+        from ui.vouchers_screen import (DRAFT_KEY as _VK,
+                                        VouchersScreen as _VS)
+        _dr.clear(_VK, "admin")
+        vs = _VS(_u5)
+        vs.refresh()
+        vs.rows = [{"kind": "gold", "weight": 12.5, "karat": 21,
+                    "amount": 0.0, "notes": "دفعة"}]
+        vs.on_close()
+        vs2 = _VS(_u5)
+        vs2.refresh()
+        check("سند لم يُرحَّل يبقى بعد مغادرة شاشته",
+              len(vs2.rows) == 1 and vs2.rows[0]["weight"] == 12.5,
+              str(vs2.rows))
+        _dr.clear(_VK, "admin")
+
+        # مسوّدة الفاتورة
+        from ui.sales_screen import DRAFT_KEY as _SK, SalesScreen as _SS
+        _dr.clear(_SK, "admin")
+        ss = _SS(_u5)
+        ss.refresh()
+        with db(readonly=True) as conn:
+            _wo = conn.execute(
+                "SELECT * FROM work_orders WHERE status='in_stock'"
+                " AND is_deleted=0 LIMIT 1").fetchone()
+        if _wo is not None:
+            i = ss.customer.findData(cust)
+            if i >= 0:
+                ss.customer.setCurrentIndex(i)
+            ss.items = [{"wo": _wo, "weight": 5.0, "wage": 20.0}]
+            ss.qr_check.setChecked(True)
+            ss.on_close()
+            ss2 = _SS(_u5)
+            ss2.refresh()
+            check("فاتورة لم تُرحَّل تبقى بعد مغادرة شاشتها",
+                  len(ss2.items) == 1
+                  and ss2.items[0]["wo"]["id"] == _wo["id"],
+                  str(len(ss2.items)))
+            check("واختيار رمز QR يُستعاد معها",
+                  ss2.qr_check.isChecked())
+            check("والعميل يعود كما كان",
+                  ss2.customer.currentData() == cust)
+        # وضع التعديل لا يُحفظ مسوّدةً
+        ss.editing_id = 99
+        check("وضع التعديل لا يُحفظ مسوّدةً", ss.draft_state() is None)
+        ss.editing_id = None
+        _dr.clear(_SK, "admin")
+
+        # آخر اختيار لرمز QR يبقى بعد إعادة فتح الشاشة
+        from ui.widgets.common import load_pref as _lp
+        ss3 = _SS(_u5)
+        ss3.qr_check.setChecked(True)
+        check("تفعيل رمز QR يُحفظ تفضيلاً",
+              str(_lp("sales_qr_enabled", "0")) == "1")
+        ss4 = _SS(_u5)
+        check("ويعود مفعّلاً عند فتح الشاشة من جديد",
+              ss4.qr_check.isChecked())
+        ss4.qr_check.setChecked(False)
+        ss5 = _SS(_u5)
+        check("وإلغاؤه يبقى ملغى كذلك", not ss5.qr_check.isChecked())
+    except ImportError:
+        check("فحوص المسوّدات ورمز الفاتورة", True,
+              "تخطّي — PyQt5 غير مثبّت")
+
     step("28) حدّ الائتمان")
     # سقفٌ لكل جهة يُفحص **لحظة الترحيل** لا في تقرير آخر الشهر:
     # البضاعة تخرج لحظتها، فالتنبيه بعدها بأسبوع تنبيهٌ متأخر.
