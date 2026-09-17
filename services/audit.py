@@ -148,4 +148,21 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
 def soft_delete_entry(entry_id: int, username: str) -> str:
     """حذف منطقي بمعاملة مستقلة (يُستدعى من الشاشات مباشرة)."""
     with db() as conn:
-        return reverse_entry(conn, entry_id, username)
+        src = conn.execute(
+            "SELECT source_table, source_id FROM journal_entries"
+            " WHERE id=?", (entry_id,)).fetchone()
+        msg = reverse_entry(conn, entry_id, username)
+    # ══ صفحة الفاتورة المحذوفة تُعلن إلغاءها ══
+    # **بعد إغلاق المعاملة**: الإعلان رفعٌ عبر الإنترنت، وإجراؤه داخل
+    # المعاملة يحبس قفل الكتابة. ومن بيده الورقة سيصوّر رمزها يوماً،
+    # فصفحةٌ باقية بمضمونها القديم تُوهمه أن فاتورةً ملغاة ما زالت
+    # سارية — وهو أخطر من صفحةٍ مفقودة.
+    try:
+        if src and src["source_table"] == "invoices" and src["source_id"]:
+            import config
+            from services import invoice_share
+            invoice_share.mark_cancelled(src["source_id"],
+                                         config.COMPANY_NAME)
+    except Exception:
+        pass          # إعلان الإلغاء لا يُبطل حذفاً تمّ
+    return msg

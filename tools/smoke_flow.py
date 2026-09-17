@@ -1399,6 +1399,47 @@ def main():
           any("الرابط الذي سيحمله الرمز" in s["step"] for s in _ok_steps),
           str([s["step"] for s in _ok_steps]))
 
+    # ══ تعديل الفاتورة يُعدّل صفحتها — بالرمز نفسه ══
+    # الورقة بيد العميل تحمل رمزاً ثابتاً، فلو بقيت الصفحة على مضمونها
+    # القديم لرأى فاتورةً غير التي بيده.
+    with db() as conn:
+        _tok_before = _ish._token(conn, inv_on["id"])
+        conn.execute("UPDATE invoices SET share_url=? WHERE id=?",
+                     ("https://x/old/index.html", inv_on["id"]))
+    with db(readonly=True) as conn:
+        check("الصفحة المنشورة تُقرأ من الفاتورة",
+              _ish.cached_url(conn, inv_on["id"]).endswith("old/index.html"))
+    with db() as conn:
+        _ish.invalidate(conn, inv_on["id"])
+    with db(readonly=True) as conn:
+        check("تعديل الفاتورة يُبطل صفحتها القديمة",
+              _ish.cached_url(conn, inv_on["id"]) == "")
+    with db() as conn:
+        check("والرمز لا يتغيّر فورقة العميل تبقى صحيحة",
+              _ish._token(conn, inv_on["id"]) == _tok_before, _tok_before)
+
+    # ══ الصور غير المستعملة تُعرف فتُحذف ══
+    with db() as conn:
+        _ish._asset_save(conn, "sha-orphan", "http://x/orphan.jpg", 51200)
+        _ish._asset_save(conn, "sha-used", "http://x/used.jpg", 51200)
+        _ish._link_asset(conn, inv_on["id"], "sha-used")
+        conn.execute("UPDATE invoices SET share_url='u' WHERE id=?",
+                     (inv_on["id"],))
+    with db(readonly=True) as conn:
+        _orph = {h for h, _s in _ish.orphan_images(conn)}
+    check("الصورة المستعملة لا تُعدّ مهملة", "sha-used" not in _orph)
+    check("وغير المستعملة تُعدّ مهملة", "sha-orphan" in _orph, str(_orph))
+    with db(readonly=True) as conn:
+        _u2 = _ish.usage(conn)
+    check("المساحة تعرض المهمل على حدة",
+          _u2.get("orphans", 0) >= 1, str(_u2))
+    with db() as conn:
+        conn.execute("UPDATE invoices SET share_url=NULL WHERE id=?",
+                     (inv_on["id"],))
+    with db(readonly=True) as conn:
+        check("وبزوال آخر فاتورة منشورة تصير صورتها مهملة",
+              "sha-used" in {h for h, _s in _ish.orphan_images(conn)})
+
     # ── المسوّدات: ما أُدخل ولم يُرحَّل يبقى بعد مغادرة الشاشة ──
     from services import drafts as _dr
     _dr.save("اختبار", "admin", {"a": 1, "b": ["س", "ص"]})
