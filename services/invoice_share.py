@@ -22,11 +22,13 @@
 صفحتها إلا من بيده ورقتها. ويُعاد استعمال الرمز نفسه عند إعادة
 الطباعة، فلا تتكاثر النسخ ولا يتغيّر رابط سُلّم للعميل.
 """
+import hashlib
 import html
 import json
 import mimetypes
 import secrets
 import urllib.error
+import urllib.parse
 import urllib.request
 
 BUCKET = "invoice-photos"
@@ -35,6 +37,27 @@ SETTING_MODE = "invoice_share_mode"      # auto · cloud · lan · off
 # على إنترنت متقطّع تُجمّد الطباعة دقيقة لكل صورة. وأول تعذّرٍ يُنهي
 # المحاولة كلها بدل تكرار الانتظار صورةً صورة.
 UPLOAD_TIMEOUT = 8
+
+# ══════════════════════════════════════════════════════════════════
+#  حجم ما يُرفع — وهو ما يحسم سؤال «هل تكفي مساحتي السحابية؟»
+# ------------------------------------------------------------------
+#  صورة الموديل من الكاميرا تزن 2–5 ميجابايت، وهي عرضٌ على شاشة جوال
+#  عرضها 400 نقطة. فرفعها كما هي إسرافٌ بلا فائدة يُرى.
+#
+#  · **تصغير وضغط**: أقصى عرض 800 نقطة وجودة 62 — تنزل الصورة إلى
+#    ‏40–80 كيلوبايت وتبقى واضحة تماماً على الجوال.
+#  · **مرة واحدة لكل صورة**: الصور تُخزَّن ببصمة محتواها، فموديلٌ باعه
+#    المصنع في مئة فاتورة تُرفع صورته **مرة واحدة** وتشير إليها
+#    الفواتير كلها. وهذا هو الفرق الأكبر: بلا ذلك تتضاعف المساحة مع
+#    كل فاتورة.
+#  · صفحة الفاتورة نفسها نصٌّ لا يتجاوز بضعة كيلوبايتات.
+#
+#  فمصنعٌ بـ500 موديل يشغل نحو 30 ميجابايت مرةً واحدة، وكل ألف فاتورة
+#  بعدها نحو 5 ميجابايت. وهذا جزءٌ يسير من أصغر باقة تخزين.
+# ══════════════════════════════════════════════════════════════════
+MAX_WIDTH = 800
+JPEG_QUALITY = 62
+SMALL_ENOUGH = 60 * 1024         # دون هذا الحجم لا داعي لإعادة الضغط
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -286,6 +309,61 @@ def _cloud_cfg():
     return cfg["url"].rstrip("/"), cfg["key"]
 
 
+def compress(path):
+    """يصغّر صورة الموديل ويضغطها — (البايتات, نوعها).
+
+    يستعمل Qt الموجود أصلاً في النظام (لا مكتبة صور إضافية قد لا تكون
+    مثبّتة على جهاز المصنع). وإن تعذّر شيء تُعاد الصورة كما هي: صورةٌ
+    كبيرة خيرٌ من صفحةٍ بلا صورة.
+    """
+    raw = open(path, "rb").read()
+    ctype = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+    if len(raw) <= SMALL_ENOUGH:
+        return raw, ctype
+    try:
+        from PyQt5.QtCore import QBuffer, QByteArray
+        from PyQt5.QtGui import QImage
+        img = QImage()
+        if not img.loadFromData(raw):
+            return raw, ctype
+        if img.width() > MAX_WIDTH:
+            img = img.scaledToWidth(MAX_WIDTH, 1)   # 1 = Smooth
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QBuffer.WriteOnly)
+        if not img.save(buf, "JPEG", JPEG_QUALITY):
+            return raw, ctype
+        out = bytes(ba)
+        buf.close()
+        # لا نستبدل صورةً بأكبر منها
+        return (out, "image/jpeg") if 0 < len(out) < len(raw) \
+            else (raw, ctype)
+    except Exception:
+        return raw, ctype
+
+
+# ══════════════════════════════════════════════════════════════════
+#  سجل ما رُفع — فلا تُرفع صورةٌ مرتين
+# ══════════════════════════════════════════════════════════════════
+
+def _asset_url(conn, sha):
+    try:
+        r = conn.execute("SELECT url FROM cloud_assets WHERE sha=?",
+                         (sha,)).fetchone()
+        return (r["url"] or "") if r else ""
+    except Exception:
+        return ""
+
+
+def _asset_save(conn, sha, url, size):
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO cloud_assets(sha,url,size_bytes)"
+            " VALUES(?,?,?)", (sha, url, int(size)))
+    except Exception:
+        pass
+
+
 def _put(url, key, path, data, ctype):
     req = urllib.request.Request(
         f"{url}/storage/v1/object/{BUCKET}/{path}", data=data,
@@ -316,18 +394,28 @@ def cloud_publish(conn, invoice_id, data, models, company=""):
     from services import tenant
     base = f"{tenant.effective_tenant_id()}/{tok}"
 
+    tid = tenant.effective_tenant_id()
     srcs = {}
     for i, m in enumerate(models):
         if not m["path"]:
             continue
         try:
-            with open(m["path"], "rb") as fh:
-                raw = fh.read()
-            ext = (str(m["path"]).rsplit(".", 1) + ["jpg"])[1].lower()[:4]
-            name = f"{base}/m{i}.{ext}"
-            ctype = mimetypes.guess_type(str(m["path"]))[0] or "image/jpeg"
-            if _put(url, key, name, raw, ctype):
-                srcs[i] = public_url(url, name)
+            data, ctype = compress(m["path"])
+            sha = hashlib.sha1(data).hexdigest()
+            # ══ الصورة تُرفع مرةً واحدة مهما تكرّرت في الفواتير ══
+            # البصمة من محتوى الصورة نفسها، فموديلٌ في مئة فاتورة
+            # صورته كائنٌ واحد في التخزين تشير إليه المئة كلها.
+            cached = _asset_url(conn, sha)
+            if cached:
+                srcs[i] = cached
+                continue
+            ext = "jpg" if ctype == "image/jpeg" else \
+                (mimetypes.guess_extension(ctype) or ".jpg").lstrip(".")
+            name = f"{tid}/models/{sha}.{ext}"
+            if _put(url, key, name, data, ctype):
+                link = public_url(url, name)
+                srcs[i] = link
+                _asset_save(conn, sha, link, len(data))
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return ""         # المجلد غير موجود — لا جدوى من المتابعة
@@ -394,3 +482,114 @@ def as_json(data, models):
     """تمثيل نصّي للصفحة — يُستعمل في الفحوص لا في العرض."""
     return json.dumps({"invoice": data, "models": models},
                       ensure_ascii=False, sort_keys=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  المساحة المستعملة وتنظيفها
+# ------------------------------------------------------------------
+#  المساحة السحابية مدفوعة ومحدودة، فمن حقّ المستخدم أن يرى كم يشغل
+#  ويحذف ما لم يعد يُطلب — لا أن يكتشف الامتلاء فجأة.
+# ══════════════════════════════════════════════════════════════════
+
+def _list(url, key, prefix="", limit=1000, timeout=25):
+    """أسماء وأحجام ما في مجلد التخزين تحت بادئة معيّنة."""
+    body = json.dumps({"prefix": prefix, "limit": int(limit),
+                       "sortBy": {"column": "name", "order": "asc"}})
+    req = urllib.request.Request(
+        f"{url}/storage/v1/object/list/{BUCKET}",
+        data=body.encode("utf-8"), method="POST",
+        headers={"apikey": key, "Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        rows = json.loads(r.read().decode("utf-8"))
+    out = []
+    for it in rows or []:
+        meta = it.get("metadata") or {}
+        out.append({"name": f"{prefix}{it.get('name', '')}",
+                    "size": int(meta.get("size") or 0),
+                    "at": str(it.get("created_at") or "")})
+    return out
+
+
+def _delete(url, key, names, timeout=30):
+    """يحذف كائنات من التخزين — دفعةً واحدة."""
+    if not names:
+        return 0
+    body = json.dumps({"prefixes": list(names)})
+    req = urllib.request.Request(
+        f"{url}/storage/v1/object/{BUCKET}",
+        data=body.encode("utf-8"), method="DELETE",
+        headers={"apikey": key, "Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return len(names) if r.status in (200, 204) else 0
+
+
+def usage(conn):
+    """ما تشغله صفحات الفواتير وصورها: عددٌ وحجمٌ بالميجابايت.
+
+    الصور تُقرأ من السجل المحلي (سريع وبلا إنترنت)، وصفحات الفواتير
+    تُعدّ من القاعدة نفسها.
+    """
+    out = {"images": 0, "image_mb": 0.0, "pages": 0, "page_mb": 0.0,
+           "total_mb": 0.0}
+    try:
+        r = conn.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(size_bytes),0) s"
+            " FROM cloud_assets").fetchone()
+        out["images"] = int(r["n"] or 0)
+        out["image_mb"] = round((r["s"] or 0) / 1048576.0, 2)
+    except Exception:
+        pass
+    try:
+        r = conn.execute(
+            "SELECT COUNT(*) n FROM invoices"
+            " WHERE COALESCE(share_url,'')<>''").fetchone()
+        out["pages"] = int(r["n"] or 0)
+        # الصفحة نصٌّ لا صور فيه — متوسطها نحو 5 كيلوبايت
+        out["page_mb"] = round(out["pages"] * 5 / 1024.0, 2)
+    except Exception:
+        pass
+    out["total_mb"] = round(out["image_mb"] + out["page_mb"], 2)
+    return out
+
+
+def purge_pages(conn, before_date, username=None):
+    """يحذف صفحات الفواتير الأقدم من تاريخ — وصورها تبقى مشتركة.
+
+    الصور **لا تُحذف**: كائنٌ واحد تشير إليه فواتير كثيرة، وحذفه
+    لأجل فاتورة قديمة يُفرغ صور فواتير حديثة. وهي الجزء الصغير من
+    المساحة أصلاً بعد الضغط.
+    """
+    cfg = _cloud_cfg()
+    if not cfg:
+        return 0
+    url, key = cfg
+    rows = conn.execute(
+        "SELECT id, share_token FROM invoices"
+        " WHERE COALESCE(share_url,'')<>'' AND invoice_date<?"
+        " AND COALESCE(share_token,'')<>''", (str(before_date)[:10],)
+    ).fetchall()
+    if not rows:
+        return 0
+    from services import tenant
+    tid = tenant.effective_tenant_id()
+    names = [f"{tid}/{r['share_token']}/index.html" for r in rows]
+    n = 0
+    for i in range(0, len(names), 100):        # دفعات معقولة
+        try:
+            n += _delete(url, key, names[i:i + 100])
+        except Exception:
+            break
+    if n:
+        conn.execute(
+            "UPDATE invoices SET share_url=NULL"
+            " WHERE COALESCE(share_url,'')<>'' AND invoice_date<?",
+            (str(before_date)[:10],))
+        try:
+            from services.audit import log_action
+            log_action(conn, username, "delete", "invoices", None,
+                       f"حذف {n} صفحة فاتورة من التخزين السحابي")
+        except Exception:
+            pass
+    return n

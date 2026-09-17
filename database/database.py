@@ -406,6 +406,15 @@ CREATE TABLE IF NOT EXISTS app_settings(
   updated_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
+-- سجل ما رُفع للتخزين السحابي — المفتاح بصمة محتوى الصورة، فتُرفع
+-- كل صورة مرة واحدة مهما تكرّرت في الفواتير (services/invoice_share.py)
+CREATE TABLE IF NOT EXISTS cloud_assets(
+  sha TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS audit_log(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT,
@@ -1222,6 +1231,18 @@ def migrate_schema() -> None:
                     conn.execute(
                         f"ALTER TABLE entities ADD COLUMN {col}"
                         " REAL NOT NULL DEFAULT 0")
+
+        # 20) سجل ما رُفع للتخزين السحابي من صور الموديلات.
+        #     المفتاح بصمة محتوى الصورة: فموديلٌ في مئة فاتورة تُرفع
+        #     صورته مرةً واحدة وتشير إليها المئة كلها — وهذا ما يجعل
+        #     المساحة المستهلكة جزءاً يسيراً بدل أن تتضاعف مع كل فاتورة.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cloud_assets(
+              sha TEXT PRIMARY KEY,
+              url TEXT NOT NULL,
+              size_bytes INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT DEFAULT (datetime('now','localtime'))
+            )""")
 
         # 19) صفحة الفاتورة للجوال (`services.invoice_share`): رمزٌ
         #     عشوائي ثابت لكل فاتورة ورابطها المنشور. ثباتهما مقصود —

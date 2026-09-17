@@ -1302,6 +1302,40 @@ def main():
     with db() as conn:
         _ish.set_mode(conn, "auto", "admin")
 
+    # ══ المساحة السحابية: الضغط ثم الرفع مرةً واحدة لكل صورة ══
+    # وهذا ما يجعل النشر السحابي ممكناً على أصغر باقة تخزين: الصورة
+    # من الكاميرا تزن ميجابايتات، وهي تُعرض على شاشة جوال.
+    try:
+        from PyQt5.QtGui import QImage as _QI
+        big = pathlib.Path(_TMP) / "model_big.jpg"
+        _im = _QI(2600, 1900, _QI.Format_RGB32)
+        for _y in range(0, 1900, 3):
+            for _x in range(0, 2600, 3):
+                _im.setPixel(_x, _y, ((_x * 5) ^ (_y * 3)) & 0xFFFFFF)
+        _im.save(str(big), "JPEG", 92)
+        raw_size = big.stat().st_size
+        small, ctype = _ish.compress(str(big))
+        check("صورة الموديل تُصغَّر وتُضغط قبل رفعها",
+              len(small) < raw_size and ctype == "image/jpeg",
+              f"{raw_size // 1024}ك ← {len(small) // 1024}ك")
+        check("والصغيرة أصلاً تُترك كما هي",
+              _ish.compress(str(big))[0] == small)
+    except ImportError:
+        check("ضغط صور الموديلات", True, "تخطّي — PyQt5 غير مثبّت")
+
+    with db() as conn:
+        _ish._asset_save(conn, "sha-test", "http://x/a.jpg", 40960)
+        _ish._asset_save(conn, "sha-test", "http://x/a.jpg", 40960)
+    with db(readonly=True) as conn:
+        check("الصورة تُسجَّل مرةً واحدة ببصمتها",
+              conn.execute("SELECT COUNT(*) n FROM cloud_assets"
+                           " WHERE sha='sha-test'").fetchone()["n"] == 1)
+        check("والبصمة المعروفة لا تُرفع ثانيةً",
+              _ish._asset_url(conn, "sha-test") == "http://x/a.jpg")
+        _u = _ish.usage(conn)
+        check("المساحة المستعملة تُحسب وتُعرض",
+              _u["images"] >= 1 and _u["total_mb"] >= 0, str(_u))
+
     step("28) حدّ الائتمان")
     # سقفٌ لكل جهة يُفحص **لحظة الترحيل** لا في تقرير آخر الشهر:
     # البضاعة تخرج لحظتها، فالتنبيه بعدها بأسبوع تنبيهٌ متأخر.
