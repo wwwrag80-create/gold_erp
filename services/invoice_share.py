@@ -691,6 +691,30 @@ def diagnose(conn, invoice_id=None):
             pass
         else:
             url, key = cfg
+            # نوع المفتاح — بادئته وحدها، فلا يُكتب المفتاح في أي سجل
+            k = str(key)
+            kind = ("publishable (sb_publishable_…)"
+                    if k.startswith("sb_publishable") else
+                    "secret (sb_secret_…) ⚠ لا يصلح لبرنامج على أجهزة "
+                    "المستخدمين" if k.startswith("sb_secret") else
+                    "anon (JWT قديم)" if k.startswith("eyJ") else
+                    "غير معروف")
+            add("مفتاح السحابة", True, f"{kind} · الطول {len(k)}")
+
+            # قراءة المجلد: تُثبت أن المفتاح يصل للمشروع والمجلد موجود
+            try:
+                _list(url, key, f"{tenant_id_safe()}/", limit=1)
+                add("قراءة مجلد invoice-photos", True,
+                    "المفتاح يصل للمشروع والمجلد موجود")
+            except urllib.error.HTTPError as e:
+                add("قراءة مجلد invoice-photos", False,
+                    f"HTTP {e.code} — "
+                    + ("المجلد غير موجود — أنشئه من Storage ← New bucket"
+                       if e.code == 404 else "المفتاح لا يصل للمشروع"))
+            except Exception as e:
+                add("قراءة مجلد invoice-photos", False,
+                    f"{type(e).__name__}: {e} (بلا إنترنت؟)")
+
             probe = f"{tenant_id_safe()}/_probe.txt"
             try:
                 ok = _put(url, key, probe, b"ok", "text/plain")
@@ -702,16 +726,15 @@ def diagnose(conn, invoice_id=None):
                     body = e.read().decode("utf-8", "ignore")[:200]
                 except Exception:
                     pass
-                hint = {
-                    404: "المجلد «invoice-photos» غير موجود — أنشئه من "
-                         "Supabase ← Storage ← New bucket.",
-                    403: "المجلد موجود لكن الرفع ممنوع: ينقصه إذن "
-                         "الكتابة (Policy). أضف من Storage ← Policies "
-                         "سياسةً تسمح بـINSERT و UPDATE على "
-                         "«invoice-photos» للدور anon.",
-                    400: "رُفض الطلب — غالباً سياسة أمان ناقصة على "
-                         "المجلد (Policies).",
-                }.get(e.code, "")
+                deny = e.code in (400, 401, 403) or "row-level" in body
+                hint = ("المجلد «invoice-photos» غير موجود — أنشئه من "
+                        "Supabase ← Storage ← New bucket."
+                        if e.code == 404 else
+                        "المجلد موجود والرفع إليه ممنوع: تنقصه سياسة "
+                        "كتابة. انسخ أمر SQL من زر «نسخ أمر SQL» "
+                        "ونفّذه في Supabase ← SQL Editor — وهو يحذف "
+                        "أي سياسة سابقة بنفس الاسم أولاً، فلا يفشل "
+                        "بـ«already exists»." if deny else "")
                 add("الرفع إلى مجلد invoice-photos", False,
                     f"HTTP {e.code} — {hint} {body}".strip())
             except Exception as e:
@@ -735,6 +758,71 @@ def diagnose(conn, invoice_id=None):
         f"[{ 'سحابي' if where == 'cloud' else 'محلي' }] {link}" if link
         else "لا رابط — لن يُطبع رمز")
     return out
+
+
+POLICY_SQL = """-- صلاحيات مجلد صور الفواتير (نفّذه في Supabase ← SQL Editor)
+-- يحذف أي سياسة سابقة بنفس الاسم أولاً، فلا يفشل بـ«already exists».
+drop policy if exists "invoice photos read"   on storage.objects;
+drop policy if exists "invoice photos upload" on storage.objects;
+drop policy if exists "invoice photos update" on storage.objects;
+
+create policy "invoice photos read" on storage.objects
+  for select to public
+  using (bucket_id = 'invoice-photos');
+
+create policy "invoice photos upload" on storage.objects
+  for insert to public
+  with check (bucket_id = 'invoice-photos');
+
+create policy "invoice photos update" on storage.objects
+  for update to public
+  using (bucket_id = 'invoice-photos')
+  with check (bucket_id = 'invoice-photos');
+"""
+
+
+def policy_sql():
+    """أمر SQL جاهز يمنح مجلد الصور صلاحية الكتابة.
+
+    ثلاثة أشياء تجعله يعمل حيث فشل غيره:
+
+    · **`drop policy if exists` أولاً** — فتكرار التنفيذ لا يرفع
+      «already exists». وهذا الخطأ يُفشل الدفعة كلها في محرّر SQL،
+      فيبقى ما بعده غير منفَّذ ويظن المستخدم أنه أتمّ العمل.
+    · **`to public` لا `to anon`** — يشمل `anon` و`authenticated` معاً،
+      فلا يتوقف الأمر على الدور الذي يحمله المفتاح.
+    · **`with check` على التعديل أيضاً** — الرفع يجري بـ«استبدال إن
+      وُجد» (upsert)، وهو إدراجٌ وتعديل معاً؛ فسياسة تعديلٍ بلا
+      `with check` تمنع إعادة رفع صفحةٍ عُدّلت فاتورتها.
+    """
+    return POLICY_SQL
+
+
+def republish_pending(company="", limit=200):
+    """ينشر سحابياً كل فاتورة مفعَّلة لم يُنشر لها رابط بعد.
+
+    يُستعمل بعد إصلاح صلاحيات المجلد: الفواتير التي رُحّلت والرفع
+    ممنوع طُبعت برابطٍ محلي، وهذه تمنحها روابط تُفتح من أي مكان بلا
+    إعادة ترحيل ولا مساس برقم محاسبي. والرمز المطبوع لا يتغيّر.
+    """
+    from database.database import db
+    try:
+        with db(readonly=True) as conn:
+            if mode(conn) not in ("auto", "cloud"):
+                return 0, 0
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM invoices WHERE is_deleted=0"
+                " AND qr_enabled=1 AND COALESCE(share_url,'')=''"
+                " ORDER BY id DESC LIMIT ?", (int(limit),))]
+    except Exception:
+        return 0, 0
+    done = 0
+    for i in ids:
+        if ensure_published(i, company):
+            done += 1
+        elif done == 0:
+            break             # أول فشلٍ قبل أي نجاح: العطل عام لا فردي
+    return done, len(ids)
 
 
 def tenant_id_safe():

@@ -1399,6 +1399,25 @@ def main():
           any("الرابط الذي سيحمله الرمز" in s["step"] for s in _ok_steps),
           str([s["step"] for s in _ok_steps]))
 
+    # ══ أمر صلاحيات المجلد: يُنفَّذ مرتين بلا خطأ ══
+    # الخطأ «already exists» يُفشل الدفعة كلها في محرّر SQL، فيبقى ما
+    # بعده غير منفَّذ ويظن المستخدم أنه أتمّ العمل — وهو ما وقع فعلاً.
+    _sql = _ish.policy_sql()
+    check("أمر الصلاحيات يحذف السابق أولاً",
+          _sql.count("drop policy if exists") == 3)
+    check("ويمنح القراءة والرفع والاستبدال",
+          all(f"for {w}" in _sql for w in ("select", "insert", "update")))
+    check("و«to public» يشمل anon و authenticated",
+          "to anon" not in _sql and _sql.count("to public") == 3)
+    check("و«with check» على التعديل (الرفع استبدالٌ لا إدراجٌ فقط)",
+          _sql.count("with check") == 2)
+    check("ويُسمّي المجلد الصحيح", _sql.count("'invoice-photos'") == 4)
+
+    # النشر الدفعي: بلا سحابة لا يُنشر شيء ولا يُرفع خطأ
+    _done, _tot = _ish.republish_pending("مصنع")
+    check("النشر الدفعي يُحصي المنتظر ولا يتعثّر",
+          _done == 0 and _tot >= 0, f"{_done}/{_tot}")
+
     # ══ تعديل الفاتورة يُعدّل صفحتها — بالرمز نفسه ══
     # الورقة بيد العميل تحمل رمزاً ثابتاً، فلو بقيت الصفحة على مضمونها
     # القديم لرأى فاتورةً غير التي بيده.
