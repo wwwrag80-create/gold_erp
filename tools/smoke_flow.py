@@ -1462,13 +1462,19 @@ def main():
             check("النشر السحابي يعيد رابطاً عاماً",
                   bool(_clink) and _cwhere == "cloud",
                   f"{_cwhere}: {_clink[:70]}")
-            check("ويرفع الصورة **وصفحة الفاتورة** معاً",
-                  any("/models/" in x for x in _puts)
-                  and any("index.html" in x for x in _puts),
+            # ══ الصفحة صورةٌ لا HTML ══
+            # التخزين السحابي يقدّم HTML بنوع `text/plain`، فظهرت
+            # الصفحة على جوال العميل **كوداً نصّياً**. الصورة تُعرض
+            # دائماً — وهذا الفحص يثبت أن المرفوع صورة.
+            check("الصفحة تُرفع **صورةً** لا صفحة HTML",
+                  any(x.endswith("invoice.jpg") for x in _puts)
+                  and not any(x.endswith("index.html") for x in _puts),
                   str([x.rsplit('/', 1)[-1] for x in _puts]))
-            check("والرابط يشير إلى المسار العام للصفحة",
+            check("والرابط يشير إلى المسار العام للصورة",
                   "/object/public/invoice-photos/" in _clink
-                  and _clink.endswith("index.html"), _clink[-60:])
+                  and _clink.endswith("invoice.jpg"), _clink[-60:])
+            check("وطلبٌ واحد يكفي للفاتورة كلها",
+                  len(_puts) == 1, f"{len(_puts)} طلباً")
             with db(readonly=True) as conn:
                 check("ويُحفظ مع الفاتورة فلا يُرفع مرتين",
                       _ish.cached_url(conn, _cinv["id"]) == _clink)
@@ -1488,6 +1494,39 @@ def main():
         for _k, _v in _old_proxy.items():
             if _v is not None:
                 os.environ[_k] = _v
+
+    # ══ رسم صفحة الفاتورة صورةً ══
+    try:
+        from PyQt5 import QtWidgets as _QW6
+        _QW6.QApplication.instance() or _QW6.QApplication([])
+        with db(readonly=True) as conn:
+            _pd = _ish.invoice_data(conn, inv_on["id"])
+            _pm2 = _ish.model_lines(conn, inv_on["id"])
+        _shot = _ish.render_page_image(_pd, _pm2, "مصنع الاختبار")
+        check("صفحة الفاتورة تُرسم صورةَ JPEG",
+              _shot[:2] == b"\xff\xd8" and len(_shot) > 4000,
+              f"{len(_shot) // 1024} كيلوبايت")
+        check("وحجمها معقول (أقل من ربع ميجابايت)",
+              len(_shot) < 256 * 1024, f"{len(_shot) // 1024}ك")
+        _cx = _ish.render_cancelled_image("S-1", "مصنع")
+        check("وصورة «أُلغيت» تُرسم كذلك",
+              _cx[:2] == b"\xff\xd8" and len(_cx) > 1000)
+        # فاتورة بلا أصناف ولا موديلات: لا تُسقط الرسّام ولا التطبيق
+        _empty = {"no": "S-0", "date": "2026-01-01", "kind": "فاتورة مبيعات",
+                  "customer": "—", "lines": [], "unit": "جم 18",
+                  "weight": 0.0, "wages": 0.0, "vat": 0.0, "total": 0.0,
+                  "vat_applied": False}
+        check("والحالة الفارغة لا تُسقط الرسم",
+              _ish.render_page_image(_empty, [], "")[:2] == b"\xff\xd8")
+        # ══ استثناءٌ أثناء الرسم لا يُجهض التطبيق ══
+        # الرسّام المفتوح على صورةٍ تُجمَع يُجهض Qt العملية كلها، فخللٌ
+        # في تجميل يُسقط نظاماً محاسبياً. الإغلاق في `finally` يمنعه.
+        _bad = dict(_empty)
+        _bad["lines"] = None            # يرفع استثناءً داخل الرسم
+        check("واستثناء أثناء الرسم يعيد فراغاً بلا إجهاض",
+              _ish.render_page_image(_bad, [], "") == b"")
+    except ImportError:
+        check("رسم صفحة الفاتورة", True, "تخطّي — PyQt5 غير مثبّت")
 
     # ══ أمر صلاحيات المجلد: يُنفَّذ مرتين بلا خطأ ══
     # الخطأ «already exists» يُفشل الدفعة كلها في محرّر SQL، فيبقى ما
