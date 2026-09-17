@@ -61,6 +61,15 @@ from ui.widgets.common import ElidedLabel, ask, err, info, search_combo
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
 NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 
+# ══ إصدار ترتيب القائمة ══
+# الترتيب المحفوظ على جهاز المستخدم يُطابَق بمفتاح كل شاشة (اسمها
+# الافتراضي). فحين يتغيّر الترتيب المعتمد نفسه — أو تُعاد تسمية شاشات
+# — يصير المحفوظ ترتيباً قديماً يحجب الجديد: الشاشات المعاد تسميتها
+# تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
+# رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
+# ثم يُحفظ تخصيص المستخدم فوقه من جديد.
+NAV_VERSION = 2
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, user):
@@ -107,36 +116,42 @@ class MainWindow(QtWidgets.QMainWindow):
             self.archive_screen = Lazy(lambda: DocumentArchiveScreen(
                 user, on_open_ledger=self.open_ledger), "archive_screen")
 
-            # العمليات اليومية تبقى ظاهرة، والشاشات الإدارية والتقارير
-            # تُجمَّع تحت قائمة رئيسية واحدة لتقليل الازدحام.
+            # ══════════════════════════════════════════════════════
+            #  ترتيب القائمة — اثنتا عشرة شاشة يومية ظاهرة، وما عداها
+            #  تحت «الإدارة والتقارير» يُفتح بالسهم.
+            # ------------------------------------------------------
+            #  الترتيب هنا هو ترتيب العمل نفسه: تُفتح لوحة التحكم،
+            #  يُراجَع الموديل وحركة طقمه، يُقرأ كشف الحساب، ثم دورة
+            #  اليوم — وارد ← بيع ← قبض ← تسكير ← شراء ← قيد، ثم
+            #  تقارير المصنع وأعمار الديون في آخر الدوام. وما يُفتح
+            #  مرة في الشهر لا يزاحم ما يُفتح كل ساعة.
+            # ══════════════════════════════════════════════════════
             groups = [
                 (None, [
-                    ("دفتر الأستاذ العام", self.gl_screen),
-                    ("الإغلاق اليومي", Lazy(lambda: DayCloseScreen(user),
-                                            "الإغلاق اليومي")),
-                    ("تقارير مبيعات وإنتاج المصنع", Lazy(lambda: FactoryReportsScreen(user), "تقارير مبيعات وإنتاج المصنع")),
-                    ("حركة الطقم", Lazy(lambda: ItemHistoryScreen(user), "حركة الطقم")),
-                    ("دليل الموديلات", Lazy(lambda: ModelsScreen(user), "دليل الموديلات")),
-                ]),
-                (None, [
                     ("لوحة التحكم", dashboard),
-                    ("الأرصدة الافتتاحية المخزنية", self.opening_screen),
-                    ("الإنتاج والتوريد", self.production_screen),
-                    ("المبيعات والمرتجعات والتحويلات", self.sales_screen),
-                    ("السندات والخصومات", self.vouchers_screen),
-                    ("الصب والتصفية", self.melting_screen),
-                    ("تسوية فواقد الورشة", Lazy(lambda: WorkshopLossesScreen(user), "تسوية فواقد الورشة")),
-                    ("حسابات الورشة", Lazy(lambda: WorkshopAccountsScreen(user), "حسابات الورشة")),
-                    ("التسكير (تسعير الذهب)", self.fixing_screen),
-                    ("المشتريات والأصول", self.purchases_screen),
+                    ("دليل الموديلات", Lazy(lambda: ModelsScreen(user), "دليل الموديلات")),
+                    ("حركة الطقم", Lazy(lambda: ItemHistoryScreen(user), "حركة الطقم")),
+                    ("كشف حساب", self.gl_screen),
+                    ("الوارد من التصنيع", self.production_screen),
+                    ("مبيعات/مرتجعات", self.sales_screen),
+                    ("سندات قبض/صرف", self.vouchers_screen),
+                    ("التسكيرات", self.fixing_screen),
+                    ("المشتريات", self.purchases_screen),
                     ("القيود اليومية", self.journal_screen),
+                    ("تقارير مبيعات وإنتاج المصنع", Lazy(lambda: FactoryReportsScreen(user), "تقارير مبيعات وإنتاج المصنع")),
+                    ("أعمار الديون (30/60/90)",
+                     Lazy(lambda: AgingScreen(user), "أعمار الديون")),
                 ]),
                 ("الإدارة والتقارير", [
+                    ("الإغلاق اليومي", Lazy(lambda: DayCloseScreen(user),
+                                            "الإغلاق اليومي")),
                     ("دليل الحسابات (شجرة الحسابات)", self.coa_screen),
                     ("التكويد الموحّد لجهات التعامل", self.entities_screen),
                     ("أرصدة الأستاذ المساعد", self.subledger_screen),
-                    ("أعمار الديون (30/60/90)",
-                     Lazy(lambda: AgingScreen(user), "أعمار الديون")),
+                    ("الأرصدة الافتتاحية المخزنية", self.opening_screen),
+                    ("الصب والتصفية", self.melting_screen),
+                    ("تسوية فواقد الورشة", Lazy(lambda: WorkshopLossesScreen(user), "تسوية فواقد الورشة")),
+                    ("حسابات الورشة", Lazy(lambda: WorkshopAccountsScreen(user), "حسابات الورشة")),
                     ("الجرد الفعلي", self.stocktake_screen),
                     ("إدارة وتحويل العمليات", Lazy(lambda: OperationsScreen(user), "إدارة وتحويل العمليات")),
                     ("سجل العمليات", self.txlog_screen),
@@ -149,8 +164,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
                     ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
                     ("الإقرار الضريبي (VAT)", Lazy(lambda: VatReturnScreen(user), "الإقرار الضريبي (VAT)")),
-                ]),
-                ("التقارير الختامية والفترات المالية", [
                     ("ميزان المراجعة", Lazy(lambda: TrialBalanceScreen(user), "ميزان المراجعة")),
                     ("الميزانية العمومية", Lazy(lambda: BalanceSheetScreen(user), "الميزانية العمومية")),
                     ("تهيئة أرصدة أول المدة (تاريخ القطع)", Lazy(lambda: OpeningBalancesScreen(user), "تهيئة أرصدة أول المدة (تاريخ القطع)")),
@@ -461,8 +474,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if getattr(self, "_nav_loading", False):
             return
         try:
-            data = [self._nav_node(self.sidebar.topLevelItem(i))
-                    for i in range(self.sidebar.topLevelItemCount())]
+            data = {
+                "version": NAV_VERSION,
+                "nodes": [self._nav_node(self.sidebar.topLevelItem(i))
+                          for i in range(self.sidebar.topLevelItemCount())],
+            }
             path = self._nav_layout_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
@@ -492,6 +508,18 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
+            return
+        # ترتيبٌ محفوظ بإصدارٍ أقدم: يُهمل مرةً واحدة ليظهر الترتيب
+        # المعتمد الجديد كاملاً. وبدون ذلك تبقى الأسماء القديمة فوق
+        # والشاشات المعاد تسميتها ملحقةً في الذيل.
+        if not isinstance(saved, dict) or saved.get("version") != NAV_VERSION:
+            try:
+                path.unlink()
+            except Exception:
+                pass
+            return
+        saved = saved.get("nodes") or []
+        if not saved:
             return
         # خريطة الفهرس ← نص افتراضي لكل عنصر حالي
         current = {}
@@ -999,6 +1027,26 @@ class MainWindow(QtWidgets.QMainWindow):
             gf.addAction(a)
             a.triggered.connect(lambda _c=False, v=val: self._set_scale(v))
 
+        # ══ وجهة رمز QR على الفاتورة ══
+        # القرار ليس تجميلياً: الرابط السحابي يفتحه العميل من بيته،
+        # والمحلي لا يفتحه إلا من على شبكة المصنع. فمن يريد أن يرى
+        # عميله الصفحة يحتاج السحابة، ومن يريد ألا يخرج شيء من المصنع
+        # يقصره على الشبكة.
+        m_qr = menu.addMenu("🔗 رمز QR على الفاتورة")
+        gq = QtWidgets.QActionGroup(menu)
+        gq.setExclusive(True)
+        cur_qr = self._qr_mode()
+        for key, label in (
+                ("auto", "تلقائي — السحابة ثم شبكة المصنع"),
+                ("cloud", "السحابة فقط (يفتحه العميل من أي مكان)"),
+                ("lan", "شبكة المصنع فقط (لا يخرج شيء للإنترنت)"),
+                ("off", "بلا رمز")):
+            a = m_qr.addAction(label)
+            a.setCheckable(True)
+            a.setChecked(key == cur_qr)
+            gq.addAction(a)
+            a.triggered.connect(lambda _c=False, k=key: self._set_qr_mode(k))
+
         menu.addSeparator()
         a_find = menu.addAction("🔍 بحث موحّد…        Ctrl+K")
         a_find.triggered.connect(self.open_palette)
@@ -1008,6 +1056,35 @@ class MainWindow(QtWidgets.QMainWindow):
         btn.setMenu(menu)
         self._view_menu = menu          # مرجع يمنع جمعه مبكّراً
         return btn
+
+    def _qr_mode(self):
+        try:
+            from services import invoice_share
+            with db(readonly=True) as conn:
+                return invoice_share.mode(conn)
+        except Exception:
+            return "auto"
+
+    def _set_qr_mode(self, value):
+        try:
+            from services import invoice_share
+            with db() as conn:
+                invoice_share.set_mode(conn, value,
+                                       self.user.get("username"))
+            if value == "cloud":
+                info(self, "رمز الفاتورة سيحمل رابطاً سحابياً يفتحه "
+                           "العميل من أي مكان.\n\n"
+                           "يتطلب مجلد تخزين عام باسم «invoice-photos» "
+                           "في حساب المصنع السحابي. وإن تعذّر الرفع "
+                           "فلن يُطبع رمز — اختر «تلقائي» ليعود للرابط "
+                           "المحلي عند التعذّر.")
+            elif value == "lan":
+                info(self, "رمز الفاتورة سيحمل رابطاً على شبكة المصنع "
+                           "وحدها.\n\nيفتحه من كان جواله على شبكة "
+                           "المصنع والنظام يعمل — ولا يفتحه العميل بعد "
+                           "خروجه.")
+        except Exception as e:
+            err(self, e)
 
     def _set_theme(self, name):
         try:

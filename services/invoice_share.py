@@ -1,0 +1,396 @@
+# -*- coding: utf-8 -*-
+"""صفحة الفاتورة للجوال — ما يفتحه رمز QR المطبوع عليها.
+
+**ما تعرضه**: الفاتورة أولاً (رقمها وتاريخها والعميل وأصنافها
+وإجمالياتها)، ثم أسفلها موديلاتها — كل موديل بصورته واسمه وعدد قطعه
+في هذه الفاتورة.
+
+**أين تُنشر — وهذا هو الفرق الذي يهمّ العميل**:
+
+1. **السحابة** إن كانت مهيّأة: تُرفع الصور والصفحة إلى تخزين المصنع
+   السحابي فيصير الرابط عاماً يُفتح **من أي مكان وفي أي وقت** — من
+   بيت العميل، بعد أسبوع، وجهاز المصنع مطفأ.
+2. **شبكة المصنع** إن تعذّرت السحابة: الصفحة على الجهاز نفسه، ولا
+   تُفتح إلا من جوالٍ متصل بشبكة المصنع وما دام النظام يعمل.
+
+**ولماذا هذا التقسيم**: الرابط المحلي عنوانه `192.168.x.x` — وهو عنوان
+لا معنى له خارج شبكة المصنع. فالموظف يفتحه لأنه على الشبكة، والعميل
+يخرج بالفاتورة فلا يفتح شيئاً. النشر السحابي هو الحل الوحيد لأن تصل
+الصفحة إلى جهازٍ ليس على الشبكة.
+
+**الرابط لا يُخمَّن**: لكل فاتورة رمزٌ عشوائي يُحفظ معها، فلا يصل إلى
+صفحتها إلا من بيده ورقتها. ويُعاد استعمال الرمز نفسه عند إعادة
+الطباعة، فلا تتكاثر النسخ ولا يتغيّر رابط سُلّم للعميل.
+"""
+import html
+import json
+import mimetypes
+import secrets
+import urllib.error
+import urllib.request
+
+BUCKET = "invoice-photos"
+SETTING_MODE = "invoice_share_mode"      # auto · cloud · lan · off
+# مهلة قصيرة عن قصد: النشر يجري أثناء بناء ورقة الطباعة، فمهلةٌ طويلة
+# على إنترنت متقطّع تُجمّد الطباعة دقيقة لكل صورة. وأول تعذّرٍ يُنهي
+# المحاولة كلها بدل تكرار الانتظار صورةً صورة.
+UPLOAD_TIMEOUT = 8
+
+
+# ══════════════════════════════════════════════════════════════════
+#  بيانات الصفحة
+# ══════════════════════════════════════════════════════════════════
+
+def invoice_data(conn, invoice_id):
+    """بيانات الفاتورة كما تُعرض في الصفحة — بعيار المصنع المختار."""
+    from models import invoices
+    from services import karat_view as kv
+    inv, items = invoices.get_invoice_full(conn, invoice_id)
+    if not inv:
+        return None
+    cust = conn.execute("SELECT name FROM entities WHERE id=?",
+                        (inv["customer_id"],)).fetchone()
+    lines = []
+    for it in items:
+        wo = conn.execute(
+            "SELECT work_order_no, model_no FROM work_orders WHERE id=?",
+            (it["work_order_id"],)).fetchone()
+        lines.append({
+            "wo": (wo["work_order_no"] if wo else "—") or "—",
+            "model": ((wo["model_no"] if wo else "") or "—"),
+            "weight": kv.g(it["registered_weight"]),
+            "wage": it["wages"] or 0.0,
+        })
+    return {
+        "no": inv["invoice_no"],
+        "date": inv["invoice_date"],
+        "kind": "فاتورة مبيعات" if inv["kind"] == "sale" else "مرتجع مبيعات",
+        "customer": (cust["name"] if cust else "—"),
+        "lines": lines,
+        "unit": kv.unit(),
+        "weight": kv.g(inv["total_weight"]),
+        "wages": inv["total_wages"] or 0.0,
+        "vat": inv["vat_amount"] or 0.0,
+        "total": inv["grand_total"] or 0.0,
+        "vat_applied": bool(inv["vat_applied"]),
+    }
+
+
+def model_lines(conn, invoice_id):
+    """موديلات الفاتورة: [(الموديل, العدد, الوزن, مسار الصورة أو None)].
+
+    العدد عدد **قطع هذه الفاتورة** من الموديل لا رصيده في المخزن:
+    السؤال هنا «ماذا في هذه الورقة؟» لا «كم عندنا منه؟».
+    """
+    from models import models_catalog as mc
+    from services import karat_view as kv
+    try:
+        rows = conn.execute(
+            "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'—') m,"
+            " COUNT(*) n, ROUND(SUM(it.registered_weight),3) g"
+            " FROM invoice_items it"
+            " JOIN work_orders w ON w.id=it.work_order_id"
+            " WHERE it.invoice_id=? GROUP BY m ORDER BY m",
+            (invoice_id,)).fetchall()
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        model = str(r["m"])
+        path = None
+        if model != "—":
+            try:
+                p = mc.image_path(model)
+                path = str(p) if p is not None else None
+            except Exception:
+                path = None
+        out.append({"model": model, "count": int(r["n"] or 0),
+                    "weight": kv.g(r["g"] or 0), "path": path,
+                    "unit": kv.unit()})
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════
+#  الصفحة
+# ══════════════════════════════════════════════════════════════════
+
+_PAGE = """<!DOCTYPE html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+ :root {{ --gold:#9A7B22; --ink:#1F1B17; --mut:#6B6459; --line:#E3DDD0; }}
+ * {{ box-sizing: border-box; }}
+ body {{ font-family: system-ui, "Segoe UI", Tahoma, sans-serif; margin:0;
+        padding:12px; background:#F5F2EA; color:var(--ink); }}
+ .card {{ background:#fff; border:1px solid var(--line); border-radius:14px;
+         padding:14px; margin-bottom:14px; }}
+ h1 {{ font-size:17px; margin:0 0 3px; color:var(--gold); }}
+ .sub {{ font-size:12px; color:var(--mut); margin-bottom:10px; }}
+ .kv {{ display:flex; justify-content:space-between; font-size:14px;
+       padding:6px 0; border-bottom:1px solid #F0EBE0; }}
+ .kv b {{ font-weight:600; color:var(--mut); }}
+ table {{ width:100%; border-collapse:collapse; font-size:13px;
+         margin-top:8px; }}
+ th {{ background:#F1ECE0; color:#4A4237; padding:7px 5px;
+      border-bottom:2px solid #D8CDB4; font-size:12px; }}
+ td {{ padding:7px 5px; border-bottom:1px solid #F0EBE0;
+      text-align:center; }}
+ tfoot td {{ font-weight:bold; background:#FAF8F3; }}
+ h2 {{ font-size:15px; margin:16px 0 8px; color:var(--gold); }}
+ .g {{ display:grid; gap:12px;
+      grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); }}
+ .m {{ background:#fff; border:1px solid var(--line); border-radius:12px;
+      overflow:hidden; }}
+ .m img {{ width:100%; height:165px; object-fit:cover; display:block;
+          background:#F1ECE0; }}
+ .noimg {{ height:165px; display:flex; align-items:center;
+          justify-content:center; color:#B3AB9A; font-size:13px;
+          background:#F7F4EC; }}
+ .mt {{ padding:8px; text-align:center; font-size:13px;
+       border-top:1px solid #F0EBE0; }}
+ .mt b {{ display:block; font-size:14px; margin-bottom:2px; }}
+ .mt span {{ color:var(--mut); font-size:12px; }}
+ .foot {{ text-align:center; color:#9A9384; font-size:11px;
+         padding:10px 0 4px; }}
+</style></head><body>
+<div class="card">
+  <h1>{kind} · {no}</h1>
+  <div class="sub">{company}</div>
+  <div class="kv"><b>التاريخ</b><span>{date}</span></div>
+  <div class="kv"><b>العميل</b><span>{customer}</span></div>
+  {table}
+</div>
+<h2>موديلات الفاتورة</h2>
+<div class="g">{models}</div>
+<div class="foot">{company} — صفحة الفاتورة</div>
+</body></html>"""
+
+
+def _esc(v):
+    return html.escape(str(v if v is not None else ""))
+
+
+def _table(d):
+    rows = "".join(
+        "<tr>"
+        f"<td>{_esc(l['model'])}</td>"
+        f"<td>{_esc(l['wo'])}</td>"
+        f"<td>{l['weight']:,.3f}</td>"
+        f"<td>{l['wage']:,.2f}</td>"
+        "</tr>" for l in d["lines"])
+    if not rows:
+        rows = '<tr><td colspan="4">لا توجد أصناف</td></tr>'
+    vat = ""
+    if d["vat_applied"]:
+        vat = (f'<tr><td colspan="3">ضريبة القيمة المضافة</td>'
+               f'<td>{d["vat"]:,.2f}</td></tr>')
+    return (
+        '<table><thead><tr>'
+        '<th>الموديل</th><th>رقم التشغيل</th>'
+        f'<th>الوزن ({_esc(d["unit"])})</th><th>الأجرة</th>'
+        '</tr></thead>'
+        f'<tbody>{rows}</tbody><tfoot>'
+        f'<tr><td colspan="2">الإجمالي</td>'
+        f'<td>{d["weight"]:,.3f}</td><td>{d["wages"]:,.2f}</td></tr>'
+        f'{vat}'
+        f'<tr><td colspan="3">الإجمالي النهائي (ريال)</td>'
+        f'<td>{d["total"]:,.2f}</td></tr>'
+        '</tfoot></table>')
+
+
+def page_html(data, models, img_src, company=""):
+    """يبني الصفحة. `img_src(i)` يعيد عنوان صورة الموديل رقم i أو ""."""
+    cards = []
+    for i, m in enumerate(models):
+        src = img_src(i) or ""
+        pic = (f'<img src="{_esc(src)}" alt="{_esc(m["model"])}">' if src
+               else '<div class="noimg">لا توجد صورة</div>')
+        cards.append(
+            f'<div class="m">{pic}<div class="mt">'
+            f'<b>{_esc(m["model"])}</b>'
+            f'<span>العدد: {m["count"]} · {m["weight"]:,.3f} '
+            f'{_esc(m["unit"])}</span></div></div>')
+    body = ("".join(cards) if cards
+            else '<div class="card">لا توجد موديلات في هذه الفاتورة.</div>')
+    return _PAGE.format(
+        title=f'{_esc(data["kind"])} {_esc(data["no"])}',
+        kind=_esc(data["kind"]), no=_esc(data["no"]),
+        company=_esc(company), date=_esc(data["date"]),
+        customer=_esc(data["customer"]), table=_table(data),
+        models=body)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  الرمز المحفوظ مع الفاتورة
+# ══════════════════════════════════════════════════════════════════
+
+def _token(conn, invoice_id):
+    """رمز الفاتورة العشوائي — يُنشأ مرة ويُعاد استعماله بعدها.
+
+    ثباته مقصود: رابطٌ سُلّم للعميل يجب أن يبقى يعمل، وإعادة طباعة
+    الفاتورة لا يجوز أن تُبطل ورقته الأولى.
+    """
+    try:
+        r = conn.execute("SELECT share_token FROM invoices WHERE id=?",
+                         (invoice_id,)).fetchone()
+    except Exception:
+        return None               # قاعدة قبل الترقية
+    if r and (r["share_token"] or "").strip():
+        return r["share_token"].strip()
+    tok = secrets.token_urlsafe(12)
+    try:
+        conn.execute("UPDATE invoices SET share_token=? WHERE id=?",
+                     (tok, invoice_id))
+    except Exception:
+        return None
+    return tok
+
+
+def cached_url(conn, invoice_id):
+    """الرابط السحابي المنشور سابقاً لهذه الفاتورة، أو ""."""
+    try:
+        r = conn.execute("SELECT share_url FROM invoices WHERE id=?",
+                         (invoice_id,)).fetchone()
+        return (r["share_url"] or "").strip() if r else ""
+    except Exception:
+        return ""
+
+
+def mode(conn):
+    try:
+        from models import fiscal
+        m = (fiscal.get_setting(conn, SETTING_MODE, "") or "").strip()
+    except Exception:
+        m = ""
+    return m if m in ("auto", "cloud", "lan", "off") else "auto"
+
+
+def set_mode(conn, value, username=None):
+    if value not in ("auto", "cloud", "lan", "off"):
+        raise ValueError(f"وضع غير مدعوم: {value}")
+    from models import fiscal
+    fiscal.set_setting(conn, SETTING_MODE, value, username)
+    return value
+
+
+# ══════════════════════════════════════════════════════════════════
+#  النشر السحابي
+# ══════════════════════════════════════════════════════════════════
+
+def _cloud_cfg():
+    from services import tenant
+    cfg = tenant.cloud_config()
+    if not (cfg.get("url") and cfg.get("key")):
+        return None
+    return cfg["url"].rstrip("/"), cfg["key"]
+
+
+def _put(url, key, path, data, ctype):
+    req = urllib.request.Request(
+        f"{url}/storage/v1/object/{BUCKET}/{path}", data=data,
+        method="POST",
+        headers={"apikey": key, "Authorization": f"Bearer {key}",
+                 "Content-Type": ctype, "x-upsert": "true"})
+    with urllib.request.urlopen(req, timeout=UPLOAD_TIMEOUT) as r:
+        return r.status in (200, 201)
+
+
+def public_url(url, path):
+    return f"{url}/storage/v1/object/public/{BUCKET}/{path}"
+
+
+def cloud_publish(conn, invoice_id, data, models, company=""):
+    """يرفع الصفحة وصورها إلى تخزين المصنع ويعيد رابطها العام.
+
+    يعيد "" عند أي تعذّر — مكتبة ناقصة، بلا إنترنت، مجلد تخزين غير
+    موجود. فالطباعة لا تتوقف على شبكة، ويُكتفى بالرابط المحلي.
+    """
+    cfg = _cloud_cfg()
+    if not cfg:
+        return ""
+    url, key = cfg
+    tok = _token(conn, invoice_id)
+    if not tok:
+        return ""
+    from services import tenant
+    base = f"{tenant.effective_tenant_id()}/{tok}"
+
+    srcs = {}
+    for i, m in enumerate(models):
+        if not m["path"]:
+            continue
+        try:
+            with open(m["path"], "rb") as fh:
+                raw = fh.read()
+            ext = (str(m["path"]).rsplit(".", 1) + ["jpg"])[1].lower()[:4]
+            name = f"{base}/m{i}.{ext}"
+            ctype = mimetypes.guess_type(str(m["path"]))[0] or "image/jpeg"
+            if _put(url, key, name, raw, ctype):
+                srcs[i] = public_url(url, name)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return ""         # المجلد غير موجود — لا جدوى من المتابعة
+        except OSError:
+            # انقطاع شبكة أو انتهاء مهلة: المحاولة كلها تُنهى هنا.
+            # تكرارها لكل صورة يعني انتظاراً مضاعفاً وطباعةً متجمّدة.
+            return ""
+        except Exception:
+            continue              # صورةٌ تعذّرت قراءتها: تُنشر الصفحة بدونها
+
+    html_doc = page_html(data, models, lambda i: srcs.get(i, ""), company)
+    try:
+        if not _put(url, key, f"{base}/index.html",
+                    html_doc.encode("utf-8"), "text/html; charset=utf-8"):
+            return ""
+    except Exception:
+        return ""
+    link = public_url(url, f"{base}/index.html")
+    try:
+        conn.execute("UPDATE invoices SET share_url=? WHERE id=?",
+                     (link, invoice_id))
+    except Exception:
+        pass
+    return link
+
+
+# ══════════════════════════════════════════════════════════════════
+#  النشر — سحابةً أو على شبكة المصنع
+# ══════════════════════════════════════════════════════════════════
+
+def publish(conn, invoice_id, company=""):
+    """يعيد (الرابط، «cloud» أو «lan»)، أو ("", "") إن تعذّر كلاهما."""
+    m = mode(conn)
+    if m == "off":
+        return "", ""
+    data = invoice_data(conn, invoice_id)
+    if not data:
+        return "", ""
+    models = model_lines(conn, invoice_id)
+
+    if m in ("auto", "cloud"):
+        cached = cached_url(conn, invoice_id)
+        if cached:
+            return cached, "cloud"
+        link = cloud_publish(conn, invoice_id, data, models, company)
+        if link:
+            return link, "cloud"
+        if m == "cloud":
+            return "", ""
+
+    # البديل المحلي: الصفحة نفسها على شبكة المصنع
+    try:
+        from services import photo_server
+        link = photo_server.publish_page(
+            data["no"],
+            [(m2["model"], m2["path"]) for m2 in models],
+            lambda src: page_html(data, models, src, company))
+        return (link or ""), ("lan" if link else "")
+    except Exception:
+        return "", ""
+
+
+def as_json(data, models):
+    """تمثيل نصّي للصفحة — يُستعمل في الفحوص لا في العرض."""
+    return json.dumps({"invoice": data, "models": models},
+                      ensure_ascii=False, sort_keys=True)

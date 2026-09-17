@@ -101,29 +101,34 @@ def qr_png_data_uri(text, box_size=4, border=2):
 
 
 def qr_for_invoice(conn, invoice_id, invoice_no, size=112):
-    """وسم QR لصور موديلات الفاتورة — أو "" إن تعذّر شيء.
+    """وسم QR لصفحة الفاتورة — أو "" إن تعذّر شيء.
 
-    القيمة المعادة HTML جاهز للإدراج في القالب مباشرةً.
+    الصفحة تعرض الفاتورة أولاً ثم موديلاتها بأسمائها وأعدادها
+    (`services.invoice_share`). والقيمة المعادة HTML جاهز للإدراج في
+    القالب مباشرةً.
+
+    **العنوان تحت الرمز يقول الحقيقة**: الرابط السحابي يُفتح من أي
+    مكان، والمحلي لا يُفتح إلا من جوالٍ على شبكة المصنع. وطباعةُ وعدٍ
+    لا يفي به الرمز أسوأ من عدم طباعته.
     """
     try:
-        items = invoice_models(conn, invoice_id)
-        if not items:
-            return ""
-        from services import photo_server
-        url = photo_server.publish_invoice(invoice_no, items)
+        import config
+        from services import invoice_share
+        url, where = invoice_share.publish(
+            conn, invoice_id, getattr(config, "COMPANY_NAME", ""))
         if not url:
             return ""
         uri = qr_png_data_uri(url)
         if not uri:
             return ""
-        # يلتصق بحافة الورقة اليمنى تحت عنوان المستند — لا يزاحم
-        # جدول أرقام الفاتورة ولا يبتلع مساحتها.
+        caption = ("الفاتورة وصور الموديلات" if where == "cloud"
+                   else "الفاتورة والموديلات — على شبكة المصنع")
         # يلتصق بحافة الورقة اليمنى تحت عنوان المستند — لا يزاحم
         # جدول أرقام الفاتورة ولا يبتلع مساحتها.
         return (
             f'<div style="text-align:right">'
             f'<img src="{uri}" width="{size}" height="{size}" alt="QR"/>'
             f'<div style="font-size:7.5pt; padding-top:2px;'
-            f' text-align:right">صور الموديلات</div></div>')
+            f' text-align:right">{caption}</div></div>')
     except Exception:
         return ""

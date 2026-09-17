@@ -986,12 +986,44 @@ def main():
         check("لكل بند مفتاح ثابت",
               all(it.data(0, _KEY) for it, _p in w1._iter_nav()))
 
-        # ملف قديم بفهارس مُزاحة وبندٍ مُعاد تسميته
-        legacy = [{"idx": max(0, i - 2), "text": t, "expanded": True,
-                   "children": []} for t, i in base]
-        legacy[3]["text"] = "اسم غيّرته بنفسي"
+        # ══ الترتيب المعتمد: اثنتا عشرة شاشة يومية ثم مجموعة واحدة ══
+        from ui.main_window import NAV_VERSION as _NAVV
+        top = [w1.sidebar.topLevelItem(i).text(0)
+               for i in range(w1.sidebar.topLevelItemCount())]
+        want = ["لوحة التحكم", "دليل الموديلات", "حركة الطقم",
+                "كشف حساب", "الوارد من التصنيع", "مبيعات/مرتجعات",
+                "سندات قبض/صرف", "التسكيرات", "المشتريات",
+                "القيود اليومية", "تقارير مبيعات وإنتاج المصنع",
+                "أعمار الديون (30/60/90)", "الإدارة والتقارير"]
+        check("ترتيب القائمة هو المعتمد حرفياً",
+              top[:len(want)] == want, str(top[:len(want)]))
+        grp = next((w1.sidebar.topLevelItem(i)
+                    for i in range(w1.sidebar.topLevelItemCount())
+                    if w1.sidebar.topLevelItem(i).text(0)
+                    == "الإدارة والتقارير"), None)
+        check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
+              grp is not None and grp.childCount() == len(base) - 12,
+              f"{grp.childCount() if grp else 0} بنداً")
+        check("لا شاشة خارج الترتيب المعتمد",
+              len(top) == len(want), str(top[len(want):]))
+
         path = w1._nav_layout_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        # ملفٌ بإصدارٍ أقدم: يُهمل فيظهر الترتيب المعتمد الجديد
+        path.write_text(_json.dumps(
+            [{"idx": 0, "text": "ترتيب قديم", "expanded": True,
+              "children": []}], ensure_ascii=False), encoding="utf-8")
+        w_old = _MW(_user)
+        check("ترتيب محفوظ بإصدار أقدم يُهمل",
+              [w_old.sidebar.topLevelItem(i).text(0)
+               for i in range(w_old.sidebar.topLevelItemCount())] == top)
+
+        # ملف بالإصدار الحالي لكن بفهارس مُزاحة وبندٍ مُعاد تسميته
+        legacy = {"version": _NAVV, "nodes": [
+            {"idx": max(0, i - 2), "key": t, "text": t, "expanded": True,
+             "children": []} for t, i in base]}
+        legacy["nodes"][3]["text"] = "اسم غيّرته بنفسي"
         path.write_text(_json.dumps(legacy, ensure_ascii=False),
                         encoding="utf-8")
 
@@ -1018,8 +1050,10 @@ def main():
             return out
 
         check("المفاتيح تُحفظ في الملف",
-              len([k for k in _keys(saved_nav)
+              len([k for k in _keys(saved_nav["nodes"])
                    if k and not k.startswith("::group::")]) == len(base))
+        check("الملف يحمل إصدار الترتيب",
+              saved_nav.get("version") == _NAVV)
         w3 = _MW(_user)
         check("الاستعادة بالمفاتيح مطابقة", _tree(w3) == after)
         try:
@@ -1223,6 +1257,50 @@ def main():
               f"{t3.columnWidth(0)} / {t3.columnWidth(1)}")
     except ImportError:
         check("فحوص الجداول الاحترافية", True, "تخطّي — PyQt5 غير مثبّت")
+
+    step("27ب) صفحة الفاتورة التي يفتحها رمز QR")
+    # **الشكوى التي عولجت**: الموظف يفتح الرمز فتظهر الصور، والعميل
+    # يصوّره في بيته فلا يفتح شيئاً — لأن الرابط كان عنواناً محلياً
+    # (192.168.x.x) لا يبلغه إلا من كان على شبكة المصنع.
+    from services import invoice_share as _ish
+    with db(readonly=True) as conn:
+        _d = _ish.invoice_data(conn, inv_id)
+        _m = _ish.model_lines(conn, inv_id)
+    check("بيانات الفاتورة تُقرأ للصفحة",
+          _d and _d["no"] and _d["lines"], str(_d and _d["no"]))
+    check("الإجمالي في الصفحة = إجمالي الفاتورة",
+          abs(_d["total"] - inv["grand_total"]) < 0.01,
+          f"{_d['total']} / {inv['grand_total']}")
+    _page = _ish.page_html(_d, _m, lambda i: "", "مصنع الاختبار")
+    check("الفاتورة تظهر أولاً في الصفحة",
+          _page.index(str(_d["no"])) < _page.index("موديلات الفاتورة"))
+    check("وموديلاتها أسفلها بأسمائها وأعدادها",
+          all(f'<b>{x["model"]}</b>' in _page and
+              f'العدد: {x["count"]}' in _page for x in _m),
+          str([(x["model"], x["count"]) for x in _m]))
+    check("الصفحة صالحة للجوال",
+          'name="viewport"' in _page and 'dir="rtl"' in _page)
+
+    # رمز الفاتورة ثابت: رابطٌ سُلّم للعميل لا يجوز أن تُبطله إعادة
+    # الطباعة.
+    with db() as conn:
+        _t1 = _ish._token(conn, inv_id)
+    with db() as conn:
+        _t2 = _ish._token(conn, inv_id)
+    check("رمز الفاتورة يُنشأ مرةً ويثبت", bool(_t1) and _t1 == _t2, _t1)
+    check("ولا يُخمَّن (طوله كافٍ)", len(_t1 or "") >= 12)
+    with db(readonly=True) as conn:
+        check("الوضع الافتراضي تلقائي", _ish.mode(conn) == "auto")
+    with db() as conn:
+        _ish.set_mode(conn, "off", "admin")
+    with db(readonly=True) as conn:
+        check("وضع «بلا رمز» يمنع النشر",
+              _ish.publish(conn, inv_id) == ("", ""))
+        _ish_qr = __import__("services.photo_qr", fromlist=["x"])
+        check("ولا يُطبع وسم QR حينها",
+              _ish_qr.qr_for_invoice(conn, inv_id, _d["no"]) == "")
+    with db() as conn:
+        _ish.set_mode(conn, "auto", "admin")
 
     step("28) حدّ الائتمان")
     # سقفٌ لكل جهة يُفحص **لحظة الترحيل** لا في تقرير آخر الشهر:

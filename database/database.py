@@ -144,6 +144,8 @@ CREATE TABLE IF NOT EXISTS invoices(
   vat_amount REAL NOT NULL,
   grand_total REAL NOT NULL,
   qr_base64 TEXT DEFAULT '',
+  -- رمز صفحة الفاتورة للجوال ورابطها المنشور (services/invoice_share.py)
+  share_token TEXT, share_url TEXT,
   vat_applied INTEGER NOT NULL DEFAULT 1,
   description TEXT DEFAULT '',
   entry_id INTEGER REFERENCES journal_entries(id),
@@ -1220,6 +1222,17 @@ def migrate_schema() -> None:
                     conn.execute(
                         f"ALTER TABLE entities ADD COLUMN {col}"
                         " REAL NOT NULL DEFAULT 0")
+
+        # 19) صفحة الفاتورة للجوال (`services.invoice_share`): رمزٌ
+        #     عشوائي ثابت لكل فاتورة ورابطها المنشور. ثباتهما مقصود —
+        #     رابطٌ سُلّم للعميل يجب أن يبقى يعمل بعد إعادة الطباعة.
+        inv_cols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(invoices)")]
+        if inv_cols:
+            for col in ("share_token", "share_url"):
+                if col not in inv_cols:
+                    conn.execute(
+                        f"ALTER TABLE invoices ADD COLUMN {col} TEXT")
 
         # 18) سلسلة بصمات القيود — سجل تدقيق محصَّن (`models.integrity`).
         #     العمودان يبقيان فارغين للقيود السابقة حتى تُختم دفعةً
