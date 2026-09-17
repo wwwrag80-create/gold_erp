@@ -245,6 +245,207 @@ def page_html(data, models, img_src, company=""):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  الصفحة **صورةً** — لأن التخزين السحابي لا يعرض HTML
+# ------------------------------------------------------------------
+#  **الخلل الذي عولج هنا**: رُفعت الصفحة بصيغة HTML فظهرت على جوال
+#  العميل **كوداً نصّياً** لا فاتورة. السبب أن تخزين Supabase يقدّم
+#  ملفات HTML بنوع `text/plain` عمداً — إجراءُ أمانٍ يمنع استضافة
+#  صفحات تصيّد على نطاقه. فلا سبيل لجعله يعرض HTML مهما ضُبطت
+#  الترويسات، والعلاج ليس في الترويسة بل في الصيغة.
+#
+#  **الصورة تُعرض دائماً**: لا متصفح يرفضها، ولا نوع محتوى يُعاد
+#  كتابته، ولا خطّ عربي ناقص على جهاز العميل — النص مرسومٌ داخلها.
+#  وتكبيرها باللمس أسهل من تكبير صفحة. والصفحة المحلية تبقى HTML
+#  لأن خادم المصنع يقدّمها بنوعها الصحيح.
+# ══════════════════════════════════════════════════════════════════
+
+PAGE_WIDTH = 760
+PAGE_QUALITY = 58
+THUMB_W, THUMB_H = 352, 264
+
+_C_BG = "#F5F2EA"
+_C_CARD = "#FFFFFF"
+_C_INK = "#1F1B17"
+_C_MUT = "#6B6459"
+_C_GOLD = "#8A6E1E"
+_C_LINE = "#E0D9C8"
+_C_HEAD = "#F1ECE0"
+
+
+def _painter_ready():
+    """هل يمكن الرسم؟ رسم النصوص يحتاج تطبيق واجهة قائماً."""
+    try:
+        from PyQt5.QtWidgets import QApplication
+        return QApplication.instance() is not None
+    except Exception:
+        return False
+
+
+def render_page_image(data, models, company="", width=PAGE_WIDTH):
+    """يرسم صفحة الفاتورة صورةَ JPEG — أو b"" إن تعذّر الرسم."""
+    if not _painter_ready():
+        return b""
+    try:
+        from PyQt5.QtCore import QBuffer, QByteArray, QRect, Qt
+        from PyQt5.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter
+    except Exception:
+        return b""
+    p = None
+    try:
+        # لوحة طويلة تُقصّ عند آخر ما رُسم — أبسط من حساب الارتفاع
+        # مرّتين، وأدقّ لأن لفّ النص العربي يقرّره القياس لا التقدير.
+        img = QImage(width, 9000, QImage.Format_RGB32)
+        img.fill(QColor(_C_BG))
+        p = QPainter(img)
+        # ══ الرسّام يُغلق دائماً ══
+        # أي استثناء أثناء الرسم كان يترك الرسّام مفتوحاً على الصورة،
+        # فيُجهض Qt التطبيق كلّه عند جمعها («Cannot destroy paint device
+        # that is being painted»). خللٌ في تجميل يُسقط نظاماً محاسبياً —
+        # فالإغلاق في `finally` لا في نهاية المسار الناجح وحده.
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        p.setLayoutDirection(Qt.RightToLeft)
+
+        pad, y = 18, 18
+        inner = width - pad * 2
+        AR = Qt.AlignRight | Qt.AlignVCenter
+        AC = Qt.AlignCenter
+
+        def font(size, bold=False):
+            f = QFont("Segoe UI", size)
+            f.setBold(bold)
+            return f
+
+        def text(s, x, yy, w, h, f, color, align=AR):
+            p.setFont(f)
+            p.setPen(QColor(color))
+            p.drawText(QRect(int(x), int(yy), int(w), int(h)), align, str(s))
+
+        def card(yy, h):
+            p.setPen(QColor(_C_LINE))
+            p.setBrush(QColor(_C_CARD))
+            p.drawRoundedRect(QRect(pad, int(yy), inner, int(h)), 12, 12)
+
+        # ── ترويسة الفاتورة ──
+        rows = data["lines"]
+        head_h = 96
+        tbl_h = 34 + 30 * (len(rows) or 1) + 30 * (3 if data["vat_applied"]
+                                                   else 2)
+        box_h = head_h + tbl_h + 34
+        card(y, box_h)
+        text(f'{data["kind"]} · {data["no"]}', pad + 14, y + 12, inner - 28,
+             30, font(15, True), _C_GOLD)
+        text(company, pad + 14, y + 42, inner - 28, 20, font(9), _C_MUT)
+        text(f'التاريخ: {data["date"]}', pad + 14, y + 64, inner - 28, 24,
+             font(10), _C_INK)
+        text(f'العميل: {data["customer"]}', pad + 14, y + 64, inner - 28, 24,
+             font(10, True), _C_INK, Qt.AlignLeft | Qt.AlignVCenter)
+        ty = y + head_h
+
+        # ── جدول الأصناف ──
+        cols = [("الموديل", 0.22), ("رقم التشغيل", 0.28),
+                (f'الوزن ({data["unit"]})', 0.25), ("الأجرة", 0.25)]
+        x0 = pad + 10
+        tw = inner - 20
+        p.setBrush(QColor(_C_HEAD))
+        p.setPen(QColor(_C_LINE))
+        p.drawRect(QRect(x0, int(ty), tw, 34))
+        cx = x0 + tw
+        for title, frac in cols:
+            w = int(tw * frac)
+            cx -= w
+            text(title, cx, ty, w, 34, font(9, True), "#4A4237", AC)
+        ty += 34
+        for ln in (rows or [{}]):
+            cx = x0 + tw
+            vals = [ln.get("model", "—"), ln.get("wo", "—"),
+                    f'{ln.get("weight", 0):,.3f}', f'{ln.get("wage", 0):,.2f}']
+            for (t_, frac), v in zip(cols, vals):
+                w = int(tw * frac)
+                cx -= w
+                text(v, cx, ty, w, 30, font(9), _C_INK, AC)
+            p.setPen(QColor("#F0EBE0"))
+            p.drawLine(x0, int(ty + 30), x0 + tw, int(ty + 30))
+            ty += 30
+
+        def total_row(label, value, bold=True):
+            nonlocal ty
+            p.setBrush(QColor("#FAF8F3"))
+            p.setPen(QColor(_C_LINE))
+            p.drawRect(QRect(x0, int(ty), tw, 30))
+            text(label, x0 + 8, ty, tw - 16, 30, font(9, bold), _C_INK)
+            text(value, x0 + 8, ty, tw - 16, 30, font(10, True), _C_GOLD,
+                 Qt.AlignLeft | Qt.AlignVCenter)
+            ty += 30
+
+        total_row("إجمالي الوزن", f'{data["weight"]:,.3f} {data["unit"]}')
+        if data["vat_applied"]:
+            total_row("الأجور قبل الضريبة", f'{data["wages"]:,.2f}', False)
+            total_row("ضريبة القيمة المضافة", f'{data["vat"]:,.2f}', False)
+        total_row("الإجمالي النهائي (ريال)", f'{data["total"]:,.2f}')
+        y += box_h + 16
+
+        # ── الموديلات ──
+        text("موديلات الفاتورة", pad + 4, y, inner - 8, 28, font(12, True),
+             _C_GOLD)
+        y += 32
+        cols_n = 2
+        cw = (inner - 12) // cols_n
+        for idx, m in enumerate(models):
+            col = idx % cols_n
+            if col == 0 and idx:
+                y += THUMB_H + 66
+            cx = pad + (cols_n - 1 - col) * (cw + 12)
+            p.setPen(QColor(_C_LINE))
+            p.setBrush(QColor(_C_CARD))
+            p.drawRoundedRect(QRect(int(cx), int(y), cw, THUMB_H + 58), 10, 10)
+            ph = QRect(int(cx) + 6, int(y) + 6, cw - 12, THUMB_H)
+            pic = QImage(str(m["path"])) if m.get("path") else QImage()
+            if not pic.isNull():
+                sc = pic.scaled(ph.width(), ph.height(), Qt.KeepAspectRatio,
+                                Qt.SmoothTransformation)
+                p.drawImage(ph.x() + (ph.width() - sc.width()) // 2,
+                            ph.y() + (ph.height() - sc.height()) // 2, sc)
+            else:
+                p.setBrush(QColor("#F7F4EC"))
+                p.setPen(QColor("#EDE6D8"))
+                p.drawRect(ph)
+                text("لا توجد صورة", ph.x(), ph.y(), ph.width(), ph.height(),
+                     font(10), "#B3AB9A", AC)
+            text(m["model"], cx + 6, y + THUMB_H + 8, cw - 12, 24,
+                 font(11, True), _C_INK, AC)
+            text(f'العدد: {m["count"]} · {m["weight"]:,.3f} {m["unit"]}',
+                 cx + 6, y + THUMB_H + 30, cw - 12, 22, font(9), _C_MUT, AC)
+        if models:
+            y += THUMB_H + 66
+        else:
+            text("لا توجد موديلات في هذه الفاتورة.", pad + 4, y, inner - 8,
+                 26, font(10), _C_MUT)
+            y += 30
+
+        text(company or "صفحة الفاتورة", pad, y + 4, inner, 24, font(8),
+             "#9A9384", AC)
+        y += 34
+        p.end()
+
+        out = img.copy(0, 0, width, min(int(y), img.height()))
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QBuffer.WriteOnly)
+        ok = out.save(buf, "JPEG", PAGE_QUALITY)
+        buf.close()
+        return bytes(ba) if ok else b""
+    except Exception:
+        return b""
+    finally:
+        try:
+            if p is not None and p.isActive():
+                p.end()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════
 #  الرمز المحفوظ مع الفاتورة
 # ══════════════════════════════════════════════════════════════════
 
@@ -408,6 +609,31 @@ def cloud_publish(conn, invoice_id, data, models, company=""):
     base = f"{tenant.effective_tenant_id()}/{tok}"
 
     tid = tenant.effective_tenant_id()
+
+    # ══ الصفحة صورةٌ واحدة ══
+    # التخزين يقدّم HTML بنوع `text/plain` فيظهر كوداً على الجوال
+    # (الشرح في `render_page_image`). والصورة تُعرض دائماً، وهي
+    # مكتفية بذاتها فلا تُرفع معها صور الموديلات منفصلةً — طلبٌ واحد
+    # بدل عشرة، وملفٌ واحد بدل أحد عشر.
+    shot = render_page_image(data, models, company)
+    if shot:
+        name = f"{base}/invoice.jpg"
+        try:
+            if _put(url, key, name, shot, "image/jpeg"):
+                link = public_url(url, name)
+                try:
+                    conn.execute(
+                        "UPDATE invoices SET share_url=? WHERE id=?",
+                        (link, invoice_id))
+                except Exception:
+                    pass
+                return link
+        except Exception:
+            pass
+        return ""          # تعذّر الرفع — لا يُستبدل بصفحة لا تُعرض
+
+    # لم يتيسّر الرسم (بلا واجهة رسومية): تُرفع الصفحة نصّاً مع صورها.
+    # قد لا تُعرض على كل متصفح، لكنها خيرٌ من لا شيء.
     srcs = {}
     for i, m in enumerate(models):
         if not m["path"]:
@@ -517,6 +743,51 @@ _CANCELLED = """<!DOCTYPE html>
 للاستفسار راجع {company}.</p></div></body></html>"""
 
 
+def render_cancelled_image(invoice_no, company="", width=PAGE_WIDTH):
+    """صورة «هذه الفاتورة أُلغيت» — أو b"" إن تعذّر الرسم."""
+    if not _painter_ready():
+        return b""
+    p = None
+    try:
+        from PyQt5.QtCore import QBuffer, QByteArray, QRect, Qt
+        from PyQt5.QtGui import QColor, QFont, QImage, QPainter
+        img = QImage(width, 300, QImage.Format_RGB32)
+        img.fill(QColor(_C_BG))
+        p = QPainter(img)      # يُغلق في `finally` أدناه
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setLayoutDirection(Qt.RightToLeft)
+        p.setPen(QColor("#E2C3C3"))
+        p.setBrush(QColor(_C_CARD))
+        p.drawRoundedRect(QRect(18, 30, width - 36, 240), 14, 14)
+        f = QFont("Segoe UI", 17)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor("#A33131"))
+        p.drawText(QRect(30, 70, width - 60, 46), Qt.AlignCenter,
+                   "⛔ هذه الفاتورة أُلغيت")
+        p.setFont(QFont("Segoe UI", 11))
+        p.setPen(QColor(_C_MUT))
+        p.drawText(QRect(40, 130, width - 80, 110),
+                   Qt.AlignCenter | Qt.TextWordWrap,
+                   f"الفاتورة {invoice_no} أُلغيت في سجلات المصنع ولم تعد "
+                   f"سارية.\nللاستفسار راجع {company}.")
+        p.end()
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QBuffer.WriteOnly)
+        ok = img.save(buf, "JPEG", 70)
+        buf.close()
+        return bytes(ba) if ok else b""
+    except Exception:
+        return b""
+    finally:
+        try:
+            if p is not None and p.isActive():
+                p.end()
+        except Exception:
+            pass
+
+
 def mark_cancelled(invoice_id, company=""):
     """يستبدل صفحة فاتورةٍ حُذفت بصفحة «أُلغيت».
 
@@ -540,12 +811,18 @@ def mark_cancelled(invoice_id, company=""):
             return ""
         url, key = cfg
         from services import tenant
-        path = f"{tenant.effective_tenant_id()}/{r['share_token']}/index.html"
+        base = f"{tenant.effective_tenant_id()}/{r['share_token']}"
+        # الإعلان صورةً كذلك: نفس سبب صفحة الفاتورة — التخزين لا يعرض
+        # HTML، فإعلانٌ لا يُقرأ كإعلانٍ لم يكن.
+        shot = render_cancelled_image(r["invoice_no"], company)
+        if shot and _put(url, key, f"{base}/invoice.jpg", shot,
+                         "image/jpeg"):
+            return public_url(url, f"{base}/invoice.jpg")
         page = _CANCELLED.format(no=_esc(r["invoice_no"]),
                                  company=_esc(company))
-        if _put(url, key, path, page.encode("utf-8"),
+        if _put(url, key, f"{base}/index.html", page.encode("utf-8"),
                 "text/html; charset=utf-8"):
-            return public_url(url, path)
+            return public_url(url, f"{base}/index.html")
     except Exception:
         pass
     return ""
@@ -765,6 +1042,26 @@ def diagnose(conn, invoice_id=None):
     add("الرابط الذي سيحمله الرمز", bool(link),
         f"[{ 'سحابي' if where == 'cloud' else 'محلي' }] {link}" if link
         else "لا رابط — لن يُطبع رمز")
+
+    # 9) **فتح الرابط فعلاً** — لا يكفي أن يُرفع، يجب أن يُعرض
+    # الفحص السابق كان يقف عند «رُفع بنجاح»، فمرّت صفحةٌ رُفعت وقُدّمت
+    # نصّاً فظهرت على الجوال كوداً. هذه الخطوة تفتح الرابط كما يفتحه
+    # جوال العميل وتقرأ نوع المحتوى الذي يُقدَّم به.
+    if link:
+        try:
+            req = urllib.request.Request(link, method="GET")
+            with urllib.request.urlopen(req, timeout=UPLOAD_TIMEOUT) as r:
+                ctype = (r.headers.get("Content-Type") or "").lower()
+                size = len(r.read(4096))
+            shows = ctype.startswith("image/") or "text/html" in ctype
+            add("فتح الرابط كما يفتحه العميل", shows and size > 0,
+                f"يُقدَّم بنوع «{ctype or '—'}»"
+                + ("" if shows else
+                   " — لن يُعرض كصفحة. صفحة الفاتورة تُرفع صورةً لهذا "
+                   "السبب؛ إن ظهر هذا السطر فالمرفوع نصٌّ لا صورة."))
+        except Exception as e:
+            add("فتح الرابط كما يفتحه العميل", False,
+                f"{type(e).__name__}: {e}")
     return out
 
 
@@ -1011,7 +1308,11 @@ def purge_pages(conn, before_date, username=None):
         return 0
     from services import tenant
     tid = tenant.effective_tenant_id()
-    names = [f"{tid}/{r['share_token']}/index.html" for r in rows]
+    # الاسمان معاً: الصفحة صورةٌ اليوم وكانت HTML قبله
+    names = []
+    for r in rows:
+        names.append(f"{tid}/{r['share_token']}/invoice.jpg")
+        names.append(f"{tid}/{r['share_token']}/index.html")
     n = 0
     for i in range(0, len(names), 100):        # دفعات معقولة
         try:
