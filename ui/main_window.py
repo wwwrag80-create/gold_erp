@@ -1046,6 +1046,11 @@ class MainWindow(QtWidgets.QMainWindow):
             a.setChecked(key == cur_qr)
             gq.addAction(a)
             a.triggered.connect(lambda _c=False, k=key: self._set_qr_mode(k))
+        m_qr.addSeparator()
+        a_use = m_qr.addAction("📊 المساحة السحابية المستعملة…")
+        a_use.triggered.connect(self._qr_usage)
+        a_clean = m_qr.addAction("🧹 حذف صفحات الفواتير القديمة…")
+        a_clean.triggered.connect(self._qr_purge)
 
         menu.addSeparator()
         a_find = menu.addAction("🔍 بحث موحّد…        Ctrl+K")
@@ -1083,6 +1088,47 @@ class MainWindow(QtWidgets.QMainWindow):
                            "وحدها.\n\nيفتحه من كان جواله على شبكة "
                            "المصنع والنظام يعمل — ولا يفتحه العميل بعد "
                            "خروجه.")
+        except Exception as e:
+            err(self, e)
+
+    def _qr_usage(self):
+        """يعرض ما تشغله صفحات الفواتير وصورها من المساحة السحابية."""
+        try:
+            from services import invoice_share
+            with db(readonly=True) as conn:
+                u = invoice_share.usage(conn)
+            info(self,
+                 f"صور الموديلات المرفوعة: {u['images']:,} صورة — "
+                 f"{u['image_mb']:,.2f} ميجابايت\n"
+                 f"صفحات الفواتير المنشورة: {u['pages']:,} صفحة — "
+                 f"{u['page_mb']:,.2f} ميجابايت\n"
+                 f"الإجمالي: {u['total_mb']:,.2f} ميجابايت\n\n"
+                 "الصورة تُصغَّر وتُضغط قبل رفعها، وتُرفع **مرة واحدة** "
+                 "مهما تكرّر موديلها في الفواتير — فلا تتضاعف المساحة "
+                 "مع كل فاتورة.",
+                 "المساحة السحابية")
+        except Exception as e:
+            err(self, e)
+
+    def _qr_purge(self):
+        """يحذف صفحات الفواتير الأقدم من سنة — وصور الموديلات تبقى."""
+        try:
+            import datetime as _dt
+            from services import invoice_share
+            cut = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+            if not ask(self,
+                       f"حذف صفحات الفواتير الأقدم من {cut} من التخزين "
+                       "السحابي؟\n\n"
+                       "• لا يُحذف رقمٌ محاسبي ولا فاتورة — الصفحة "
+                       "المعروضة على الجوال وحدها.\n"
+                       "• صور الموديلات تبقى: الصورة الواحدة تشير "
+                       "إليها فواتير كثيرة.\n"
+                       "• رموز QR على الأوراق القديمة لن تفتح بعدها."):
+                return
+            with db() as conn:
+                n = invoice_share.purge_pages(
+                    conn, cut, self.user.get("username"))
+            info(self, f"حُذفت {n:,} صفحة فاتورة من التخزين السحابي.")
         except Exception as e:
             err(self, e)
 
