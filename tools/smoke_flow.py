@@ -1367,6 +1367,38 @@ def main():
                   "SELECT COUNT(*) n FROM invoices WHERE qr_enabled=1"
               ).fetchone()["n"] == 1)
 
+    # ══ الرمز يظهر فعلاً في ورقة الطباعة حين يُفعَّل ══
+    # الفحص من طرفٍ إلى طرف: من خانة التفعيل إلى وسم <img> في القالب.
+    from services import print_manager as _pm
+    _html_on = _pm.build_html("invoice", inv_on["id"])
+    _html_off = _pm.build_html("invoice", inv_off["id"])
+    check("وسم QR يظهر في قالب الفاتورة المفعَّلة",
+          "data:image/png;base64," in _html_on)
+    check("ولا يظهر في غير المفعَّلة",
+          "data:image/png;base64," not in _html_off)
+
+    # الطباعة لا ترفع شيئاً عبر الإنترنت: الرفع فعلٌ صريح بعد الترحيل،
+    # وإلا حُبس قفل الكتابة ثوانيَ فتجمّدت الواجهة (وهو خلل عولج من
+    # قبل حين كانت صورة QR تُبنى داخل المعاملة).
+    with db(readonly=True) as conn:
+        check("الطباعة لا تحاول الرفع (قفل الكتابة لا تلمسه الشبكة)",
+              _ish.publish(conn, inv_on["id"])[1] in ("lan", ""),
+              str(_ish.publish(conn, inv_on["id"])))
+
+    # التشخيص يقول أين توقّف المسار بالضبط
+    with db() as conn:
+        _rep = _ish.report(conn, inv_off["id"])
+        _steps = _ish.diagnose(conn, inv_off["id"])
+    check("التشخيص يذكر الخطوات باسمها", "مكتبة بناء الرمز" in _rep)
+    check("ويكشف أن الفاتورة غير مفعَّلة",
+          any(not s["ok"] and "تفعيل الرمز" in s["step"] for s in _steps),
+          str([s["step"] for s in _steps]))
+    with db() as conn:
+        _ok_steps = _ish.diagnose(conn, inv_on["id"])
+    check("وللمفعَّلة يمضي إلى الرابط النهائي",
+          any("الرابط الذي سيحمله الرمز" in s["step"] for s in _ok_steps),
+          str([s["step"] for s in _ok_steps]))
+
     # ── المسوّدات: ما أُدخل ولم يُرحَّل يبقى بعد مغادرة الشاشة ──
     from services import drafts as _dr
     _dr.save("اختبار", "admin", {"a": 1, "b": ["س", "ص"]})

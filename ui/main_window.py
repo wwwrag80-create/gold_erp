@@ -56,7 +56,8 @@ from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
 from services import karat_view as kv
 from ui import theme
-from ui.widgets.common import ElidedLabel, ask, err, info, search_combo
+from ui.widgets.common import (ElidedLabel, ask, busy, err, info,
+                               search_combo)
 
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
 NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
@@ -1047,6 +1048,8 @@ class MainWindow(QtWidgets.QMainWindow):
             gq.addAction(a)
             a.triggered.connect(lambda _c=False, k=key: self._set_qr_mode(k))
         m_qr.addSeparator()
+        a_diag = m_qr.addAction("🩺 لماذا لم يظهر الرمز؟ (فحص)")
+        a_diag.triggered.connect(self._qr_diagnose)
         a_use = m_qr.addAction("📊 المساحة السحابية المستعملة…")
         a_use.triggered.connect(self._qr_usage)
         a_clean = m_qr.addAction("🧹 حذف صفحات الفواتير القديمة…")
@@ -1088,6 +1091,29 @@ class MainWindow(QtWidgets.QMainWindow):
                            "وحدها.\n\nيفتحه من كان جواله على شبكة "
                            "المصنع والنظام يعمل — ولا يفتحه العميل بعد "
                            "خروجه.")
+        except Exception as e:
+            err(self, e)
+
+    def _qr_diagnose(self):
+        """يمشي مسار رمز QR خطوةً خطوة ويعرض أين توقّف بالضبط.
+
+        الطباعة لا تتوقف لأجل صورة، فكل تعذّر فيها صامت — وهذا يحمي
+        المستند لكنه يُعمي المستخدم عن السبب. هذه النافذة تكشفه.
+        """
+        try:
+            from services import invoice_share
+            with busy(self, "جارٍ فحص مسار الرمز…", stage="فحص QR"):
+                with db() as conn:
+                    txt = invoice_share.report(conn)
+            box = QtWidgets.QMessageBox(self)
+            box.setWindowTitle("فحص رمز QR على الفاتورة")
+            box.setIcon(QtWidgets.QMessageBox.Information)
+            box.setText("نتيجة فحص مسار الرمز لآخر فاتورة:")
+            box.setDetailedText(txt)
+            box.setInformativeText(
+                txt if len(txt) < 900 else
+                "التفاصيل كاملةً في «إظهار التفاصيل».")
+            box.exec_()
         except Exception as e:
             err(self, e)
 

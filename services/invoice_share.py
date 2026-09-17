@@ -461,8 +461,43 @@ def enabled_for(conn, invoice_id):
     return bool(r and r["qr_enabled"])
 
 
-def publish(conn, invoice_id, company=""):
-    """يعيد (الرابط، «cloud» أو «lan»)، أو ("", "") إن تعذّر كلاهما."""
+def ensure_published(invoice_id, company=""):
+    """ينشر صفحة الفاتورة سحابياً — **بعد الترحيل وخارج أي معاملة**.
+
+    **لماذا هنا لا عند الطباعة**: بناء ورقة الطباعة يجري داخل معاملة
+    كتابة مفتوحة. ورفعُ صورٍ عبر الإنترنت داخلها يحبس قفل الكتابة
+    ثوانيَ — فتتعطّل النسخ الاحتياطي والمزامنة، وتتجمّد الواجهة. وهو
+    عين الخلل الذي عولج من قبل حين كانت صورة QR تُبنى داخل المعاملة.
+
+    فالرفع يجري مرةً واحدة عقب الترحيل (والقراءة عند الطباعة تجد
+    الرابط جاهزاً)، والشبكة لا تُلامس قفل القاعدة أبداً.
+    """
+    from database.database import db
+    try:
+        with db(readonly=True) as conn:
+            if mode(conn) not in ("auto", "cloud"):
+                return ""
+            if not enabled_for(conn, invoice_id):
+                return ""
+            if cached_url(conn, invoice_id):
+                return cached_url(conn, invoice_id)
+            data = invoice_data(conn, invoice_id)
+            models = model_lines(conn, invoice_id)
+        if not data:
+            return ""
+        with db() as conn:
+            return cloud_publish(conn, invoice_id, data, models, company)
+    except Exception:
+        return ""             # النشر رفاهية لا تُعطّل ترحيلاً تمّ
+
+
+def publish(conn, invoice_id, company="", allow_upload=False):
+    """يعيد (الرابط، «cloud» أو «lan»)، أو ("", "") إن تعذّر كلاهما.
+
+    `allow_upload=False` (وهو حال الطباعة): يُكتفى برابطٍ منشور سابقاً،
+    ولا تُلامس الشبكةُ قفلَ الكتابة. الرفع فعلٌ صريح في
+    `ensure_published` عقب الترحيل.
+    """
     m = mode(conn)
     if m == "off" or not enabled_for(conn, invoice_id):
         return "", ""
@@ -475,9 +510,18 @@ def publish(conn, invoice_id, company=""):
         cached = cached_url(conn, invoice_id)
         if cached:
             return cached, "cloud"
-        link = cloud_publish(conn, invoice_id, data, models, company)
-        if link:
-            return link, "cloud"
+        if allow_upload:
+            # ══ تعثّر السحابة لا يجوز أن يمنع البديل المحلي ══
+            # كان أي استثناء هنا — إعداداتٌ ناقصة، رفضٌ من التخزين،
+            # انقطاعُ شبكة — يخرج من `publish` كلها فلا تُجرَّب الشبكة
+            # المحلية أصلاً، ويُطبع المستند بلا رمز بلا أن يُعرف السبب.
+            try:
+                link = cloud_publish(conn, invoice_id, data, models,
+                                     company)
+            except Exception:
+                link = ""
+            if link:
+                return link, "cloud"
         if m == "cloud":
             return "", ""
 
@@ -491,6 +535,142 @@ def publish(conn, invoice_id, company=""):
         return (link or ""), ("lan" if link else "")
     except Exception:
         return "", ""
+
+
+# ══════════════════════════════════════════════════════════════════
+#  التشخيص — لماذا لم يظهر الرمز؟
+# ------------------------------------------------------------------
+#  كل مسار في هذه الوحدة يعيد "" عند التعذّر ولا يرفع خطأً: ورقةٌ
+#  محاسبية لا يجوز أن تتوقف طباعتها لأجل صورة. لكن الصمت الذي يحمي
+#  الطباعة يُعمي المستخدم عن السبب — فيرى رمزاً لا يظهر بلا تفسير.
+#  هذه الدالة تمشي المسار نفسه خطوةً خطوة وتقول أين توقّف بالضبط.
+# ══════════════════════════════════════════════════════════════════
+
+def diagnose(conn, invoice_id=None):
+    """يفحص مسار رمز QR ويعيد [(الخطوة, نجحت؟, التفصيل)]."""
+    out = []
+
+    def add(step, ok, detail=""):
+        out.append({"step": step, "ok": bool(ok), "detail": str(detail)})
+        return ok
+
+    # 1) مكتبة بناء الرمز
+    try:
+        import qrcode                      # noqa: F401
+        add("مكتبة بناء الرمز (qrcode)", True, "مثبّتة")
+    except Exception as e:
+        add("مكتبة بناء الرمز (qrcode)", False,
+            f"غير مثبّتة — {e}. بدونها لا يُبنى رمز إطلاقاً.")
+        return out
+
+    # 2) وضع الرمز
+    m = mode(conn)
+    labels = {"auto": "تلقائي (سحابة ثم شبكة المصنع)",
+              "cloud": "السحابة فقط", "lan": "شبكة المصنع فقط",
+              "off": "بلا رمز"}
+    if not add("وضع الرمز", m != "off", labels.get(m, m)):
+        return out
+
+    # 3) الفاتورة المفحوصة
+    if invoice_id is None:
+        r = conn.execute(
+            "SELECT id FROM invoices WHERE is_deleted=0"
+            " ORDER BY id DESC LIMIT 1").fetchone()
+        invoice_id = r["id"] if r else None
+    if not add("آخر فاتورة", invoice_id is not None,
+               f"رقم {invoice_id}" if invoice_id else "لا توجد فواتير"):
+        return out
+
+    # 4) هل فُعّل الرمز لهذه الفاتورة؟
+    if not add("تفعيل الرمز لهذه الفاتورة", enabled_for(conn, invoice_id),
+               "مفعَّل" if enabled_for(conn, invoice_id) else
+               "غير مفعَّل — الخانة في شاشة المبيعات تُفعَّل **قبل** "
+               "الترحيل، والقرار يُحفظ مع الفاتورة. الفواتير التي "
+               "رُحّلت قبل تفعيلها تبقى بلا رمز."):
+        return out
+
+    # 5) موديلات الفاتورة وصورها
+    models = model_lines(conn, invoice_id)
+    with_img = [m2 for m2 in models if m2["path"]]
+    add("موديلات الفاتورة", True,
+        f"{len(models)} موديل · {len(with_img)} منها له صورة محفوظة")
+
+    # 6) السحابة
+    if m in ("auto", "cloud"):
+        cached = cached_url(conn, invoice_id)
+        if cached:
+            add("رابط سحابي منشور سابقاً", True, cached)
+            return out
+        cfg = _cloud_cfg()
+        if not add("إعدادات السحابة", cfg is not None,
+                   "مهيّأة" if cfg else
+                   "غير مهيّأة (SUPABASE_URL / KEY) — يُستعمل البديل "
+                   "المحلي"):
+            pass
+        else:
+            url, key = cfg
+            probe = f"{tenant_id_safe()}/_probe.txt"
+            try:
+                ok = _put(url, key, probe, b"ok", "text/plain")
+                add("الرفع إلى مجلد invoice-photos", ok,
+                    "نجح" if ok else "رُفض بلا رسالة")
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", "ignore")[:200]
+                except Exception:
+                    pass
+                hint = {
+                    404: "المجلد «invoice-photos» غير موجود — أنشئه من "
+                         "Supabase ← Storage ← New bucket.",
+                    403: "المجلد موجود لكن الرفع ممنوع: ينقصه إذن "
+                         "الكتابة (Policy). أضف من Storage ← Policies "
+                         "سياسةً تسمح بـINSERT و UPDATE على "
+                         "«invoice-photos» للدور anon.",
+                    400: "رُفض الطلب — غالباً سياسة أمان ناقصة على "
+                         "المجلد (Policies).",
+                }.get(e.code, "")
+                add("الرفع إلى مجلد invoice-photos", False,
+                    f"HTTP {e.code} — {hint} {body}".strip())
+            except Exception as e:
+                add("الرفع إلى مجلد invoice-photos", False,
+                    f"{type(e).__name__}: {e}")
+
+    # 7) شبكة المصنع
+    try:
+        from services import photo_server
+        addr = photo_server.ensure_running()
+        add("خادم شبكة المصنع", bool(addr),
+            f"يعمل على {addr[0]}:{addr[1]}" if addr
+            else "تعذّر تشغيله (منفذ مشغول أو جدار حماية)")
+    except Exception as e:
+        add("خادم شبكة المصنع", False, f"{type(e).__name__}: {e}")
+
+    # 8) النتيجة النهائية كما ستُطبع
+    # الفحص فعلٌ صريح من المستخدم، فيُسمح فيه بالرفع ليُرى أثره فعلاً
+    link, where = publish(conn, invoice_id, "", allow_upload=True)
+    add("الرابط الذي سيحمله الرمز", bool(link),
+        f"[{ 'سحابي' if where == 'cloud' else 'محلي' }] {link}" if link
+        else "لا رابط — لن يُطبع رمز")
+    return out
+
+
+def tenant_id_safe():
+    try:
+        from services import tenant
+        return tenant.effective_tenant_id()
+    except Exception:
+        return "unknown"
+
+
+def report(conn, invoice_id=None):
+    """تقرير التشخيص نصّاً عربياً جاهزاً للعرض."""
+    lines = []
+    for r in diagnose(conn, invoice_id):
+        mark = "✔" if r["ok"] else "✘"
+        lines.append(f"{mark} {r['step']}"
+                     + (f"\n     {r['detail']}" if r["detail"] else ""))
+    return "\n".join(lines)
 
 
 def as_json(data, models):
