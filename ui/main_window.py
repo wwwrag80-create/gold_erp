@@ -1113,7 +1113,51 @@ class MainWindow(QtWidgets.QMainWindow):
             box.setInformativeText(
                 txt if len(txt) < 900 else
                 "التفاصيل كاملةً في «إظهار التفاصيل».")
+            b_sql = box.addButton("📋 نسخ أمر SQL لصلاحيات المجلد",
+                                  QtWidgets.QMessageBox.ActionRole)
+            b_pub = box.addButton("☁ نشر الفواتير المفعَّلة غير المنشورة",
+                                  QtWidgets.QMessageBox.ActionRole)
+            box.addButton("إغلاق", QtWidgets.QMessageBox.RejectRole)
             box.exec_()
+            if box.clickedButton() is b_sql:
+                QtWidgets.QApplication.clipboard().setText(
+                    invoice_share.policy_sql())
+                info(self,
+                     "نُسخ الأمر. الصقه في Supabase ← SQL Editor ثم "
+                     "Run.\n\n"
+                     "• يحذف أي سياسة سابقة بنفس الاسم أولاً، فلا يفشل "
+                     "بـ«already exists» — وهذا الخطأ يُفشل الدفعة كلها "
+                     "فيبقى ما بعده غير منفَّذ.\n"
+                     "• يمنح القراءة والرفع والاستبدال معاً.\n\n"
+                     "ثم أعد هذا الفحص: سطر الرفع يجب أن يصير ✔.")
+            elif box.clickedButton() is b_pub:
+                self._qr_republish()
+        except Exception as e:
+            err(self, e)
+
+    def _qr_republish(self):
+        """يمنح روابط سحابية للفواتير التي طُبعت برابطٍ محلي.
+
+        بعد إصلاح صلاحيات المجلد تبقى الفواتير السابقة بلا رابط عام،
+        فرموزها المطبوعة لا تُفتح إلا من شبكة المصنع. هذا يعالجها
+        دفعةً واحدة — بلا إعادة ترحيل، والرمز المطبوع لا يتغيّر.
+        """
+        try:
+            import config
+            from services import invoice_share
+            with busy(self, "جارٍ نشر الفواتير…", stage="نشر دفعي"):
+                done, total = invoice_share.republish_pending(
+                    config.COMPANY_NAME)
+            if not total:
+                info(self, "لا توجد فواتير مفعَّلة تنتظر النشر.")
+            elif done:
+                info(self, f"نُشرت {done:,} فاتورة من {total:,}."
+                           + ("" if done == total else
+                              "\n\nتوقّف الباقي — أعد الفحص لمعرفة السبب."))
+            else:
+                err(self, "لم تُنشر أي فاتورة — الرفع ما زال مرفوضاً.\n\n"
+                          "نفّذ أمر SQL لصلاحيات المجلد أولاً "
+                          "(زر «نسخ أمر SQL» في شاشة الفحص).")
         except Exception as e:
             err(self, e)
 
