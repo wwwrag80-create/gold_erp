@@ -413,8 +413,16 @@ def cloud_publish(conn, invoice_id, data, models, company=""):
         if not m["path"]:
             continue
         try:
-            data, ctype = compress(m["path"])
-            sha = hashlib.sha1(data).hexdigest()
+            # ══ `raw` لا `data` ══
+            # `data` هنا **بيانات الفاتورة** التي تُبنى منها الصفحة
+            # أدناه. تسميةُ بايتات الصورة بالاسم نفسه كانت تدهسها،
+            # فتُستدعى `page_html` ببايتات صورة بدل قاموس الفاتورة
+            # فترفع استثناءً يبتلعه الحارس — فلا تُرفع صفحة ولا يُطبع
+            # رمز، ولا يظهر سببٌ إطلاقاً. ولا يقع الخلل إلا حين يكون
+            # لموديلٍ صورةٌ محفوظة، ولهذا مرّ من كل الفحوص التي لم
+            # يكن فيها صورة.
+            raw, ctype = compress(m["path"])
+            sha = hashlib.sha1(raw).hexdigest()
             # ══ الصورة تُرفع مرةً واحدة مهما تكرّرت في الفواتير ══
             # البصمة من محتوى الصورة نفسها، فموديلٌ في مئة فاتورة
             # صورته كائنٌ واحد في التخزين تشير إليه المئة كلها.
@@ -426,10 +434,10 @@ def cloud_publish(conn, invoice_id, data, models, company=""):
             ext = "jpg" if ctype == "image/jpeg" else \
                 (mimetypes.guess_extension(ctype) or ".jpg").lstrip(".")
             name = f"{tid}/models/{sha}.{ext}"
-            if _put(url, key, name, data, ctype):
+            if _put(url, key, name, raw, ctype):
                 link = public_url(url, name)
                 srcs[i] = link
-                _asset_save(conn, sha, link, len(data))
+                _asset_save(conn, sha, link, len(raw))
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return ""         # المجلد غير موجود — لا جدوى من المتابعة
