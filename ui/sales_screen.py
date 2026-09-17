@@ -1187,6 +1187,20 @@ class SalesScreen(QtWidgets.QWidget):
                             conn, cid, cart, dstr(self.date),
                             self.user["username"], apply_vat, desc,
                             qr_enabled=self.qr_check.isChecked())
+            # ══ نشر صفحة الفاتورة — **بعد إغلاق المعاملة** ══
+            # الرفع عبر الإنترنت داخل معاملة الكتابة يحبس قفل القاعدة
+            # ثوانيَ فتتجمّد الواجهة وتتعطّل المزامنة. هنا والمعاملة
+            # مغلقة، وداخل مؤشر انشغال يرى المستخدمُ سببَ الانتظار.
+            if self.qr_check.isChecked() and res.get("id"):
+                try:
+                    from services import invoice_share
+                    with busy(self, "جارٍ تجهيز صفحة الفاتورة…",
+                              stage="نشر صفحة الفاتورة"):
+                        invoice_share.ensure_published(
+                            res["id"], config.COMPANY_NAME)
+                except Exception:
+                    pass          # تعذّر النشر لا يُبطل ترحيلاً تمّ
+
             if res.get("added") is not None and self.editing_id is not None:
                 parts = []
                 if res.get("added"):
