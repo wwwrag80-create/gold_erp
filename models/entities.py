@@ -255,6 +255,50 @@ def add_entity(conn, name, entity_type, phone="", vat_number="", username=None,
     return ent_id
 
 
+# ══════════════════════════════════════════════════════════════════
+#  حدّ الائتمان
+# ------------------------------------------------------------------
+#  سقفٌ لِما يُسلَّم للجهة قبل أن تسدّد — يُفحص لحظة الترحيل في
+#  `services.credit_guard`. **صفرٌ يعني بلا حدّ**، لا حدّاً صفرياً:
+#  فالجهات القائمة تبقى بلا سقف حتى يضعه المستخدم صراحةً.
+#  الوزن يُخزَّن بمكافئ عيار 18 كسائر أوزان النظام.
+# ══════════════════════════════════════════════════════════════════
+
+def set_credit_limit(conn, entity_id, limit_cash=0.0, limit_gold=0.0,
+                     username=None):
+    """يضبط سقفَي الجهة النقدي والوزني ويوثّق التغيير في التدقيق."""
+    e = get_entity(conn, entity_id)
+    if not e:
+        raise ValueError("الجهة غير موجودة")
+    c = round(float(limit_cash or 0), 2)
+    g = round(float(limit_gold or 0), 3)
+    if c < 0 or g < 0:
+        raise ValueError("حدّ الائتمان لا يكون سالباً — الصفر يعني بلا حدّ")
+    conn.execute("UPDATE entities SET credit_limit=?, credit_limit_gold=?"
+                 " WHERE id=?", (c, g, entity_id))
+    try:
+        from services.audit import log_action
+        log_action(conn, username, "update", "entities", entity_id,
+                   f"حدّ الائتمان: نقد {c} · وزن {g}")
+    except Exception:
+        pass
+    return c, g
+
+
+def credit_limit(conn, entity_id):
+    """(السقف النقدي، السقف الوزني) للجهة — وصفران إن لم يُحدَّد."""
+    try:
+        r = conn.execute(
+            "SELECT COALESCE(credit_limit,0) c,"
+            " COALESCE(credit_limit_gold,0) g FROM entities WHERE id=?",
+            (entity_id,)).fetchone()
+    except Exception:
+        return 0.0, 0.0          # قاعدة قبل الترقية
+    if not r:
+        return 0.0, 0.0
+    return round(float(r["c"] or 0), 2), round(float(r["g"] or 0), 3)
+
+
 def add_customer(conn, name, phone="", vat_number="", username=None) -> int:
     """اسم متوافق مع الإصدارات السابقة (إضافة سريعة لعميل)."""
     return add_entity(conn, name, "customer", phone, vat_number, username)

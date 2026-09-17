@@ -744,4 +744,11 @@ def _adjust_invoice_entry(conn, inv, kind, internal, dw, dg, dvat):
         raise ValueError(
             f"اختلّ توازن القيد بعد التعديل "
             f"(ذهب {chk['g']} · نقد {chk['c']}) — أُلغيت العملية")
+    # تعديلٌ مشروع لمبالغ قيدٍ قائم: يُوسَم ليُعاد ختمه في سلسلة
+    # البصمات عند إغلاق المعاملة، وإلا ظهر التعديل السليم «عبثاً».
+    try:
+        from models import integrity
+        integrity.mark(conn, entry_id)
+    except Exception:
+        pass
     return True

@@ -1129,6 +1129,16 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
         conn.execute("UPDATE journal_entries SET entry_date=? WHERE id=?",
                      (entry_date, entry_id))
 
+    # تعديل دفعة التوريد يغيّر مبالغ القيد وتاريخه في مكانهما —
+    # تعديلٌ مشروع من داخل النظام موثَّق في سجل التدقيق أدناه. يُوسَم
+    # القيد ليُعاد ختمه في سلسلة البصمات عند إغلاق المعاملة، وإلا
+    # ظهر التعديل السليم «عبثاً» في شاشة سلامة السجل.
+    try:
+        from models import integrity
+        integrity.mark(conn, entry_id)
+    except Exception:
+        pass
+
     log_action(conn, username, "update", "work_orders", entry_id,
                f"تعديل دفعة توريد: +{len(added)} · ~{len(updated)} · "
                f"-{len(removed)} · مباع محفوظ {len(set(kept_sold))} · "

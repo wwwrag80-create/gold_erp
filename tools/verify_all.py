@@ -111,6 +111,9 @@ SCREENS = [
     ("ui.reports.factory_reports_screen", "FactoryReportsScreen"),
     ("ui.reports.stock_report", "StockReportScreen"),
     ("ui.reports.year_end_screen", "YearEndScreen"),
+    ("ui.reports.aging_screen", "AgingScreen"),
+    ("ui.reports.day_close_screen", "DayCloseScreen"),
+    ("ui.reports.integrity_screen", "IntegrityScreen"),
     ("ui.super_admin_screen", "SuperAdminScreen"),
     ("ui.main_window", "MainWindow"),
 ]
