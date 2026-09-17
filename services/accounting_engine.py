@@ -182,6 +182,34 @@ def post_entry(conn, entry_date, description, lines,
             stock_guard.set_warning(stock_guard.message(_warn))
         except Exception:
             pass
+
+    # ══ حارس حدّ الائتمان ══
+    # سقفٌ لكل جهة يُفحص هنا لا في تقريرٍ آخر الشهر: البضاعة تخرج
+    # لحظة الترحيل، فالتنبيه بعده بأسبوع تنبيهٌ متأخر. وفي وضع المنع
+    # يرفع خطأً فتُلغى المعاملة قبل إغلاقها.
+    try:
+        from services import credit_guard
+        _over = credit_guard.check_entry(conn, entry_id)
+    except ValueError:
+        raise             # المنع مقصود — تُلغى العملية كاملةً
+    except Exception:
+        _over = []        # أي خلل في الحارس لا يمنع قيداً سليماً
+    if _over:
+        try:
+            credit_guard.set_warning(credit_guard.message(_over))
+        except Exception:
+            pass
+
+    # ══ وسم القيد لسلسلة البصمات ══
+    # الختم نفسه يجري عند إغلاق المعاملة لا هنا: عملياتٌ كثيرة تُكمل
+    # القيد بعد كتابته (ربط `source_id` بمستنده مثلاً)، فختمُه الآن
+    # يلتقط صورةً ناقصة ثم يُعلَن الاكتمالُ المشروع عبثاً. الشرح
+    # كاملاً في `models/integrity.py`.
+    try:
+        from models import integrity
+        integrity.mark(conn, entry_id)
+    except Exception:
+        pass          # السلسلة أداة كشفٍ لا شرطَ صحةٍ محاسبية
     return entry_id
 
 

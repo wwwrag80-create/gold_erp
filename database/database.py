@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS entities(
   basic_salary REAL NOT NULL DEFAULT 0,
   employee_id INTEGER REFERENCES employees(id),
   opening_entry_id INTEGER REFERENCES journal_entries(id),
+  -- سقف الائتمان: نقداً بالريال ووزناً بمكافئ عيار 18. صفرٌ = بلا حدّ.
+  credit_limit REAL NOT NULL DEFAULT 0,
+  credit_limit_gold REAL NOT NULL DEFAULT 0,
   is_internal INTEGER NOT NULL DEFAULT 0,
   is_deleted INTEGER NOT NULL DEFAULT 0,
   created_by TEXT, created_at TEXT DEFAULT (datetime('now','localtime'))
@@ -105,6 +108,8 @@ CREATE TABLE IF NOT EXISTS journal_entries(
   user_note TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL,
   source_table TEXT, source_id INTEGER,
+  -- سلسلة بصمات القيود: بصمة هذا القيد وبصمة سابقه (models/integrity.py)
+  row_hash TEXT, prev_hash TEXT,
   is_deleted INTEGER NOT NULL DEFAULT 0,
   deleted_by TEXT, deleted_at TEXT,
   created_by TEXT, created_at TEXT DEFAULT (datetime('now','localtime'))
@@ -533,6 +538,19 @@ def db(readonly: bool = False):
     st["depth"], st["readonly"] = 1, readonly
     try:
         yield conn
+        # ══ ختم القيود قبل الإغلاق ══
+        # آخر لحظةٍ يكون فيها القيد قد بلغ صورته النهائية: ما وُسم في
+        # هذه المعاملة يُختم الآن في سلسلة البصمات (models/integrity).
+        # داخل المعاملة نفسها فالقيد وبصمته يُثبَّتان معاً أو لا
+        # يُثبَّتان. وفشل الختم لا يُلغي عملاً سليماً — السلسلة أداة
+        # كشفٍ لا شرطَ صحةٍ محاسبية، وقيدٌ غير مختوم يظهر في شاشة
+        # «سلامة السجل» ليُختم هناك.
+        if not readonly:
+            try:
+                from models import integrity
+                integrity.seal_pending(conn)
+            except Exception:
+                pass
         conn.execute("COMMIT")
     except BaseException:
         try:
@@ -1189,6 +1207,36 @@ def migrate_schema() -> None:
                 conn.execute(ddl)
             except Exception:
                 pass          # جدول غير موجود في قاعدة قديمة جداً
+
+        # 17) حدّ الائتمان لكل جهة — سقفٌ نقديٌّ ووزنيٌّ يُفحص لحظة
+        #     الترحيل (`services.credit_guard`). صفرٌ = بلا حدّ، فالقاعدة
+        #     القائمة تعمل بعد الترقية كما كانت تماماً حتى يضع المستخدم
+        #     سقفاً لمن يريد.
+        ent_cols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(entities)")]
+        if ent_cols:
+            for col in ("credit_limit", "credit_limit_gold"):
+                if col not in ent_cols:
+                    conn.execute(
+                        f"ALTER TABLE entities ADD COLUMN {col}"
+                        " REAL NOT NULL DEFAULT 0")
+
+        # 18) سلسلة بصمات القيود — سجل تدقيق محصَّن (`models.integrity`).
+        #     العمودان يبقيان فارغين للقيود السابقة حتى تُختم دفعةً
+        #     واحدة من شاشة «سلامة السجل»، والفهرس يجعل قراءة رأس
+        #     السلسلة فورية وهي تُقرأ مع كل ترحيل.
+        je_cols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(journal_entries)")]
+        if je_cols:
+            for col in ("row_hash", "prev_hash"):
+                if col not in je_cols:
+                    conn.execute(
+                        f"ALTER TABLE journal_entries ADD COLUMN {col} TEXT")
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_je_sealed"
+                             " ON journal_entries(row_hash)")
+            except Exception:
+                pass
 
 
 def run_migrations_files():

@@ -514,11 +514,16 @@ def posted(parent, message, doc_type=None, doc_id=None,
     # تنبيه الرصيد السالب يظهر مع رسالة الترحيل نفسها — لا في شاشة
     # أخرى ولا بعد أسابيع. الموضع واحد لكل الشاشات لأنها كلها تمرّ
     # من هنا بعد الترحيل.
-    try:
-        from services import stock_guard
-        warn_txt = stock_guard.take_warning()
-    except Exception:
-        warn_txt = ""
+    warns = []
+    for mod in ("stock_guard", "credit_guard"):
+        try:
+            m = __import__(f"services.{mod}", fromlist=["x"])
+            t = m.take_warning()
+            if t:
+                warns.append(t)
+        except Exception:
+            pass
+    warn_txt = "\n\n".join(warns)
     if warn_txt:
         message = f"{message}\n\n{warn_txt}"
 

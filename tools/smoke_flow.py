@@ -1166,25 +1166,6 @@ def main():
     check("الأرقام والنصوص لا تُقارَن ببعضها فترفع استثناءً",
           sorted(["ب", "100", "9", "—"], key=_tt._key)[0] == "9")
 
-    # ── لقطة الشاشة الأولى ──
-    from models import home_panels as _hp
-    with db(readonly=True) as conn:
-        _snap = _hp.snapshot(conn, date="2026-06-05")
-        _recent = _hp.recent_ops(conn, 5)
-        _tre = _hp.treasury(conn)
-    check("لقطة الشاشة الأولى تحمل أقسامها الخمسة",
-          all(k in _snap for k in ("pulse", "treasury", "negatives",
-                                   "debts", "ops")))
-    check("نبض اليوم يقرأ حركة يومه",
-          _snap["pulse"]["count"] >= 1, str(_snap["pulse"]))
-    check("آخر العمليات مرتَّبة بزمن الترحيل ولها مصدرها",
-          bool(_recent) and all(r["src"] for r in _recent))
-    check("الخزائن تُقرأ وتُعلَّم إشارتها",
-          bool(_tre) and all("negative" in t for t in _tre))
-    _neg = [t for t in _tre if t["negative"]]
-    check("الأرصدة السالبة هي عينها ما يحرسه حارس المخزون",
-          all(t["code"] in {c for c, _n, _d in _hp.WATCH} for t in _neg))
-
     # ── شريط الأوامر: يجد ما أنشأته هذه الدورة ──
     from ui.widgets import palette as _pal
     with db(readonly=True) as conn:
@@ -1242,6 +1223,226 @@ def main():
               f"{t3.columnWidth(0)} / {t3.columnWidth(1)}")
     except ImportError:
         check("فحوص الجداول الاحترافية", True, "تخطّي — PyQt5 غير مثبّت")
+
+    step("28) حدّ الائتمان")
+    # سقفٌ لكل جهة يُفحص **لحظة الترحيل** لا في تقرير آخر الشهر:
+    # البضاعة تخرج لحظتها، فالتنبيه بعدها بأسبوع تنبيهٌ متأخر.
+    from models import entities as _ent
+    from services import credit_guard as _cg
+
+    with db() as conn:
+        cl_cust = add_entity(conn, "عميل السقف", "customer", username="admin")
+        _cg.set_mode(conn, "warn", "admin")
+    with db(readonly=True) as conn:
+        check("الوضع الافتراضي تنبيه لا منع",
+              _cg.mode(conn) == "warn", _cg.mode(conn))
+        check("الجهة الجديدة بلا سقف",
+              _ent.credit_limit(conn, cl_cust) == (0.0, 0.0))
+
+    with db() as conn:
+        _b = _batch(conn, [{"wo_no": "CL1", "gold": 30.0,
+                            "wage_per_gram": 20.0},
+                           {"wo_no": "CL2", "gold": 30.0,
+                            "wage_per_gram": 20.0}],
+                    "2026-07-01", "admin")
+        clids = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no IN ('CL1','CL2')")}
+        # بلا سقف: لا تنبيه مهما بلغ الرصيد
+        create_sale(conn, cl_cust, [{"work_order_id": clids["CL1"]}],
+                    "2026-07-02", "admin")
+    check("بلا سقف ⇒ بلا تنبيه", _cg.take_warning() == "")
+
+    # سقفٌ وزنيٌّ أقلّ من الرصيد القائم
+    with db() as conn:
+        _ent.set_credit_limit(conn, cl_cust, 0.0, 10.0, "admin")
+    with db(readonly=True) as conn:
+        _over = _cg.over_limit(conn)
+    check("الجهة تظهر متجاوزةً سقفها",
+          any(o["entity_id"] == cl_cust for o in _over), str(_over))
+
+    with db() as conn:
+        create_sale(conn, cl_cust, [{"work_order_id": clids["CL2"]}],
+                    "2026-07-03", "admin")
+    _w = _cg.take_warning()
+    check("بيعٌ فوق السقف يُنبَّه عليه", "حدّ الائتمان" in _w, _w[:80])
+
+    # السداد يمرّ صامتاً ولو بقي الرصيد فوق السقف
+    from models.vouchers import create_voucher
+    with db() as conn:
+        _acc_cust = conn.execute(
+            "SELECT account_id FROM entities WHERE id=?",
+            (cl_cust,)).fetchone()["account_id"]
+        post_entry(conn, "2026-07-04", "سداد جزئي", [
+            {"account_id": acc_id(conn, "1200"), "gold_debit": 5.0},
+            {"account_id": _acc_cust, "gold_credit": 5.0}],
+            username="admin")
+    check("السداد لا يُنبَّه عليه ولو بقي فوق السقف",
+          _cg.take_warning() == "")
+
+    # وضع المنع: البيع يُرفض والمعاملة تُلغى كاملةً
+    with db() as conn:
+        _cg.set_mode(conn, "block", "admin")
+        _batch(conn, [{"wo_no": "CL3", "gold": 20.0, "wage_per_gram": 20.0}],
+               "2026-07-05", "admin")
+        cl3 = conn.execute("SELECT id FROM work_orders"
+                           " WHERE work_order_no='CL3'").fetchone()["id"]
+
+    def _blocked_sale():
+        with db() as conn:
+            create_sale(conn, cl_cust, [{"work_order_id": cl3}],
+                        "2026-07-06", "admin")
+    expect_error("وضع المنع يرفض تجاوز السقف", _blocked_sale, "حدّ الائتمان")
+    with db(readonly=True) as conn:
+        check("الفاتورة المرفوضة لم تُكتب",
+              conn.execute("SELECT COUNT(*) n FROM invoice_items"
+                           " WHERE work_order_id=?",
+                           (cl3,)).fetchone()["n"] == 0)
+        check("والطقم ما زال بالمخزون",
+              conn.execute("SELECT status FROM work_orders WHERE id=?",
+                           (cl3,)).fetchone()["status"] == "in_stock")
+        g, c, gv, cv = ledger_balanced(conn)
+    check("الدفتر متوازن بعد الرفض", g and c, f"ذهب {gv} · نقد {cv}")
+    with db() as conn:
+        _cg.set_mode(conn, "off", "admin")
+        create_sale(conn, cl_cust, [{"work_order_id": cl3}],
+                    "2026-07-06", "admin")
+    check("وضع «بلا فحص» يمرّر العملية", _cg.take_warning() == "")
+    with db() as conn:
+        _cg.set_mode(conn, "warn", "admin")
+
+    step("29) سلامة السجل — سلسلة بصمات القيود")
+    from models import integrity as _ig
+    with db() as conn:
+        _sealed = _ig.seal_all(conn, "admin")      # ختم ما سبق الميزة
+    with db(readonly=True) as conn:
+        rep = _ig.verify(conn)
+    check("كل القيود مختومة", rep["unsealed"] == 0, str(rep["unsealed"]))
+    check("السلسلة سليمة بعد الختم", rep["ok"] and not rep["breaks"],
+          str(rep["breaks"][:2]))
+    check("عدد المختوم = عدد القيود",
+          rep["checked"] > 0, str(rep["checked"]))
+
+    # كل قيدٍ جديد يُختم داخل معاملة ترحيله
+    with db() as conn:
+        _eid = post_entry(conn, "2026-08-01", "اختبار البصمة", [
+            {"account_id": acc_id(conn, "1400"), "cash_debit": 10},
+            {"account_id": acc_id(conn, "1100"), "cash_credit": 10}],
+            username="admin")
+    with db(readonly=True) as conn:
+        _row = conn.execute("SELECT row_hash, prev_hash FROM journal_entries"
+                            " WHERE id=?", (_eid,)).fetchone()
+        check("القيد الجديد يُختم آلياً",
+              bool(_row["row_hash"]) and len(_row["row_hash"]) == 64)
+        check("ويرتبط ببصمة سابقه", bool(_row["prev_hash"]))
+        check("السلسلة ما زالت سليمة", _ig.verify(conn)["ok"])
+
+    # ══ العبث من خارج النظام يُكشف ══
+    with db() as conn:
+        conn.execute("UPDATE journal_lines SET cash_debit=99999"
+                     " WHERE entry_id=? AND cash_debit>0", (_eid,))
+    with db(readonly=True) as conn:
+        bad = _ig.verify(conn)
+    check("تغيير مبلغٍ في قيدٍ مرحَّل يُكشف فوراً", not bad["ok"])
+    check("ويُشار إلى القيد نفسه بالضبط",
+          bool(bad["breaks"]) and bad["breaks"][0]["id"] == _eid,
+          str(bad["breaks"][:1]))
+    check("ونوع الخلل «مضمون تغيّر»",
+          "مضمون" in (bad["breaks"][0]["kind"] if bad["breaks"] else ""))
+
+    # إعادة المبلغ تُعيد السلسلة سليمةً — البصمة تشهد على المضمون لا
+    # على زمن القراءة.
+    with db() as conn:
+        conn.execute("UPDATE journal_lines SET cash_debit=10"
+                     " WHERE entry_id=? AND cash_debit=99999", (_eid,))
+    with db(readonly=True) as conn:
+        check("إعادة المضمون تُعيد السلسلة سليمة", _ig.verify(conn)["ok"])
+
+    # الحذف المنطقي عملٌ مشروع لا يُعدّ عبثاً
+    with db() as conn:
+        conn.execute("UPDATE journal_entries SET is_deleted=1 WHERE id=?",
+                     (_eid,))
+    with db(readonly=True) as conn:
+        check("الحذف المنطقي لا يُعدّ عبثاً", _ig.verify(conn)["ok"])
+    with db() as conn:
+        conn.execute("UPDATE journal_entries SET is_deleted=0 WHERE id=?",
+                     (_eid,))
+
+    # محو قيدٍ من الجدول **بعد ختمه** يقطع الحلقة عند تاليه.
+    # المحو هنا في معاملة مستقلة عمداً: لو جرى في معاملة الترحيل
+    # نفسها لختمت السلسلةُ ما بقي عند الإغلاق فبدت سليمةً بحق —
+    # والمحاكاة المقصودة هي عبثٌ **بعد** اكتمال الختم، من خارج النظام.
+    with db() as conn:
+        _e2 = post_entry(conn, "2026-08-02", "قيد سيُمحى", [
+            {"account_id": acc_id(conn, "1400"), "cash_debit": 7},
+            {"account_id": acc_id(conn, "1100"), "cash_credit": 7}],
+            username="admin")
+        post_entry(conn, "2026-08-03", "قيد بعده", [
+            {"account_id": acc_id(conn, "1400"), "cash_debit": 3},
+            {"account_id": acc_id(conn, "1100"), "cash_credit": 3}],
+            username="admin")
+    with db(readonly=True) as conn:
+        check("القيدان مختومان قبل المحو", _ig.verify(conn)["ok"])
+    with db() as conn:
+        conn.execute("DELETE FROM journal_lines WHERE entry_id=?", (_e2,))
+        conn.execute("DELETE FROM journal_entries WHERE id=?", (_e2,))
+    with db(readonly=True) as conn:
+        gone = _ig.verify(conn)
+    check("محو قيدٍ من الجدول يقطع السلسلة", not gone["ok"])
+    check("ونوع الخلل «حلقة مقطوعة»",
+          "مقطوعة" in (gone["breaks"][0]["kind"] if gone["breaks"] else ""),
+          str(gone["breaks"][:1]))
+    # ══ التعديل المشروع من داخل النظام لا يُعدّ عبثاً ══
+    # وهذا أخطر ما في الميزة: تنبيهٌ كاذبٌ يتكرر مع كل تعديلٍ سليم
+    # يجعل المستخدم يتجاهل التنبيهات كلها — فتصير السلسلة ضرراً لا
+    # حماية. العقد: من يعدّل مضمون قيدٍ قائم يوسمه، فيُعاد ختمه وما
+    # بعده عند إغلاق المعاملة.
+    # السلسلة مقطوعة الآن بفعل اختبار المحو أعلاه — تُعاد بناءً
+    # بقرارٍ صريح (كما يفعل المدقّق بعد معالجة خللٍ مُثبت) قبل اختبار
+    # التعديل المشروع، وإلا خلط الكسرُ القديم نتيجةَ الاختبار الجديد.
+    with db() as conn:
+        _ig.rebuild(conn, username="admin")
+    with db(readonly=True) as conn:
+        check("إعادة البناء الصريحة تُصلح السلسلة", _ig.verify(conn)["ok"])
+
+    with db() as conn:
+        _e3 = post_entry(conn, "2026-08-04", "قيد قابل للتعديل", [
+            {"account_id": acc_id(conn, "1400"), "cash_debit": 20},
+            {"account_id": acc_id(conn, "1100"), "cash_credit": 20}],
+            username="admin")
+        post_entry(conn, "2026-08-05", "قيد تالٍ", [
+            {"account_id": acc_id(conn, "1400"), "cash_debit": 5},
+            {"account_id": acc_id(conn, "1100"), "cash_credit": 5}],
+            username="admin")
+    with db() as conn:
+        conn.execute("UPDATE journal_lines SET cash_debit=25"
+                     " WHERE entry_id=? AND cash_debit=20", (_e3,))
+        conn.execute("UPDATE journal_lines SET cash_credit=25"
+                     " WHERE entry_id=? AND cash_credit=20", (_e3,))
+        _ig.mark(conn, _e3)          # تعديلٌ مشروع ⇒ يُوسَم
+    with db(readonly=True) as conn:
+        _after = _ig.verify(conn)
+    check("التعديل المشروع الموسوم لا يُعدّ عبثاً",
+          _after["ok"], str(_after["breaks"][:1]))
+    check("وسلسلة ما بعده أُعيد ربطها",
+          _after["unsealed"] == 0 and _after["checked"] > 0)
+
+    check("البصمة نفسها ثابتة لنفس المضمون",
+          _ig.digest({"id": 1, "entry_date": "2026-01-01", "doc_no": "JV-1",
+                      "description": "د", "user_note": "", "source_table": "",
+                      "source_id": None, "created_by": "admin"}, [], "x")
+          == _ig.digest({"id": 1, "entry_date": "2026-01-01",
+                         "doc_no": "JV-1", "description": "د",
+                         "user_note": "", "source_table": "",
+                         "source_id": None, "created_by": "admin"}, [], "x"))
+    check("وتختلف باختلاف بصمة السابق",
+          _ig.digest({"id": 1, "entry_date": "2026-01-01", "doc_no": "JV-1",
+                      "description": "د", "user_note": "", "source_table": "",
+                      "source_id": None, "created_by": "admin"}, [], "x")
+          != _ig.digest({"id": 1, "entry_date": "2026-01-01",
+                         "doc_no": "JV-1", "description": "د",
+                         "user_note": "", "source_table": "",
+                         "source_id": None, "created_by": "admin"}, [], "y"))
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

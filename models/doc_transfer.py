@@ -130,6 +130,10 @@ def transfer(conn, source_table, source_id, new_entity_id, username,
                 "UPDATE journal_lines SET line_desc="
                 "REPLACE(line_desc, ?, ?) WHERE entry_id=?",
                 (old["name"], new["name"], info["entry_id"]))
+            # نقل المستند يغيّر حسابات القيد وبيانه: تعديلٌ مشروع
+            # يُوسَم ليُعاد ختمه في سلسلة البصمات عند إغلاق المعاملة.
+            from models import integrity
+            integrity.mark(conn, info["entry_id"])
         except Exception:
             pass
 

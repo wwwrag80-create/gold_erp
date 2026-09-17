@@ -43,6 +43,7 @@ from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
 from ui.reports.aging_screen import AgingScreen
 from ui.reports.day_close_screen import DayCloseScreen
+from ui.reports.integrity_screen import IntegrityScreen
 from ui.item_history_screen import ItemHistoryScreen
 from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
@@ -139,6 +140,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("الجرد الفعلي", self.stocktake_screen),
                     ("إدارة وتحويل العمليات", Lazy(lambda: OperationsScreen(user), "إدارة وتحويل العمليات")),
                     ("سجل العمليات", self.txlog_screen),
+                    ("سلامة السجل (بصمة القيود)",
+                     Lazy(lambda: IntegrityScreen(user),
+                          "سلامة السجل (بصمة القيود)")),
                     ("المطابقة وتسوية الفروقات", self.recon_screen),
                     ("أرشيف المستندات والطباعة", self.archive_screen),
                     ("الرواتب والموظفون", self.payroll_screen),
@@ -312,13 +316,10 @@ class MainWindow(QtWidgets.QMainWindow):
         sb.addWidget(self.screen_tools)
         sb.addWidget(self.btn_close)
 
-        # شاشة البداية الحيّة (الفهرس 0): أرقام اليوم وتنبيهاته، وكل
-        # رقمٍ فيها بابٌ إلى تفصيله عبر هذه الوصلات الثلاث.
-        self.welcome = WelcomeScreen(
-            user,
-            on_open_ledger=self.open_ledger,
-            on_open_doc=self.open_document_for_edit,
-            on_open_screen=self.goto_by_name)
+        # شاشة الترحيب (الفهرس 0): مساحة يتوسّطها شعار المصنع. جُرّبت
+        # مكانها شاشةُ أرقامٍ حيّة فلم تُرَد — والشعار أوضح وأسرع،
+        # والأرقام لها شاشاتها (الإغلاق اليومي · لوحة التحكم).
+        self.welcome = WelcomeScreen(user)
 
         self.sidebar = QtWidgets.QTreeWidget()
         # قائمة ديناميكية: سحب وإفلات لإعادة الترتيب والتجميع،

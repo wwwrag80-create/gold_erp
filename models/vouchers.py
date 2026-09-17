@@ -327,6 +327,13 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
                  (entry_id, tmp["entry_id"]))
     conn.execute("UPDATE journal_entries SET description=? WHERE id=?",
                  (desc, entry_id))
+    # تعديلٌ مشروع لمضمون قيدٍ قائم: يُوسَم ليُعاد ختمه في سلسلة
+    # البصمات عند إغلاق المعاملة، وإلا ظهر التعديل السليم «عبثاً».
+    try:
+        from models import integrity
+        integrity.mark(conn, entry_id)
+    except Exception:
+        pass
     conn.execute("UPDATE vouchers SET entry_id=NULL WHERE id=?",
                  (tmp["id"],))
     conn.execute("DELETE FROM vouchers WHERE id=?", (tmp["id"],))

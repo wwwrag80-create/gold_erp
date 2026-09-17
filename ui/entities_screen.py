@@ -9,6 +9,7 @@ from services import karat_view as kv
 from models import entities
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, mspin, title_label, wspin)
+from ui.widgets.table_tools import enhance
 
 TYPE_ITEMS = [("عميل", "customer"), ("مورد", "supplier"),
               ("شريك", "partner"), ("موظف", "employee"),
@@ -115,6 +116,10 @@ class EntitiesScreen(QtWidgets.QWidget):
         al.addWidget(btn_save)
 
         self.table = make_table()
+        # بلا فرزٍ بالنقر: صفوف هذا الجدول موازيةٌ لقائمة `_row_ids`
+        # بالترتيب، فإعادة ترتيبها تجعل «احذف المحدد» يحذف غير المحدد.
+        enhance(self.table, key="entities", sortable=False)
+        self.table.itemSelectionChanged.connect(self._row_selected)
         self.summary = big_label()
         btn_refresh = QtWidgets.QPushButton("تحديث الأرصدة")
         btn_refresh.setObjectName("ghost")
@@ -132,6 +137,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         row.addStretch(1)
         row.addWidget(self.summary)
         ll.addLayout(row)
+        ll.addWidget(self._credit_box())
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("التكويد الموحّد لجهات التعامل"))
@@ -139,8 +145,117 @@ class EntitiesScreen(QtWidgets.QWidget):
         w1 = QtWidgets.QWidget(); QtWidgets.QVBoxLayout(w1).addWidget(add_box)
         w2 = QtWidgets.QWidget(); QtWidgets.QVBoxLayout(w2).addWidget(list_box)
         sp.addWidget(w1); sp.addWidget(w2)
+        # نموذج الإضافة ثابت الطول، والدليل يطول بعدد الجهات — فالتمدّد
+        # للدليل وحده، والفاصل قابل للسحب لمن يريد غير ذلك.
+        sp.setStretchFactor(0, 0)
+        sp.setStretchFactor(1, 1)
         lay.addWidget(sp, 1)
         self._type_changed()
+
+    # ══════════════════════════════════════════════════════════════
+    #  حدّ الائتمان
+    # ══════════════════════════════════════════════════════════════
+
+    def _credit_box(self):
+        """لوحة ضبط سقف الجهة المحددة ووضع الحارس.
+
+        موضعها تحت الدليل مقصود: السقف يُضبط لجهةٍ **قائمة** في أغلب
+        الأحيان لا لجهةٍ تُنشأ الآن — فالحاجة تظهر بعد أن يكبر الرصيد.
+        """
+        self.lim_cash = mspin()
+        self.lim_cash.setToolTip("صفر = بلا حدّ")
+        self.lim_gold = wspin()
+        self.lim_gold.setToolTip("صفر = بلا حدّ")
+        self.lbl_lim_gold = QtWidgets.QLabel(
+            f"سقف وزني ({kv.unit()}):")
+        self.lbl_credit_who = QtWidgets.QLabel("— لم تُحدَّد جهة —")
+        self.lbl_credit_who.setObjectName("big")
+        btn = QtWidgets.QPushButton("حفظ سقف الجهة المحددة")
+        btn.clicked.connect(self.save_limit)
+
+        self.guard_mode = QtWidgets.QComboBox()
+        for label, val in (("تنبيه فقط (الافتراضي)", "warn"),
+                           ("منع الترحيل عند التجاوز", "block"),
+                           ("بلا فحص", "off")):
+            self.guard_mode.addItem(label, val)
+        self.guard_mode.currentIndexChanged.connect(self._mode_changed)
+
+        box = QtWidgets.QGroupBox("حدّ الائتمان — سقف ما يُسلَّم قبل السداد")
+        g = QtWidgets.QGridLayout(box)
+        g.addWidget(QtWidgets.QLabel("الجهة:"), 0, 0)
+        g.addWidget(self.lbl_credit_who, 0, 1, 1, 3)
+        g.addWidget(QtWidgets.QLabel("سقف نقدي (ريال):"), 1, 0)
+        g.addWidget(self.lim_cash, 1, 1)
+        g.addWidget(self.lbl_lim_gold, 1, 2)
+        g.addWidget(self.lim_gold, 1, 3)
+        g.addWidget(btn, 1, 4)
+        g.addWidget(QtWidgets.QLabel("عند التجاوز:"), 2, 0)
+        g.addWidget(self.guard_mode, 2, 1)
+        note = QtWidgets.QLabel(
+            "صفر = بلا حدّ. يُفحص السقف **لحظة الترحيل** لا في تقرير آخر "
+            "الشهر — فالبضاعة تخرج لحظتها. والسداد الذي يخفّض الدين "
+            "يمرّ دائماً ولو كان الرصيد فوق السقف.")
+        note.setObjectName("cardSub")
+        note.setWordWrap(True)
+        g.addWidget(note, 3, 0, 1, 5)
+        return box
+
+    def _row_selected(self):
+        """يملأ حقول السقف بقيم الجهة المحددة في الدليل."""
+        try:
+            r = self.table.currentRow()
+            ids = getattr(self, "_row_ids", [])
+            if r < 0 or r >= len(ids):
+                self.lbl_credit_who.setText("— لم تُحدَّد جهة —")
+                return
+            with db(readonly=True) as conn:
+                e = entities.get_entity(conn, ids[r])
+                c, g = entities.credit_limit(conn, ids[r])
+            self.lbl_credit_who.setText(e["name"] if e else "—")
+            self.lim_cash.setValue(c)
+            self.lim_gold.setValue(kv.g(g))
+        except Exception:
+            pass          # ضبط السقف رفاهية لا تُعطّل الدليل
+
+    def save_limit(self):
+        try:
+            r = self.table.currentRow()
+            ids = getattr(self, "_row_ids", [])
+            if r < 0 or r >= len(ids):
+                raise ValueError("حدّد جهةً من الدليل أولاً")
+            with db() as conn:
+                entities.set_credit_limit(
+                    conn, ids[r], self.lim_cash.value(),
+                    kv.store(self.lim_gold.value()), self.user["username"])
+            info(self, "حُفظ حدّ الائتمان للجهة المحددة.")
+            self.refresh()
+        except Exception as e:
+            err(self, e)
+
+    def _mode_changed(self):
+        if getattr(self, "_loading_mode", False):
+            return
+        try:
+            from services import credit_guard
+            with db() as conn:
+                credit_guard.set_mode(conn, self.guard_mode.currentData(),
+                                      self.user["username"])
+        except Exception as e:
+            err(self, e)
+
+    def _load_mode(self):
+        try:
+            from services import credit_guard
+            with db(readonly=True) as conn:
+                m = credit_guard.mode(conn)
+            self._loading_mode = True
+            i = self.guard_mode.findData(m)
+            if i >= 0:
+                self.guard_mode.setCurrentIndex(i)
+        except Exception:
+            pass
+        finally:
+            self._loading_mode = False
 
     def _row(self, label_text, widget):
         lbl = QtWidgets.QLabel(label_text)
@@ -250,8 +365,12 @@ class EntitiesScreen(QtWidgets.QWidget):
             err(self, e)
 
     def refresh(self):
+        from services import credit_guard
         with db() as conn:
             rows, self._row_ids = [], []
+            # المتجاوزون يُقرأون دفعةً واحدة لا جهةً جهة — الدليل قد
+            # يحوي مئات الأسماء، واستعلامٌ لكل اسم يُبطئ فتح الشاشة.
+            over = {r["entity_id"]: r for r in credit_guard.over_limit(conn)}
             for e in entities.list_entities(conn):
                 g, c = entities.balances(conn, e["id"])
                 if e["entity_type"] == "partner":
@@ -263,14 +382,27 @@ class EntitiesScreen(QtWidgets.QWidget):
                             f"{e['basic_salary']:,.2f}")
                 else:
                     extra = e["vat_number"] or "—"
+                lc, lg = entities.credit_limit(conn, e["id"])
+                bits = []
+                if lc:
+                    bits.append(f"{lc:,.0f} ريال")
+                if lg:
+                    bits.append(f"{kv.g(lg):,.0f} {kv.unit()}")
+                limit_txt = " · ".join(bits) if bits else "بلا حدّ"
+                if e["id"] in over:
+                    limit_txt = "⛔ تجاوز — " + limit_txt
                 rows.append((e["name"], entities.TYPE_LABELS[e["entity_type"]],
-                            f"{c:,.2f}", f"{g:,.2f}", extra))
+                            f"{c:,.2f}", f"{g:,.2f}", limit_txt, extra))
                 self._row_ids.append(e["id"])
             share_total = entities.partners_share_total(conn)
         fill(self.table, ["الاسم", "النوع", "رصيد نقدي",
-                          "رصيد ذهب (جم 18)", "بيانات إضافية"], rows)
+                          "رصيد ذهب (جم 18)", "حدّ الائتمان",
+                          "بيانات إضافية"], rows)
         w = "" if abs(share_total - 100) < 0.01 or share_total == 0 else \
             "  ⚠ المجموع لا يساوي 100%"
+        over_txt = f" | ⛔ متجاوزون للسقف: {len(over)}" if over else ""
         self.summary.setText(
-            f"عدد الجهات: {len(rows)} | مجموع حصص الشركاء: {share_total:.2f}%{w}")
+            f"عدد الجهات: {len(rows)} | مجموع حصص الشركاء: "
+            f"{share_total:.2f}%{w}{over_txt}")
         self._reload_completer()
+        self._load_mode()
