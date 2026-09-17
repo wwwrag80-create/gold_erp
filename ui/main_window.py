@@ -1123,16 +1123,32 @@ class MainWindow(QtWidgets.QMainWindow):
             from services import invoice_share
             with db(readonly=True) as conn:
                 u = invoice_share.usage(conn)
-            info(self,
-                 f"صور الموديلات المرفوعة: {u['images']:,} صورة — "
-                 f"{u['image_mb']:,.2f} ميجابايت\n"
-                 f"صفحات الفواتير المنشورة: {u['pages']:,} صفحة — "
-                 f"{u['page_mb']:,.2f} ميجابايت\n"
-                 f"الإجمالي: {u['total_mb']:,.2f} ميجابايت\n\n"
-                 "الصورة تُصغَّر وتُضغط قبل رفعها، وتُرفع **مرة واحدة** "
-                 "مهما تكرّر موديلها في الفواتير — فلا تتضاعف المساحة "
-                 "مع كل فاتورة.",
-                 "المساحة السحابية")
+            txt = (
+                f"صور الموديلات المرفوعة: {u['images']:,} صورة — "
+                f"{u['image_mb']:,.2f} ميجابايت\n"
+                f"صفحات الفواتير المنشورة: {u['pages']:,} صفحة — "
+                f"{u['page_mb']:,.2f} ميجابايت\n"
+                f"الإجمالي: {u['total_mb']:,.2f} ميجابايت\n\n"
+                "الصورة تُصغَّر وتُضغط قبل رفعها، وتُرفع **مرة واحدة** "
+                "مهما تكرّر موديلها في الفواتير — فلا تتضاعف المساحة "
+                "مع كل فاتورة.")
+            orph, omb = u.get("orphans", 0), u.get("orphan_mb", 0.0)
+            if not orph:
+                info(self, txt, "المساحة السحابية")
+                return
+            if ask(self,
+                   txt + f"\n\n♻ صورٌ لم تعد تستعملها أي فاتورة منشورة: "
+                         f"{orph:,} صورة — {omb:,.2f} ميجابايت.\n\n"
+                         "حذفها الآن؟ (مساحة محجوزة بلا مقابل — ولا يُحذف "
+                         "رقمٌ محاسبي ولا صفحةٌ ما زالت مستعملة)",
+                   "المساحة السحابية"):
+                with busy(self, "جارٍ حذف الصور غير المستعملة…",
+                          stage="تنظيف التخزين"):
+                    with db() as conn:
+                        n, mb = invoice_share.purge_orphan_images(
+                            conn, self.user.get("username"))
+                info(self, f"حُذفت {n:,} صورة — استُرجع "
+                           f"{mb:,.2f} ميجابايت.")
         except Exception as e:
             err(self, e)
 

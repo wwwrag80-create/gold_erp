@@ -13,7 +13,8 @@ from PyQt5 import QtCore, QtWidgets
 from database.database import db
 from services import karat_view as kv
 from services import browser_print
-from ui.widgets.common import big_label, date_edit, dstr, err, make_table, title_label
+from ui.widgets.common import (big_label, busy, date_edit, dstr, err,
+                               info, make_table, title_label, warn)
 
 DOC_TYPES = [
     ("كل المستندات", "all"),
@@ -191,7 +192,52 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
             b.setMaximumWidth(38)
             b.clicked.connect(lambda _, rr=r, f=fn: f(rr))
             h.addWidget(b)
+        # رمز الفاتورة: تفعيله لفاتورة رُحّلت بلا رمز، أو نسخ رابطها
+        # لإرساله للعميل. الفواتير وحدها — لا السندات ولا القيود.
+        if r.get("src") == "invoices" and not r.get("deleted"):
+            b = QtWidgets.QPushButton("🔗")
+            b.setObjectName("ghost")
+            b.setToolTip("رمز QR: تفعيله لهذه الفاتورة أو نسخ رابط صفحتها")
+            b.setMaximumWidth(38)
+            b.clicked.connect(lambda _, rr=r: self.share_qr(rr))
+            h.addWidget(b)
         return w
+
+    def share_qr(self, r):
+        """يفعّل رمز الفاتورة وينشر صفحتها، ثم يعرض رابطها للنسخ.
+
+        **لماذا يلزم هذا الزر**: قرار الرمز يُتخذ في شاشة المبيعات قبل
+        الترحيل ويُحفظ مع الفاتورة. فمن رحّل بلا رمز ثم بدا له أن
+        يُعطي العميل صفحتها لم يكن أمامه سبيل. هذا هو السبيل — ولا
+        يُعيد ترحيل شيء ولا يمسّ رقماً محاسبياً.
+        """
+        try:
+            import config
+            from services import invoice_share
+            with db() as conn:
+                conn.execute("UPDATE invoices SET qr_enabled=1 WHERE id=?",
+                             (r["id"],))
+            with busy(self, "جارٍ تجهيز صفحة الفاتورة…",
+                      stage="نشر صفحة فاتورة"):
+                invoice_share.ensure_published(r["id"], config.COMPANY_NAME)
+                with db(readonly=True) as conn:
+                    link, where = invoice_share.publish(
+                        conn, r["id"], config.COMPANY_NAME)
+            if not link:
+                warn(self, "تعذّر تجهيز صفحة الفاتورة.\n\n"
+                           "افتح «⚙ عرض ← رمز QR على الفاتورة ← لماذا لم "
+                           "يظهر الرمز؟» لمعرفة السبب بالضبط.")
+                return
+            QtWidgets.QApplication.clipboard().setText(link)
+            info(self,
+                 ("رابط عام — يفتحه العميل من أي مكان:"
+                  if where == "cloud" else
+                  "رابط على شبكة المصنع — لا يفتحه إلا من كان عليها:")
+                 + f"\n\n{link}\n\nنُسخ الرابط. وسيُطبع الرمز على "
+                 "الفاتورة في أي طباعة قادمة.")
+            self.search()
+        except Exception as e:
+            err(self, e)
 
     def open_browser(self, r):
         """يفتح المستند في المتصفح بتنسيق كامل (مستقل عن محرك Qt)."""

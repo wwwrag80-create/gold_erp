@@ -409,6 +409,14 @@ CREATE TABLE IF NOT EXISTS app_settings(
   updated_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
+-- أي صورة يستعملها أي فاتورة منشورة — لمعرفة الصور التي لم تعد
+-- مستعملة فتُحذف من التخزين (services/invoice_share.py)
+CREATE TABLE IF NOT EXISTS invoice_assets(
+  invoice_id INTEGER NOT NULL,
+  sha TEXT NOT NULL,
+  PRIMARY KEY(invoice_id, sha)
+);
+
 -- مسوّدات شاشات الإدخال: ما أُدخل ولم يُرحَّل بعد (services/drafts.py).
 -- ليست قيداً ولا تمسّ رقماً محاسبياً — نصٌّ يصف ما كان في الشاشة.
 CREATE TABLE IF NOT EXISTS screen_drafts(
@@ -1244,6 +1252,15 @@ def migrate_schema() -> None:
                     conn.execute(
                         f"ALTER TABLE entities ADD COLUMN {col}"
                         " REAL NOT NULL DEFAULT 0")
+
+        # 22) ربط الفاتورة بالصور التي تستعملها — فتُعرف الصور التي
+        #     لم تعد مستعملة وتُحذف من التخزين بدل أن تتراكم.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS invoice_assets(
+              invoice_id INTEGER NOT NULL,
+              sha TEXT NOT NULL,
+              PRIMARY KEY(invoice_id, sha)
+            )""")
 
         # 21) مسوّدات شاشات الإدخال — ما أُدخل ولم يُرحَّل بعد.
         conn.execute("""

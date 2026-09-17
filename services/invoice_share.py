@@ -355,6 +355,19 @@ def _asset_url(conn, sha):
         return ""
 
 
+def _link_asset(conn, invoice_id, sha):
+    """يربط الصورة بالفاتورة التي تستعملها.
+
+    بلا هذا الربط لا سبيل لمعرفة الصور التي لم تعد مستعملة، فتتراكم
+    في التخزين إلى الأبد ولو حُذفت كل الفواتير التي كانت فيها.
+    """
+    try:
+        conn.execute("INSERT OR IGNORE INTO invoice_assets(invoice_id,sha)"
+                     " VALUES(?,?)", (int(invoice_id), str(sha)))
+    except Exception:
+        pass
+
+
 def _asset_save(conn, sha, url, size):
     try:
         conn.execute(
@@ -405,6 +418,7 @@ def cloud_publish(conn, invoice_id, data, models, company=""):
             # ══ الصورة تُرفع مرةً واحدة مهما تكرّرت في الفواتير ══
             # البصمة من محتوى الصورة نفسها، فموديلٌ في مئة فاتورة
             # صورته كائنٌ واحد في التخزين تشير إليه المئة كلها.
+            _link_asset(conn, invoice_id, sha)
             cached = _asset_url(conn, sha)
             if cached:
                 srcs[i] = cached
@@ -459,6 +473,74 @@ def enabled_for(conn, invoice_id):
     except Exception:
         return False              # قاعدة قبل الترقية
     return bool(r and r["qr_enabled"])
+
+
+def invalidate(conn, invoice_id):
+    """يُعلِن أن صفحة الفاتورة لم تعد مطابقة لها — تُعاد كتابتها.
+
+    يُستدعى عند **تعديل** الفاتورة: الورقة المطبوعة بيد العميل تحمل
+    رمزاً يشير إلى رابطٍ ثابت، فلو بقيت الصفحة على مضمونها القديم لرأى
+    العميل فاتورةً غير التي بيده. والرمز **لا يتغيّر** — يُعاد رفع
+    الصفحة على المسار نفسه، فالورقة القديمة تظل صحيحة وتعرض الجديد.
+    """
+    try:
+        conn.execute("UPDATE invoices SET share_url=NULL WHERE id=?",
+                     (invoice_id,))
+        return True
+    except Exception:
+        return False
+
+
+_CANCELLED = """<!DOCTYPE html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>فاتورة ملغاة</title>
+<style>
+ body {{ font-family: system-ui, "Segoe UI", Tahoma, sans-serif;
+        background:#F5F2EA; color:#1F1B17; margin:0; padding:26px;
+        text-align:center; }}
+ .c {{ background:#fff; border:1px solid #E2C3C3; border-radius:14px;
+      padding:26px 16px; max-width:420px; margin:40px auto; }}
+ h1 {{ color:#A33131; font-size:19px; margin:0 0 10px; }}
+ p {{ color:#6B6459; font-size:14px; line-height:1.9; margin:0; }}
+</style></head><body>
+<div class="c"><h1>⛔ هذه الفاتورة أُلغيت</h1>
+<p>الفاتورة <b>{no}</b> أُلغيت في سجلات المصنع ولم تعد سارية.<br>
+للاستفسار راجع {company}.</p></div></body></html>"""
+
+
+def mark_cancelled(invoice_id, company=""):
+    """يستبدل صفحة فاتورةٍ حُذفت بصفحة «أُلغيت».
+
+    **لماذا لا تُحذف الصفحة**: من بيده الورقة سيصوّر رمزها يوماً ما.
+    صفحةٌ مفقودة تُربكه، وصفحةٌ باقية بمضمونها القديم تُوهمه أن
+    فاتورةً ملغاة ما زالت سارية — وهذا أخطر. الإعلان الصريح أصدق من
+    الاثنين، وحجمه كيلوبايت واحد.
+    """
+    from database.database import db
+    try:
+        with db(readonly=True) as conn:
+            if not cached_url(conn, invoice_id):
+                return ""         # لم تُنشر أصلاً — لا شيء يُصحَّح
+            r = conn.execute(
+                "SELECT invoice_no, share_token FROM invoices WHERE id=?",
+                (invoice_id,)).fetchone()
+        if not r or not (r["share_token"] or "").strip():
+            return ""
+        cfg = _cloud_cfg()
+        if not cfg:
+            return ""
+        url, key = cfg
+        from services import tenant
+        path = f"{tenant.effective_tenant_id()}/{r['share_token']}/index.html"
+        page = _CANCELLED.format(no=_esc(r["invoice_no"]),
+                                 company=_esc(company))
+        if _put(url, key, path, page.encode("utf-8"),
+                "text/html; charset=utf-8"):
+            return public_url(url, path)
+    except Exception:
+        pass
+    return ""
 
 
 def ensure_published(invoice_id, company=""):
@@ -720,6 +802,64 @@ def _delete(url, key, names, timeout=30):
         return len(names) if r.status in (200, 204) else 0
 
 
+def orphan_images(conn):
+    """الصور التي لم تعد تستعملها أي فاتورة منشورة — [(البصمة, الحجم)].
+
+    الصورة تُرفع مرةً وتشترك فيها الفواتير. فمتى حُذفت صفحاتها كلها
+    (بالتنظيف أو بحذف الفواتير) لم يبق لها مستعمل — وهي حينئذ مساحةٌ
+    محجوزة بلا مقابل.
+    """
+    try:
+        return [(r["sha"], int(r["size_bytes"] or 0)) for r in conn.execute(
+            "SELECT a.sha, a.size_bytes FROM cloud_assets a"
+            " WHERE NOT EXISTS ("
+            "   SELECT 1 FROM invoice_assets ia"
+            "   JOIN invoices i ON i.id=ia.invoice_id"
+            "   WHERE ia.sha=a.sha AND i.is_deleted=0"
+            "     AND COALESCE(i.share_url,'')<>'')")]
+    except Exception:
+        return []
+
+
+def purge_orphan_images(conn, username=None):
+    """يحذف من التخزين الصور التي لم تعد مستعملة، ويعيد عددها وحجمها."""
+    rows = orphan_images(conn)
+    if not rows:
+        return 0, 0.0
+    cfg = _cloud_cfg()
+    if not cfg:
+        return 0, 0.0
+    url, key = cfg
+    names, shas, size = [], [], 0
+    for sha, sz in rows:
+        r = conn.execute("SELECT url FROM cloud_assets WHERE sha=?",
+                         (sha,)).fetchone()
+        link = (r["url"] or "") if r else ""
+        marker = f"/public/{BUCKET}/"
+        if marker not in link:
+            continue
+        names.append(link.split(marker, 1)[1])
+        shas.append(sha)
+        size += sz
+    done = 0
+    for i in range(0, len(names), 100):
+        try:
+            done += _delete(url, key, names[i:i + 100])
+        except Exception:
+            break
+    if done:
+        qs = ",".join("?" * len(shas))
+        conn.execute(f"DELETE FROM cloud_assets WHERE sha IN ({qs})", shas)
+        conn.execute(f"DELETE FROM invoice_assets WHERE sha IN ({qs})", shas)
+        try:
+            from services.audit import log_action
+            log_action(conn, username, "delete", "cloud_assets", None,
+                       f"حذف {done} صورة غير مستعملة من التخزين")
+        except Exception:
+            pass
+    return done, round(size / 1048576.0, 2)
+
+
 def usage(conn):
     """ما تشغله صفحات الفواتير وصورها: عددٌ وحجمٌ بالميجابايت.
 
@@ -746,6 +886,12 @@ def usage(conn):
     except Exception:
         pass
     out["total_mb"] = round(out["image_mb"] + out["page_mb"], 2)
+    try:
+        orph = orphan_images(conn)
+        out["orphans"] = len(orph)
+        out["orphan_mb"] = round(sum(s for _h, s in orph) / 1048576.0, 2)
+    except Exception:
+        out["orphans"], out["orphan_mb"] = 0, 0.0
     return out
 
 

@@ -670,6 +670,15 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     # ── تعديل القيد بالفرق الصافي ──
     _adjust_invoice_entry(conn, inv, kind, internal, dw, dg, dvat)
 
+    # صفحة الفاتورة على الجوال صارت غير مطابقة لها: تُعلَّم لتُعاد
+    # كتابتها عقب الترحيل. والرمز المطبوع لا يتغيّر — المسار نفسه
+    # يُعاد رفعه، فورقة العميل تبقى صحيحة وتعرض الجديد.
+    try:
+        from services import invoice_share
+        invoice_share.invalidate(conn, invoice_id)
+    except Exception:
+        pass
+
     log_action(conn, username, "update", "invoices", invoice_id,
                f"تعديل {inv['invoice_no']} في مكانه: +{len(added)} · "
                f"~{len(updated)} · -{len(removed)} · "
