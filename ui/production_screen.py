@@ -7,10 +7,12 @@ from PyQt5 import QtCore, QtWidgets
 import config
 from database.database import db
 from models import editing, inventory
-from services import gold_math, karat_view as kv
+from services import drafts, gold_math, karat_view as kv
 from ui.widgets.common import (busy, confirm_post, posted, ask, big_label, date_edit, dstr, enter_chain,
                                err, fill, info, make_table, mspin,
                                title_label, wspin)
+
+DRAFT_KEY = "production"
 
 COLS = ["رقم الموديل", "رقم التشغيل", "النوع", "الذهب", "الفصوص", "الأحجار",
         "الأحجار بعد الخصم", "نسبة الخصم", "الوزن المقيد", "الذهب القائم",
@@ -190,6 +192,13 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         r2.addWidget(self.date)
         bl.addLayout(r2)
         bl.addWidget(self.totals)
+        # يظهر حين تُستعاد دفعة لم تُرحَّل — فلا يظن المستخدم أن
+        # أسطراً ظهرت من تلقاء نفسها.
+        self.draft_note = QtWidgets.QLabel("")
+        self.draft_note.setObjectName("ok")
+        self.draft_note.setWordWrap(True)
+        self.draft_note.setVisible(False)
+        bl.addWidget(self.draft_note)
         bl.addWidget(self.edit_banner)
         prow = QtWidgets.QHBoxLayout()
         prow.addWidget(btn_post, 1)
@@ -361,6 +370,64 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             f"{total:.2f} {kv.unit()}")
         self.recalc()
 
+    # ══════════════════════════════════════════════════════════════
+    #  مسوّدة الدفعة غير المرحَّلة
+    # --------------------------------------------------------------
+    #  الشاشة تُغلق عند الانتقال لغيرها، فدفعةٌ من عشرين طقماً كانت
+    #  تضيع بخروجةٍ واحدة لمراجعة رقم. الشرح في `services/drafts.py`.
+    # ══════════════════════════════════════════════════════════════
+
+    def draft_state(self):
+        """أسطر الدفعة كما هي — وهي قواميس بسيطة تُحفظ كما هي.
+
+        الأوزان هنا **بعيار العرض** لا بمكافئ 18، تماماً كما يراها
+        المستخدم في الجدول، فتعود كما تركها. والتحويل يبقى في مكانه
+        الوحيد: لحظة الترحيل.
+        """
+        if getattr(self, "is_editing", False):
+            return None          # وضع التعديل لا يُحفظ مسوّدةً
+        if not self.batch:
+            return None
+        return {"date": dstr(self.date), "karat": kv.active(),
+                "batch": [dict(b) for b in self.batch]}
+
+    def apply_draft(self, d):
+        if not d or not d.get("batch"):
+            return False
+        # المسوّدة محفوظة بعيار العرض وقت حفظها. لو بدّل المستخدم عيار
+        # المصنع بينهما لصارت الأرقام بوحدةٍ أخرى — فلا تُستعاد بل
+        # تُترك للمستخدم قراراً واعياً بدل أوزانٍ صامتة بوحدةٍ خاطئة.
+        if int(d.get("karat") or kv.active()) != kv.active():
+            return False
+        self.batch = [dict(b) for b in d["batch"]]
+        if d.get("date"):
+            self.date.setDate(QtCore.QDate.fromString(d["date"],
+                                                      "yyyy-MM-dd"))
+        self.render_batch()
+        return True
+
+    def _restore_draft(self):
+        if getattr(self, "_draft_done", False):
+            return
+        self._draft_done = True
+        try:
+            if self.apply_draft(drafts.load(DRAFT_KEY,
+                                            self.user.get("username"))):
+                self.draft_note.setText(
+                    "↩ استُعيدت دفعة لم تُرحَّل بعد — أكملها أو احذف "
+                    "أسطرها.")
+                self.draft_note.setVisible(True)
+        except Exception:
+            pass
+
+    def on_close(self):
+        """يُستدعى من `LazyScreen.release` عند مغادرة الشاشة."""
+        try:
+            drafts.save(DRAFT_KEY, self.user.get("username"),
+                        self.draft_state())
+        except Exception:
+            pass
+
     def post_batch(self):
         if not self.batch:
             err(self, "أضف طقماً واحداً على الأقل إلى الدفعة قبل الترحيل")
@@ -418,6 +485,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                    editing=was_editing)
             self.end_edit()
             self.batch = []
+            # المسوّدة تُمحى فور الترحيل: بديلٌ عن الذاكرة لا عن الدفتر
+            drafts.clear(DRAFT_KEY, self.user.get("username"))
+            self.draft_note.setVisible(False)
             self.render_batch()
             self.refresh()
         except Exception as e:
@@ -515,3 +585,4 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             f"الذهب المشغول: {kv.g(snap['mashghool_gold']):.2f} جم "
             f"({snap['wo_count']} طقم)")
         self.render_batch()
+        self._restore_draft()

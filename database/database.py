@@ -144,8 +144,11 @@ CREATE TABLE IF NOT EXISTS invoices(
   vat_amount REAL NOT NULL,
   grand_total REAL NOT NULL,
   qr_base64 TEXT DEFAULT '',
-  -- رمز صفحة الفاتورة للجوال ورابطها المنشور (services/invoice_share.py)
+  -- رمز صفحة الفاتورة للجوال ورابطها المنشور (services/invoice_share.py).
+  -- `qr_enabled` قرارٌ لكل فاتورة على حدة يتخذه المستخدم في شاشة
+  -- المبيعات: لا يُنشأ رمز ولا يُرفع شيء لفاتورة لم تُفعَّل.
   share_token TEXT, share_url TEXT,
+  qr_enabled INTEGER NOT NULL DEFAULT 0,
   vat_applied INTEGER NOT NULL DEFAULT 1,
   description TEXT DEFAULT '',
   entry_id INTEGER REFERENCES journal_entries(id),
@@ -404,6 +407,16 @@ CREATE TABLE IF NOT EXISTS app_settings(
   value TEXT NOT NULL DEFAULT '',
   updated_by TEXT,
   updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- مسوّدات شاشات الإدخال: ما أُدخل ولم يُرحَّل بعد (services/drafts.py).
+-- ليست قيداً ولا تمسّ رقماً محاسبياً — نصٌّ يصف ما كان في الشاشة.
+CREATE TABLE IF NOT EXISTS screen_drafts(
+  screen TEXT NOT NULL,
+  username TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now','localtime')),
+  PRIMARY KEY(screen, username)
 );
 
 -- سجل ما رُفع للتخزين السحابي — المفتاح بصمة محتوى الصورة، فتُرفع
@@ -1232,6 +1245,16 @@ def migrate_schema() -> None:
                         f"ALTER TABLE entities ADD COLUMN {col}"
                         " REAL NOT NULL DEFAULT 0")
 
+        # 21) مسوّدات شاشات الإدخال — ما أُدخل ولم يُرحَّل بعد.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS screen_drafts(
+              screen TEXT NOT NULL,
+              username TEXT NOT NULL DEFAULT '',
+              payload TEXT NOT NULL DEFAULT '',
+              updated_at TEXT DEFAULT (datetime('now','localtime')),
+              PRIMARY KEY(screen, username)
+            )""")
+
         # 20) سجل ما رُفع للتخزين السحابي من صور الموديلات.
         #     المفتاح بصمة محتوى الصورة: فموديلٌ في مئة فاتورة تُرفع
         #     صورته مرةً واحدة وتشير إليها المئة كلها — وهذا ما يجعل
@@ -1254,6 +1277,11 @@ def migrate_schema() -> None:
                 if col not in inv_cols:
                     conn.execute(
                         f"ALTER TABLE invoices ADD COLUMN {col} TEXT")
+            # الفواتير السابقة تبقى بلا رمز: القرار للمستخدم فاتورةً
+            # فاتورة، ولا يُرفع شيء لفاتورة لم يطلب لها رمزاً.
+            if "qr_enabled" not in inv_cols:
+                conn.execute("ALTER TABLE invoices ADD COLUMN qr_enabled"
+                             " INTEGER NOT NULL DEFAULT 0")
 
         # 18) سلسلة بصمات القيود — سجل تدقيق محصَّن (`models.integrity`).
         #     العمودان يبقيان فارغين للقيود السابقة حتى تُختم دفعةً

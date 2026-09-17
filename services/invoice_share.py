@@ -446,10 +446,25 @@ def cloud_publish(conn, invoice_id, data, models, company=""):
 #  النشر — سحابةً أو على شبكة المصنع
 # ══════════════════════════════════════════════════════════════════
 
+def enabled_for(conn, invoice_id):
+    """هل طُلب رمزٌ لهذه الفاتورة بعينها؟
+
+    القرار يُتخذ في شاشة المبيعات قبل الترحيل ويُحفظ مع الفاتورة. وما
+    لم يُطلب لا يُبنى رمز ولا تُرفع صورة ولا تُستهلك مساحة — فالفواتير
+    التي لا يحتاج أصحابها صورها لا تُكلّف شيئاً.
+    """
+    try:
+        r = conn.execute("SELECT qr_enabled FROM invoices WHERE id=?",
+                         (invoice_id,)).fetchone()
+    except Exception:
+        return False              # قاعدة قبل الترقية
+    return bool(r and r["qr_enabled"])
+
+
 def publish(conn, invoice_id, company=""):
     """يعيد (الرابط، «cloud» أو «lan»)، أو ("", "") إن تعذّر كلاهما."""
     m = mode(conn)
-    if m == "off":
+    if m == "off" or not enabled_for(conn, invoice_id):
         return "", ""
     data = invoice_data(conn, invoice_id)
     if not data:

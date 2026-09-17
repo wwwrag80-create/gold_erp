@@ -107,7 +107,7 @@ def _sync_wo_weight(conn, wo, new_reg, username):
 
 
 def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
-         description=""):
+         description="", qr_enabled=False):
     ent = get_entity(conn, entity_id)
     if not ent:
         raise ValueError("اختر الطرف المقابل")
@@ -200,11 +200,11 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     cur = conn.execute(
         "INSERT INTO invoices(kind,customer_id,invoice_date,wage_per_gram,"
         "total_weight,total_wages,vat_amount,grand_total,qr_base64,vat_applied,"
-        "description,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        "qr_enabled,description,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (kind, entity_id, invoice_date, 0.0 if internal else
          (lines_info[0]["wage"] if lines_info else 0.0),
          total_w, wages, vat, grand, qr_b64, int(apply_vat),
-         description.strip(), username))
+         int(bool(qr_enabled)), description.strip(), username))
     inv_id = cur.lastrowid
     inv_no = f"{prefix}-{inv_id:05d}"
     entry_id = post_entry(conn, invoice_date, f"{desc} — {inv_no}", lines,
@@ -252,15 +252,15 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
 
 
 def create_sale(conn, entity_id, cart, invoice_date, username,
-                apply_vat=True, description=""):
+                apply_vat=True, description="", qr_enabled=False):
     return _save(conn, "sale", entity_id, cart, invoice_date, username,
-                apply_vat, description)
+                apply_vat, description, qr_enabled)
 
 
 def create_sale_return(conn, entity_id, cart, invoice_date, username,
-                       apply_vat=True, description=""):
+                       apply_vat=True, description="", qr_enabled=False):
     return _save(conn, "sale_return", entity_id, cart, invoice_date, username,
-                apply_vat, description)
+                apply_vat, description, qr_enabled)
 
 
 # ملاحظة: `update_sale` القديمة أُزيلت في 4.6.0.

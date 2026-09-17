@@ -10,11 +10,14 @@ from database.database import db
 from models import entities, inventory, invoices
 from models.inventory import BULK_WO_NO
 from services import gold_math, karat_view as kv
+from services import drafts
 from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                big_label, date_edit, dstr, err, fill,
-                               has_model_image, info, make_table, mspin,
-                               reload_combo, search_combo, show_model_image,
-                               title_label, wspin)
+                               has_model_image, info, load_pref, make_table,
+                               mspin, reload_combo, save_pref, search_combo,
+                               show_model_image, title_label, wspin)
+
+DRAFT_KEY = "sales"
 
 # نفس أعمدة جدول التوريد + الأجر والأجرة
 COLS = ["الموديل", "رقم التشغيل", "الذهب", "الفصوص", "الأحجار", "الأحجار بعد الخصم",
@@ -383,6 +386,23 @@ class SalesScreen(QtWidgets.QWidget):
             "تطبيق القيمة المضافة (15%) — فاتورة ضريبية مع QR")
         self.vat_check.setChecked(False)
         self.vat_check.stateChanged.connect(self.recalc)
+        # ══ رمز QR لصفحة الفاتورة — قرارٌ لكل فاتورة ══
+        # ليست كل فاتورة تحتاج صفحةً للعميل. وإنشاء الرمز يعني رفع
+        # صور موديلاتها إلى التخزين — مساحةٌ تُستهلك بلا داعٍ إن لم
+        # تُطلب. فالافتراضي إذن **غير مفعَّل**، والتفعيل باختيار صريح.
+        # وآخر اختيار يُحفظ: من يعمل يومه كله بفواتير ذات رمز لا
+        # يُطالَب بتفعيله في كل فاتورة.
+        self.qr_check = QtWidgets.QCheckBox(
+            "إنشاء رمز QR لصفحة الفاتورة (الفاتورة + صور الموديلات)")
+        self.qr_check.setToolTip(
+            "عند تفعيله يُطبع على الفاتورة رمزٌ يفتح صفحتها على الجوال:\n"
+            "الفاتورة أولاً ثم موديلاتها بأسمائها وأعدادها.\n\n"
+            "يبقى الاختيار مفعّلاً للفواتير التالية حتى تُلغيه — "
+            "وما لم يُفعَّل لا يُنشأ رمز ولا تُرفع صورة ولا تُستهلك "
+            "مساحة.")
+        self.qr_check.setChecked(
+            str(load_pref("sales_qr_enabled", "0")).strip() == "1")
+        self.qr_check.stateChanged.connect(self._qr_pref_changed)
         self.internal_note = QtWidgets.QLabel(
             "🏭 تحويل داخلي (إعادة تشغيل): تخرج الأطقم إلى خزينة التصنيع "
             "بالوزن فقط — بلا أجور ولا ضريبة.")
@@ -401,7 +421,8 @@ class SalesScreen(QtWidgets.QWidget):
         top.addWidget(QtWidgets.QLabel("البيان:"), 1, 2)
         top.addWidget(self.description, 1, 3, 1, 3)
         top.addWidget(self.vat_check, 2, 0, 1, 6)
-        top.addWidget(self.internal_note, 3, 0, 1, 6)
+        top.addWidget(self.qr_check, 3, 0, 1, 6)
+        top.addWidget(self.internal_note, 4, 0, 1, 6)
         def _sub(t):
             l = QtWidgets.QLabel(t)
             l.setObjectName("cardSub")
@@ -420,7 +441,7 @@ class SalesScreen(QtWidgets.QWidget):
         entry.setColumnStretch(0, 1)
         entry.setColumnStretch(1, 4)
         entry.setColumnStretch(2, 1)
-        top.addLayout(entry, 4, 0, 1, 6)
+        top.addLayout(entry, 5, 0, 1, 6)
 
         self.items_table = make_table()
         # النقر على خانة الموديل يفتح صورته المحفوظة
@@ -452,6 +473,12 @@ class SalesScreen(QtWidgets.QWidget):
         self.edit_banner.setObjectName("warn")
         self.edit_banner.setWordWrap(True)
         self.edit_banner.setVisible(False)
+        # يظهر حين تُستعاد فاتورة لم تُرحَّل — فلا يظن المستخدم أن
+        # أسطراً ظهرت من تلقاء نفسها.
+        self.live_note = QtWidgets.QLabel("")
+        self.live_note.setObjectName("ok")
+        self.live_note.setWordWrap(True)
+        self.live_note.setVisible(False)
 
         inv_box = QtWidgets.QGroupBox("بنود الفاتورة")
         il = QtWidgets.QVBoxLayout(inv_box)
@@ -465,6 +492,7 @@ class SalesScreen(QtWidgets.QWidget):
         row.addWidget(self.totals)
         il.addLayout(row)
         il.addWidget(self.live_balance)
+        il.addWidget(self.live_note)
         il.addWidget(self.edit_banner)
         srow = QtWidgets.QHBoxLayout()
         srow.addWidget(self.btn_save, 1)
@@ -489,6 +517,106 @@ class SalesScreen(QtWidgets.QWidget):
         note.setObjectName("cardSub")
         lay.addWidget(note)
         self._install_shortcuts()
+
+    def _qr_pref_changed(self):
+        """يحفظ آخر اختيار لرمز QR فيبقى بعد الخروج من الشاشة والنظام."""
+        save_pref("sales_qr_enabled",
+                  "1" if self.qr_check.isChecked() else "0",
+                  self.user.get("username"))
+
+    # ══════════════════════════════════════════════════════════════
+    #  مسوّدة الفاتورة غير المرحَّلة
+    # --------------------------------------------------------------
+    #  الشاشة تُغلق عند الانتقال لغيرها، فما لم يُرحَّل يُحفظ ويُستعاد.
+    #  شرح الفكرة كاملاً في `services/drafts.py`.
+    # ══════════════════════════════════════════════════════════════
+
+    def draft_state(self):
+        """وصفُ ما في الشاشة الآن — أو None إن لم يكن فيها شيء.
+
+        تُحفظ **أرقام** الأطقم لا صفوفها: الصف صورةٌ من لحظةٍ مضت، وقد
+        تتغيّر حالة الطقم قبل العودة. القراءة من جديد عند الاستعادة
+        تضمن أن ما يُرحَّل يطابق الواقع.
+        """
+        if self.editing_id is not None:
+            return None          # وضع التعديل لا يُحفظ مسوّدةً
+        if not self.items:
+            return None
+        return {
+            "kind": self.kind.currentData(),
+            "customer_id": self.customer.currentData(),
+            "date": dstr(self.date),
+            "description": self.description.text().strip(),
+            "vat": bool(self.vat_check.isChecked()),
+            "qr": bool(self.qr_check.isChecked()),
+            "items": [{"wo_id": i["wo"]["id"], "weight": i["weight"],
+                       "wage": i["wage"]} for i in self.items],
+        }
+
+    def apply_draft(self, d):
+        """يعيد بناء الشاشة من مسوّدة — بتجاهل ما لم يعد موجوداً."""
+        if not d or not d.get("items"):
+            return False
+        items = []
+        try:
+            with db(readonly=True) as conn:
+                for it in d["items"]:
+                    wo = conn.execute(
+                        "SELECT * FROM work_orders WHERE id=? AND"
+                        " is_deleted=0", (it.get("wo_id"),)).fetchone()
+                    if wo is None:
+                        continue      # طقمٌ حُذف بعد حفظ المسوّدة
+                    items.append({"wo": wo,
+                                  "weight": float(it.get("weight") or 0),
+                                  "wage": float(it.get("wage") or 0)})
+        except Exception:
+            return False
+        if not items:
+            return False
+        self._loading_doc = True
+        try:
+            i = self.kind.findData(d.get("kind") or "sale")
+            if i >= 0:
+                self.kind.setCurrentIndex(i)
+            i = self.customer.findData(d.get("customer_id"))
+            if i >= 0:
+                self.customer.setCurrentIndex(i)
+        finally:
+            self._loading_doc = False
+        if d.get("date"):
+            self.date.setDate(QtCore.QDate.fromString(d["date"], "yyyy-MM-dd"))
+        self.description.setText(d.get("description") or "")
+        self.vat_check.setChecked(bool(d.get("vat")))
+        self.qr_check.setChecked(bool(d.get("qr")))
+        self.items = items
+        self.render_items()
+        return True
+
+    def _restore_draft(self):
+        """يستعيد المسوّدة مرةً واحدة عند أول بناء للشاشة."""
+        if getattr(self, "_draft_done", False):
+            return
+        self._draft_done = True
+        try:
+            if self.apply_draft(drafts.load(DRAFT_KEY,
+                                            self.user.get("username"))):
+                self.live_note.setText(
+                    "↩ استُعيدت فاتورة لم تُرحَّل بعد — أكملها أو "
+                    "امسح أسطرها.")
+                self.live_note.setVisible(True)
+        except Exception:
+            pass          # المسوّدة راحةٌ لا تُعطّل الشاشة
+
+    def _save_draft(self):
+        try:
+            drafts.save(DRAFT_KEY, self.user.get("username"),
+                        self.draft_state())
+        except Exception:
+            pass
+
+    def on_close(self):
+        """يُستدعى من `LazyScreen.release` عند مغادرة الشاشة."""
+        self._save_draft()
 
     # ══════════════════════════════════════════════════════════════
     #  الإدخال السريع بلوحة المفاتيح
@@ -1052,11 +1180,13 @@ class SalesScreen(QtWidgets.QWidget):
                     elif self.kind.currentData() == "sale":
                         res = invoices.create_sale(
                             conn, cid, cart, dstr(self.date),
-                            self.user["username"], apply_vat, desc)
+                            self.user["username"], apply_vat, desc,
+                            qr_enabled=self.qr_check.isChecked())
                     else:
                         res = invoices.create_sale_return(
                             conn, cid, cart, dstr(self.date),
-                            self.user["username"], apply_vat, desc)
+                            self.user["username"], apply_vat, desc,
+                            qr_enabled=self.qr_check.isChecked())
             if res.get("added") is not None and self.editing_id is not None:
                 parts = []
                 if res.get("added"):
@@ -1098,6 +1228,10 @@ class SalesScreen(QtWidgets.QWidget):
             self.description.clear()
             self.clear_items()
             self._update_mode()
+            # المسوّدة تُمحى فور الترحيل — بديلٌ عن الذاكرة لا عن
+            # الدفتر، فلا يجوز أن تُعيد أسطراً صارت قيداً.
+            self.live_note.setVisible(False)
+            drafts.clear(DRAFT_KEY, self.user.get("username"))
             with busy(self, "جارٍ تحديث الشاشة…", stage="تحديث المبيعات"):
                 self.refresh()
         except Exception as e:
@@ -1113,3 +1247,6 @@ class SalesScreen(QtWidgets.QWidget):
                               + r["name"])
         self.render_items()
         self.customer_changed()
+        # الاستعادة بعد تعبئة قائمة العملاء: قبلها لا يوجد ما يُختار
+        # منه، فيضيع العميل المحفوظ في المسوّدة.
+        self._restore_draft()
