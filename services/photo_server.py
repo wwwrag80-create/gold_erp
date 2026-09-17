@@ -69,13 +69,18 @@ def _prune():
         _docs.pop(tok, None)
 
 
-def register(invoice_no, items):
-    """يسجّل صور فاتورة ويعيد رمزها. `items`: [(الموديل, المسار)]."""
+def register(invoice_no, items, page=None):
+    """يسجّل صفحة فاتورة ويعيد رمزها.
+
+    `items`: [(الموديل, المسار)] — الصور تُقدَّم من `/img/<رمز>/<فهرس>`.
+    `page(src_fn)`: دالةٌ تبني صفحة HTML كاملة، تتلقّى دالةً تعيد عنوان
+    صورة كل موديل. بلا `page` تُعرض الصور وحدها كما كان.
+    """
     with _lock:
         _prune()
         tok = secrets.token_urlsafe(12)
         _docs[tok] = {"no": str(invoice_no), "items": list(items),
-                      "at": time.time()}
+                      "page": page, "at": time.time()}
         return tok
 
 
@@ -144,6 +149,15 @@ class _Handler(BaseHTTPRequestHandler):
         d = _doc(tok)
         if not d:
             return self._send(404, "<h3>انتهت صلاحية الرابط</h3>")
+        # صفحةٌ جاهزة من `invoice_share` (الفاتورة ثم موديلاتها).
+        # الصور تبقى تُقدَّم من هنا: الملفات على هذا الجهاز وحده.
+        builder = d.get("page")
+        if callable(builder):
+            try:
+                return self._send(200, builder(
+                    lambda i: f"/img/{tok}/{i}"))
+            except Exception:
+                pass          # تعذّر بناء الصفحة ⇒ العرض المبسّط أدناه
         cards = []
         for i, (model, _path) in enumerate(d["items"]):
             m = html.escape(str(model))
@@ -193,13 +207,24 @@ def ensure_running(port=DEFAULT_PORT):
 
 def publish_invoice(invoice_no, items, port=DEFAULT_PORT):
     """ينشر صور فاتورة ويعيد رابطها، أو None إن تعذّر تشغيل الخادم."""
-    if not items:
+    return publish_page(invoice_no, items, None, port)
+
+
+def publish_page(invoice_no, items, page=None, port=DEFAULT_PORT):
+    """ينشر صفحة فاتورة (وصورها) على شبكة المصنع ويعيد رابطها.
+
+    **حدٌّ لا مفرّ منه**: العنوان المعاد عنوانٌ خاص (`192.168.x.x`)، لا
+    يبلغه إلا جهازٌ على شبكة المصنع نفسها وما دام النظام يعمل. فهذا
+    الرابط للموظف لا للعميل الذي يخرج بالورقة — ولذلك يُجرَّب النشر
+    السحابي أولاً في `services.invoice_share`.
+    """
+    if not items and page is None:
         return None
     addr = ensure_running(port)
     if not addr:
         return None
     host, p = addr
-    return f"http://{host}:{p}/inv/{register(invoice_no, items)}"
+    return f"http://{host}:{p}/inv/{register(invoice_no, items, page)}"
 
 
 def stop():
