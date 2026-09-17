@@ -1399,6 +1399,96 @@ def main():
           any("الرابط الذي سيحمله الرمز" in s["step"] for s in _ok_steps),
           str([s["step"] for s in _ok_steps]))
 
+    # ══ النشر السحابي كاملاً — مقابل خادم تخزين محاكٍ ══
+    # **الخلل الذي يحرسه هذا الفحص**: داخل حلقة رفع الصور كان متغيّر
+    # بايتات الصورة يحمل اسم `data` نفسه الذي يحمل **بيانات الفاتورة**،
+    # فيدهسه. فتُستدعى `page_html` ببايتات صورة بدل قاموس الفاتورة،
+    # فترفع استثناءً يبتلعه الحارس: لا صفحة تُرفع ولا رمز يُطبع ولا
+    # سبب يظهر.
+    #
+    # ولا يقع إلا حين يكون لموديلٍ **صورةٌ محفوظة** — ولهذا مرّ من كل
+    # الفحوص السابقة: لم يكن في أيٍّ منها صورة. فالفحص هنا يرفع صورة
+    # حقيقية ويعدّ طلبات الرفع: صورةٌ ثم صفحة.
+    import http.server as _hs
+    import threading as _th
+    _puts = []
+
+    class _FakeStore(_hs.BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def do_POST(self):                                # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            listing = "/object/list/" in self.path
+            if not listing:
+                _puts.append(self.path)
+            b = b"[]" if listing else b'{"Key":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+    _srv = _hs.HTTPServer(("127.0.0.1", 0), _FakeStore)
+    _th.Thread(target=_srv.serve_forever, daemon=True).start()
+    _old_proxy = {k: os.environ.pop(k, None) for k in
+                  ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")}
+    os.environ["NO_PROXY"] = "*"
+    try:
+        from models import models_catalog as _mc
+        from services import tenant as _tn
+        _tn.update(cloud_url=f"http://127.0.0.1:{_srv.server_address[1]}",
+                   cloud_key="k")
+        try:
+            from PyQt5.QtGui import QImage as _QI2
+            _im2 = _QI2(1400, 1100, _QI2.Format_RGB32)
+            _im2.fill(0xCCAA44)
+            _imgp = pathlib.Path(_TMP) / "model_cloud.jpg"
+            _im2.save(str(_imgp), "JPEG", 92)
+            with db() as conn:
+                _b3 = _batch(conn, [{"wo_no": "CQ1", "gold": 18.0,
+                                     "wage_per_gram": 20.0,
+                                     "model_no": "MC-1"}],
+                             "2026-09-20", "admin")
+                _cq = conn.execute(
+                    "SELECT id FROM work_orders"
+                    " WHERE work_order_no='CQ1'").fetchone()["id"]
+                _cinv = create_sale(conn, cust, [{"work_order_id": _cq}],
+                                    "2026-09-21", "admin", qr_enabled=True)
+            _mc.set_image("MC-1", str(_imgp), "admin")
+            with db() as conn:
+                _ish.set_mode(conn, "cloud", "admin")
+                _clink, _cwhere = _ish.publish(conn, _cinv["id"], "مصنع",
+                                               allow_upload=True)
+            check("النشر السحابي يعيد رابطاً عاماً",
+                  bool(_clink) and _cwhere == "cloud",
+                  f"{_cwhere}: {_clink[:70]}")
+            check("ويرفع الصورة **وصفحة الفاتورة** معاً",
+                  any("/models/" in x for x in _puts)
+                  and any("index.html" in x for x in _puts),
+                  str([x.rsplit('/', 1)[-1] for x in _puts]))
+            check("والرابط يشير إلى المسار العام للصفحة",
+                  "/object/public/invoice-photos/" in _clink
+                  and _clink.endswith("index.html"), _clink[-60:])
+            with db(readonly=True) as conn:
+                check("ويُحفظ مع الفاتورة فلا يُرفع مرتين",
+                      _ish.cached_url(conn, _cinv["id"]) == _clink)
+            _n_before = len(_puts)
+            with db() as conn:
+                _ish.publish(conn, _cinv["id"], "مصنع", allow_upload=True)
+            check("النشر الثاني لا يرفع شيئاً", len(_puts) == _n_before,
+                  f"{len(_puts) - _n_before} طلباً إضافياً")
+            with db() as conn:
+                _ish.set_mode(conn, "auto", "admin")
+        except ImportError:
+            check("فحص النشر السحابي", True, "تخطّي — PyQt5 غير مثبّت")
+    finally:
+        _tn.update(cloud_url="", cloud_key="")
+        _srv.shutdown()
+        os.environ.pop("NO_PROXY", None)
+        for _k, _v in _old_proxy.items():
+            if _v is not None:
+                os.environ[_k] = _v
+
     # ══ أمر صلاحيات المجلد: يُنفَّذ مرتين بلا خطأ ══
     # الخطأ «already exists» يُفشل الدفعة كلها في محرّر SQL، فيبقى ما
     # بعده غير منفَّذ ويظن المستخدم أنه أتمّ العمل — وهو ما وقع فعلاً.
