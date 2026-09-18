@@ -61,6 +61,15 @@ def main():
         return
     win = MainWindow(dlg.user)
     win.showMaximized()
+    # ══ حارس التجمّد ══
+    # يرصد توقّف خيط الواجهة عن معالجة أحداثه — وهو ما يراه المستخدم
+    # «شاشة سوداء ولا يستجيب» — ويكتب في السجل **موضعه** بالملف
+    # والسطر والدالة. لا يُعالج شيئاً؛ يجعل الشكوى دليلاً يُقرأ.
+    try:
+        from services import ui_watchdog
+        ui_watchdog.start(win)
+    except Exception:
+        pass
     sys.exit(app.exec_())
 
 

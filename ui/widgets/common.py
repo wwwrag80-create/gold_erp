@@ -251,6 +251,62 @@ def fill(table, headers, rows):
     except Exception:
         pass
 
+@contextlib.contextmanager
+def bulk_rows(table, n_rows, headers=None):
+    """يهيّئ جدولاً لملءٍ يدويٍّ سريع، ثم يعيده إلى هيئته.
+
+    **الخلل الذي وُجد لأجله**: `make_table` يفعّل لفّ النص ويجعل ارتفاع
+    الصف تابعاً لمحتواه. فكل `setItem` يُعيد قياس الصف كله، وقياس صفٍّ
+    يُعيد حساب الأعمدة — فتصير كلفة الخلية الواحدة ثابتةً باهظة (قيست
+    ١٢.٦ مللي ثانية للخلية الواحدة). على ٣٧٨ صفاً وثمانية أعمدة صار
+    فتح **أرشيف المستندات** ثلاثين ثانية: الواجهة لا تعالج أحداثها،
+    فيرسمها ويندوز سوداءَ ويعلن «لا يستجيب» — وهي الشكوى بعينها.
+
+    `fill()` يتفادى هذا داخلياً، لكن كل شاشةٍ تملأ جدولها بيدها (لأنها
+    تضع أزراراً في الصفوف أو تلوّن خلاياها) كانت تدفع الثمن كاملاً.
+    فهذا هو المخرج المشترك:
+
+        with bulk_rows(self.table, len(rows), COLS):
+            for i, r in enumerate(rows):
+                ...  self.table.setItem(i, c, it)
+
+    ولا يُستعمل `insertRow` داخله: عدد الصفوف يُضبط مرةً واحدة.
+    """
+    prev_wrap = table.wordWrap()
+    vh = table.verticalHeader()
+    prev_mode = vh.sectionResizeMode(0) if table.rowCount() else None
+    big = n_rows > BIG_TABLE
+    try:
+        table.setUpdatesEnabled(False)
+        table.setSortingEnabled(False)
+        if big:
+            table.setWordWrap(False)
+            vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+            vh.setDefaultSectionSize(30)
+        if headers:
+            table.setColumnCount(len(headers))
+            table.setHorizontalHeaderLabels(list(headers))
+        table.setRowCount(0)
+        table.setRowCount(n_rows)
+        yield table
+    finally:
+        try:
+            if not big:
+                table.setWordWrap(prev_wrap)
+                if prev_mode is not None:
+                    vh.setSectionResizeMode(prev_mode)
+            table.setUpdatesEnabled(True)
+        except Exception:
+            pass
+        # توزيعٌ حسابي لا يقرأ محتوى الخلايا — بديل
+        # `resizeColumnsToContents` الذي يقيس كل خلية (وكل widget فيها)
+        try:
+            from ui.widgets.table_fit import fit_columns
+            fit_columns(table)
+        except Exception:
+            pass
+
+
 def cell(table, row, col):
     it = table.item(row, col)
     return it.text() if it else ""

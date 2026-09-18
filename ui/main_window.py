@@ -43,11 +43,14 @@ from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
 from ui.reports.aging_screen import AgingScreen
 from ui.reports.day_close_screen import DayCloseScreen
+from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
 from ui.item_history_screen import ItemHistoryScreen
 from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
 from ui.sales_screen import SalesScreen
+from ui.shrinkage_screen import ShrinkageScreen
+from ui.reports.stock_report import StockReportScreen
 from ui.workshop_accounts_screen import WorkshopAccountsScreen
 from ui.workshop_losses_screen import WorkshopLossesScreen
 from ui.stocktake_screen import StocktakeScreen
@@ -69,7 +72,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 2
+NAV_VERSION = 3
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -159,6 +162,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("سلامة السجل (بصمة القيود)",
                      Lazy(lambda: IntegrityScreen(user),
                           "سلامة السجل (بصمة القيود)")),
+                    ("صحة النظام",
+                     Lazy(lambda: DiagnosticsScreen(user), "صحة النظام")),
                     ("المطابقة وتسوية الفروقات", self.recon_screen),
                     ("أرشيف المستندات والطباعة", self.archive_screen),
                     ("الرواتب والموظفون", self.payroll_screen),
@@ -166,7 +171,25 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
                     ("الإقرار الضريبي (VAT)", Lazy(lambda: VatReturnScreen(user), "الإقرار الضريبي (VAT)")),
                     ("ميزان المراجعة", Lazy(lambda: TrialBalanceScreen(user), "ميزان المراجعة")),
+                    # ══ خمس شاشات كانت مبنيّةً ولا باب لها ══
+                    # كانت تُبنى وتُختبر ولا تظهر في القائمة، فكان
+                    # النظام يُسلَّم بلا **قائمة دخل** — وهي أول ما
+                    # يسأل عنه محاسب. أُلحقت هنا بترتيبها المحاسبي:
+                    # الميزانية ثم قائمة الدخل، ثم أرصدة المخازن.
+                    ("قائمة الدخل (الأرباح والخسائر)",
+                     Lazy(lambda: IncomeStatementScreen(user),
+                          "قائمة الدخل (الأرباح والخسائر)")),
                     ("الميزانية العمومية", Lazy(lambda: BalanceSheetScreen(user), "الميزانية العمومية")),
+                    ("أرصدة المخازن (جرد لحظي)",
+                     Lazy(lambda: StockReportScreen(user),
+                          "أرصدة المخازن (جرد لحظي)")),
+                    ("تحليل مبيعات العملاء", self.analytics_screen),
+                    ("إنتاج خزينة التصنيع (مطابقة)",
+                     Lazy(lambda: KhazinaReportScreen(user),
+                          "إنتاج خزينة التصنيع (مطابقة)")),
+                    ("تسوية فاقد التصنيع الشهري",
+                     Lazy(lambda: ShrinkageScreen(user),
+                          "تسوية فاقد التصنيع الشهري")),
                     ("تهيئة أرصدة أول المدة (تاريخ القطع)", Lazy(lambda: OpeningBalancesScreen(user), "تهيئة أرصدة أول المدة (تاريخ القطع)")),
                     ("الإقفال السنوي", Lazy(lambda: YearEndScreen(user), "الإقفال السنوي")),
                 ]),
