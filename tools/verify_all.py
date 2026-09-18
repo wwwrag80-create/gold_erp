@@ -116,6 +116,7 @@ SCREENS = [
     ("ui.reports.integrity_screen", "IntegrityScreen"),
     ("ui.reports.diagnostics_screen", "DiagnosticsScreen"),
     ("ui.reports.bank_recon_screen", "BankReconScreen"),
+    ("ui.reports.model_profit_screen", "ModelProfitScreen"),
     ("ui.super_admin_screen", "SuperAdminScreen"),
     ("ui.main_window", "MainWindow"),
 ]

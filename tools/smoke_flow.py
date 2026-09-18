@@ -2016,6 +2016,77 @@ def main():
         _bal_g, _bal_c, _, _ = ledger_balanced(conn)
     check("والدفتر بقي متوازناً بعد المطابقة كلها", _bal_g and _bal_c)
 
+    step("31) ربحية الموديل")
+    # ══ لماذا يُفحص بالأرقام ══
+    # تقريرٌ يجمع المرتجع بدل أن يطرحه يُظهر موديلاً خاسراً رابحاً،
+    # فيُكثر منه المصنع. تُبنى هنا حالةٌ يُعرف جوابها سلفاً: موديلان،
+    # يُباع من كلٍّ طقمان، ويُرتجع من أحدهما واحد.
+    from models import model_profit as _mp
+    from models.invoices import create_sale_return as _csr
+
+    with db() as conn:
+        _b2 = _batch(conn, [
+            {"wo_no": "MP-A1", "gold": 10.0, "wage_per_gram": 30.0,
+             "model_no": "MODEL-A"},
+            {"wo_no": "MP-A2", "gold": 10.0, "wage_per_gram": 30.0,
+             "model_no": "MODEL-A"},
+            {"wo_no": "MP-B1", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "MODEL-B"},
+            {"wo_no": "MP-B2", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "MODEL-B"},
+        ], "2026-07-01", "admin")
+        _wo = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'MP-%'")}
+        _sale_a = create_sale(
+            conn, cust, [{"work_order_id": _wo["MP-A1"]},
+                         {"work_order_id": _wo["MP-A2"]}],
+            "2026-07-05", "admin", apply_vat=False)
+        create_sale(conn, cust, [{"work_order_id": _wo["MP-B1"]},
+                                 {"work_order_id": _wo["MP-B2"]}],
+                    "2026-07-05", "admin", apply_vat=False)
+    with db() as conn:
+        _csr(conn, cust, [{"work_order_id": _wo["MP-A2"]}],
+             "2026-07-09", "admin", apply_vat=False)
+
+    with db(readonly=True) as conn:
+        _prl = _mp.by_model(conn, "2026-07-01", "2026-07-31")
+    _pr = {r["model"]: r for r in _prl}
+    check("كل موديلٍ بِيع منه يظهر بصفٍّ واحد",
+          "MODEL-A" in _pr and "MODEL-B" in _pr, str(sorted(_pr)))
+    _a, _b = _pr["MODEL-A"], _pr["MODEL-B"]
+    check("المرتجع يُطرح من العدد لا يُجمع",
+          _a["sold"] == 2 and _a["returned"] == 1 and _a["net_count"] == 1,
+          f"مباع {_a['sold']} · مرتجع {_a['returned']} · "
+          f"صافي {_a['net_count']}")
+    check("والمرتجع يُطرح من الوزن كذلك",
+          abs(_a["net_weight"] - (_b["net_weight"] / 2)) < 0.01,
+          f"{_a['net_weight']:.3f} مقابل نصف {_b['net_weight']:.3f}")
+    check("صافي الأجور يطرح أجرة المرتجع",
+          _a["wages"] > 0 and abs(_a["wages"] - _b["wages"] * 1.5) < 0.01,
+          f"A={_a['wages']:,.2f} · B={_b['wages']:,.2f}")
+    check("متوسط أجرة الجرام يميّز الغالي من الرخيص",
+          _a["avg_wage"] > _b["avg_wage"] * 2.5,
+          f"A={_a['avg_wage']:,.2f} · B={_b['avg_wage']:,.2f}")
+    check("الترتيب بالأعلى أجوراً أولاً — لا بالاسم",
+          [r["wages"] for r in _prl] == sorted(
+              (r["wages"] for r in _prl), reverse=True),
+          " · ".join(f"{r['model']}={r['wages']:,.0f}" for r in _prl[:4]))
+    _sh = sum(r["share"] for r in _pr.values())
+    check("الحصص تجمع مئةً بالمئة", abs(_sh - 100.0) < 0.1, f"{_sh:.2f}%")
+    _t = _mp.totals(list(_pr.values()))
+    check("الإجمالي = مجموع الصفوف",
+          abs(_t["wages"] - sum(r["wages"] for r in _pr.values())) < 0.01)
+
+    with db(readonly=True) as conn:
+        _un = {u["model"]: u for u in _mp.unsold(conn)}
+    check("ما ارتُجع عاد إلى «ما لم يُبَع بعد»",
+          _un.get("MODEL-A", {}).get("count", 0) >= 1,
+          f"{_un.get('MODEL-A', {}).get('count', 0)} طقماً")
+    check("والأجرة غير المحصَّلة = الوزن × أجرة الجرام",
+          all(abs(u["potential"] - u["weight"] * u["wage_per_gram"]) < 0.01
+              for u in _un.values()))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

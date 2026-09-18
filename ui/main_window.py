@@ -43,6 +43,7 @@ from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
 from ui.reports.aging_screen import AgingScreen
 from ui.reports.bank_recon_screen import BankReconScreen
+from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
@@ -189,6 +190,10 @@ class MainWindow(QtWidgets.QMainWindow):
                      Lazy(lambda: StockReportScreen(user),
                           "أرصدة المخازن (جرد لحظي)")),
                     ("تحليل مبيعات العملاء", self.analytics_screen),
+                    # «أيّ موديلٍ يكسب» كان يُجاب بالانطباع: ما يُرى
+                    # يخرج كثيراً قد يكون كثيرَ الخروج قليلَ الأجرة
+                    ("ربحية الموديل",
+                     Lazy(lambda: ModelProfitScreen(user), "ربحية الموديل")),
                     ("إنتاج خزينة التصنيع (مطابقة)",
                      Lazy(lambda: KhazinaReportScreen(user),
                           "إنتاج خزينة التصنيع (مطابقة)")),
