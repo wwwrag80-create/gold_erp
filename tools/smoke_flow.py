@@ -1947,6 +1947,35 @@ def main():
                          "user_note": "", "source_table": "",
                          "source_id": None, "created_by": "admin"}, [], "y"))
 
+    step("29ب) ملفات الهجرة تُعثر عليها فعلاً")
+    # ══ خللٌ مرّ صامتاً حتى أول هجرةٍ ذات أثر ══
+    # كان مجلد الهجرات يُشتقّ من مجلد **البيانات** لا من مجلد البرنامج.
+    # وهما واحدٌ عند التشغيل من المصدر بلا إعدادات — فمرّ. أما نسخة
+    # الـexe (بياناتها في مجلد دائم منفصل) أو أي تشغيل يضبط
+    # `JADEITE_DATA_DIR` فلا مجلد هجرات عنده أصلاً: `discover()` تعيد
+    # لا شيء، و`run_all` تنجح **صامتةً** بلا تنفيذ هجرة واحدة، ويظهر
+    # العطل عند المستخدم بـ«لا يوجد جدول كذا». وهذا الفحص يمنع عودته:
+    # يقارن ما تجده الخدمة بما في مجلد المشروع فعلاً.
+    from services import migrations as _mig
+    _repo_sqls = sorted(p.name for p in
+                        (pathlib.Path(__file__).resolve().parent.parent
+                         / "migrations").glob("*.sql"))
+    _seen_sqls = sorted(p.name for _, _, p in _mig.discover())
+    check("كل ملفات الهجرة في المشروع تُعثر عليها",
+          _seen_sqls == _repo_sqls and bool(_repo_sqls),
+          f"وُجد {_seen_sqls} · في المشروع {_repo_sqls}")
+    with db(readonly=True) as conn:
+        _done = _mig.applied(conn)
+    check("وكلها طُبِّقت على قاعدة الفحص",
+          len(_done) >= len(_repo_sqls),
+          f"{len(_done)} مطبَّقة من {len(_repo_sqls)}")
+    with db(readonly=True) as conn:
+        _has = conn.execute(
+            "SELECT COUNT(*) c FROM sqlite_master"
+            " WHERE type='table' AND name='bank_recon_marks'"
+        ).fetchone()["c"]
+    check("وجدولُ هجرةٍ حقيقيّ موجودٌ في القاعدة", _has == 1)
+
     step("30) مطابقة كشف البنك")
     # ══ لماذا يُفحص هذا بالأرقام ══
     # معادلة المطابقة تُقلب بسهولة: طرحُ ما يجب جمعه يعطي فرقاً يبدو
