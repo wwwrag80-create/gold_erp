@@ -29,7 +29,8 @@ os.environ["GOLD_ERP_DATA_DIR"] = _TMP
 import config                                            # noqa: E402
 config.DB_PATH = __import__("pathlib").Path(_TMP) / "smoke.db"
 
-from database.database import create_tables, db, migrate_schema  # noqa: E402
+from database.database import (create_tables, db, migrate_schema,  # noqa: E402
+                               run_migrations_files)
 from database.seed import (ensure_new_accounts, ensure_system_tags,  # noqa: E402
                            seed_initial_data)
 from models.accounts import acc_id                       # noqa: E402
@@ -73,6 +74,7 @@ def main():
     step("0) تهيئة قاعدة مؤقتة")
     create_tables()
     migrate_schema()
+    run_migrations_files()   # كما يفعل الإقلاع الحقيقي
     seed_initial_data()
     ensure_new_accounts()
     with db() as conn:
@@ -1910,6 +1912,75 @@ def main():
                          "doc_no": "JV-1", "description": "د",
                          "user_note": "", "source_table": "",
                          "source_id": None, "created_by": "admin"}, [], "y"))
+
+    step("30) مطابقة كشف البنك")
+    # ══ لماذا يُفحص هذا بالأرقام ══
+    # معادلة المطابقة تُقلب بسهولة: طرحُ ما يجب جمعه يعطي فرقاً يبدو
+    # معقولاً فيُقبَل، ويُسلَّم كشفٌ خاطئ لمراجع. فتُبنى هنا حالةٌ
+    # يُعرف جوابها سلفاً: إيداعٌ ظهر في الكشف، وشيكٌ صُرف، وشيكٌ لم
+    # يُصرَف بعد — والمتوقَّع يجب أن يساوي الكشف بالضبط.
+    from models import bank_recon as _br
+    from models.vouchers import create_voucher
+    with db(readonly=True) as conn:
+        _accs = _br.bank_accounts(conn)
+    _codes = {a["code"] for a in _accs}
+    check("حسابات المطابقة = النقدية والبنوك وحدها",
+          {"1400", "1500"} <= _codes and not (_codes & {"1730", "1740"}),
+          f"المعروض: {sorted(_codes)}")
+    _bank = next(a for a in _accs if a["code"] == "1500")
+
+    with db() as conn:
+        _cust = conn.execute(
+            "SELECT id FROM entities WHERE entity_type='customer'"
+            " AND is_deleted=0 ORDER BY id").fetchone()["id"]
+        for _amt in (5_000.0, 1_200.0, 800.0):
+            create_voucher(conn, "receipt", "2026-06-10", "admin",
+                           entity_id=_cust, cash_amount=_amt,
+                           cash_account_code="1500")   # يدخل البنك
+    with db(readonly=True) as conn:
+        _mv = _br.movements(conn, _bank["id"], "2026-06-01", "2026-06-30")
+    check("حركات البنك تُقرأ من سطور القيود", len(_mv) >= 3,
+          f"{len(_mv)} حركة")
+    _in = sum(m["debit"] for m in _mv)
+    check("مجموع الوارد = مجموع السندات", abs(_in - 7_000.0) < 0.01,
+          f"{_in:,.2f}")
+    check("كل الحركات تبدأ بلا مطابقة",
+          all(not m["matched"] for m in _mv))
+
+    # يُطابَق اثنان ويُترك الثالث: هو ما لم يصل المصرفَ بعد
+    _seen = [m for m in _mv if m["debit"] in (5_000.0, 1_200.0)]
+    with db() as conn:
+        _br.set_matched(conn, [m["line_id"] for m in _seen], True, "admin",
+                        "ST-06")
+    with db(readonly=True) as conn:
+        _s = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30")
+    check("المطابقة تُحفظ ولا تُنشئ قيداً", _s["matched_rows"] == len(_seen),
+          f"{_s['matched_rows']} مطابَقة")
+    check("رصيد الدفتر = مجموع الحركات", abs(_s["book"] - 7_000.0) < 0.01,
+          f"{_s['book']:,.2f}")
+    # الإيداع الذي لم يظهر في الكشف يُستبعَد: 7000 − 800 = 6200
+    check("المتوقَّع في الكشف يستبعد ما لم يظهر فيه",
+          abs(_s["expected"] - 6_200.0) < 0.01, f"{_s['expected']:,.2f}")
+
+    with db(readonly=True) as conn:
+        _s0 = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30",
+                          6_200.0)
+        _s1 = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30",
+                          6_350.0)
+    check("رصيدٌ مطابق ⇒ الفرق صفر", _s0["difference"] == 0,
+          f"{_s0['difference']}")
+    check("رصيدٌ مخالف ⇒ الفرق بمقداره وإشارته",
+          abs(_s1["difference"] - 150.0) < 0.01, f"{_s1['difference']}")
+
+    with db() as conn:
+        _br.set_matched(conn, [m["line_id"] for m in _seen], False, "admin")
+    with db(readonly=True) as conn:
+        _s2 = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30")
+    check("رفع التعليم يُعيد الحركات غير مطابَقة",
+          _s2["unmatched_rows"] == _s2["rows"] and _s2["matched_rows"] == 0)
+    with db(readonly=True) as conn:
+        _bal_g, _bal_c, _, _ = ledger_balanced(conn)
+    check("والدفتر بقي متوازناً بعد المطابقة كلها", _bal_g and _bal_c)
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

@@ -62,7 +62,8 @@ def rec(kind, name, seconds, note=""):
 
 def build_data(n_invoices):
     """دفترٌ بحجم مصنعٍ يعمل منذ سنة."""
-    from database.database import create_tables, db, migrate_schema
+    from database.database import (create_tables, db, migrate_schema,
+                                   run_migrations_files)
     from database.seed import (ensure_new_accounts, ensure_system_tags,
                                seed_initial_data)
     from models.entities import (ensure_employee_accrual_accounts,
@@ -73,6 +74,7 @@ def build_data(n_invoices):
 
     create_tables()
     migrate_schema()
+    run_migrations_files()   # كما يفعل الإقلاع الحقيقي
     seed_initial_data()
     ensure_new_accounts()
     with db() as conn:

@@ -42,6 +42,7 @@ from ui.reports.khazina_report_screen import KhazinaReportScreen
 from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
 from ui.reports.aging_screen import AgingScreen
+from ui.reports.bank_recon_screen import BankReconScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
@@ -165,6 +166,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("صحة النظام",
                      Lazy(lambda: DiagnosticsScreen(user), "صحة النظام")),
                     ("المطابقة وتسوية الفروقات", self.recon_screen),
+                    # مطابقة الدفتر بكشف المصرف — كانت تُعمل بورقةٍ
+                    # وقلمٍ خارج النظام، والورقة لا تُدقَّق ولا تُؤرشَف
+                    ("مطابقة كشف البنك",
+                     Lazy(lambda: BankReconScreen(user), "مطابقة كشف البنك")),
                     ("أرشيف المستندات والطباعة", self.archive_screen),
                     ("الرواتب والموظفون", self.payroll_screen),
                     ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
