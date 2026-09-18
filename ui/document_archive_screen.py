@@ -13,8 +13,15 @@ from PyQt5 import QtCore, QtWidgets
 from database.database import db
 from services import karat_view as kv
 from services import browser_print
-from ui.widgets.common import (big_label, busy, date_edit, dstr, err,
-                               info, make_table, title_label, warn)
+from ui.widgets.common import (big_label, bulk_rows, busy, date_edit, dstr,
+                               err, info, make_table, run_bg, title_label,
+                               warn)
+
+# ══ سقف العرض ══
+# البحث قد يُرجع آلاف المستندات، وكل صفٍّ يحمل ثلاثة أزرار. لا أحد
+# يقلّب ألفاً بعينه — يضيّق البحث. فيُعرض أحدثها، وتبقى **الإجماليات
+# محسوبة على النتيجة كاملة** فلا يُضلّل السقفُ قارئاً.
+PAGE = 300
 
 DOC_TYPES = [
     ("كل المستندات", "all"),
@@ -78,6 +85,7 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         self.user = user
         self.on_open_ledger = on_open_ledger
         self.results = []
+        self.shown = PAGE
 
         self.q = QtWidgets.QLineEdit()
         self.q.setPlaceholderText("رقم المستند أو اسم الجهة…")
@@ -110,11 +118,19 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         self.table.setColumnCount(len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.summary = big_label()
+        self.btn_more = QtWidgets.QPushButton()
+        self.btn_more.setObjectName("ghost")
+        self.btn_more.setToolTip(
+            "يُعرض أحدث المستندات أولاً — وضيّق البحث بالتاريخ أو النوع "
+            "بدل تقليب الكل")
+        self.btn_more.clicked.connect(self.show_more)
+        self.btn_more.setVisible(False)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("أرشيف المستندات — البحث الشامل وإعادة الطباعة"))
         lay.addLayout(top)
         lay.addWidget(self.table, 1)
+        lay.addWidget(self.btn_more)
         lay.addWidget(self.summary)
         note = QtWidgets.QLabel(
             "أزرار كل صف: 👁 معاينة · 🖨 طباعة · 💾 PDF — يُعاد بناء المستند "
@@ -149,32 +165,45 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
                                      "deleted": r["is_deleted"]})
             rows.sort(key=lambda x: (x["date"], x["id"]), reverse=True)
             self.results = rows
+            self.shown = PAGE          # كل بحثٍ يبدأ من صفحته الأولى
             self.render()
         except Exception as e:
             err(self, e)
 
     def render(self):
-        self.table.setRowCount(0)
-        self.table.setColumnCount(len(COLS))
-        self.table.setHorizontalHeaderLabels(COLS)
-        for i, r in enumerate(self.results):
-            self.table.insertRow(i)
-            vals = [r["label"], r["doc_no"], r["date"], r["party"],
-                    f"{(r['cash'] or 0):,.2f}",
-                    f"{kv.g(r['gold'] or 0):,.2f}",
-                    "ملغى" if r["deleted"] else "ساري"]
-            for c, v in enumerate(vals):
-                it = QtWidgets.QTableWidgetItem(str(v))
-                it.setTextAlignment(QtCore.Qt.AlignCenter)
-                self.table.setItem(i, c, it)
-            self.table.setCellWidget(i, len(COLS) - 1, self._actions(r))
-        self.table.resizeColumnsToContents()
+        """يرسم أحدث `self.shown` مستنداً، ويجمع الإجماليات على الكل.
+
+        الرسم هنا يمرّ بـ`bulk_rows`: بدونه كانت كلفة الخلية الواحدة
+        ١٢.٦ مللي ثانية (لفّ النص يُعيد قياس الصف مع كل خلية)، فبلغ
+        فتح الشاشة ثلاثين ثانيةً تظهر فيها نافذةٌ سوداء لا تستجيب.
+        """
+        shown = self.results[:self.shown]
+        with bulk_rows(self.table, len(shown), COLS):
+            for i, r in enumerate(shown):
+                vals = [r["label"], r["doc_no"], r["date"], r["party"],
+                        f"{(r['cash'] or 0):,.2f}",
+                        f"{kv.g(r['gold'] or 0):,.2f}",
+                        "ملغى" if r["deleted"] else "ساري"]
+                for c, v in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    self.table.setItem(i, c, it)
+                self.table.setCellWidget(i, len(COLS) - 1, self._actions(r))
         tc = sum(x["cash"] or 0 for x in self.results)
         tg = sum(x["gold"] or 0 for x in self.results)
+        rest = len(self.results) - len(shown)
         self.summary.setText(
-            f"عدد المستندات: {len(self.results)}   |   إجمالي القيم النقدية: "
-            f"{tc:,.2f} ريال   |   إجمالي الأوزان: "
-            f"{kv.g(tg):,.2f} {kv.unit()}")
+            f"عدد المستندات: {len(self.results):,}"
+            + (f"   ({len(shown):,} معروضة · {rest:,} بقيّة)" if rest else "")
+            + f"   |   إجمالي القيم النقدية: {tc:,.2f} ريال"
+            + f"   |   إجمالي الأوزان: {kv.g(tg):,.2f} {kv.unit()}")
+        self.btn_more.setVisible(bool(rest))
+        self.btn_more.setText(f"▼ عرض {min(PAGE, rest):,} مستنداً إضافياً")
+
+    def show_more(self):
+        """يزيد المعروض صفحةً — الإجماليات لم تكن ناقصةً أصلاً."""
+        self.shown += PAGE
+        self.render()
 
     def _actions(self, r):
         w = QtWidgets.QWidget()
@@ -217,9 +246,13 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
             with db() as conn:
                 conn.execute("UPDATE invoices SET qr_enabled=1 WHERE id=?",
                              (r["id"],))
-            with busy(self, "جارٍ تجهيز صفحة الفاتورة…",
-                      stage="نشر صفحة فاتورة"):
-                invoice_share.ensure_published(r["id"], config.COMPANY_NAME)
+            # الرفع في خيطٍ جانبي: على اتصالٍ بطيء كان يترك النافذة
+            # سوداء لا تستجيب حتى ينتهي.
+            _iid, _co = r["id"], config.COMPANY_NAME
+            run_bg(lambda: invoice_share.ensure_published(_iid, _co),
+                   parent=self, text="جارٍ تجهيز صفحة الفاتورة…",
+                   stage="نشر صفحة فاتورة", timeout=20.0)
+            with busy(self, "جارٍ قراءة رابط الصفحة…"):
                 with db(readonly=True) as conn:
                     link, where = invoice_share.publish(
                         conn, r["id"], config.COMPANY_NAME)

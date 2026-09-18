@@ -9,7 +9,8 @@ from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import reconciliation
-from ui.widgets.common import big_label, err, make_table, title_label
+from ui.widgets.common import (big_label, bulk_rows, err, make_table,
+                               title_label)
 
 COLS = ["الخطورة", "نوع الاختلال", "الموقع", "الوصف", "فرق النقد",
         "فرق الذهب", "تعمّق"]
@@ -68,24 +69,26 @@ class ReconciliationScreen(QtWidgets.QWidget):
         self.summary.setText(
             f"⚠ نتيجة التدقيق: {res['critical']} اختلال حرج · "
             f"{res['warnings']} تحذير — راجع الجدول لمعالجتها.")
-        for i, issue in enumerate(self.issues):
-            self.table.insertRow(i)
-            sev = ("🔴 حرج" if issue["severity"] == "critical"
-                   else "🟡 تحذير")
-            cd = f"{issue['cash_diff']:,.2f}" if issue["cash_diff"] else "—"
-            gd = f"{issue['gold_diff']:,.2f}" if issue["gold_diff"] else "—"
-            vals = [sev, issue["kind"], issue["ref"], issue["detail"], cd, gd]
-            for c, v in enumerate(vals):
-                it = QtWidgets.QTableWidgetItem(str(v))
-                it.setTextAlignment(QtCore.Qt.AlignCenter)
-                self.table.setItem(i, c, it)
-            if issue.get("entry_id") and self.on_open_entry:
-                b = QtWidgets.QPushButton("فتح القيد")
-                b.setObjectName("ghost")
-                b.clicked.connect(
-                    lambda _, e=issue["entry_id"]: self.on_open_entry(e))
-                self.table.setCellWidget(i, len(COLS) - 1, b)
-        self.table.resizeColumnsToContents()
+        # دفترٌ مختلٌّ قد يُخرج ألفَ اختلال — ولا يُرسم ألفُ صفٍّ بخليةٍ
+        # تُعيد قياس صفّها. `bulk_rows` يجعل الرسم لحظياً مهما كثرت.
+        with bulk_rows(self.table, len(self.issues), COLS):
+            for i, issue in enumerate(self.issues):
+                sev = ("🔴 حرج" if issue["severity"] == "critical"
+                       else "🟡 تحذير")
+                cd = f"{issue['cash_diff']:,.2f}" if issue["cash_diff"] else "—"
+                gd = f"{issue['gold_diff']:,.2f}" if issue["gold_diff"] else "—"
+                vals = [sev, issue["kind"], issue["ref"], issue["detail"],
+                        cd, gd]
+                for c, v in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    self.table.setItem(i, c, it)
+                if issue.get("entry_id") and self.on_open_entry:
+                    b = QtWidgets.QPushButton("فتح القيد")
+                    b.setObjectName("ghost")
+                    b.clicked.connect(
+                        lambda _, e=issue["entry_id"]: self.on_open_entry(e))
+                    self.table.setCellWidget(i, len(COLS) - 1, b)
 
     def refresh(self):
         pass

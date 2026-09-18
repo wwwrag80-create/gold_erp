@@ -42,12 +42,17 @@ from ui.reports.khazina_report_screen import KhazinaReportScreen
 from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
 from ui.reports.aging_screen import AgingScreen
+from ui.reports.bank_recon_screen import BankReconScreen
+from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.day_close_screen import DayCloseScreen
+from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
 from ui.item_history_screen import ItemHistoryScreen
 from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
 from ui.sales_screen import SalesScreen
+from ui.shrinkage_screen import ShrinkageScreen
+from ui.reports.stock_report import StockReportScreen
 from ui.workshop_accounts_screen import WorkshopAccountsScreen
 from ui.workshop_losses_screen import WorkshopLossesScreen
 from ui.stocktake_screen import StocktakeScreen
@@ -56,8 +61,8 @@ from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
 from services import karat_view as kv
 from ui import theme
-from ui.widgets.common import (ElidedLabel, ask, busy, err, info,
-                               search_combo)
+from ui.widgets.common import (ElidedLabel, ask, busy, err, info, run_bg,
+                               search_combo, warn)
 
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
 NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
@@ -69,7 +74,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 2
+NAV_VERSION = 3
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -159,14 +164,42 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("سلامة السجل (بصمة القيود)",
                      Lazy(lambda: IntegrityScreen(user),
                           "سلامة السجل (بصمة القيود)")),
+                    ("صحة النظام",
+                     Lazy(lambda: DiagnosticsScreen(user), "صحة النظام")),
                     ("المطابقة وتسوية الفروقات", self.recon_screen),
+                    # مطابقة الدفتر بكشف المصرف — كانت تُعمل بورقةٍ
+                    # وقلمٍ خارج النظام، والورقة لا تُدقَّق ولا تُؤرشَف
+                    ("مطابقة كشف البنك",
+                     Lazy(lambda: BankReconScreen(user), "مطابقة كشف البنك")),
                     ("أرشيف المستندات والطباعة", self.archive_screen),
                     ("الرواتب والموظفون", self.payroll_screen),
                     ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
                     ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
                     ("الإقرار الضريبي (VAT)", Lazy(lambda: VatReturnScreen(user), "الإقرار الضريبي (VAT)")),
                     ("ميزان المراجعة", Lazy(lambda: TrialBalanceScreen(user), "ميزان المراجعة")),
+                    # ══ خمس شاشات كانت مبنيّةً ولا باب لها ══
+                    # كانت تُبنى وتُختبر ولا تظهر في القائمة، فكان
+                    # النظام يُسلَّم بلا **قائمة دخل** — وهي أول ما
+                    # يسأل عنه محاسب. أُلحقت هنا بترتيبها المحاسبي:
+                    # الميزانية ثم قائمة الدخل، ثم أرصدة المخازن.
+                    ("قائمة الدخل (الأرباح والخسائر)",
+                     Lazy(lambda: IncomeStatementScreen(user),
+                          "قائمة الدخل (الأرباح والخسائر)")),
                     ("الميزانية العمومية", Lazy(lambda: BalanceSheetScreen(user), "الميزانية العمومية")),
+                    ("أرصدة المخازن (جرد لحظي)",
+                     Lazy(lambda: StockReportScreen(user),
+                          "أرصدة المخازن (جرد لحظي)")),
+                    ("تحليل مبيعات العملاء", self.analytics_screen),
+                    # «أيّ موديلٍ يكسب» كان يُجاب بالانطباع: ما يُرى
+                    # يخرج كثيراً قد يكون كثيرَ الخروج قليلَ الأجرة
+                    ("ربحية الموديل",
+                     Lazy(lambda: ModelProfitScreen(user), "ربحية الموديل")),
+                    ("إنتاج خزينة التصنيع (مطابقة)",
+                     Lazy(lambda: KhazinaReportScreen(user),
+                          "إنتاج خزينة التصنيع (مطابقة)")),
+                    ("تسوية فاقد التصنيع الشهري",
+                     Lazy(lambda: ShrinkageScreen(user),
+                          "تسوية فاقد التصنيع الشهري")),
                     ("تهيئة أرصدة أول المدة (تاريخ القطع)", Lazy(lambda: OpeningBalancesScreen(user), "تهيئة أرصدة أول المدة (تاريخ القطع)")),
                     ("الإقفال السنوي", Lazy(lambda: YearEndScreen(user), "الإقفال السنوي")),
                 ]),
@@ -758,12 +791,19 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             from services import update_channel, updater
             # ══ أولاً: التحقق عبر الإنترنت ══
+            # في خيطٍ جانبي: خادمٌ لا يستجيب كان يترك النافذة سوداء
+            # حتى تنتهي مهلة الاتصال.
+            def _check():
+                st = update_channel.status()
+                return (st.get("info") if st.get("available")
+                        else update_channel.check())
+
             online = None
             try:
-                st = update_channel.status()
-                online = (st.get("info") if st.get("available")
-                          else update_channel.check())
-                if online and not online.get("newer"):
+                ok, online, _ex = run_bg(
+                    _check, parent=self, text="جارٍ التحقق من التحديثات…",
+                    stage="فحص التحديث", timeout=25.0)
+                if not ok or _ex or (online and not online.get("newer")):
                     online = None
             except Exception:
                 online = None      # بلا إنترنت: نتابع بالملف المحلي
@@ -1102,9 +1142,23 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         try:
             from services import invoice_share
-            with busy(self, "جارٍ فحص مسار الرمز…", stage="فحص QR"):
+            # تسعُ خطواتٍ منها نداءاتُ شبكةٍ برفعٍ وقراءةٍ وجلبٍ
+            # للرابط — دقيقةٌ كاملة على اتصالٍ بطيء. على خيط الواجهة
+            # كانت النافذة تبقى سوداء طوالها.
+            def _report():
                 with db() as conn:
-                    txt = invoice_share.report(conn)
+                    return invoice_share.report(conn)
+
+            ok, txt, ex = run_bg(_report, parent=self,
+                                 text="جارٍ فحص مسار الرمز…",
+                                 stage="فحص QR", timeout=90.0)
+            if ex:
+                raise ex
+            if not ok:
+                warn(self, "تأخّر الفحص أكثر من دقيقة ونصف — الاتصال "
+                           "بالإنترنت بطيءٌ أو محجوب. أعد المحاولة، أو "
+                           "استعمل «رمز على شبكة المصنع».")
+                return
             box = QtWidgets.QMessageBox(self)
             box.setWindowTitle("فحص رمز QR على الفاتورة")
             box.setIcon(QtWidgets.QMessageBox.Information)
@@ -1145,9 +1199,20 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             import config
             from services import invoice_share
-            with busy(self, "جارٍ نشر الفواتير…", stage="نشر دفعي"):
-                done, total = invoice_share.republish_pending(
-                    config.COMPANY_NAME)
+            # نشرٌ دفعي: فاتورةٌ بعد فاتورة عبر الإنترنت. مئةُ فاتورةٍ
+            # تعني دقائق — لا يجوز أن تمرّ على خيط الواجهة.
+            _co = config.COMPANY_NAME
+            ok, out, ex = run_bg(
+                lambda: invoice_share.republish_pending(_co),
+                parent=self, text="جارٍ نشر الفواتير…", stage="نشر دفعي",
+                timeout=600.0)
+            if ex:
+                raise ex
+            if not ok:
+                warn(self, "ما زال النشر جارياً في الخلفية — أعد فتح "
+                           "«لماذا لم يظهر الرمز؟» بعد قليل لمعرفة ما تمّ.")
+                return
+            done, total = out
             if not total:
                 info(self, "لا توجد فواتير مفعَّلة تنتظر النشر.")
             elif done:

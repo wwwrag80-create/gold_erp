@@ -15,8 +15,46 @@ from pathlib import Path
 
 import config
 
-MIGRATIONS_DIR = config.BASE_DIR / "migrations"
 NAME_RE = re.compile(r"^(\d{3,})[_-](.+)\.sql$", re.IGNORECASE)
+
+
+def _dirs():
+    """أماكن ملفات الهجرة — بالترتيب، وأولها الأصحّ.
+
+    **الخلل الذي عولج**: كان المسار `config.BASE_DIR / "migrations"`،
+    و`BASE_DIR` هو مجلد **البيانات** لا مجلد البرنامج. وهما مجلدٌ
+    واحد في التشغيل من المصدر بلا إعدادات — فمرّ الأمر. أما نسخة
+    الـexe فبياناتها في مجلدٍ دائم منفصل، وكذلك أي تشغيل يضبط
+    `JADEITE_DATA_DIR`: هناك لا يوجد مجلد `migrations` أصلاً، فكانت
+    `discover()` تعيد لا شيء و`run_all` تنجح صامتةً بلا تنفيذ هجرة
+    واحدة. والنتيجة عند المستخدم: «لا يوجد جدول كذا» عند أول ميزةٍ
+    تعتمد هجرة. لم يظهر قبل الآن لأن الهجرة الوحيدة (001) خطُّ أساسٍ
+    لا أثر له.
+
+    وملفات الهجرة تُشحن مع **الكود** لا مع بيانات المستخدم، فمكانها
+    جذر المشروع أو جذر الحزمة المفكوكة.
+    """
+    here = Path(__file__).resolve().parent.parent      # services/ → الجذر
+    cands = [here / "migrations",
+             Path(getattr(config, "BUNDLE_DIR", here)) / "migrations",
+             Path(config.BASE_DIR) / "migrations"]     # وضعٌ قديم
+    out, seen = [], set()
+    for d in cands:
+        try:
+            key = str(d.resolve())
+        except Exception:
+            key = str(d)
+        if key in seen:
+            continue
+        seen.add(key)
+        if d.is_dir():
+            out.append(d)
+    return out
+
+
+# يبقى الاسم للتوافق: أول مجلدٍ وُجد، أو الجذر إن لم يوجد شيء
+MIGRATIONS_DIR = (_dirs() or [Path(__file__).resolve().parent.parent
+                              / "migrations"])[0]
 
 
 def _split(sql):
@@ -49,15 +87,18 @@ def _ensure_table(conn):
 
 
 def discover():
-    """يعيد الهجرات مرتّبة تصاعدياً: [(رقم, اسم, مسار)]."""
-    if not MIGRATIONS_DIR.exists():
-        return []
-    out = []
-    for p in MIGRATIONS_DIR.glob("*.sql"):
-        m = NAME_RE.match(p.name)
-        if m:
-            out.append((int(m.group(1)), m.group(2), p))
-    return sorted(out, key=lambda x: x[0])
+    """يعيد الهجرات مرتّبة تصاعدياً: [(رقم, اسم, مسار)].
+
+    يُبحث في كل المجلدات المحتملة، والأسبقية للأول: رقمٌ وُجد مرتين
+    يُؤخذ من مجلد الكود لا من نسخةٍ قديمة في مجلد البيانات.
+    """
+    found = {}
+    for d in _dirs():
+        for p in d.glob("*.sql"):
+            m = NAME_RE.match(p.name)
+            if m and int(m.group(1)) not in found:
+                found[int(m.group(1))] = (int(m.group(1)), m.group(2), p)
+    return [found[k] for k in sorted(found)]
 
 
 def applied(conn):

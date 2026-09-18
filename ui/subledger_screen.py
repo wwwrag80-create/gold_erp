@@ -13,7 +13,7 @@ from models import coa, entities
 from PyQt5 import QtCore
 
 
-from ui.widgets.common import (Card, cell, err, fill, info,
+from ui.widgets.common import (Card, bulk_rows, cell, err, fill, info,
                                make_table, title_label)
 
 CATEGORIES = [("إجمالي العملاء", "customer"), ("إجمالي الموردين", "supplier"),
@@ -124,18 +124,16 @@ class SubLedgerScreen(QtWidgets.QWidget):
                 data.append((d["name"], d["phone"] or "—",
                              f"{d['cash']:,.2f}", cs,
                              f"{kv.g(d['gold']):,.2f}", gs))
-        self.table.setRowCount(0)
-        self.table.setColumnCount(len(headers))
-        self.table.setHorizontalHeaderLabels(headers)
-        for i, row in enumerate(data):
-            self.table.insertRow(i)
-            for c, v in enumerate(row):
-                it = QtWidgets.QTableWidgetItem(str(v))
-                it.setTextAlignment(QtCore.Qt.AlignCenter)
-                self.table.setItem(i, c, it)
-            self.table.setCellWidget(i, len(headers) - 1,
-                                    self._ledger_btn(vis[i]))
-        self.table.resizeColumnsToContents()
+        # `bulk_rows` ضرورةٌ لا تحسين: بدونه يُعيد لفُّ النص قياسَ الصف
+        # مع كل خلية، فيتجمّد المصنعُ ذو المئات من الجهات عند كل فتح.
+        with bulk_rows(self.table, len(data), headers):
+            for i, row in enumerate(data):
+                for c, v in enumerate(row):
+                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    self.table.setItem(i, c, it)
+                self.table.setCellWidget(i, len(headers) - 1,
+                                        self._ledger_btn(vis[i]))
 
     def _ledger_btn(self, d):
         """زر «كشف حساب» داخل كل صف — تعمّق فوري لحركات الجهة."""

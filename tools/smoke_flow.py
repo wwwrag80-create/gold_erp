@@ -17,6 +17,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -29,7 +30,8 @@ os.environ["GOLD_ERP_DATA_DIR"] = _TMP
 import config                                            # noqa: E402
 config.DB_PATH = __import__("pathlib").Path(_TMP) / "smoke.db"
 
-from database.database import create_tables, db, migrate_schema  # noqa: E402
+from database.database import (create_tables, db, migrate_schema,  # noqa: E402
+                               run_migrations_files)
 from database.seed import (ensure_new_accounts, ensure_system_tags,  # noqa: E402
                            seed_initial_data)
 from models.accounts import acc_id                       # noqa: E402
@@ -73,6 +75,7 @@ def main():
     step("0) تهيئة قاعدة مؤقتة")
     create_tables()
     migrate_schema()
+    run_migrations_files()   # كما يفعل الإقلاع الحقيقي
     seed_initial_data()
     ensure_new_accounts()
     with db() as conn:
@@ -1148,6 +1151,39 @@ def main():
         check("مؤشر الانتظار يُستعاد",
               _app3.overrideCursor() is None)
 
+        # ══ العمل البطيء في خيطٍ جانبي والواجهة حيّة ══
+        # هذا هو الفرق بين «انتظارٍ بمؤشر» و«شاشةٍ سوداء لا تستجيب»:
+        # `busy` ينفّذ على خيط الواجهة فتموت حلقةُ الأحداث، ونداءُ
+        # شبكةٍ بعشر ثوانٍ يصير عشرَ ثوانٍ من السواد بعد كل ترحيل.
+        # يُثبَت هنا بالعدّ: مؤقّتٌ ينبض أثناء العمل — إن نبض فالحلقة
+        # تعمل، وإن لم ينبض فالواجهة متجمّدة.
+        from PyQt5 import QtCore as _QC3
+        from ui.widgets.common import run_bg as _run_bg
+        beats = []
+        _tm = _QC3.QTimer()
+        _tm.setInterval(20)
+        _tm.timeout.connect(lambda: beats.append(1))
+        _tm.start()
+        _ok, _res, _err = _run_bg(lambda: (time.sleep(0.6), "تمّ")[1],
+                                  parent=holder, text="اختبار", slow=99)
+        _tm.stop()
+        check("العمل الجانبي يعيد نتيجته", _ok and _res == "تمّ" and not _err,
+              f"{_ok} · {_res} · {_err}")
+        check("وحلقة الأحداث تعمل أثناءه (لا شاشة سوداء)",
+              len(beats) >= 5, f"{len(beats)} نبضة")
+        check("والنافذة عادت مفعَّلة والمؤشر مُستعاد",
+              holder.isEnabled() and _app3.overrideCursor() is None)
+
+        _ok2, _, _ = _run_bg(lambda: time.sleep(1.5), parent=holder,
+                             text="اختبار", timeout=0.2, slow=99)
+        check("سقف الانتظار يُحرّر الواجهة ولا يحبسها",
+              _ok2 is False)
+
+        _ok3, _, _err3 = _run_bg(lambda: 1 / 0, parent=holder,
+                                 text="اختبار", slow=99)
+        check("وخطأ الخيط الجانبي يُنقل لا يُبتلع",
+              _ok3 and isinstance(_err3, ZeroDivisionError))
+
         # المُحجِّم يعيد الحساب عند تغيّر عدد الأعمدة لا العرض وحده
         from ui.widgets.table_fit import ColumnFitter
         t = _QW3.QTableWidget()
@@ -1910,6 +1946,175 @@ def main():
                          "doc_no": "JV-1", "description": "د",
                          "user_note": "", "source_table": "",
                          "source_id": None, "created_by": "admin"}, [], "y"))
+
+    step("29ب) ملفات الهجرة تُعثر عليها فعلاً")
+    # ══ خللٌ مرّ صامتاً حتى أول هجرةٍ ذات أثر ══
+    # كان مجلد الهجرات يُشتقّ من مجلد **البيانات** لا من مجلد البرنامج.
+    # وهما واحدٌ عند التشغيل من المصدر بلا إعدادات — فمرّ. أما نسخة
+    # الـexe (بياناتها في مجلد دائم منفصل) أو أي تشغيل يضبط
+    # `JADEITE_DATA_DIR` فلا مجلد هجرات عنده أصلاً: `discover()` تعيد
+    # لا شيء، و`run_all` تنجح **صامتةً** بلا تنفيذ هجرة واحدة، ويظهر
+    # العطل عند المستخدم بـ«لا يوجد جدول كذا». وهذا الفحص يمنع عودته:
+    # يقارن ما تجده الخدمة بما في مجلد المشروع فعلاً.
+    from services import migrations as _mig
+    _repo_sqls = sorted(p.name for p in
+                        (pathlib.Path(__file__).resolve().parent.parent
+                         / "migrations").glob("*.sql"))
+    _seen_sqls = sorted(p.name for _, _, p in _mig.discover())
+    check("كل ملفات الهجرة في المشروع تُعثر عليها",
+          _seen_sqls == _repo_sqls and bool(_repo_sqls),
+          f"وُجد {_seen_sqls} · في المشروع {_repo_sqls}")
+    with db(readonly=True) as conn:
+        _done = _mig.applied(conn)
+    check("وكلها طُبِّقت على قاعدة الفحص",
+          len(_done) >= len(_repo_sqls),
+          f"{len(_done)} مطبَّقة من {len(_repo_sqls)}")
+    with db(readonly=True) as conn:
+        _has = conn.execute(
+            "SELECT COUNT(*) c FROM sqlite_master"
+            " WHERE type='table' AND name='bank_recon_marks'"
+        ).fetchone()["c"]
+    check("وجدولُ هجرةٍ حقيقيّ موجودٌ في القاعدة", _has == 1)
+
+    step("30) مطابقة كشف البنك")
+    # ══ لماذا يُفحص هذا بالأرقام ══
+    # معادلة المطابقة تُقلب بسهولة: طرحُ ما يجب جمعه يعطي فرقاً يبدو
+    # معقولاً فيُقبَل، ويُسلَّم كشفٌ خاطئ لمراجع. فتُبنى هنا حالةٌ
+    # يُعرف جوابها سلفاً: إيداعٌ ظهر في الكشف، وشيكٌ صُرف، وشيكٌ لم
+    # يُصرَف بعد — والمتوقَّع يجب أن يساوي الكشف بالضبط.
+    from models import bank_recon as _br
+    from models.vouchers import create_voucher
+    with db(readonly=True) as conn:
+        _accs = _br.bank_accounts(conn)
+    _codes = {a["code"] for a in _accs}
+    check("حسابات المطابقة = النقدية والبنوك وحدها",
+          {"1400", "1500"} <= _codes and not (_codes & {"1730", "1740"}),
+          f"المعروض: {sorted(_codes)}")
+    _bank = next(a for a in _accs if a["code"] == "1500")
+
+    with db() as conn:
+        _cust = conn.execute(
+            "SELECT id FROM entities WHERE entity_type='customer'"
+            " AND is_deleted=0 ORDER BY id").fetchone()["id"]
+        for _amt in (5_000.0, 1_200.0, 800.0):
+            create_voucher(conn, "receipt", "2026-06-10", "admin",
+                           entity_id=_cust, cash_amount=_amt,
+                           cash_account_code="1500")   # يدخل البنك
+    with db(readonly=True) as conn:
+        _mv = _br.movements(conn, _bank["id"], "2026-06-01", "2026-06-30")
+    check("حركات البنك تُقرأ من سطور القيود", len(_mv) >= 3,
+          f"{len(_mv)} حركة")
+    _in = sum(m["debit"] for m in _mv)
+    check("مجموع الوارد = مجموع السندات", abs(_in - 7_000.0) < 0.01,
+          f"{_in:,.2f}")
+    check("كل الحركات تبدأ بلا مطابقة",
+          all(not m["matched"] for m in _mv))
+
+    # يُطابَق اثنان ويُترك الثالث: هو ما لم يصل المصرفَ بعد
+    _seen = [m for m in _mv if m["debit"] in (5_000.0, 1_200.0)]
+    with db() as conn:
+        _br.set_matched(conn, [m["line_id"] for m in _seen], True, "admin",
+                        "ST-06")
+    with db(readonly=True) as conn:
+        _s = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30")
+    check("المطابقة تُحفظ ولا تُنشئ قيداً", _s["matched_rows"] == len(_seen),
+          f"{_s['matched_rows']} مطابَقة")
+    check("رصيد الدفتر = مجموع الحركات", abs(_s["book"] - 7_000.0) < 0.01,
+          f"{_s['book']:,.2f}")
+    # الإيداع الذي لم يظهر في الكشف يُستبعَد: 7000 − 800 = 6200
+    check("المتوقَّع في الكشف يستبعد ما لم يظهر فيه",
+          abs(_s["expected"] - 6_200.0) < 0.01, f"{_s['expected']:,.2f}")
+
+    with db(readonly=True) as conn:
+        _s0 = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30",
+                          6_200.0)
+        _s1 = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30",
+                          6_350.0)
+    check("رصيدٌ مطابق ⇒ الفرق صفر", _s0["difference"] == 0,
+          f"{_s0['difference']}")
+    check("رصيدٌ مخالف ⇒ الفرق بمقداره وإشارته",
+          abs(_s1["difference"] - 150.0) < 0.01, f"{_s1['difference']}")
+
+    with db() as conn:
+        _br.set_matched(conn, [m["line_id"] for m in _seen], False, "admin")
+    with db(readonly=True) as conn:
+        _s2 = _br.summary(conn, _bank["id"], "2026-06-01", "2026-06-30")
+    check("رفع التعليم يُعيد الحركات غير مطابَقة",
+          _s2["unmatched_rows"] == _s2["rows"] and _s2["matched_rows"] == 0)
+    with db(readonly=True) as conn:
+        _bal_g, _bal_c, _, _ = ledger_balanced(conn)
+    check("والدفتر بقي متوازناً بعد المطابقة كلها", _bal_g and _bal_c)
+
+    step("31) ربحية الموديل")
+    # ══ لماذا يُفحص بالأرقام ══
+    # تقريرٌ يجمع المرتجع بدل أن يطرحه يُظهر موديلاً خاسراً رابحاً،
+    # فيُكثر منه المصنع. تُبنى هنا حالةٌ يُعرف جوابها سلفاً: موديلان،
+    # يُباع من كلٍّ طقمان، ويُرتجع من أحدهما واحد.
+    from models import model_profit as _mp
+    from models.invoices import create_sale_return as _csr
+
+    with db() as conn:
+        _b2 = _batch(conn, [
+            {"wo_no": "MP-A1", "gold": 10.0, "wage_per_gram": 30.0,
+             "model_no": "MODEL-A"},
+            {"wo_no": "MP-A2", "gold": 10.0, "wage_per_gram": 30.0,
+             "model_no": "MODEL-A"},
+            {"wo_no": "MP-B1", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "MODEL-B"},
+            {"wo_no": "MP-B2", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "MODEL-B"},
+        ], "2026-07-01", "admin")
+        _wo = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'MP-%'")}
+        _sale_a = create_sale(
+            conn, cust, [{"work_order_id": _wo["MP-A1"]},
+                         {"work_order_id": _wo["MP-A2"]}],
+            "2026-07-05", "admin", apply_vat=False)
+        create_sale(conn, cust, [{"work_order_id": _wo["MP-B1"]},
+                                 {"work_order_id": _wo["MP-B2"]}],
+                    "2026-07-05", "admin", apply_vat=False)
+    with db() as conn:
+        _csr(conn, cust, [{"work_order_id": _wo["MP-A2"]}],
+             "2026-07-09", "admin", apply_vat=False)
+
+    with db(readonly=True) as conn:
+        _prl = _mp.by_model(conn, "2026-07-01", "2026-07-31")
+    _pr = {r["model"]: r for r in _prl}
+    check("كل موديلٍ بِيع منه يظهر بصفٍّ واحد",
+          "MODEL-A" in _pr and "MODEL-B" in _pr, str(sorted(_pr)))
+    _a, _b = _pr["MODEL-A"], _pr["MODEL-B"]
+    check("المرتجع يُطرح من العدد لا يُجمع",
+          _a["sold"] == 2 and _a["returned"] == 1 and _a["net_count"] == 1,
+          f"مباع {_a['sold']} · مرتجع {_a['returned']} · "
+          f"صافي {_a['net_count']}")
+    check("والمرتجع يُطرح من الوزن كذلك",
+          abs(_a["net_weight"] - (_b["net_weight"] / 2)) < 0.01,
+          f"{_a['net_weight']:.3f} مقابل نصف {_b['net_weight']:.3f}")
+    check("صافي الأجور يطرح أجرة المرتجع",
+          _a["wages"] > 0 and abs(_a["wages"] - _b["wages"] * 1.5) < 0.01,
+          f"A={_a['wages']:,.2f} · B={_b['wages']:,.2f}")
+    check("متوسط أجرة الجرام يميّز الغالي من الرخيص",
+          _a["avg_wage"] > _b["avg_wage"] * 2.5,
+          f"A={_a['avg_wage']:,.2f} · B={_b['avg_wage']:,.2f}")
+    check("الترتيب بالأعلى أجوراً أولاً — لا بالاسم",
+          [r["wages"] for r in _prl] == sorted(
+              (r["wages"] for r in _prl), reverse=True),
+          " · ".join(f"{r['model']}={r['wages']:,.0f}" for r in _prl[:4]))
+    _sh = sum(r["share"] for r in _pr.values())
+    check("الحصص تجمع مئةً بالمئة", abs(_sh - 100.0) < 0.1, f"{_sh:.2f}%")
+    _t = _mp.totals(list(_pr.values()))
+    check("الإجمالي = مجموع الصفوف",
+          abs(_t["wages"] - sum(r["wages"] for r in _pr.values())) < 0.01)
+
+    with db(readonly=True) as conn:
+        _un = {u["model"]: u for u in _mp.unsold(conn)}
+    check("ما ارتُجع عاد إلى «ما لم يُبَع بعد»",
+          _un.get("MODEL-A", {}).get("count", 0) >= 1,
+          f"{_un.get('MODEL-A', {}).get('count', 0)} طقماً")
+    check("والأجرة غير المحصَّلة = الوزن × أجرة الجرام",
+          all(abs(u["potential"] - u["weight"] * u["wage_per_gram"]) < 0.01
+              for u in _un.values()))
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

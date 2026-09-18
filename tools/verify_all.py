@@ -114,6 +114,9 @@ SCREENS = [
     ("ui.reports.aging_screen", "AgingScreen"),
     ("ui.reports.day_close_screen", "DayCloseScreen"),
     ("ui.reports.integrity_screen", "IntegrityScreen"),
+    ("ui.reports.diagnostics_screen", "DiagnosticsScreen"),
+    ("ui.reports.bank_recon_screen", "BankReconScreen"),
+    ("ui.reports.model_profit_screen", "ModelProfitScreen"),
     ("ui.super_admin_screen", "SuperAdminScreen"),
     ("ui.main_window", "MainWindow"),
 ]
@@ -199,32 +202,74 @@ def check_methods():
 
 def check_boot():
     step("3) الإقلاع وبناء الشاشات")
-    from database.database import create_tables, db, migrate_schema
+    from database.database import (create_tables, db, migrate_schema,
+                                   run_migrations_files)
     from database.seed import (ensure_new_accounts, ensure_system_tags,
                                seed_initial_data)
     from models.entities import (ensure_employee_accrual_accounts,
                                  ensure_internal_counterparties)
-    create_tables(); migrate_schema(); seed_initial_data(); ensure_new_accounts()
+    # `run_migrations_files` جزءٌ من إقلاع النظام الحقيقي (main.py).
+    # إغفالها هنا جعل الفحص يعمل على قاعدةٍ **أقدم** من التي يُشغَّل
+    # عليها النظام: أي ميزةٍ تعتمد جدولاً من ملفات الهجرة تفشل عند
+    # المستخدم ويمرّ الفحص. تُشغَّل بالترتيب نفسه: بعد الترقية.
+    create_tables(); migrate_schema(); run_migrations_files()
+    seed_initial_data(); ensure_new_accounts()
     with db() as conn:
         ensure_internal_counterparties(conn)
         ensure_employee_accrual_accounts(conn)
         ensure_system_tags(conn)
     print("  ✔ تهيئة قاعدة البيانات والترقيات")
     user = {"username": "admin", "role": "accountant", "full_name": "المدير"}
+    # ══ نافذةٌ قافلة أثناء بناء الشاشة = تجمّدٌ لا فشل ══
+    # الشاشة تُبنى داخل `switch()`. فإن فتحت نافذة خطأ أثناء بنائها
+    # وقف الفحص إلى الأبد — لا رسالة ولا سطر يُقرأ منه السبب، وعند
+    # المستخدم يقف النظام كله قبل أن تُعرض الشاشة. تُسجَّل هنا بدل
+    # أن تُفتح، فيصير التجمّد فشلاً باسم شاشته.
+    popped = _no_modals_during_build()
     try:
         from ui.main_window import MainWindow
         win = MainWindow(user)
         print(f"  ✔ MainWindow — {len(win.screens)} شاشة")
         for i, scr in enumerate(win.screens):
+            popped.clear()
             try:
                 win.switch(i)
             except Exception as ex:
                 failures.append((type(scr).__name__, ex))
                 print(f"  ✘ {type(scr).__name__}: {type(ex).__name__}: {ex}")
+                continue
+            if popped:
+                name = getattr(win, "_screen_keys", {}).get(
+                    i, type(scr).__name__)
+                ex = RuntimeError(
+                    f"فتحت نافذة حوار أثناء بنائها — توقف النظام قبل "
+                    f"عرضها: {popped[0]}")
+                failures.append((name, ex))
+                print(f"  ✘ {name}: {ex}")
         print(f"  ✔ التنقل عبر كل الشاشات")
     except Exception as ex:
         failures.append(("MainWindow", ex))
         print(f"  ✘ MainWindow: {type(ex).__name__}: {ex}")
+
+
+def _no_modals_during_build():
+    """يمنع فتح أي نافذة حوارٍ ويسجّل محاولتها — يعيد قائمة ما سُجّل."""
+    from PyQt5 import QtWidgets
+    seen = []
+
+    def grab(kind):
+        def f(*a, **k):
+            seen.append(f"{kind}: {a[2] if len(a) > 2 else ''}"[:160])
+            return QtWidgets.QMessageBox.Ok
+        return staticmethod(f)
+
+    qmb = QtWidgets.QMessageBox
+    qmb.critical = grab("خطأ")
+    qmb.warning = grab("تنبيه")
+    qmb.information = grab("رسالة")
+    qmb.question = staticmethod(lambda *a, **k: qmb.No)
+    QtWidgets.QDialog.exec_ = lambda self, *a, **k: QtWidgets.QDialog.Rejected
+    return seen
 
 
 def _silence_dialogs(modules, captured):

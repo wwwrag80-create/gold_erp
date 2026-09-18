@@ -26,7 +26,8 @@ import pathlib                                           # noqa: E402
 import config                                            # noqa: E402
 config.DB_PATH = pathlib.Path(_TMP) / "bench.db"
 
-from database.database import create_tables, db, migrate_schema  # noqa: E402
+from database.database import (create_tables, db, migrate_schema,  # noqa: E402
+                               run_migrations_files)
 from database.seed import (ensure_new_accounts, ensure_system_tags,  # noqa: E402
                            seed_initial_data)
 from models.accounts import acc_id                       # noqa: E402
@@ -49,7 +50,8 @@ def timed(label, fn, repeat=1):
 
 def build():
     print(f"بناء دفتر اختباري: {N_ENTRIES:,} قيد · {N_CUSTOMERS} عميل …")
-    create_tables(); migrate_schema(); seed_initial_data(); ensure_new_accounts()
+    create_tables(); migrate_schema(); run_migrations_files()
+    seed_initial_data(); ensure_new_accounts()
     with db() as conn:
         ensure_internal_counterparties(conn)
         ensure_employee_accrual_accounts(conn)
