@@ -14,8 +14,9 @@ from services import drafts
 from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                big_label, date_edit, dstr, err, fill,
                                has_model_image, info, load_pref, make_table,
-                               mspin, reload_combo, save_pref, search_combo,
-                               show_model_image, title_label, wspin)
+                               mspin, reload_combo, run_bg, save_pref,
+                               search_combo, show_model_image, title_label,
+                               wspin)
 
 DRAFT_KEY = "sales"
 
@@ -1187,20 +1188,25 @@ class SalesScreen(QtWidgets.QWidget):
                             conn, cid, cart, dstr(self.date),
                             self.user["username"], apply_vat, desc,
                             qr_enabled=self.qr_check.isChecked())
-            # ══ نشر صفحة الفاتورة — **بعد إغلاق المعاملة** ══
-            # الرفع عبر الإنترنت داخل معاملة الكتابة يحبس قفل القاعدة
-            # ثوانيَ فتتجمّد الواجهة وتتعطّل المزامنة. هنا والمعاملة
-            # مغلقة، وداخل مؤشر انشغال يرى المستخدمُ سببَ الانتظار.
+            # ══ نشر صفحة الفاتورة — **بعد إغلاق المعاملة، وخارج خيط
+            #    الواجهة** ══
+            # الرفع داخل معاملة الكتابة يحبس قفل القاعدة ثوانيَ فتتعطّل
+            # المزامنة — لذلك هو هنا والمعاملة مغلقة. وكان يجري مع ذلك
+            # على خيط الواجهة داخل `busy`: فعلى اتصالٍ بطيء تبقى
+            # النافذة **سوداء لا تستجيب** عشر ثوانٍ بعد كل ترحيل، وهي
+            # شكوى المستخدم بعينها. الآن في خيطٍ جانبي وحلقةُ الأحداث
+            # تعمل، بسقف انتظارٍ عشر ثوانٍ: بعده يُكمل الرفع في
+            # الخلفية ولا يُحبَس أحدٌ خلف شبكةٍ لا تستجيب.
             # يشمل التعديل: `update_invoice` يُلغي صلاحية الصفحة
             # المنشورة، فتُعاد كتابتها هنا على **المسار نفسه** — فورقة
             # العميل القديمة تبقى صحيحة وتعرض الفاتورة بعد تعديلها.
             if res.get("id"):
                 try:
                     from services import invoice_share
-                    with busy(self, "جارٍ تجهيز صفحة الفاتورة…",
-                              stage="نشر صفحة الفاتورة"):
-                        invoice_share.ensure_published(
-                            res["id"], config.COMPANY_NAME)
+                    _iid, _co = res["id"], config.COMPANY_NAME
+                    run_bg(lambda: invoice_share.ensure_published(_iid, _co),
+                           parent=self, text="جارٍ تجهيز صفحة الفاتورة…",
+                           stage="نشر صفحة الفاتورة", timeout=10.0)
                 except Exception:
                     pass          # تعذّر النشر لا يُبطل ترحيلاً تمّ
 

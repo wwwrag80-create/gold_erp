@@ -60,8 +60,8 @@ from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
 from services import karat_view as kv
 from ui import theme
-from ui.widgets.common import (ElidedLabel, ask, busy, err, info,
-                               search_combo)
+from ui.widgets.common import (ElidedLabel, ask, busy, err, info, run_bg,
+                               search_combo, warn)
 
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
 NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
@@ -786,12 +786,19 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             from services import update_channel, updater
             # ══ أولاً: التحقق عبر الإنترنت ══
+            # في خيطٍ جانبي: خادمٌ لا يستجيب كان يترك النافذة سوداء
+            # حتى تنتهي مهلة الاتصال.
+            def _check():
+                st = update_channel.status()
+                return (st.get("info") if st.get("available")
+                        else update_channel.check())
+
             online = None
             try:
-                st = update_channel.status()
-                online = (st.get("info") if st.get("available")
-                          else update_channel.check())
-                if online and not online.get("newer"):
+                ok, online, _ex = run_bg(
+                    _check, parent=self, text="جارٍ التحقق من التحديثات…",
+                    stage="فحص التحديث", timeout=25.0)
+                if not ok or _ex or (online and not online.get("newer")):
                     online = None
             except Exception:
                 online = None      # بلا إنترنت: نتابع بالملف المحلي
@@ -1130,9 +1137,23 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         try:
             from services import invoice_share
-            with busy(self, "جارٍ فحص مسار الرمز…", stage="فحص QR"):
+            # تسعُ خطواتٍ منها نداءاتُ شبكةٍ برفعٍ وقراءةٍ وجلبٍ
+            # للرابط — دقيقةٌ كاملة على اتصالٍ بطيء. على خيط الواجهة
+            # كانت النافذة تبقى سوداء طوالها.
+            def _report():
                 with db() as conn:
-                    txt = invoice_share.report(conn)
+                    return invoice_share.report(conn)
+
+            ok, txt, ex = run_bg(_report, parent=self,
+                                 text="جارٍ فحص مسار الرمز…",
+                                 stage="فحص QR", timeout=90.0)
+            if ex:
+                raise ex
+            if not ok:
+                warn(self, "تأخّر الفحص أكثر من دقيقة ونصف — الاتصال "
+                           "بالإنترنت بطيءٌ أو محجوب. أعد المحاولة، أو "
+                           "استعمل «رمز على شبكة المصنع».")
+                return
             box = QtWidgets.QMessageBox(self)
             box.setWindowTitle("فحص رمز QR على الفاتورة")
             box.setIcon(QtWidgets.QMessageBox.Information)
@@ -1173,9 +1194,20 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             import config
             from services import invoice_share
-            with busy(self, "جارٍ نشر الفواتير…", stage="نشر دفعي"):
-                done, total = invoice_share.republish_pending(
-                    config.COMPANY_NAME)
+            # نشرٌ دفعي: فاتورةٌ بعد فاتورة عبر الإنترنت. مئةُ فاتورةٍ
+            # تعني دقائق — لا يجوز أن تمرّ على خيط الواجهة.
+            _co = config.COMPANY_NAME
+            ok, out, ex = run_bg(
+                lambda: invoice_share.republish_pending(_co),
+                parent=self, text="جارٍ نشر الفواتير…", stage="نشر دفعي",
+                timeout=600.0)
+            if ex:
+                raise ex
+            if not ok:
+                warn(self, "ما زال النشر جارياً في الخلفية — أعد فتح "
+                           "«لماذا لم يظهر الرمز؟» بعد قليل لمعرفة ما تمّ.")
+                return
+            done, total = out
             if not total:
                 info(self, "لا توجد فواتير مفعَّلة تنتظر النشر.")
             elif done:

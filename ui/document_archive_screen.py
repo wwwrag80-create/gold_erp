@@ -14,7 +14,8 @@ from database.database import db
 from services import karat_view as kv
 from services import browser_print
 from ui.widgets.common import (big_label, bulk_rows, busy, date_edit, dstr,
-                               err, info, make_table, title_label, warn)
+                               err, info, make_table, run_bg, title_label,
+                               warn)
 
 # ══ سقف العرض ══
 # البحث قد يُرجع آلاف المستندات، وكل صفٍّ يحمل ثلاثة أزرار. لا أحد
@@ -245,9 +246,13 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
             with db() as conn:
                 conn.execute("UPDATE invoices SET qr_enabled=1 WHERE id=?",
                              (r["id"],))
-            with busy(self, "جارٍ تجهيز صفحة الفاتورة…",
-                      stage="نشر صفحة فاتورة"):
-                invoice_share.ensure_published(r["id"], config.COMPANY_NAME)
+            # الرفع في خيطٍ جانبي: على اتصالٍ بطيء كان يترك النافذة
+            # سوداء لا تستجيب حتى ينتهي.
+            _iid, _co = r["id"], config.COMPANY_NAME
+            run_bg(lambda: invoice_share.ensure_published(_iid, _co),
+                   parent=self, text="جارٍ تجهيز صفحة الفاتورة…",
+                   stage="نشر صفحة فاتورة", timeout=20.0)
+            with busy(self, "جارٍ قراءة رابط الصفحة…"):
                 with db(readonly=True) as conn:
                     link, where = invoice_share.publish(
                         conn, r["id"], config.COMPANY_NAME)

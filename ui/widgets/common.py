@@ -807,3 +807,78 @@ def busy(parent=None, text="جارٍ التنفيذ…", stage="", slow=SLOW_SEC
                 health.log_slow(stage or text, took)
             except Exception:
                 pass
+
+
+def run_bg(fn, parent=None, text="جارٍ التنفيذ…", stage="", timeout=None,
+           slow=SLOW_SECONDS):
+    """ينفّذ عملاً بطيئاً في خيطٍ جانبي **والواجهة حيّة**.
+
+    **الفرق عن `busy`**: `busy` يُظهر مؤشر انتظارٍ ثم ينفّذ العمل على
+    خيط الواجهة نفسه. فما دام العمل جارياً لا تعالج الواجهة حدثاً
+    واحداً: لا تُرسم النافذة فتبقى سوداء، ويُعلن ويندوز «لا يستجيب».
+    مقبولٌ لاستعلامٍ في جزء من ثانية، وغيرُ مقبولٍ لنداء **شبكة**:
+    رفعُ صفحة فاتورة قد يستغرق عشر ثوانٍ على اتصالٍ بطيء — وهي عشر
+    ثوانٍ يرى فيها المستخدم شاشةً سوداء بعد كل ترحيل.
+
+    هنا يجري العمل في خيطٍ جانبي، وتُدار حلقةُ الأحداث أثناءه فتُرسم
+    النافذة ويبقى النظام حيّاً. وتُستبعَد أحداث **إدخال المستخدم**
+    من الحلقة: الضغط أثناء العمل لا يُنفَّذ ولا يُصطفّ ليُنفَّذ بعده
+    على شاشةٍ تغيّرت — وهو ما يُشتكى منه بـ«نقرتُ في مكان خاطئ».
+
+    تُرجع `(تمّ, النتيجة, الخطأ)`. و`timeout` سقفُ الانتظار: بعده
+    يُترك العمل يُكمل في الخلفية وتعود الدالة بـ`تمّ=False` — فلا
+    يُحبس المستخدم خلف شبكةٍ لا تستجيب.
+
+    ملاحظة: `fn` يعمل على خيطٍ آخر، فلا يلمس أي widget. اتصال قاعدة
+    البيانات محليٌّ لكل خيط (`database.db`) فالكتابة منه سليمة.
+    """
+    import threading
+    box = {"done": False, "res": None, "err": None}
+
+    def work():
+        try:
+            box["res"] = fn()
+        except Exception as e:                  # الخطأ يُنقل لا يُبتلع
+            box["err"] = e
+        finally:
+            box["done"] = True
+
+    app = QtWidgets.QApplication.instance()
+    t0 = time.time()
+    th = threading.Thread(target=work, daemon=True, name="run_bg")
+    th.start()
+    if app is None:                             # بلا واجهة (أدوات الفحص)
+        th.join(timeout)
+        return box["done"], box["res"], box["err"]
+
+    app.setOverrideCursor(QtGui.QCursor(QtCore.Qt.WaitCursor))
+    if parent is not None:
+        try:
+            parent.setEnabled(False)
+        except Exception:
+            pass
+    try:
+        while not box["done"]:
+            if timeout is not None and time.time() - t0 > timeout:
+                break
+            # بلا أحداث إدخال: الواجهة تُرسم ولا يُنفَّذ ضغطٌ عارض
+            app.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents, 40)
+            th.join(0.02)
+    finally:
+        if parent is not None:
+            try:
+                parent.setEnabled(True)
+            except Exception:
+                pass
+        try:
+            app.restoreOverrideCursor()
+        except Exception:
+            pass
+        took = time.time() - t0
+        if took > slow:
+            try:
+                from services import health
+                health.log_slow(stage or text, took)
+            except Exception:
+                pass
+    return box["done"], box["res"], box["err"]

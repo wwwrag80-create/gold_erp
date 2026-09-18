@@ -17,6 +17,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -1149,6 +1150,39 @@ def main():
               inside is False and holder.isEnabled() is True)
         check("مؤشر الانتظار يُستعاد",
               _app3.overrideCursor() is None)
+
+        # ══ العمل البطيء في خيطٍ جانبي والواجهة حيّة ══
+        # هذا هو الفرق بين «انتظارٍ بمؤشر» و«شاشةٍ سوداء لا تستجيب»:
+        # `busy` ينفّذ على خيط الواجهة فتموت حلقةُ الأحداث، ونداءُ
+        # شبكةٍ بعشر ثوانٍ يصير عشرَ ثوانٍ من السواد بعد كل ترحيل.
+        # يُثبَت هنا بالعدّ: مؤقّتٌ ينبض أثناء العمل — إن نبض فالحلقة
+        # تعمل، وإن لم ينبض فالواجهة متجمّدة.
+        from PyQt5 import QtCore as _QC3
+        from ui.widgets.common import run_bg as _run_bg
+        beats = []
+        _tm = _QC3.QTimer()
+        _tm.setInterval(20)
+        _tm.timeout.connect(lambda: beats.append(1))
+        _tm.start()
+        _ok, _res, _err = _run_bg(lambda: (time.sleep(0.6), "تمّ")[1],
+                                  parent=holder, text="اختبار", slow=99)
+        _tm.stop()
+        check("العمل الجانبي يعيد نتيجته", _ok and _res == "تمّ" and not _err,
+              f"{_ok} · {_res} · {_err}")
+        check("وحلقة الأحداث تعمل أثناءه (لا شاشة سوداء)",
+              len(beats) >= 5, f"{len(beats)} نبضة")
+        check("والنافذة عادت مفعَّلة والمؤشر مُستعاد",
+              holder.isEnabled() and _app3.overrideCursor() is None)
+
+        _ok2, _, _ = _run_bg(lambda: time.sleep(1.5), parent=holder,
+                             text="اختبار", timeout=0.2, slow=99)
+        check("سقف الانتظار يُحرّر الواجهة ولا يحبسها",
+              _ok2 is False)
+
+        _ok3, _, _err3 = _run_bg(lambda: 1 / 0, parent=holder,
+                                 text="اختبار", slow=99)
+        check("وخطأ الخيط الجانبي يُنقل لا يُبتلع",
+              _ok3 and isinstance(_err3, ZeroDivisionError))
 
         # المُحجِّم يعيد الحساب عند تغيّر عدد الأعمدة لا العرض وحده
         from ui.widgets.table_fit import ColumnFitter
