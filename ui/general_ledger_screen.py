@@ -11,7 +11,10 @@ from services.audit import soft_delete_entry
 
 from services import browser_print, gold_math, karat_view as kv
 from ui.widgets.table_fit import fit_columns
-from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err, fill, info, karat_combo, make_table, search_combo, title_label)
+from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err,
+                               fill, info, karat_combo, ledger_rows,
+                               make_table, num_item, search_combo, text_item,
+                               title_label)
 
 from models.editing import EDITABLE
 
@@ -302,23 +305,30 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             self.table.setSortingEnabled(False)
             try:
                 self.table.setRowCount(len(rows))
+                # ══ هيئة الكشف: سطرٌ لكل حركة، وارتفاعٌ واحد ══
+                # التاريخ والنوع والمستند تُوسَّط (طولها ثابت)، والاسم
+                # والبيان يُحاذَيان اليمين كالنصّ العربي، والأرقام
+                # تُحاذى اليمين فتصطفّ الآحاد تحت الآحاد وتُقارَن
+                # خانةٌ بخانة. وما طال يُقصّ ويبقى كاملاً في التلميح.
+                _C = QtCore.Qt.AlignCenter
                 for i, r in enumerate(rows):
-                    vals = (r["date"], r["op"], r["doc_no"], r["name"],
-                            r["desc"],
-                            self._g(r["gd"]) if r["gd"] else "",
-                            self._g(r["gc"]) if r["gc"] else "",
-                            self._g(r["gbal"]),
-                            r["cd"] or "", r["cc"] or "",
-                            r["cbal"],
-                            "👁" if (r.get("src") and r.get("sid")) else "")
-                    for c, v in enumerate(vals):
-                        it = QtWidgets.QTableWidgetItem(str(v))
-                        it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    cellv = [
+                        text_item(r["date"], _C), text_item(r["op"], _C),
+                        text_item(r["doc_no"], _C), text_item(r["name"]),
+                        text_item(r["desc"]),
+                        num_item(self._g(r["gd"]) if r["gd"] else ""),
+                        num_item(self._g(r["gc"]) if r["gc"] else ""),
+                        num_item(self._g(r["gbal"])),
+                        num_item(r["cd"] or ""), num_item(r["cc"] or ""),
+                        num_item(r["cbal"]),
+                        text_item("👁" if (r.get("src") and r.get("sid"))
+                                  else "", _C),
+                    ]
+                    for c, it in enumerate(cellv):
                         self.table.setItem(i, c, it)
             finally:
                 self.table.setUpdatesEnabled(True)
-            self.table.setWordWrap(True)
-            self.table.setTextElideMode(QtCore.Qt.ElideNone)
+            ledger_rows(self.table)
             self.table.setHorizontalScrollBarPolicy(
                 QtCore.Qt.ScrollBarAlwaysOff)
             fit_columns(self.table)
@@ -346,47 +356,9 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 f"{abs(c):,.2f}",
                 "مدين/عليه" if c >= 0 else "دائن/له")
             # الجهة/الحساب المقابل (3) والبيان (4): يُلفّان على أسطر
-            self._fit_rows((3, 4))
             self._show_latest()
         except Exception as e:
             err(self, e)
-
-    def _fit_rows(self, cols, max_lines=4):
-        """يلفّ نص أعمدة بعينها على أسطر داخل عرضها الثابت.
-
-        الاسم الطويل كان يُقتطع إلى كلمتين حتى لا يتمدّد العمود، فيضيع
-        تمييز الجهة — وهو أهم ما في العمود. الآن يُعرض كاملاً ملفوفاً
-        داخل العرض نفسه، فلا يتمدّد الجدول أفقياً ولا يُخفى شيء.
-
-        القياس على الأعمدة المطلوبة وحدها — لا `resizeRowsToContents`
-        الذي يقرأ كل خلية في كل عمود فيتجمّد على مئات الصفوف.
-        """
-        try:
-            from PyQt5 import QtGui
-            fm = QtGui.QFontMetrics(self.table.font())
-            line = max(14, fm.lineSpacing())
-            pad = 10
-            base = line + pad
-            vh = self.table.verticalHeader()
-            vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-            widths = {c: max(40, self.table.columnWidth(c) - 12)
-                      for c in cols}
-            flag = QtCore.Qt.TextWordWrap
-            for i in range(self.table.rowCount()):
-                need = 1
-                for c in cols:
-                    it = self.table.item(i, c)
-                    txt = it.text() if it else ""
-                    if not txt or len(txt) < 12:
-                        continue
-                    h = fm.boundingRect(0, 0, widths[c], 0, flag,
-                                        txt).height()
-                    need = max(need, min(max_lines,
-                                         max(1, -(-h // line))))
-                self.table.setRowHeight(i, base if need == 1
-                                        else need * line + pad)
-        except Exception:
-            pass          # اللفّ تحسين عرض لا يُفشل الكشف
 
     def _show_latest(self):
         """ينزل بالكشف إلى **آخر** العمليات عند العرض.
@@ -586,21 +558,23 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.table.setSortingEnabled(False)
         try:
             self.table.setRowCount(len(rows))
+            _C = QtCore.Qt.AlignCenter
             for i, r in enumerate(rows):
-                vals = (r["date"], r["op"], r["doc_no"], r["accounts"],
-                        r["desc"],
-                        f"{self._g(r['gold']):,.3f}" if r["gold"] else "",
-                        f"{r['cash']:,.2f}" if r["cash"] else "",
-                        r["who"],
-                        "👁" if (r.get("src") and r.get("sid")) else "")
-                for c, v in enumerate(vals):
-                    it = QtWidgets.QTableWidgetItem(str(v))
-                    it.setTextAlignment(QtCore.Qt.AlignCenter)
+                cellv = [
+                    text_item(r["date"], _C), text_item(r["op"], _C),
+                    text_item(r["doc_no"], _C), text_item(r["accounts"]),
+                    text_item(r["desc"]),
+                    num_item(f"{self._g(r['gold']):,.3f}" if r["gold"] else ""),
+                    num_item(f"{r['cash']:,.2f}" if r["cash"] else ""),
+                    text_item(r["who"], _C),
+                    text_item("👁" if (r.get("src") and r.get("sid")) else "",
+                              _C),
+                ]
+                for c, it in enumerate(cellv):
                     self.table.setItem(i, c, it)
         finally:
             self.table.setUpdatesEnabled(True)
-        self.table.setWordWrap(True)
-        self.table.setTextElideMode(QtCore.Qt.ElideNone)
+        ledger_rows(self.table)
         self.table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         fit_columns(self.table)
 
@@ -613,7 +587,6 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.c_credit.set_value("—")
         self.c_bal.set_value(f"{len(rows):,}", "عدد المستندات")
         # الحسابات المتأثرة (3) والبيان (4)
-        self._fit_rows((3, 4))
         self._show_latest()
         if not rows:
             info(self, f"لا توجد عمليات بين {d1} و{d2}.")

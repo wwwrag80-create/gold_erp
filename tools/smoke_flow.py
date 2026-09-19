@@ -817,52 +817,40 @@ def main():
     _kv.set_active(18, "admin")
     check("العودة إلى 18 سليمة", _kv.active() == 18 and _kv.is_base())
 
-    step("22) حارس الأرصدة السالبة")
-    # الحسابات المادية: ما لا يوجد فيها لا يُصرف منه.
-    from services import stock_guard as _sg
+    step("22) إلغاء حارس الأرصدة السالبة")
+    # أُلغيت الميزة بطلب صاحب النظام: الرصيد السالب في مصنعٍ يعمل
+    # حالةٌ واقعية (بضاعة تخرج قبل تسجيل توريدها)، فكان التنبيه
+    # يتكرّر على عملياتٍ سليمة. يُفحص هنا أنها أُزيلت **فعلاً** لا
+    # أُسكتت: لا وحدة، ولا نداء في محرّك القيود، ولا تنبيه بعد قيدٍ
+    # يُسلِّب رصيداً مادياً.
+    import importlib.util as _ilu
+    check("وحدة الحارس أُزيلت من النظام",
+          _ilu.find_spec("services.stock_guard") is None)
+    _eng = pathlib.Path("services/accounting_engine.py").read_text(
+        encoding="utf-8")
+    check("ولا يُستدعى في محرّك القيود",
+          "stock_guard.check_entry" not in _eng)
     from services.accounting_engine import balance_by_code as _bal
-
-    with db(readonly=True) as conn:
-        check("الوضع الافتراضي تنبيه", _sg.mode(conn) == "warn")
     with db() as conn:
-        tz, lossacc = acc_id(conn, "1100"), acc_id(conn, "5300")
-        before = _bal(conn, "1100")[0]
-
-    def _post(desc, dr, cr, amount):
-        with db() as conn:
-            return post_entry(conn, "2026-05-01", desc, [
-                {"account_id": dr, "gold_debit": amount},
-                {"account_id": cr, "gold_credit": amount}], username="admin")
-
-    _sg.take_warning()
-    _post("سحب يتجاوز الرصيد", lossacc, tz, before + 500.0)
-    warn = _sg.take_warning()
-    check("ينبّه حين يصير الرصيد سالباً",
-          "سالب" in warn and "1100" in warn, warn.split("\n")[0])
-
-    _post("توريد يُصلح العجز", tz, lossacc, 100.0)
-    check("لا ينبّه على قيد يُقلّل العجز", _sg.take_warning() == "")
-
+        _tz, _la = acc_id(conn, "1100"), acc_id(conn, "5300")
+        _before = _bal(conn, "1100")[0]
     with db() as conn:
-        _sg.set_mode(conn, "block", "admin")
-    expect_error("يمنع قيداً يزيد العجز",
-                 lambda: _post("سحب آخر", lossacc, tz, 10.0),
-                 "الرصيد لا يكفي")
+        post_entry(conn, "2026-05-01", "سحب يتجاوز الرصيد", [
+            {"account_id": _la, "gold_debit": _before + 500.0},
+            {"account_id": _tz, "gold_credit": _before + 500.0}],
+            username="admin")
     with db(readonly=True) as conn:
-        left = conn.execute(
+        _left = conn.execute(
             "SELECT COUNT(*) c FROM journal_entries"
-            " WHERE description='سحب آخر'").fetchone()["c"]
-    check("العملية الممنوعة لا تترك أثراً", left == 0, str(left))
-    _post("تصحيح في وضع المنع", tz, lossacc, 50.0)
-    check("القيد المصحِّح يمرّ في وضع المنع", True)
-    with db() as conn:
-        _sg.set_mode(conn, "warn", "admin")
-        n_neg = len(_sg.negatives(conn))
-    check("يرصد الأرصدة السالبة القائمة", n_neg >= 1, f"{n_neg} حساب")
-    expect_error("وضع غير مدعوم يُرفض",
-                 lambda: _sg.set_mode(conn, "maybe", "admin"), "غير مدعوم")
+            " WHERE description='سحب يتجاوز الرصيد'").fetchone()["c"]
+    check("والقيد الذي يُسلِّب رصيداً يمرّ بلا منع ولا تنبيه",
+          _left == 1, f"{_left}")
     # إعادة الخزينة إلى موجب حتى لا تتأثر بقية الفحوص
-    _post("إعادة الرصيد", tz, lossacc, 1000.0)
+    with db() as conn:
+        post_entry(conn, "2026-05-01", "إعادة الرصيد", [
+            {"account_id": _tz, "gold_debit": _before + 500.0},
+            {"account_id": _la, "gold_credit": _before + 500.0}],
+            username="admin")
 
     step("23) أعمار الديون")
     import datetime as _dt
@@ -1946,6 +1934,96 @@ def main():
                          "doc_no": "JV-1", "description": "د",
                          "user_note": "", "source_table": "",
                          "source_id": None, "created_by": "admin"}, [], "y"))
+
+    step("28ب) تعديل دفعة توريد يعيد كل ما تعرضه الشاشة")
+    # ══ الخلل: نجاحٌ يظهر خطأً ══
+    # شاشة «الوارد من التصنيع» تعرض `total_registered` في رسالة
+    # «تم الترحيل» للمسارين معاً. وكان مسار **الإنشاء** وحده يعيده،
+    # فالتعديل يرفع `KeyError: 'total_registered'` **بعد** إغلاق
+    # المعاملة بنجاح: الدفعة تُحفظ، ويرى المستخدم رسالةً إنجليزية لا
+    # يفهمها، فيظنّ أن التعديل فشل فيعيده. يُفحص هنا أن المسارين
+    # يعيدان المفاتيح نفسها — فلا يتكرّر مع أي مفتاح يُضاف لاحقاً.
+    from models.inventory import update_supply_batch as _usb
+
+    with db() as conn:
+        _mk = _batch(conn, [{"wo_no": "SB-1", "gold": 30.0,
+                             "wage_per_gram": 20.0},
+                            {"wo_no": "SB-2", "gold": 20.0,
+                             "wage_per_gram": 20.0}],
+                     "2026-05-02", "admin")
+    _need = {"entry_id", "total_registered", "items"}
+    check("الإنشاء يعيد مفاتيح الشاشة", _need <= set(_mk),
+          f"ينقصه {sorted(_need - set(_mk))}")
+    with db() as conn:
+        _ed = _usb(conn, _mk["entry_id"], [
+            {"wo_no": "SB-1", "gold": 30.0, "wage_per_gram": 20.0},
+            {"wo_no": "SB-2", "gold": 20.0, "wage_per_gram": 20.0},
+            {"wo_no": "SB-3", "gold": 15.0, "wage_per_gram": 20.0},
+        ], "2026-05-02", "admin")
+    check("والتعديل يعيدها كلها — لا KeyError بعد نجاح الحفظ",
+          _need <= set(_ed), f"ينقصه {sorted(_need - set(_ed))}")
+    check("وإجمالي الوزن المقيد يساوي أوزان الدفعة بعد الإضافة",
+          abs(_ed["total_registered"] - 65.0) < 0.01,
+          f"{_ed['total_registered']}")
+    check("والإضافة سُجّلت طقماً جديداً", _ed["added"] == ["SB-3"],
+          str(_ed["added"]))
+
+    step("29أ) تعديل فاتورة على الرقم التجميعي — أسطرٌ مستقلة")
+    # ══ الخلل: مئة جرامٍ تضيع من الدفتر بلا أثر ══
+    # بنود الفاتورة كانت تُفهرَس بـ`work_order_id`. صحيحٌ للطقم
+    # المفرد (قطعةٌ لا تتكرّر في فاتورة)، وخطأٌ للرقم التجميعي: ذاك
+    # **رصيدٌ وزني** يُباع منه في الفاتورة الواحدة أسطرٌ مستقلة.
+    # فتعديلٌ يُبقي سطر ١٠٠ ويضيف ٥٠ كان يُنهي الفاتورة بـ٥٠ وحدها،
+    # وحذفُ أحد سطرَيه لا يحذف شيئاً. يُفحص بالأرقام هنا لأن الخلل
+    # صامت: لا خطأ ولا رسالة — فقط وزنٌ ناقص في كشف العميل.
+    from models.inventory import adjust_bulk_wo as _adj
+    from models.inventory import get_or_create_bulk_wo as _bulk
+    from models import invoices as invoices
+
+    with db() as conn:
+        _bw = _bulk(conn, "admin")["id"]
+        _adj(conn, 1000.0, "admin")
+        _bi = create_sale(conn, cust, [{"work_order_id": _bw,
+                                        "weight": 100.0}],
+                          "2026-05-01", "admin", apply_vat=False)
+    check("فاتورة على الرقم التجميعي تُرحَّل بوزنها",
+          abs(_bi["total_weight"] - 100.0) < 0.01, f"{_bi['total_weight']}")
+
+    # إضافة سطرٍ ثانٍ لنفس الرقم التجميعي — يجب أن يكون سطراً مستقلاً
+    with db(readonly=True) as conn:
+        _, _its = invoices.get_invoice_full(conn, _bi["id"])
+    _cart = [{"work_order_id": t["work_order_id"], "weight": 100.0,
+              "item_id": t["item_id"]} for t in _its]
+    _cart.append({"work_order_id": _bw, "weight": 50.0})
+    with db() as conn:
+        invoices.update_invoice(conn, _bi["id"], _cart, "admin")
+    with db(readonly=True) as conn:
+        _inv2, _its2 = invoices.get_invoice_full(conn, _bi["id"])
+    check("إضافة ٥٠ إلى سطر ١٠٠ تُنشئ سطرين لا تدهس الأول",
+          len(_its2) == 2,
+          f"{len(_its2)} سطراً · "
+          f"{[round(x['registered_weight'], 1) for x in _its2]}")
+    check("والإجمالي ١٥٠ لا ٥٠ — لا يضيع وزنٌ من الدفتر",
+          abs(_inv2["total_weight"] - 150.0) < 0.01,
+          f"{_inv2['total_weight']}")
+
+    # حذف سطرٍ واحد من سطرَي الرقم التجميعي — يجب أن يُحذف فعلاً
+    _keep = [t for t in _its2 if abs(t["registered_weight"] - 50.0) < 0.01]
+    with db() as conn:
+        invoices.update_invoice(
+            conn, _bi["id"],
+            [{"work_order_id": t["work_order_id"],
+              "weight": t["registered_weight"], "item_id": t["item_id"]}
+             for t in _keep], "admin")
+    with db(readonly=True) as conn:
+        _inv3, _its3 = invoices.get_invoice_full(conn, _bi["id"])
+    check("حذف أحد سطرَي الرقم التجميعي يحذفه فعلاً",
+          len(_its3) == 1 and abs(_inv3["total_weight"] - 50.0) < 0.01,
+          f"{len(_its3)} سطراً · إجمالي {_inv3['total_weight']}")
+    with db(readonly=True) as conn:
+        _bg, _bc, _gv, _cv = ledger_balanced(conn)
+    check("والدفتر متوازن بعد التعديل والحذف", _bg and _bc,
+          f"ذهب {_gv} · نقد {_cv}")
 
     step("29ب) ملفات الهجرة تُعثر عليها فعلاً")
     # ══ خللٌ مرّ صامتاً حتى أول هجرةٍ ذات أثر ══

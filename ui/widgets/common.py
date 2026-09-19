@@ -307,6 +307,50 @@ def bulk_rows(table, n_rows, headers=None):
             pass
 
 
+def ledger_rows(table, height=32):
+    """صفوفٌ متساوية الارتفاع — هيئة الكشف المحاسبي.
+
+    **الشكوى**: «الجدول يظهر غير مرتب: صفٌّ واسع وصفٌّ قصير وصفٌّ
+    كبير». وسببها أن `make_table` يفعّل لفّ النص ويجعل ارتفاع الصف
+    تابعاً لمحتواه: صفٌّ بيانه سطرٌ واحد يبقى قصيراً، وصفٌّ بيانه
+    طويل يُلفّ على ثلاثة أسطر فيعلو ثلاثة أضعاف. فيخرج الكشف مموّجاً
+    لا تستطيع العين تتبّع سطرٍ فيه بالمسطرة — وهو أول ما يحتاجه من
+    يراجع كشف حساب.
+
+    الكشف المحاسبي سطرٌ واحد لكل حركة، بارتفاع واحد. وما طال من
+    البيان يُقصّ بثلاث نقاط ويبقى كاملاً في التلميح، فلا يضيع شيء.
+    """
+    table.setWordWrap(False)
+    table.setTextElideMode(QtCore.Qt.ElideRight)
+    vh = table.verticalHeader()
+    vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+    vh.setDefaultSectionSize(height)
+
+
+def num_item(text, tip=None):
+    """خلية رقم: محاذاةٌ لليمين فتصطفّ الآحاد تحت الآحاد.
+
+    الأرقام الموسَّطة تتراقص يميناً ويساراً بطول الرقم، فلا تُقارَن
+    خانةٌ بخانة. ومحاذاتها لليمين هي عُرف كل كشف حساب.
+    """
+    it = QtWidgets.QTableWidgetItem(str(text))
+    # `AlignAbsolute` ضرورية: بدونها يقلب Qt معنى «اليمين» في الواجهة
+    # العربية فتلتصق الأرقام بالحافة اليسرى — وهو عكس المقصود تماماً.
+    it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignAbsolute
+                        | QtCore.Qt.AlignVCenter)
+    if tip:
+        it.setToolTip(str(tip))
+    return it
+
+
+def text_item(text, align=QtCore.Qt.AlignRight, tip=None):
+    """خلية نصّ: محاذاةٌ واحدة، والنصّ الكامل في التلميح إن قُصّ."""
+    it = QtWidgets.QTableWidgetItem(str(text))
+    it.setTextAlignment(align | QtCore.Qt.AlignVCenter)
+    it.setToolTip(str(tip if tip is not None else text))
+    return it
+
+
 def cell(table, row, col):
     it = table.item(row, col)
     return it.text() if it else ""
@@ -567,11 +611,11 @@ def posted(parent, message, doc_type=None, doc_id=None,
     صب · تسكير · قيد يومي · مشتريات) فتوحّد التجربة: رسالة تأكيد
     واضحة، ثم سؤال عن الطباعة بدل البحث عن المستند لاحقاً.
     """
-    # تنبيه الرصيد السالب يظهر مع رسالة الترحيل نفسها — لا في شاشة
+    # تنبيه حدّ الائتمان يظهر مع رسالة الترحيل نفسها — لا في شاشة
     # أخرى ولا بعد أسابيع. الموضع واحد لكل الشاشات لأنها كلها تمرّ
-    # من هنا بعد الترحيل.
+    # من هنا بعد الترحيل. (وكان معه تنبيه الرصيد السالب فأُلغي.)
     warns = []
-    for mod in ("stock_guard", "credit_guard"):
+    for mod in ("credit_guard",):
         try:
             m = __import__(f"services.{mod}", fromlist=["x"])
             t = m.take_warning()

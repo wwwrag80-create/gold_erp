@@ -16,15 +16,21 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from database.database import db
 from models import model_profit as mp
 from services import karat_view as kv
-from ui.widgets.common import (Card, big_label, busy, date_edit, dstr, err,
-                               fill, make_table, title_label)
+from ui.widgets.common import (Card, big_label, date_edit, dstr, err,
+                               fill, make_table, run_bg, title_label)
 from ui.widgets.table_tools import enhance as _enhance
 
 
 def _cols():
+    """أعمدة الجدول — بلا تفصيل الأجور بطلب صاحب النظام.
+
+    حُذفت ثلاثة أعمدة (صافي الأجور · متوسط أجرة الجرام · حصته من
+    الأجور): الجدول صار يقرأ **الحركة** — كم خرج وكم رجع وكم بقي
+    وزناً وحجراً. وإجماليات الأجور للمصنع كله باقيةٌ في اللوحات
+    أعلاه، والترتيب ما زال بالأعلى أجوراً فأوّل صفٍّ هو الأكسب.
+    """
     u = kv.unit()
     return ["الموديل", "مباع", "مرتجع", "الصافي", f"الوزن الصافي ({u})",
-            "صافي الأجور (ريال)", "متوسط أجرة الجرام", "حصته من الأجور %",
             "فصوص", "أحجار"]
 
 
@@ -99,27 +105,42 @@ class ModelProfitScreen(QtWidgets.QWidget):
         lay.addWidget(note)
 
     def load(self):
-        try:
-            with busy(self, "جارٍ حساب ربحية الموديلات…",
-                      stage="ربحية الموديل"):
-                with db(readonly=True) as conn:
-                    self.rows = mp.by_model(conn, dstr(self.d_from),
-                                            dstr(self.d_to))
-                    unsold = mp.unsold(conn)
-        except Exception as e:
-            err(self, e)
+        """يقرأ في خيطٍ جانبي — والواجهة تبقى حيّة.
+
+        **الخلل الذي عولج**: القراءة كانت تجري داخل `busy` على خيط
+        الواجهة. و`busy` يُظهر مؤشر انتظارٍ لكنه لا يُدير حلقة
+        الأحداث، فما دام الاستعلام جارياً لا تُرسم النافذة: يراها
+        ويندوز معلَّقةً فيرسمها **سوداء** ويقول «لا يستجيب». وهو ما
+        وقع عند الضغط على «إعداد التقرير» على دفترٍ حقيقي: الاستعلام
+        يمسح كل بنود الفواتير وكل أوامر التشغيل، وعلى مصنعٍ بآلاف
+        الموديلات يطول. الآن يجري جانباً وحلقةُ الأحداث تعمل.
+        """
+        d1, d2 = dstr(self.d_from), dstr(self.d_to)
+
+        def _read():
+            with db(readonly=True) as conn:
+                return (mp.by_model(conn, d1, d2), mp.unsold(conn))
+
+        ok, out, ex = run_bg(_read, parent=self,
+                             text="جارٍ حساب ربحية الموديلات…",
+                             stage="ربحية الموديل", timeout=120.0)
+        if ex:
+            err(self, ex)
             return
+        if not ok:
+            self.state.setText(
+                "تأخّر الحساب أكثر من دقيقتين — ضيّق الفترة وأعد المحاولة.")
+            return
+        self.rows, unsold = out
         t = mp.totals(self.rows)
         data = [(r["model"], r["sold"], r["returned"], r["net_count"],
-                 f"{kv.g(r['net_weight']):,.3f}", f"{r['wages']:,.2f}",
-                 f"{r['avg_wage']:,.2f}", f"{r['share']:,.1f}",
+                 f"{kv.g(r['net_weight']):,.3f}",
                  f"{kv.g(r['small_stones']):,.2f}",
                  f"{kv.g(r['big_stones']):,.2f}") for r in self.rows]
         if data:
             data.append(("الإجمالي", "", "", t["net_count"],
                          f"{kv.g(t['net_weight']):,.3f}",
-                         f"{t['wages']:,.2f}", f"{t['avg_wage']:,.2f}",
-                         "100.0", f"{kv.g(t['small_stones']):,.2f}",
+                         f"{kv.g(t['small_stones']):,.2f}",
                          f"{kv.g(t['big_stones']):,.2f}"))
         fill(self.table, _cols(), data)
         self._bold_last(self.table, len(data))
@@ -169,8 +190,7 @@ class ModelProfitScreen(QtWidgets.QWidget):
         for r in self.rows:
             out.append("\t".join(str(x) for x in (
                 r["model"], r["sold"], r["returned"], r["net_count"],
-                round(kv.g(r["net_weight"]), 3), round(r["wages"], 2),
-                round(r["avg_wage"], 2), round(r["share"], 1),
+                round(kv.g(r["net_weight"]), 3),
                 round(kv.g(r["small_stones"]), 2),
                 round(kv.g(r["big_stones"]), 2))))
         QtWidgets.QApplication.clipboard().setText("\n".join(out))

@@ -456,6 +456,11 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                         res = inventory.create_work_orders_batch(
                             conn, batch, dstr(self.date),
                             self.user["username"])
+            # ══ ما بعد هذه النقطة: المعاملة أُغلقت بنجاح ══
+            # بناء الرسالة عرضٌ لا ترحيل. خطأٌ فيه كان يظهر للمستخدم
+            # «خطأ» على عمليةٍ **تمّت وحُفظت** — فيعيدها ظانّاً أنها
+            # فشلت. (وقع فعلاً: مفتاح `total_registered` كان ناقصاً في
+            # مسار التعديل، فظهر `KeyError` إنجليزيّ بعد نجاح الحفظ.)
             if res.get("delta") is not None:
                 # ملخّص التعديل التفاضلي
                 parts = []
@@ -477,10 +482,10 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                                   f"{kv.g(i['standing_gold']):.2f} {kv.unit()}"
                                   for i in res["items"])
             was_editing = bool(self.is_editing)
-            posted(self, f"تم ترحيل الدفعة بقيد رقم {res['entry_id']}\n"
+            posted(self, f"تم ترحيل الدفعة بقيد رقم {res.get('entry_id')}\n"
                        f"إجمالي الوزن المقيد: "
-                       f"{kv.g(res['total_registered']):.2f} {kv.unit()}\n"
-                       f"{lines}", "work_orders",
+                       f"{kv.g(res.get('total_registered') or 0):.2f} "
+                       f"{kv.unit()}\n{lines}", "work_orders",
                    (res.get("items") or [{}])[0].get("id"),
                    editing=was_editing)
             self.end_edit()
