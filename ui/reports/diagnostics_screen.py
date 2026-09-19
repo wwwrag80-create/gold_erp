@@ -100,6 +100,28 @@ class DiagnosticsScreen(QtWidgets.QWidget):
             "متطابقة" if not h["invoice_totals"]
             else f"{len(h['invoice_totals'])} فاتورة إجماليها يخالف بنودها")
 
+        # ══ الأرصدة المادية السالبة ══
+        # بديل الحارس اللحظي الذي أُلغي: السالب لحظةَ البيع حالةٌ
+        # واقعية تتكرّر، والتنبيه عليها يُتجاهَل. أما السالب الباقي
+        # عند المراجعة فخللٌ حقيقي — توريدٌ لم يُسجَّل أو وزنٌ خرج
+        # مرتين — فمكانه هنا: يُقرأ عند الحاجة ولا يقاطع عملاً.
+        neg = h.get("negatives") or []
+        if neg:
+            from services import karat_view as _kv
+            bits = []
+            for r in neg[:5]:
+                p = []
+                if r["gold"]:
+                    p.append(f"ذهب {_kv.g(r['gold']):,.3f}")
+                if r["cash"]:
+                    p.append(f"نقد {r['cash']:,.2f}")
+                bits.append(f"{r['name']} ({' · '.join(p)})")
+            rows.append(("⚠ يُراجَع", "أرصدة مادية سالبة",
+                         " · ".join(bits)))
+        else:
+            add(True, "الأرصدة المادية (خزينة · مشغول · كسر · صندوق)",
+                "لا رصيد سالب")
+
         # سلسلة بصمات القيود
         try:
             from models import integrity as _ig
@@ -128,8 +150,15 @@ class DiagnosticsScreen(QtWidgets.QWidget):
 
         fill(self.table, COLS, rows)
         bad = [r for r in rows if r[0].startswith("⛔")]
-        self.state.setText("✔ النظام سليم" if not bad
-                           else f"⛔ {len(bad)} خلل يحتاج مراجعة")
+        rev = [r for r in rows if r[0].startswith("⚠")]
+        # السالب يُراجَع ولا يُعدّ خللاً: الدفتر قد يكون متوازناً
+        # تماماً ورصيدُه سالب — وهي حالة تُصحَّح بتوريدٍ لا بقيد.
+        if bad:
+            self.state.setText(f"⛔ {len(bad)} خلل يحتاج مراجعة")
+        elif rev:
+            self.state.setText(f"✔ الدفتر سليم · {len(rev)} بندٌ يُراجَع")
+        else:
+            self.state.setText("✔ النظام سليم")
 
     def show_log(self):
         """آخر ما سُجّل من أخطاء وبطء — نصّاً كما هو."""
