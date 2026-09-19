@@ -738,6 +738,10 @@ class SalesScreen(QtWidgets.QWidget):
                     # المخزَّن بمكافئ 18 ← المعروض بعيار المصنع
                     cart.append({
                         "wo": wo,
+                        # هويّة السطر: بها يعرف التعديل أيَّ سطرٍ
+                        # يُحدِّث. الرقم التجميعي يتكرّر في الفاتورة
+                        # بأسطرٍ مستقلة، ولا يميّزها إلا هذا الرقم.
+                        "item_id": it["item_id"],
                         "weight": kv.g(it["registered_weight"]),
                         "wage": kv.rate(it["wage_per_gram"])})
             self.editing_id = invoice_id
@@ -1133,6 +1137,9 @@ class SalesScreen(QtWidgets.QWidget):
             apply_vat = False if internal else self.vat_check.isChecked()
             # الحد الفاصل: كل ما يعبر إلى القاعدة بمكافئ 18
             cart = [{"work_order_id": i["wo"]["id"],
+                     # سطرٌ حُمِّل من فاتورةٍ تُعدَّل يحمل رقمه؛
+                     # والمُضاف حديثاً بلا رقم فيُسجَّل سطراً جديداً
+                     "item_id": i.get("item_id"),
                      "weight": kv.store(i["weight"]),
                      "wage_override": (None if internal
                                        else kv.rate_store(i["wage"]))}

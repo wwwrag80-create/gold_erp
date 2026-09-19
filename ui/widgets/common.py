@@ -216,17 +216,24 @@ def fill(table, headers, rows):
 
     الآن: التحديث مُعطَّل أثناء الملء، والقياس المكلف يُستبدل بتوزيع
     نسبي حسابي لا يقرأ المحتوى.
+
+    **وارتفاع الصف واحدٌ دائماً** — لا للجداول الكبيرة وحدها كما كان.
+    الشكوى: «الجدول غير مرتب: صفٌّ واسع وصفٌّ قصير وصفٌّ كبير». وسببها
+    أن ارتفاع الصف كان تابعاً لمحتواه، فصفٌّ بيانه سطرٌ يبقى قصيراً
+    وصفٌّ بيانه طويل يُلفّ على ثلاثة أسطر فيعلو ثلاثة أضعاف — فيخرج
+    الكشف مموّجاً لا تتتبّع العين سطراً فيه. والكشف المحاسبي سطرٌ
+    واحد لكل حركة بارتفاع واحد؛ وما طال يُقصّ ويبقى كاملاً في التلميح.
     """
     big = len(rows) > BIG_TABLE
     try:
         table.setUpdatesEnabled(False)
         table.setSortingEnabled(False)
-        if big:
-            # لفّ النص وارتفاع الصف التلقائي مكلفان جداً هنا
-            table.setWordWrap(False)
-            vh = table.verticalHeader()
-            vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-            vh.setDefaultSectionSize(26)
+        table.setWordWrap(False)
+        table.setTextElideMode(QtCore.Qt.ElideRight)
+        vh = table.verticalHeader()
+        vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        # الجداول الكبيرة أضيق صفّاً: يظهر منها أكثر في الشاشة نفسها
+        vh.setDefaultSectionSize(26 if big else 32)
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
         table.setRowCount(len(rows))
@@ -235,8 +242,11 @@ def fill(table, headers, rows):
                 if isinstance(val, float):
                     val = (f"{val:,.2f}".rstrip("0").rstrip(".")
                            if abs(val) < 1e12 else str(val))
-                item = QtWidgets.QTableWidgetItem(
-                    "" if val is None else str(val))
+                txt = "" if val is None else str(val)
+                item = QtWidgets.QTableWidgetItem(txt)
+                # النصّ الكامل في التلميح: القصّ لا يُخفي شيئاً
+                if len(txt) > 14:
+                    item.setToolTip(txt)
                 table.setItem(r, c, item)
     finally:
         try:
@@ -272,17 +282,17 @@ def bulk_rows(table, n_rows, headers=None):
 
     ولا يُستعمل `insertRow` داخله: عدد الصفوف يُضبط مرةً واحدة.
     """
-    prev_wrap = table.wordWrap()
     vh = table.verticalHeader()
-    prev_mode = vh.sectionResizeMode(0) if table.rowCount() else None
     big = n_rows > BIG_TABLE
     try:
         table.setUpdatesEnabled(False)
         table.setSortingEnabled(False)
-        if big:
-            table.setWordWrap(False)
-            vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-            vh.setDefaultSectionSize(30)
+        # ارتفاعٌ واحد دائماً — لا للكبيرة وحدها: الجدول المموّج
+        # (صفٌّ واسع وصفٌّ قصير) لا تتتبّعه العين مهما قلّت صفوفه.
+        table.setWordWrap(False)
+        table.setTextElideMode(QtCore.Qt.ElideRight)
+        vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        vh.setDefaultSectionSize(30 if big else 32)
         if headers:
             table.setColumnCount(len(headers))
             table.setHorizontalHeaderLabels(list(headers))
@@ -291,10 +301,6 @@ def bulk_rows(table, n_rows, headers=None):
         yield table
     finally:
         try:
-            if not big:
-                table.setWordWrap(prev_wrap)
-                if prev_mode is not None:
-                    vh.setSectionResizeMode(prev_mode)
             table.setUpdatesEnabled(True)
         except Exception:
             pass
@@ -305,6 +311,50 @@ def bulk_rows(table, n_rows, headers=None):
             fit_columns(table)
         except Exception:
             pass
+
+
+def ledger_rows(table, height=32):
+    """صفوفٌ متساوية الارتفاع — هيئة الكشف المحاسبي.
+
+    **الشكوى**: «الجدول يظهر غير مرتب: صفٌّ واسع وصفٌّ قصير وصفٌّ
+    كبير». وسببها أن `make_table` يفعّل لفّ النص ويجعل ارتفاع الصف
+    تابعاً لمحتواه: صفٌّ بيانه سطرٌ واحد يبقى قصيراً، وصفٌّ بيانه
+    طويل يُلفّ على ثلاثة أسطر فيعلو ثلاثة أضعاف. فيخرج الكشف مموّجاً
+    لا تستطيع العين تتبّع سطرٍ فيه بالمسطرة — وهو أول ما يحتاجه من
+    يراجع كشف حساب.
+
+    الكشف المحاسبي سطرٌ واحد لكل حركة، بارتفاع واحد. وما طال من
+    البيان يُقصّ بثلاث نقاط ويبقى كاملاً في التلميح، فلا يضيع شيء.
+    """
+    table.setWordWrap(False)
+    table.setTextElideMode(QtCore.Qt.ElideRight)
+    vh = table.verticalHeader()
+    vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+    vh.setDefaultSectionSize(height)
+
+
+def num_item(text, tip=None):
+    """خلية رقم: محاذاةٌ لليمين فتصطفّ الآحاد تحت الآحاد.
+
+    الأرقام الموسَّطة تتراقص يميناً ويساراً بطول الرقم، فلا تُقارَن
+    خانةٌ بخانة. ومحاذاتها لليمين هي عُرف كل كشف حساب.
+    """
+    it = QtWidgets.QTableWidgetItem(str(text))
+    # `AlignAbsolute` ضرورية: بدونها يقلب Qt معنى «اليمين» في الواجهة
+    # العربية فتلتصق الأرقام بالحافة اليسرى — وهو عكس المقصود تماماً.
+    it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignAbsolute
+                        | QtCore.Qt.AlignVCenter)
+    if tip:
+        it.setToolTip(str(tip))
+    return it
+
+
+def text_item(text, align=QtCore.Qt.AlignRight, tip=None):
+    """خلية نصّ: محاذاةٌ واحدة، والنصّ الكامل في التلميح إن قُصّ."""
+    it = QtWidgets.QTableWidgetItem(str(text))
+    it.setTextAlignment(align | QtCore.Qt.AlignVCenter)
+    it.setToolTip(str(tip if tip is not None else text))
+    return it
 
 
 def cell(table, row, col):
@@ -567,11 +617,11 @@ def posted(parent, message, doc_type=None, doc_id=None,
     صب · تسكير · قيد يومي · مشتريات) فتوحّد التجربة: رسالة تأكيد
     واضحة، ثم سؤال عن الطباعة بدل البحث عن المستند لاحقاً.
     """
-    # تنبيه الرصيد السالب يظهر مع رسالة الترحيل نفسها — لا في شاشة
+    # تنبيه حدّ الائتمان يظهر مع رسالة الترحيل نفسها — لا في شاشة
     # أخرى ولا بعد أسابيع. الموضع واحد لكل الشاشات لأنها كلها تمرّ
-    # من هنا بعد الترحيل.
+    # من هنا بعد الترحيل. (وكان معه تنبيه الرصيد السالب فأُلغي.)
     warns = []
-    for mod in ("stock_guard", "credit_guard"):
+    for mod in ("credit_guard",):
         try:
             m = __import__(f"services.{mod}", fromlist=["x"])
             t = m.take_warning()

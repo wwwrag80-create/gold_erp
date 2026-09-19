@@ -53,7 +53,11 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
             _w = c.get("weight")
             weight = (float(_w) if _w not in (None, "", 0)
                       else wo["registered_weight"])
-        out.append({"wo": wo, "weight": round(weight, 3), "wage": wage})
+        # `item_id`: هويّة السطر في فاتورةٍ تُعدَّل. الرقم التجميعي
+        # **رصيد وزني لا قطعة**، فيتكرّر في الفاتورة الواحدة بأسطرٍ
+        # مستقلة — ولا يميّزها إلا هذا. (تفصيله في `update_invoice`.)
+        out.append({"wo": wo, "weight": round(weight, 3), "wage": wage,
+                    "item_id": c.get("item_id")})
     return out
 
 
@@ -536,37 +540,67 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     internal = ent["entity_type"] == "internal"
     vat = bool(inv["vat_applied"]) if apply_vat is None else bool(apply_vat)
 
-    # الحالة الحالية: بنود الفاتورة كما هي
-    old = {}
-    for r in conn.execute(
-            "SELECT it.*, w.work_order_no wno, w.is_bulk"
-            " FROM invoice_items it"
-            " JOIN work_orders w ON w.id=it.work_order_id"
-            " WHERE it.invoice_id=?", (invoice_id,)):
-        old[r["work_order_id"]] = dict(r)
+    # ══ الحالة الحالية: بنود الفاتورة كما هي ══
+    # **هويّة السطر رقمُه لا رقمُ طقمه.** كانت البنود تُفهرَس بـ
+    # `work_order_id`، وهو صحيحٌ للطقم المفرد (قطعةٌ لا تتكرّر في
+    # فاتورة) وخطأٌ للرقم التجميعي: ذاك **رصيدٌ وزني** يُباع منه في
+    # الفاتورة الواحدة أسطرٌ مستقلة — ١٠٠ ثم ٥٠ — ولا يميّزها إلا
+    # رقم السطر. فكان الفهرس يدهس السطر الأول بالثاني: تعديلٌ يضيف
+    # ٥٠ إلى ١٠٠ يُنهي الفاتورة بـ٥٠ وحدها، فيضيع مئة جرامٍ من
+    # الدفتر بلا أثر. وحذفُ أحد سطرَيه لا يحذف شيئاً، لأن رقم طقمه
+    # ما زال في السلة بسطره الآخر.
+    old = [dict(r) for r in conn.execute(
+        "SELECT it.*, w.work_order_no wno, w.is_bulk"
+        " FROM invoice_items it"
+        " JOIN work_orders w ON w.id=it.work_order_id"
+        " WHERE it.invoice_id=? ORDER BY it.id", (invoice_id,))]
+    by_item = {r["id"]: r for r in old}
+    # احتياطٌ للنداءات التي لا تمرّر `item_id`: الطقم المفرد لا
+    # يتكرّر، فمطابقته برقمه سليمة وتُبقي السلوك القديم كما هو.
+    free_by_wo = {}
+    for r in old:
+        if not r["is_bulk"]:
+            free_by_wo.setdefault(r["work_order_id"], []).append(r)
+    claimed = set()
 
     # لا تحقق من حالة الأطقم: الفاتورة قديمة وحالتها اليوم قد تكون
     # نتيجة عمليات لاحقة لا علاقة لها بها.
     all_ids = {c.get("work_order_id") for c in cart}
     new_lines = _fetch_cart_lines(
         conn, cart, kind,
-        skip_ids=(all_ids if preserve_stock else set(old.keys())))
+        skip_ids=(all_ids if preserve_stock
+                  else {r["work_order_id"] for r in old}))
     # حالة الطقم بعد هذه الفاتورة وقبلها
     out_status = "sold" if kind == "sale" else "in_stock"
     back_status = "in_stock" if kind == "sale" else "sold"
 
-    seen, added, updated, removed, touched = set(), [], [], [], []
+    added, updated, removed, touched = [], [], [], []
     dw = 0.0          # صافي فرق الوزن
     dg = 0.0          # صافي فرق الأجور
 
     for li in new_lines:
         wo = li["wo"]
         wid = wo["id"]
-        seen.add(wid)
         w = round(float(li["weight"] or 0), 3)
         wage = float(li["wage"] or 0)
         wages = gold_math.total_wages(wage, w) if not internal else 0.0
-        prev = old.get(wid)
+
+        # مطابقة السطر بسطره: برقمه إن جاء، وإلا فبطقمه المفرد.
+        # وما لا يُطابَق سطرٌ **مُضاف** — وهو ما يجعل ١٠٠ ثم ٥٠
+        # سطرين مستقلّين لا سطراً يدهس الآخر.
+        prev = None
+        iid = li.get("item_id")
+        if iid is not None and iid in by_item and iid not in claimed:
+            prev = by_item[iid]
+        elif iid is None:
+            pool = free_by_wo.get(wid) or []
+            while pool:
+                cand = pool.pop(0)
+                if cand["id"] not in claimed:
+                    prev = cand
+                    break
+        if prev is not None:
+            claimed.add(prev["id"])
 
         if prev is None:
             conn.execute(
@@ -608,9 +642,10 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         dg += (wages - og)
         updated.append(wo["work_order_no"])
 
-    for wid, prev in old.items():
-        if wid in seen:
+    for prev in old:
+        if prev["id"] in claimed:
             continue
+        wid = prev["work_order_id"]
         ow = round(float(prev["registered_weight"] or 0), 3)
         og = round(float(prev["wages"] or 0), 2)
         # بند محذوف: يعود الطقم لحالته السابقة فقط إن كانت هذه

@@ -1143,9 +1143,21 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
                f"تعديل دفعة توريد: +{len(added)} · ~{len(updated)} · "
                f"-{len(removed)} · مباع محفوظ {len(set(kept_sold))} · "
                f"صافي الوزن {delta:+.3f} جم")
+    # ══ `total_registered` — مفتاحٌ كان ناقصاً ══
+    # الشاشة تعرضه في رسالة «تم الترحيل» للمسارين معاً: الإنشاء
+    # والتعديل. وكان الإنشاء وحده يعيده، فالتعديل يرفع
+    # `KeyError: 'total_registered'` **بعد** إغلاق المعاملة بنجاح —
+    # فتُحفظ الدفعة ويرى المستخدم رسالة خطأ إنجليزية لا يفهمها ولا
+    # تدلّ على شيء، ويظنّ أن التعديل لم يتمّ فيعيده.
+    # ويُقرأ من القاعدة لا يُجمَع من السطور: هو وزن الدفعة كما صارت
+    # بعد التعديل — بما فيها الأطقم المباعة التي بقيت كما هي.
+    total_reg = conn.execute(
+        "SELECT COALESCE(SUM(registered_weight),0) t FROM work_orders"
+        " WHERE entry_id=? AND is_deleted=0", (entry_id,)).fetchone()["t"]
     return {"entry_id": entry_id, "added": added, "updated": updated,
             "removed": removed, "kept_sold": sorted(set(kept_sold)),
             "delta": delta,
+            "total_registered": round(float(total_reg or 0), 3),
             "items": [{"work_order_no": n,
                        "registered_weight": 0, "standing_gold": 0}
                       for n in (added + updated)]}

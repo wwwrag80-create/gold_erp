@@ -121,13 +121,12 @@ class ColumnFitter(QtCore.QObject):
                 t.setColumnWidth(i, px)
                 used += px
             t.setColumnWidth(n - 1, max(self.min_px, avail - used - 2))
-            # ارتفاع الصفوف يُعاد حسابه للجداول الصغيرة فقط: القياس
-            # يقرأ كل خلية، وعلى مئات الصفوف يُجمّد الواجهة.
-            try:
-                if t.rowCount() <= 120 and t.wordWrap():
-                    t.resizeRowsToContents()
-            except Exception:
-                pass
+            # ملاحظة: كان هنا `resizeRowsToContents()` للجداول الصغيرة،
+            # فيصير ارتفاع كل صفٍّ بقدر محتواه: صفٌّ بيانه سطرٌ يبقى
+            # قصيراً وصفٌّ بيانه طويل يعلو ثلاثة أضعاف — وهو ما شُكي
+            # منه بـ«صفٌّ واسع وصفٌّ قصير وصفٌّ كبير». ارتفاع الصف
+            # صار من شأن `fill`/`bulk_rows`/`ledger_rows`: واحدٌ
+            # دائماً، وما طال من النصّ يُقصّ ويبقى في التلميح.
         except Exception:
             pass
         finally:

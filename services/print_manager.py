@@ -252,6 +252,19 @@ def thw(label, pct=None):
     return f'<th>{label}</th>'
 
 
+def thspan(label, colspan=1, rowspan=1, align="center"):
+    """خلية رأس تمتدّ على عدة أعمدة أو صفوف.
+
+    تلزم للرؤوس ذات الطابقين: طابقٌ يجمع أعمدة الذهب تحت عنوان واحد
+    وأعمدة الأجور تحت آخر، وطابقٌ تحته بالفئات العمرية. فيعرف
+    القارئ أيّ وحدةٍ يقرأ قبل أن يقرأ الرقم.
+    """
+    a = ' class="r"' if align == "right" else ""
+    cs = f' colspan="{colspan}"' if colspan > 1 else ""
+    rs = f' rowspan="{rowspan}"' if rowspan > 1 else ""
+    return f'<th{a}{cs}{rs}>{label}</th>'
+
+
 def tdw(value, pct=None, align="center"):
     """خلية بيانات؛ align='right' لعمود البيان."""
     cls = ' class="r"' if align == "right" else ""
@@ -1878,36 +1891,48 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
 
     show_cash = dim in ("both", "cash")
     show_gold = dim in ("both", "gold")
-    heads = [thw("الجهة"), thw("أقدم دين (يوم)")]
-    if show_cash:
-        heads += [thw(f"نقد {b}") for b in aging.BUCKET_LABELS]
-        heads += [thw("إجمالي النقد")]
+
+    # ══ رأسٌ من صفّين ══
+    # صفّ علويٌّ يجمع أعمدة **الذهب** تحت عنوان واحد، وآخر يجمع
+    # أعمدة **الأجور** — فالعين تعرف أيّ وحدةٍ تقرأ قبل أن تقرأ
+    # الرقم. كان الرأس صفّاً واحداً يكرّر «ذهب» و«نقد» في كل عمود،
+    # فتضيق الأعمدة ويطول العنوان ويصعب تتبّع الصف بالمسطرة.
+    # والذهب أولاً: المصنع يزن قبل أن يحاسب.
+    nb = len(aging.BUCKET_LABELS) + 1          # الفئات + عمود الإجمالي
+    top = [thspan("الجهة", rowspan=2, align="right"),
+           thspan("أقدم دين (يوم)", rowspan=2)]
+    sub = []
     if show_gold:
-        heads += [thw(f"ذهب {b}") for b in aging.BUCKET_LABELS]
-        heads += [thw(f"إجمالي الذهب ({u})")]
-    ncols = len(heads)
+        top.append(thspan(f"الذهب ({u})", colspan=nb))
+        sub += [thw(b) for b in aging.BUCKET_LABELS] + [thw("الإجمالي")]
+    if show_cash:
+        top.append(thspan("الأجور (ريال)", colspan=nb))
+        sub += [thw(b) for b in aging.BUCKET_LABELS] + [thw("الإجمالي")]
+    ncols = 2 + (nb if show_gold else 0) + (nb if show_cash else 0)
+    head_html = ("<tr>" + cells(*top) + "</tr>"
+                 + ("<tr>" + cells(*sub) + "</tr>" if sub else ""))
 
     body = ""
     for r in rows:
         tds = [tdw(r["name"], align="right"),
                tdw(en(str(r["days"] or "—")))]
-        if show_cash:
-            tds += [tdw(_w(x, 2) if x else "—") for x in r["cash_buckets"]]
-            tds += [tdw(_w(r["cash"], 2))]
         if show_gold:
             tds += [tdw(_gw(x) if x else "—") for x in r["gold_buckets"]]
             tds += [tdw(_gw(r["gold"]))]
+        if show_cash:
+            tds += [tdw(_w(x, 2) if x else "—") for x in r["cash_buckets"]]
+            tds += [tdw(_w(r["cash"], 2))]
         body += "<tr>" + cells(*tds) + "</tr>"
     if not body:
         body = f'<tr><td {TD} colspan="{ncols}">لا توجد أرصدة قائمة</td></tr>'
 
     tot = [thw("الإجمالي"), thw("—")]
-    if show_cash:
-        tot += [thw(_w(x, 2)) for x in t["cash_buckets"]]
-        tot += [thw(_w(t["cash"], 2))]
     if show_gold:
         tot += [thw(_gw(x)) for x in t["gold_buckets"]]
         tot += [thw(_gw(t["gold"]))]
+    if show_cash:
+        tot += [thw(_w(x, 2)) for x in t["cash_buckets"]]
+        tot += [thw(_w(t["cash"], 2))]
 
     pct_rows = ""
     for i, lbl in enumerate(aging.BUCKET_LABELS):
@@ -1927,7 +1952,7 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
     </table>
 
     {TBL}
-      <tr>{cells(*heads)}</tr>
+      {head_html}
       {body}
       <tr>{cells(*tot)}</tr>
     </table>

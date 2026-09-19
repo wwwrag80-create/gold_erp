@@ -193,6 +193,49 @@ def check_invoice_totals(conn):
     return bad
 
 
+# الحسابات المادية: ما فيها موجودٌ فعلاً في الخزنة أو الدرج
+NEGATIVE_WATCH = {
+    "1100": "خزينة التصنيع",
+    "1200": "الذهب المشغول",
+    "1310": "صندوق الكسر",
+    "1350": "الصب والتصفية",
+    "1400": "الصندوق النقدي",
+    "1500": "البنك",
+}
+
+
+def check_negative_stock(conn):
+    """أرصدةٌ مادية صارت سالبة — قراءةٌ لا مَنع.
+
+    **لماذا هنا لا عند الترحيل**: كان في النظام حارسٌ يفحص كل قيدٍ
+    لحظةَ ترحيله وينبّه. وأُلغي لأن الرصيد السالب في مصنعٍ يعمل حالةٌ
+    واقعية — بضاعةٌ تخرج قبل أن يُسجَّل توريدها — فكان التنبيه يتكرّر
+    على عملياتٍ سليمة حتى صار يُتجاهَل، وهذا أسوأ من غيابه.
+
+    لكنّ السالب **الباقي** آخرَ الشهر خللٌ حقيقي: توريدٌ لم يُسجَّل،
+    أو وزنٌ خرج مرتين، أو عيارٌ أُدخل خطأ. فمكانه تقريرٌ يُقرأ عند
+    المراجعة لا نافذةٌ تقاطع البيع. تُقرأ الأرصدة كما هي، ولا يُمنع
+    شيء ولا يُكتب شيء.
+    """
+    bad = []
+    for code, name in NEGATIVE_WATCH.items():
+        r = conn.execute(
+            "SELECT COALESCE(SUM(l.gold_debit-l.gold_credit),0) g,"
+            "       COALESCE(SUM(l.cash_debit-l.cash_credit),0) c"
+            " FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id"
+            " JOIN accounts a ON a.id=l.account_id"
+            " WHERE a.code=? AND e.is_deleted=0", (code,)).fetchone()
+        g = round(float(r["g"] or 0), 3)
+        c = round(float(r["c"] or 0), 2)
+        # هامشٌ يتجاوز خطأ التقريب وحده — لا يُقلق على مليغرام
+        if g < -0.011 or c < -0.011:
+            bad.append({"code": code, "name": name,
+                        "gold": g if g < -0.011 else 0.0,
+                        "cash": c if c < -0.011 else 0.0})
+    return bad
+
+
 def full_health(conn):
     """تقرير صحة شامل — يُعرض في شاشة الصيانة."""
     unbalanced = check_double_entry(conn)
@@ -200,9 +243,16 @@ def full_health(conn):
     integrity = check_db_integrity(conn)
     errors = recent_errors(5)
     inv_bad = check_invoice_totals(conn)
+    try:
+        negatives = check_negative_stock(conn)
+    except Exception:
+        negatives = []
+    # السالب **لا يُفشل** التقرير: حالةٌ تُراجَع لا خللٌ في الدفتر،
+    # والدفتر قد يكون متوازناً تماماً ورصيدُه سالب.
     ok = not (unbalanced or orphans or integrity or inv_bad)
     return {
         "invoice_totals": inv_bad,
+        "negatives": negatives,
         "ok": ok,
         "unbalanced": unbalanced,
         "orphans": orphans,

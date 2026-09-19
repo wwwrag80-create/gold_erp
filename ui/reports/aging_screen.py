@@ -74,9 +74,9 @@ class AgingScreen(QtWidgets.QWidget):
         head.addWidget(btn_print, 0)
 
         self.c_count = Card("عدد الجهات المدينة", "لها رصيد قائم")
-        self.c_cur = Card("جارٍ (0 – 30)", "ريال")
-        self.c_late = Card("متأخر (31 – 90)", "ريال")
-        self.c_bad = Card("متعثّر (أكثر من 90)", "ريال")
+        self.c_cur = Card("جارٍ (أقل من 30)", "أجور — ريال")
+        self.c_late = Card("متأخر (أقل من 90)", "أجور — ريال")
+        self.c_bad = Card("متعثّر (أكثر من 90)", "أجور — ريال")
         cards = QtWidgets.QHBoxLayout()
         cards.setSpacing(4)
         for c in (self.c_count, self.c_cur, self.c_late, self.c_bad):
@@ -220,30 +220,34 @@ class AgingScreen(QtWidgets.QWidget):
 
     # عناوين مختصرة على الشاشة: الفئة رقمان لا جملة، فالعمود يضيق
     # والعنوان يُقرأ كاملاً بدل أن يُقصّ.
-    SHORT = ("0 – 30", "31 – 60", "61 – 90", "+90")
+    # مصدرٌ واحد للتسمية مع الورقة (`models.aging.BUCKET_LABELS`):
+    # ما يراه المحاسب على الشاشة هو نفسه ما يُسلَّم للعميل مطبوعاً.
+    SHORT = aging.BUCKET_LABELS
 
     def _headers(self, dim):
+        # الذهب أولاً ثم الأجور: المصنع يزن قبل أن يحاسب، وكشف
+        # العميل يُقرأ بالوزن أولاً — فالترتيب يتبع القراءة.
         cols = ["الجهة", "الجوال", "أقدم\nدين"]
         both = dim == "both"
-        if dim in ("both", "cash"):
-            cols += [(f"نقد\n{b}" if both else b) for b in self.SHORT]
-            cols += ["إجمالي\nالنقد"]
         if dim in ("both", "gold"):
             cols += [(f"ذهب\n{b}" if both else b) for b in self.SHORT]
-            cols += [f"إجمالي\nالذهب"]
+            cols += ["إجمالي\nالذهب"]
+        if dim in ("both", "cash"):
+            cols += [(f"أجور\n{b}" if both else b) for b in self.SHORT]
+            cols += ["إجمالي\nالأجور"]
         cols += ["له علينا"]
         return cols
 
     def _row_cells(self, r, dim):
         out = [r["name"], r["phone"] or "—",
                str(r["days"]) if r["days"] else "—"]
-        if dim in ("both", "cash"):
-            out += [f"{x:,.2f}" if x else "" for x in r["cash_buckets"]]
-            out += [f"{r['cash']:,.2f}" if r["cash"] else ""]
         if dim in ("both", "gold"):
             out += [f"{kv.g(x):,.3f}" if x else ""
                     for x in r["gold_buckets"]]
             out += [f"{kv.g(r['gold']):,.3f}" if r["gold"] else ""]
+        if dim in ("both", "cash"):
+            out += [f"{x:,.2f}" if x else "" for x in r["cash_buckets"]]
+            out += [f"{r['cash']:,.2f}" if r["cash"] else ""]
         cr = []
         if r["cash_credit"]:
             cr.append(f"نقد {abs(r['cash_credit']):,.2f}")
@@ -275,13 +279,16 @@ class AgingScreen(QtWidgets.QWidget):
                         it.setForeground(QtGui.QColor("#8A6D1D"))
                     self.table.setItem(i, c, it)
             if rows:
+                # الترتيب نفسه الذي في `_headers` و`_row_cells`:
+                # الذهب أولاً ثم الأجور — وإلا وقع الإجمالي تحت عمودٍ
+                # ليس له، وهو خطأٌ لا يُرى لأن الأرقام تبدو معقولة.
                 tot = ["الإجمالي", "—", "—"]
-                if dim in ("both", "cash"):
-                    tot += [f"{x:,.2f}" for x in t["cash_buckets"]]
-                    tot += [f"{t['cash']:,.2f}"]
                 if dim in ("both", "gold"):
                     tot += [f"{kv.g(x):,.3f}" for x in t["gold_buckets"]]
                     tot += [f"{kv.g(t['gold']):,.3f}"]
+                if dim in ("both", "cash"):
+                    tot += [f"{x:,.2f}" for x in t["cash_buckets"]]
+                    tot += [f"{t['cash']:,.2f}"]
                 tot.append(f"نقد {abs(t['cash_credit']):,.2f}"
                            if t["cash_credit"] else "—")
                 last = len(rows)
