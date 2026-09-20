@@ -290,7 +290,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 8,    # التاريخ
                 7,    # نوع العملية
                 6,    # رقم السند
-                15,   # الجهة / الحساب المقابل
+                19,   # الجهة / الحساب المقابل — اسمٌ كاملٌ لا كلمتان
                 19,   # البيان
                 6, 6, 7,      # مدين/دائن/رصيد ذهب
                 6, 6, 7,      # مدين/دائن/رصيد نقد
@@ -328,7 +328,9 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                         self.table.setItem(i, c, it)
             finally:
                 self.table.setUpdatesEnabled(True)
-            ledger_rows(self.table)
+            # الجهة (٣) والبيان (٤): يتّسعان لسطرين إن لزم،
+            # وكل الصفوف ترتفع معاً فيبقى الجدول منتظماً
+            ledger_rows(self.table, wrap_cols=(3, 4))
             self.table.setHorizontalScrollBarPolicy(
                 QtCore.Qt.ScrollBarAlwaysOff)
             fit_columns(self.table)
@@ -574,7 +576,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                     self.table.setItem(i, c, it)
         finally:
             self.table.setUpdatesEnabled(True)
-        ledger_rows(self.table)
+        ledger_rows(self.table, wrap_cols=(3, 4))
         self.table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         fit_columns(self.table)
 

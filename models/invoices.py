@@ -15,12 +15,40 @@ from services.accounting_engine import post_entry
 from services.audit import log_action
 
 
+def _where_is(conn, work_order_id):
+    """أين ذهب هذا الطقم؟ — آخر فاتورةٍ حرّكته، برقمها وتاريخها وجهتها.
+
+    رسالةُ رفضٍ تقول «ليس بالمخزون» وتسكت تترك المحاسب يفتّش. وهذه
+    تدلّه على المستند الذي أخرجه فيقرّر في ثانية: يحذفه من تلك
+    الفاتورة، أو يرتجعه، أو يترك الأمر.
+    """
+    try:
+        r = conn.execute(
+            "SELECT i.invoice_no, i.invoice_date, i.kind,"
+            "       COALESCE(e.name,'—') party"
+            "  FROM invoice_items it"
+            "  JOIN invoices i ON i.id=it.invoice_id"
+            "  LEFT JOIN entities e ON e.id=i.customer_id"
+            " WHERE it.work_order_id=? AND i.is_deleted=0"
+            " ORDER BY i.invoice_date DESC, i.id DESC LIMIT 1",
+            (work_order_id,)).fetchone()
+    except Exception:
+        return ""
+    if not r:
+        return ""
+    label = "بيع" if r["kind"] == "sale" else "مرتجع"
+    return (f"\n\nآخر حركةٍ له: {label} بالفاتورة {r['invoice_no']} "
+            f"بتاريخ {r['invoice_date']} — {r['party']}."
+            f"\nاحذفه من تلك الفاتورة أو ارتجعه أولاً.")
+
+
 def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
     """يحلّ كل سطر من السلة إلى (صف الطقم، الوزن المطبَّق، أجر الجرام).
     cart: [{"work_order_id", "weight": None أو رقم للتجميعي 0001,
             "wage_override": None أو رقم}]"""
     need_status = "in_stock" if kind == "sale" else "sold"
     out = []
+    seen_single = set()
     for c in cart:
         wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
                           (c["work_order_id"],)).fetchone()
@@ -44,7 +72,12 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
             if wo["id"] not in (skip_ids or ()) \
                     and wo["status"] != need_status:
                 need = "بالمخزون" if need_status == "in_stock" else "مباعاً"
-                raise ValueError(f"الطقم {wo['work_order_no']} ليس {need}")
+                # الرفض وحده لا يكفي: «ليس بالمخزون» تترك المستخدم
+                # يبحث. فيُدلّ على **أين ذهب** ليقرّر — يحذفه من تلك
+                # الفاتورة أو يرتجعه أو يتركه.
+                raise ValueError(
+                    f"الطقم {wo['work_order_no']} ليس {need}"
+                    + _where_is(conn, wo["id"]))
             # الوزن المُدخل صراحةً يُعتمد بدل وزن البطاقة.
             # **المبرّر المحاسبي**: الطقم قد يعود بوزن مختلف عمّا
             # سُجّل (خطأ إدخال أصلي أو تصحيح ميزان)، والواقع المادي
@@ -53,6 +86,19 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
             _w = c.get("weight")
             weight = (float(_w) if _w not in (None, "", 0)
                       else wo["registered_weight"])
+        # ══ الطقم المفرد لا يتكرّر في فاتورة ══
+        # قطعةٌ واحدة تخرج مرة: سطران لها في فاتورةٍ واحدة يعني أن
+        # العميل حوسب على أجرتها مرتين ووزنها خرج مرتين من المخزون،
+        # وهو خللٌ صامت لا يظهر إلا في جردٍ لاحق. والرقم التجميعي
+        # مستثنى: هو **رصيدٌ وزني** يُباع منه مراراً بطبيعته.
+        if not wo["is_bulk"]:
+            if wo["id"] in seen_single:
+                raise ValueError(
+                    f"الطقم {wo['work_order_no']} مكرّر في الفاتورة — "
+                    "الطقم المفرد قطعةٌ واحدة لا تُباع مرتين في مستندٍ "
+                    "واحد.\n\nاحذف السطر المكرّر، أو استعمل الرقم "
+                    "التجميعي إن أردت بيع وزنٍ لا قطعة.")
+            seen_single.add(wo["id"])
         # `item_id`: هويّة السطر في فاتورةٍ تُعدَّل. الرقم التجميعي
         # **رصيد وزني لا قطعة**، فيتكرّر في الفاتورة الواحدة بأسطرٍ
         # مستقلة — ولا يميّزها إلا هذا. (تفصيله في `update_invoice`.)
@@ -563,13 +609,21 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
             free_by_wo.setdefault(r["work_order_id"], []).append(r)
     claimed = set()
 
-    # لا تحقق من حالة الأطقم: الفاتورة قديمة وحالتها اليوم قد تكون
-    # نتيجة عمليات لاحقة لا علاقة لها بها.
-    all_ids = {c.get("work_order_id") for c in cart}
+    # ══ مَن يُعفى من فحص الحالة ══
+    # أطقمُ **هذه الفاتورة وحدها**. حالتها اليوم أثرُ هذه الفاتورة
+    # نفسها، فاشتراط الحالة السابقة عليها يمنع تعديل الفاتورة التي
+    # غيّرتها أصلاً.
+    #
+    # **والخلل الذي كان**: الإعفاء كان يشمل السلة كلها — بما فيها
+    # **المُضاف حديثاً**. فيُضاف إلى فاتورةٍ قديمة طقمٌ خرج وبِيع في
+    # فاتورةٍ أخرى، بلا اعتراض ولا رسالة: فيصير الطقم الواحد مباعاً
+    # لعميلين، وكلاهما مدينٌ بأجرته، والذهب خرج مرة. وهو ما شُكي منه
+    # بـ«يظهر لي طقمٌ خارج ما لي دخلٌ به».
+    #
+    # الآن يُفحص المُضاف كما يُفحص في فاتورةٍ جديدة تماماً.
     new_lines = _fetch_cart_lines(
         conn, cart, kind,
-        skip_ids=(all_ids if preserve_stock
-                  else {r["work_order_id"] for r in old}))
+        skip_ids={r["work_order_id"] for r in old})
     # حالة الطقم بعد هذه الفاتورة وقبلها
     out_status = "sold" if kind == "sale" else "in_stock"
     back_status = "in_stock" if kind == "sale" else "sold"

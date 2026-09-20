@@ -1968,6 +1968,78 @@ def main():
     check("والإضافة سُجّلت طقماً جديداً", _ed["added"] == ["SB-3"],
           str(_ed["added"]))
 
+    step("28ج) تعديل فاتورة لا يبيع طقماً مباعاً مرتين")
+    # ══ الخلل: الذهب يخرج مرة ويُحاسَب عليه عميلان ══
+    # عند تعديل فاتورة كان الإعفاء من فحص حالة الطقم يشمل السلة كلها
+    # — بما فيها **المُضاف حديثاً**. فيُضاف إلى فاتورةٍ قديمة طقمٌ
+    # بِيع في فاتورةٍ أخرى، بلا اعتراض ولا رسالة. النتيجة: الطقم
+    # الواحد مباعٌ لعميلين، وكلاهما مدينٌ بأجرته.
+    from models.inventory import create_work_orders_batch as _b2
+    from models import invoices as invoices
+
+    def _upd2(inv_id, cart):
+        with db() as conn:
+            return invoices.update_invoice(conn, inv_id, cart, "admin")
+
+    with db() as conn:
+        _b2(conn, [{"wo_no": "DS-0", "gold": 15.0, "wage_per_gram": 20.0},
+                   {"wo_no": "DS-1", "gold": 25.0, "wage_per_gram": 20.0}],
+            "2026-03-01", "admin")
+        _w = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'DS-%'")}
+        # فاتورةٌ قديمة لا تحوي DS-1 إطلاقاً
+        _old = create_sale(conn, cust, [{"work_order_id": _w["DS-0"]}],
+                           "2026-03-05", "admin", apply_vat=False)
+        _c2 = conn.execute(
+            "SELECT id FROM entities WHERE entity_type='customer'"
+            " AND is_deleted=0 ORDER BY id DESC").fetchone()["id"]
+        # وفاتورةٌ أحدث تبيع DS-1 لعميلٍ آخر
+        _new = create_sale(conn, _c2, [{"work_order_id": _w["DS-1"]}],
+                           "2026-03-20", "admin", apply_vat=False)
+    check("طقمٌ بِيع لعميل في فاتورةٍ أحدث", bool(_new.get("id")))
+
+    # الآن: محاولة إضافته إلى الفاتورة **القديمة** وهو مباعٌ لغيرها
+    with db(readonly=True) as conn:
+        _, _oit = invoices.get_invoice_full(conn, _old["id"])
+    _cart = [{"work_order_id": t["work_order_id"], "item_id": t["item_id"],
+              "weight": t["registered_weight"]} for t in _oit]
+    _cart.append({"work_order_id": _w["DS-1"]})
+    expect_error("إضافته إلى فاتورةٍ قديمة تُرفض — لا يُباع مرتين",
+                 lambda: _upd2(_old["id"], _cart), "ليس بالمخزون")
+    with db(readonly=True) as conn:
+        _n = conn.execute(
+            "SELECT COUNT(*) c FROM invoice_items it"
+            " JOIN invoices i ON i.id=it.invoice_id"
+            " WHERE it.work_order_id=? AND i.is_deleted=0"
+            "   AND i.kind='sale'", (_w["DS-1"],)).fetchone()["c"]
+    check("ويبقى في فاتورة بيعٍ واحدة", _n == 1, f"{_n}")
+
+    # والطقم المفرد لا يتكرّر في الفاتورة الواحدة
+    expect_error("تكرار الطقم المفرد في فاتورةٍ واحدة يُرفض",
+                 lambda: _upd2(_old["id"], [
+                     {"work_order_id": _w["DS-0"],
+                      "item_id": _oit[0]["item_id"]},
+                     {"work_order_id": _w["DS-0"]}]),
+                 "مكرّر في الفاتورة")
+
+    # والرسالة تدلّ على **أين ذهب** لا تكتفي بالرفض
+    try:
+        _upd2(_old["id"], _cart)
+        _msg = ""
+    except Exception as _e:
+        _msg = str(_e)
+    check("والرسالة تسمّي الفاتورة التي أخذته وتاريخها وجهتها",
+          "آخر حركةٍ له" in _msg and _new["invoice_no"] in _msg,
+          _msg.replace("\n", " ")[:110])
+
+    # وفحصُ الدفتر يكشف ما وقع قبل الإصلاح
+    from services import health as _hh
+    with db(readonly=True) as conn:
+        _dbl = _hh.check_double_sold(conn)
+    check("وفحص «بِيع أكثر من مرة» نظيفٌ على دفترٍ سليم",
+          _dbl == [], str(_dbl)[:120])
+
     step("29أ) تعديل فاتورة على الرقم التجميعي — أسطرٌ مستقلة")
     # ══ الخلل: مئة جرامٍ تضيع من الدفتر بلا أثر ══
     # بنود الفاتورة كانت تُفهرَس بـ`work_order_id`. صحيحٌ للطقم

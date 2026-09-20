@@ -92,8 +92,8 @@ QTableWidget, QTreeWidget, QListWidget {
   background: @surface; alternate-background-color: @surface2;
   gridline-color: @grid; border: 1px solid @line; border-radius: 10px;
   color: @ink; selection-background-color: @goldSoft; selection-color: @ink;
-  font-size: 12pt; }
-QTableWidget::item { padding: 5px 6px; }
+  font-size: 12.5pt; }
+QTableWidget::item { padding: 7px 8px; }
 QTableWidget::item:hover { background: @hover; }
 QHeaderView::section { background: @hdrBg; color: @hdrFg; padding: 9px 6px;
   font-size: 11pt; font-weight: bold; border: none;

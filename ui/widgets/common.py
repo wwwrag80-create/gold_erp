@@ -207,6 +207,22 @@ def stretch_column(table, col):
 BIG_TABLE = 120
 
 
+def row_height(table, lines=1, tight=False):
+    """ارتفاع صفٍّ مريحٌ مشتقٌّ من قياس الخط لا من رقمٍ ثابت.
+
+    الرقم الثابت يصلح لجهازٍ واحد: يكبر خطُّ النظام أو تدقّ الشاشة
+    فيُقصّ النصّ في صفٍّ ضيق، أو يتباعد في صفٍّ فارغ. والاشتقاق من
+    `lineSpacing` يجعل النسبة بين الخط والصف واحدةً على أي جهاز.
+
+    `tight` للجداول الكبيرة: حشوٌ أقلّ فيظهر منها أكثر في الشاشة
+    نفسها، ويبقى النصّ كاملاً غير مقصوص.
+    """
+    fm = QtGui.QFontMetrics(table.font())
+    line = max(16, fm.lineSpacing())
+    pad = 10 if tight else 14
+    return int(max(lines, 1) * line + pad)
+
+
 def fill(table, headers, rows):
     """يملأ الجدول دفعةً واحدة — بلا قياس مكلف على الجداول الكبيرة.
 
@@ -232,8 +248,10 @@ def fill(table, headers, rows):
         table.setTextElideMode(QtCore.Qt.ElideRight)
         vh = table.verticalHeader()
         vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-        # الجداول الكبيرة أضيق صفّاً: يظهر منها أكثر في الشاشة نفسها
-        vh.setDefaultSectionSize(26 if big else 32)
+        # الارتفاع من قياس الخط لا برقمٍ ثابت: يكبر مع تكبير خط
+        # النظام ومع دقّة الشاشة، فلا يُقصّ النصّ على جهازٍ ولا يتباعد
+        # على آخر. والجداول الكبيرة أضيق قليلاً فيظهر منها أكثر.
+        vh.setDefaultSectionSize(row_height(table, tight=big))
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
         table.setRowCount(len(rows))
@@ -292,7 +310,7 @@ def bulk_rows(table, n_rows, headers=None):
         table.setWordWrap(False)
         table.setTextElideMode(QtCore.Qt.ElideRight)
         vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-        vh.setDefaultSectionSize(30 if big else 32)
+        vh.setDefaultSectionSize(row_height(table, tight=big))
         if headers:
             table.setColumnCount(len(headers))
             table.setHorizontalHeaderLabels(list(headers))
@@ -313,7 +331,7 @@ def bulk_rows(table, n_rows, headers=None):
             pass
 
 
-def ledger_rows(table, height=32):
+def ledger_rows(table, height=38, wrap_cols=(), max_lines=2):
     """صفوفٌ متساوية الارتفاع — هيئة الكشف المحاسبي.
 
     **الشكوى**: «الجدول يظهر غير مرتب: صفٌّ واسع وصفٌّ قصير وصفٌّ
@@ -323,14 +341,46 @@ def ledger_rows(table, height=32):
     لا تستطيع العين تتبّع سطرٍ فيه بالمسطرة — وهو أول ما يحتاجه من
     يراجع كشف حساب.
 
-    الكشف المحاسبي سطرٌ واحد لكل حركة، بارتفاع واحد. وما طال من
-    البيان يُقصّ بثلاث نقاط ويبقى كاملاً في التلميح، فلا يضيع شيء.
+    الكشف المحاسبي سطرٌ واحد لكل حركة، بارتفاع واحد.
+
+    **وارتفاعٌ يكفي المحتوى**: قصُّ اسم الحساب على كلمتين يُفقده
+    تمييزه — «خزينة التصنيع…» لا تقول أيّ خزينة. فيُقاس أطولُ اسمٍ
+    في العمود مرةً واحدة: إن احتاج سطرين رُفع **كل** الصفوف إلى
+    سطرين. فالاسم يظهر كاملاً والجدول يبقى منتظماً — لا هذا على حساب
+    ذاك. وسطران حدٌّ أقصى: ما جاوزهما يُقصّ ويبقى في التلميح، وإلا
+    صار الصفُّ فقرة.
+
+    الارتفاع يُشتقّ من قياس الخط لا برقمٍ ثابت، فيكبر مع تكبير خط
+    النظام ومع دقّة الشاشة بلا ضبطٍ يدوي.
+
+    `wrap_cols` أعمدة النصّ الطويل (الجهة · البيان). بلا تمريرها
+    يبقى السطر واحداً كما كان.
     """
-    table.setWordWrap(False)
+    fm = QtGui.QFontMetrics(table.font())
+    line = max(16, fm.lineSpacing())
+    need = 1
+    if wrap_cols:
+        # أطولُ نصٍّ في الأعمدة المطلوبة — بعدد الحروف، فالقياس
+        # الحقيقي يجري مرةً واحدة على أطولها لا على كل خلية.
+        longest, col_w = "", {}
+        for c in wrap_cols:
+            col_w[c] = max(60, table.columnWidth(c) - 14)
+        pick = None
+        for r in range(min(table.rowCount(), 400)):
+            for c in wrap_cols:
+                it = table.item(r, c)
+                t = it.text() if it else ""
+                if len(t) > len(longest):
+                    longest, pick = t, c
+        if longest and pick is not None:
+            h = fm.boundingRect(0, 0, col_w[pick], 0,
+                                QtCore.Qt.TextWordWrap, longest).height()
+            need = max(1, min(int(max_lines), -(-h // line)))
+    table.setWordWrap(need > 1)
     table.setTextElideMode(QtCore.Qt.ElideRight)
     vh = table.verticalHeader()
     vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-    vh.setDefaultSectionSize(height)
+    vh.setDefaultSectionSize(max(int(height), row_height(table, need)))
 
 
 def num_item(text, tip=None):
