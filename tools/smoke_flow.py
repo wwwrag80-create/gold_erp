@@ -2266,6 +2266,99 @@ def main():
           all(abs(u["potential"] - u["weight"] * u["wage_per_gram"]) < 0.01
               for u in _un.values()))
 
+    step("32) الأصول الثابتة والإهلاك")
+    # ══ لماذا يُفحص بالأرقام ══
+    # الإهلاك مصروفٌ لا يُدفع نقداً، وخطؤه لا يظهر في أي رصيد: قسطٌ
+    # زائد يُنقص الربح وناقصٌ يضخّمه، وكلاهما يمرّ صامتاً إلى قائمة
+    # الدخل. فتُبنى حالةٌ يُعرف جوابها سلفاً ويُتحقَّق من كل رقم.
+    from models import assets as _fa
+    from services.accounting_engine import balance_by_code
+
+    with db(readonly=True) as conn:
+        _da = {a["code"] for a in _fa.depreciable_accounts(conn)}
+    check("حسابات الأصول القابلة للإهلاك تُقرأ من الشجرة",
+          {"1710", "1730"} <= _da and "1790" not in _da,
+          f"المجمّع مستثنى · {sorted(_da)}")
+
+    # مكينة ٦٠٬٠٠٠ · عمر ٦٠ شهراً · تخريدية ٦٬٠٠٠ ⇒ القسط ٩٠٠
+    with db() as conn:
+        _mach = acc_id(conn, "1710")
+        post_entry(conn, "2026-01-05", "شراء مكينة ليزر",
+                   [{"account_id": _mach, "cash_debit": 60_000.0},
+                    {"account_id": acc_id(conn, "1400"),
+                     "cash_credit": 60_000.0}], username="admin")
+        _aid = _fa.add_asset(conn, "مكينة ليزر", _mach, 60_000.0, 60,
+                             "2026-01-01", salvage=6_000.0, username="admin")
+    check("القسط الشهري = (التكلفة − التخريدية) ÷ العمر",
+          abs(_fa.monthly_amount(60_000.0, 6_000.0, 60) - 900.0) < 0.01)
+
+    for _p in ("2026-01", "2026-02", "2026-03"):
+        with db() as conn:
+            _fa.run_depreciation(conn, _p, "admin")
+    with db() as conn:
+        _again = _fa.run_depreciation(conn, "2026-02", "admin")
+    check("الشهر لا يُهلَك مرتين", _again["already"] is True)
+
+    with db(readonly=True) as conn:
+        _a = [x for x in _fa.list_assets(conn) if x["id"] == _aid][0]
+        _exp = balance_by_code(conn, "5860")[1]
+        _accm = balance_by_code(conn, "1790")[1]
+        _cost = balance_by_code(conn, "1710")[1]
+    check("المُهلَك بعد ٣ أشهر = ٢٬٧٠٠",
+          abs(_a["accumulated"] - 2_700.0) < 0.01, f"{_a['accumulated']}")
+    check("والصافي الدفتري = ٥٧٬٣٠٠",
+          abs(_a["net_book"] - 57_300.0) < 0.01, f"{_a['net_book']}")
+    check("مصروف الإهلاك مدينٌ بالمبلغ نفسه",
+          abs(_exp - 2_700.0) < 0.01, f"{_exp}")
+    check("والمجمّع دائنٌ به — لا يُنقص حساب الأصل",
+          abs(_accm + 2_700.0) < 0.01 and abs(_cost - 60_000.0) < 0.01,
+          f"مجمّع {_accm} · تكلفة {_cost}")
+
+    # آخر قسطٍ يأخذ الكسر فينتهي عند التخريدية بالضبط
+    with db() as conn:
+        _sid = _fa.add_asset(conn, "جهاز صغير", acc_id(conn, "1740"),
+                             1_000.0, 3, "2026-04-01", salvage=100.0,
+                             username="admin")
+    for _p in ("2026-04", "2026-05", "2026-06", "2026-07"):
+        with db() as conn:
+            try:
+                _fa.run_depreciation(conn, _p, "admin")
+            except ValueError:
+                pass
+    with db(readonly=True) as conn:
+        _s = [x for x in _fa.list_assets(conn) if x["id"] == _sid][0]
+    check("آخر قسطٍ يأخذ الكسر فلا يتجاوز القيمة القابلة للإهلاك",
+          abs(_s["accumulated"] - 900.0) < 0.01, f"{_s['accumulated']}")
+    check("وينتهي الصافي الدفتري عند التخريدية بالضبط",
+          abs(_s["net_book"] - 100.0) < 0.01, f"{_s['net_book']}")
+
+    # الأصل المُخرَج من الخدمة يتوقّف قسطه
+    with db() as conn:
+        _fa.dispose_asset(conn, _aid, "2026-08-01", "admin")
+        _due = _fa.due_amount(
+            conn, [x for x in _fa.list_assets(conn, include_disposed=True)
+                   if x["id"] == _aid][0], "2026-08")
+    check("الأصل خارج الخدمة لا يُهلَك", abs(_due) < 0.01, f"{_due}")
+
+    # عمرٌ غير محدَّد ⇒ لا يُهلَك بالتخمين
+    with db() as conn:
+        conn.execute("INSERT INTO fixed_assets(name, purchase_date, cost,"
+                     " created_by) VALUES('أصلٌ من المشتريات','2026-01-01',"
+                     " 5000, 'admin')")
+    with db(readonly=True) as conn:
+        _t = _fa.totals(conn)
+        _un = [x for x in _fa.list_assets(conn)
+               if int(x.get("life_months") or 0) <= 0]
+    check("أصلٌ اشتُري بلا عمرٍ إنتاجي يُرصد ولا يُهلَك",
+          _t.get("unset", 0) >= 1 and all(
+              _fa.due_amount(conn, x, "2026-09") == 0 for x in _un),
+          f"{_t.get('unset')} أصلاً")
+
+    with db(readonly=True) as conn:
+        _bg, _bc, _gv, _cv = ledger_balanced(conn)
+    check("والدفتر متوازن بعد الإهلاك كله", _bg and _bc,
+          f"ذهب {_gv} · نقد {_cv}")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
