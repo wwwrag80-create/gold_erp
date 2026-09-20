@@ -45,6 +45,7 @@ from ui.reports.aging_screen import AgingScreen
 from ui.reports.bank_recon_screen import BankReconScreen
 from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.assets_screen import AssetsScreen
+from ui.reports.movement_screen import MovementScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
@@ -175,6 +176,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("أرشيف المستندات والطباعة", self.archive_screen),
                     # المكائن والسيارات كانت تُشترى ولا تُهلَك:
                     # ربحٌ لم يتحقّق وأصولٌ بثمن شرائها للأبد
+                    # «كانت المديونية ٤٠ كيلو — كم صارت وماذا
+                    # حصل؟» سؤالٌ لا يجيبه كشفُ الحساب
+                    ("تحليل حركة الرصيد",
+                     Lazy(lambda: MovementScreen(user),
+                          "تحليل حركة الرصيد")),
                     ("الأصول الثابتة والإهلاك",
                      Lazy(lambda: AssetsScreen(user),
                           "الأصول الثابتة والإهلاك")),

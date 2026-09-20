@@ -2359,6 +2359,105 @@ def main():
     check("والدفتر متوازن بعد الإهلاك كله", _bg and _bc,
           f"ذهب {_gv} · نقد {_cv}")
 
+    step("33) تحليل حركة الرصيد — الجسر ونشاط الأيام")
+    # ══ الضمانة التي يقوم عليها التصميم ══
+    # الجسر (أول المدة + ما زاد − ما نقص = آخر المدة) يجب أن يقفل
+    # **دائماً**. ولو صُنّفت الحركات بأسمائها لسقط منه كلُّ ما لا اسم
+    # له — تسويةٌ يدوية أو نوعٌ يُضاف لاحقاً — فلا يساوي المجموعُ
+    # الرصيدَ الختامي ويفقد التقرير قيمته كلها. فالأثر يُؤخذ من
+    # «مدين − دائن»، ويُفحص هنا بحركةٍ لا اسم لها في القائمة.
+    from models import movement as _mv
+    from models.entities import add_entity, get_entity
+
+    with db() as conn:
+        _mc = add_entity(conn, "عميل تحليل الحركة", "customer",
+                         username="admin")
+        _macc = get_entity(conn, _mc)["account_id"]
+        _b3 = _batch(conn, [{"wo_no": f"MV{i}", "gold": 100.0,
+                             "wage_per_gram": 20.0} for i in range(1, 6)],
+                     "2026-02-01", "admin")
+        _mw = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no LIKE 'MV%'"
+            " ORDER BY id")]
+    # رصيدٌ افتتاحي: بيعتان في يناير
+    with db() as conn:
+        create_sale(conn, _mc, [{"work_order_id": _mw[0]},
+                                {"work_order_id": _mw[1]}],
+                    "2026-01-15", "admin", apply_vat=False)
+    # الفترة: بيعٌ في يومين · مرتجعٌ في يوم · قبضٌ في ثلاثة أيام
+    for i, wid in enumerate(_mw[2:4]):
+        with db() as conn:
+            create_sale(conn, _mc, [{"work_order_id": wid}],
+                        f"2026-03-{i + 2:02d}", "admin", apply_vat=False)
+    with db() as conn:
+        invoices.create_sale_return(conn, _mc,
+                                    [{"work_order_id": _mw[2]}],
+                                    "2026-03-10", "admin", apply_vat=False)
+    for i in range(3):
+        with db() as conn:
+            create_voucher(conn, "receipt", f"2026-03-{i + 20:02d}",
+                           "admin", entity_id=_mc, gold_weight=25.0,
+                           gold_karat=18)
+    # وحركةٌ **لا اسم لها** في قائمة الأنواع — قيدٌ يدوي على الحساب
+    with db() as conn:
+        post_entry(conn, "2026-03-25", "تسوية يدوية على العميل",
+                   [{"account_id": _macc, "gold_debit": 7.0},
+                    {"account_id": acc_id(conn, "5300"),
+                     "gold_credit": 7.0}], username="admin")
+
+    with db(readonly=True) as conn:
+        _r = _mv.analyze(conn, _macc, "2026-03-01", "2026-03-31")
+
+    _sum = round(_r["opening"]["gold"]
+                 + sum(b["gold"] for b in _r["buckets"]), 3)
+    check("الجسر يقفل: الافتتاحي + الحركة = الختامي",
+          abs(_sum - _r["closing"]["gold"]) < 0.0011,
+          f"{_sum} مقابل {_r['closing']['gold']}")
+    check("والرصيد التراكمي ينتهي عند الختامي",
+          abs(_r["daily"][-1]["gbal"] - _r["closing"]["gold"]) < 0.0011,
+          f"{_r['daily'][-1]['gbal']}")
+
+    _by = {b["label"]: b for b in _r["buckets"]}
+    check("المبيعات تزيد الدين والمرتجع والقبض يُنقصانه",
+          _by["مبيعات"]["gold"] > 0 and _by["مرتجع"]["gold"] < 0
+          and _by["قبض"]["gold"] < 0,
+          " · ".join(f"{k}={v['gold']}" for k, v in _by.items()))
+    check("عدد الأيام لكل نوع يُحسب بالأيام لا بالمستندات",
+          _by["مبيعات"]["days"] == 2 and _by["مرتجع"]["days"] == 1
+          and _by["قبض"]["days"] == 3,
+          f"بيع {_by['مبيعات']['days']} · مرتجع {_by['مرتجع']['days']}"
+          f" · قبض {_by['قبض']['days']}")
+    check("والحركة التي لا اسم لها تدخل «أخرى» ولا تسقط من الجسر",
+          "أخرى" in _by and abs(_by["أخرى"]["gold"] - 7.0) < 0.0011,
+          f"{_by.get('أخرى', {}).get('gold')}")
+
+    _d = _r["days"]
+    check("أيام الفترة ٣١ ومنها ٧ فيها حركة",
+          _d["span"] == 31 and _d["active"] == 7,
+          f"{_d['active']} من {_d['span']} · صامتة {_d['silent']}")
+    check("والصامتة = الفترة − النشطة",
+          _d["silent"] == _d["span"] - _d["active"])
+
+    _s = _r["signals"]
+    check("نسبة التحصيل تُقاس على المبيعات",
+          _s["collect_pct_gold"] is not None
+          and _s["collect_pct_gold"] > 0, f"{_s['collect_pct_gold']}%")
+    check("وآخر تحصيلٍ وفجوته تُرصدان",
+          _s["collect_gap"]["last"] == "2026-03-22"
+          and _s["collect_gap"]["since"] == 9,
+          f"آخره {_s['collect_gap']['last']} · منذ "
+          f"{_s['collect_gap']['since']} يوماً")
+    check("والخلاصة جملةٌ تُقرأ لا أرقامٌ تُفسَّر",
+          "الدين" in _mv.verdict(_r), _mv.verdict(_r)[:70])
+
+    # فترةٌ بلا أي حركة: لا ينهار التحليل
+    with db(readonly=True) as conn:
+        _empty = _mv.analyze(conn, _macc, "2027-01-01", "2027-01-31")
+    check("فترةٌ بلا حركة تُعطي جسراً مقفلاً لا انهياراً",
+          _empty["buckets"] == [] and _empty["daily"] == []
+          and abs(_empty["opening"]["gold"]
+                  - _empty["closing"]["gold"]) < 0.0011)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

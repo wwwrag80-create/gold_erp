@@ -2,7 +2,7 @@
 """دفتر الأستاذ العام / كشف الحساب الشامل — أي حساب من شجرة الحسابات
 كاملة (عميل، خزينة تصنيع، مشغول، بنك، فاقد، مصروف رواتب...) بنفس
 الأعمدة الثمانية المزدوجة (ذهب/نقد) بغض النظر عن طبيعة الحساب."""
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
 from models import entities, journal
@@ -63,10 +63,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         # ست بطاقات: مدين · دائن · الرصيد — للذهب والنقد
         self.g_debit = Card("إجمالي المدين — ذهب", f"جم {kv.label()}")
         self.g_credit = Card("إجمالي الدائن — ذهب", f"جم {kv.label()}")
-        self.g_bal = Card("رصيد الذهب", "")
+        self.g_bal = Card("رصيد الذهب", "", summary=True)
         self.c_debit = Card("إجمالي المدين — نقد", "ريال")
         self.c_credit = Card("إجمالي الدائن — نقد", "ريال")
-        self.c_bal = Card("الرصيد النقدي", "")
+        self.c_bal = Card("الرصيد النقدي", "", summary=True)
         self.summary = big_label()
         self.summary.setVisible(False)
         self.table = make_table()
@@ -144,6 +144,24 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
     # ══════════════════════════════════════════════════════════════
     #  العيار: تحويل عرضٍ محض — القيد يبقى بمكافئ عيار 18
     # ══════════════════════════════════════════════════════════════
+
+    def _sum_row(self, row, items):
+        """يضع صف الختام ويُلبسه نبرة الخلاصة نفسها التي في لوحتَيها.
+
+        اللون من `theme` لا رقمٌ مكتوب هنا: فيتبع الوضع الفاتح
+        والداكن معاً بدل أن يصير في الداكن بقعةً بيضاء.
+        """
+        from ui import theme
+        pal = theme.palette(theme.current_theme())
+        bg = QtGui.QColor(pal.get("sumBg", "#FDF3E2"))
+        ink = QtGui.QColor(pal.get("sumInk", "#7A4F10"))
+        for c, it in enumerate(items):
+            f = it.font()
+            f.setBold(True)
+            it.setFont(f)
+            it.setBackground(bg)
+            it.setForeground(ink)
+            self.table.setItem(row, c, it)
 
     def _k(self):
         """العيار المختار حالياً (18 افتراضاً)."""
@@ -301,10 +319,23 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             # تعني 500 عنصر واجهة إضافي، وكل واحد يُنشئ تخطيطه وأنماطه
             # فيتجمّد النظام عند عرض حساب كثير الحركة.
             # الحل: عمود نصي بسيط، والمعاينة بالنقر المزدوج على الصف.
+            # ══ صفُّ الإجمالي داخل الجدول ══
+            # الإجماليات كانت في لوحاتٍ أسفل الشاشة وحدها، فمن طبع
+            # الكشف أو صوّره لم يأخذ معه جُمَله. وصفُّ الختام في آخر
+            # الجدول عُرفُ كل كشف حساب: يُقرأ مع آخر حركةٍ لا بعد
+            # مسافة، ويُطبع معها.
+            tgd_ = sum(float(r.get("gd") or 0) for r in rows
+                       if r["op"] != "رصيد سابق")
+            tgc_ = sum(float(r.get("gc") or 0) for r in rows
+                       if r["op"] != "رصيد سابق")
+            tcd_ = sum(float(r.get("cd") or 0) for r in rows
+                       if r["op"] != "رصيد سابق")
+            tcc_ = sum(float(r.get("cc") or 0) for r in rows
+                       if r["op"] != "رصيد سابق")
             self.table.setUpdatesEnabled(False)
             self.table.setSortingEnabled(False)
             try:
-                self.table.setRowCount(len(rows))
+                self.table.setRowCount(len(rows) + (1 if rows else 0))
                 # ══ هيئة الكشف: سطرٌ لكل حركة، وارتفاعٌ واحد ══
                 # التاريخ والنوع والمستند تُوسَّط (طولها ثابت)، والاسم
                 # والبيان يُحاذَيان اليمين كالنصّ العربي، والأرقام
@@ -326,6 +357,18 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                     ]
                     for c, it in enumerate(cellv):
                         self.table.setItem(i, c, it)
+                if rows:
+                    last_g = rows[-1]["gbal"]
+                    last_c = rows[-1]["cbal"]
+                    tot = [
+                        text_item("الإجمالي", _C), text_item("", _C),
+                        text_item("", _C), text_item(""), text_item(""),
+                        num_item(self._g(tgd_)), num_item(self._g(tgc_)),
+                        num_item(self._g(last_g)),
+                        num_item(f"{tcd_:,.2f}"), num_item(f"{tcc_:,.2f}"),
+                        num_item(f"{last_c:,.2f}"), text_item("", _C),
+                    ]
+                    self._sum_row(len(rows), tot)
             finally:
                 self.table.setUpdatesEnabled(True)
             # الجهة (٣) والبيان (٤): يتّسعان لسطرين إن لزم،
@@ -559,7 +602,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.table.setUpdatesEnabled(False)
         self.table.setSortingEnabled(False)
         try:
-            self.table.setRowCount(len(rows))
+            self.table.setRowCount(len(rows) + (1 if rows else 0))
             _C = QtCore.Qt.AlignCenter
             for i, r in enumerate(rows):
                 cellv = [
@@ -574,6 +617,15 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 ]
                 for c, it in enumerate(cellv):
                     self.table.setItem(i, c, it)
+            if rows:
+                # صفُّ الختام هنا أيضاً: اليومية تُطبع كما يُطبع الكشف
+                self._sum_row(len(rows), [
+                    text_item("الإجمالي", _C), text_item("", _C),
+                    text_item("", _C), text_item(""), text_item(""),
+                    num_item(f"{self._g(sum(r['gold'] for r in rows)):,.3f}"),
+                    num_item(f"{sum(r['cash'] for r in rows):,.2f}"),
+                    text_item("", _C), text_item("", _C),
+                ])
         finally:
             self.table.setUpdatesEnabled(True)
         ledger_rows(self.table, wrap_cols=(3, 4))

@@ -11,9 +11,15 @@ class Card(QtWidgets.QFrame):
     عند الضغط لفتح دفتر الأستاذ العام مفلتراً على حساب البطاقة."""
     clicked = QtCore.pyqtSignal()
 
-    def __init__(self, title, subtitle_hint=""):
+    def __init__(self, title, subtitle_hint="", summary=False):
+        """`summary=True` للوحة الخلاصة — الرصيد وحده.
+
+        بين ستّ لوحاتٍ متشابهة يضيع الرصيد، وهو الرقم الذي فُتحت
+        الشاشة لأجله. فيُعطى نبرةً كهرمانيةً خافتة تلتقطها العين
+        أولاً، من عائلة الألوان نفسها فلا تبدو دخيلة.
+        """
         super().__init__()
-        self.setObjectName("card")
+        self.setObjectName("cardSum" if summary else "card")
         self.setCursor(QtCore.Qt.PointingHandCursor)
         self.setFrameShape(QtWidgets.QFrame.StyledPanel)
         lay = QtWidgets.QVBoxLayout(self)
@@ -205,6 +211,25 @@ def stretch_column(table, col):
 # فوق هذا العدد يُعطَّل لفّ النص وقياس المحتوى — كلاهما يقيس كل
 # خلية على حدة فيتجمّد النظام على الجداول الكبيرة.
 BIG_TABLE = 120
+
+
+def tab_widget():
+    """تبويباتٌ تُظهر عناوينها كاملة.
+
+    **الخلل**: Qt يقصّ عنوان التبويب حين يحسب عرضاً أضيق مما يلزم —
+    وفي الواجهة العربية يقصّه من طرفيه معاً، فيصير «جسر الرصيد»
+    «تسر الرصيـ» ولا يُفهم. فيُمنع القصّ صراحةً وتُمنع أزرار التمرير،
+    ويُترك للتبويب عرضه الطبيعي.
+    """
+    t = QtWidgets.QTabWidget()
+    try:
+        bar = t.tabBar()
+        bar.setElideMode(QtCore.Qt.ElideNone)
+        bar.setUsesScrollButtons(False)
+        bar.setExpanding(False)
+    except Exception:
+        pass
+    return t
 
 
 def row_height(table, lines=1, tight=False):
