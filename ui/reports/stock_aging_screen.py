@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-"""أعمار المخزون — كم من رأس المال راكد، ومنذ متى.
+"""أعمار الموديلات — ما رقد في المخزن، ومنذ متى.
 
 **السؤال**: «في المخزن ٨٤٠ طقماً وزنها ١٢ كيلو» رقمٌ لا يُتَّخذ عليه
 قرار. الذي يُتَّخذ عليه قرارٌ هو **كم منها راقدٌ فوق التسعين يوماً**:
-ذهبٌ مجمَّدٌ لا يدور، وأجرةٌ صُرفت على العامل ولم تُحصَّل من أحد.
+ذهبٌ مجمَّدٌ لا يدور ولا يُباع.
 
-┌ أربع لوحات: في المخزن · فوق ٩٠ يوماً · أجرة راكدة · متوسط المكث
-├ **الفئات**: أقل من ٣٠ · ٦٠ · ٩٠ · أكثر — بالوزن والعدد والأجرة
-├ **بالموديل**: أيّ موديلٍ يرقد، ونسبة ما تجاوز التسعين منه
-└ **قطعة قطعة**: الأقدم أولاً، بتاريخ دخولها وعمرها
+┌ أربع لوحات: في المخزن · فوق ٩٠ يوماً · متوسط المكث · أقدم قطعة
+└ **برقم التشغيل**: كل قطعةٍ بعمرها وفئتها، الأقدم أولاً
+
+جدولٌ واحد لا ثلاثة: السؤال عن **القطعة** — أيُّها رقد ومنذ متى —
+والتجميع بالفئة أو بالموديل يخفي القطعةَ التي يُراد الوصول إليها.
 
 قراءةٌ محضة: لا تكتب رقماً ولا تُنشئ قيداً.
 """
@@ -59,37 +60,30 @@ class StockAgingScreen(QtWidgets.QWidget):
 
         self.c_stock = Card("في المخزن", "قطعٌ مفردة", summary=True)
         self.c_old = Card("فوق ٩٠ يوماً", "مالٌ راكد", summary=True)
-        self.c_wage = Card("أجرة راكدة", "صُرفت ولم تُحصَّل")
         self.c_avg = Card("متوسط المكث", "مرجَّحاً بالوزن")
+        self.c_oldest = Card("أقدم قطعة", "رقم تشغيلها وعمرها")
         tiles = QtWidgets.QHBoxLayout()
-        for c in (self.c_stock, self.c_old, self.c_wage, self.c_avg):
+        for c in (self.c_stock, self.c_old, self.c_avg, self.c_oldest):
             tiles.addWidget(c)
 
         self.verdict = big_label("اختر التاريخ ثم «إعداد التقرير».")
         # الخلاصة عدة جملٍ قد تطول — تُلفّ ولا تُقصّ
         self.verdict.setWordWrap(True)
 
-        self.t_buckets = make_table()
-        _enhance(self.t_buckets, key="stock_aging_buckets")
-        self.t_models = make_table()
-        _enhance(self.t_models, key="stock_aging_models")
         self.t_items = make_table()
         _enhance(self.t_items, key="stock_aging_items")
 
         self.tabs = tab_widget()
-        self.tabs.addTab(self.t_buckets, "الفئات")
-        self.tabs.addTab(self.t_models, "بالموديل")
-        self.tabs.addTab(self.t_items, "قطعة قطعة")
+        self.tabs.addTab(self.t_items, "برقم التشغيل")
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
-        lay.addWidget(title_label("أعمار المخزون — رأس المال الراكد"))
+        lay.addWidget(title_label("أعمار الموديلات — ما رقد في المخزن"))
         intro = QtWidgets.QLabel(
-            "الطقم الذي دخل أمس بضاعة، والذي دخل قبل سنةٍ مالٌ مدفون: "
-            "ذهبُه لا يدور وأجرةُ تصنيعه صُرفت ولم تُحصَّل. هذا التقرير "
-            "يوزّع المخزون على فئاته العمرية بالفئات نفسها المستعملة في "
-            "أعمار الديون.")
+            "الطقم الذي دخل أمس بضاعة، والذي دخل قبل سنةٍ مالٌ مدفونٌ في "
+            "الرفّ لا يدور. هنا كل قطعةٍ برقم تشغيلها وعمرها وفئتها — "
+            "بالفئات نفسها المستعملة في أعمار الديون، والأقدم أولاً.")
         intro.setObjectName("cardSub")
         intro.setWordWrap(True)
         lay.addWidget(intro)
@@ -137,8 +131,8 @@ class StockAgingScreen(QtWidgets.QWidget):
                 return sa.report(conn, d, mdl)
 
         ok, res, ex = run_bg(_read, parent=self,
-                             text="جارٍ حساب أعمار المخزون…",
-                             stage="أعمار المخزون", timeout=90.0)
+                             text="جارٍ حساب أعمار الموديلات…",
+                             stage="أعمار الموديلات", timeout=90.0)
         if ex:
             err(self, ex)
             return
@@ -164,75 +158,36 @@ class StockAgingScreen(QtWidgets.QWidget):
                                f"قطعة · {w(t['weight'])} {u}")
         self.c_old.set_value(w(r["old_weight"]),
                              f"{u} · {r['old_pct']:,.1f}% من المخزون")
-        self.c_wage.set_value(m(r["buckets"][-1]["idle_wage"]),
-                              f"ريال فوق ٩٠ · {m(t['idle_wage'])} إجمالاً")
         self.c_avg.set_value(f"{r['avg_days']:,.1f}",
                              "يوماً — مرجّحاً بالوزن")
+        o = r["oldest"]
+        self.c_oldest.set_value(o["wo_no"] if o else "—",
+                                (f"منذ {o['days']:,} يوماً · {o['in_date']}"
+                                 if o else "لا قطعَ مفردة"))
         self.verdict.setText("   ·   ".join(sa.verdict(r, w, m)))
 
-        # ── الفئات ──
-        # الترتيب يمنع الالتباس: الفئات، ثم مجموعُها، ثم ما لا عمر
-        # له، ثم المخزون كلّه — فلا يبدو مجموعٌ وكأنه يشمل سطراً
-        # فوقه وهو لا يشمله
-        rows = [(b["label"], f"{b['count']:,}", w(b["weight"]),
-                 f"{b['weight_pct']:,.1f}%", m(b["idle_wage"]))
-                for b in r["buckets"]]
-        marks = [len(rows)]
-        rows.append(("إجمالي القطع المفردة", f"{t['count']:,}",
-                     w(t["weight"]), "100%", m(t["idle_wage"])))
+        # ── برقم التشغيل ──
+        # الوزن هو ما يُقرأ هنا؛ والأجرة حُذفت بطلب صاحب النظام —
+        # السؤال «ما الذي رقد» لا «كم كان سيكسب لو بِيع».
+        rows = [(x["wo_no"], x["model"], x["item_type"] or "—",
+                 x["in_date"], f"{x['days']:,}",
+                 BUCKET_LABELS[x["bucket"]], w(x["weight"]))
+                for x in r["items"]]
+        marks = []
         if r["bulk"]["count"]:
-            g = r["grand"]
-            rows.append(("رصيد تجميعي — خارج الفئات (بلا عمر)",
-                         f"{r['bulk']['count']:,}", w(r["bulk"]["weight"]),
-                         "—", m(r["bulk"]["idle_wage"])))
+            # الرقم التجميعي رصيدُ وزنٍ لا قطعة، فلا عمر له — يُعرض
+            # في ذيل الجدول معلَّماً بأنه خارج الفئات لا ضمنها
             marks.append(len(rows))
-            rows.append(("إجمالي المخزون", f"{g['count']:,}",
-                         w(g["weight"]), "—", m(g["idle_wage"])))
-        fill(self.t_buckets, ["الفئة العمرية", "عدد القطع",
-                              f"الوزن ({u})", "النسبة",
-                              "أجرة راكدة (ريال)"], rows)
-        fit_columns(self.t_buckets, [28, 16, 20, 14, 22])
-        ledger_rows(self.t_buckets, wrap_cols=(0,))
-        self._mark(self.t_buckets, marks)
-
-        # ── بالموديل ──
-        # الفئات ثم مجموعها — ترتيب ورقة أعمار الديون نفسه، فلا
-        # يتعلّم المستخدم قراءتين لجدولين متشابهين
-        cols = ["الموديل", "العدد"] \
-            + [f"{b} ({u})" for b in BUCKET_LABELS] \
-            + [f"الوزن ({u})", "فوق ٩٠ %", "أقدم قطعة (يوم)",
-               "أجرة راكدة (ريال)"]
-        data = [tuple([mm["model"], f"{mm['count']:,}"]
-                      + [w(b["weight"]) if b["weight"] else "—"
-                         for b in mm["buckets"]]
-                      + [w(mm["weight"]), f"{mm['old_pct']:,.1f}%",
-                         f"{mm['oldest']:,}", m(mm["idle_wage"])])
-                for mm in r["models"]]
-        if data:
-            data.append(tuple(
-                ["الإجمالي", f"{t['count']:,}"]
-                + [w(b["weight"]) for b in r["buckets"]]
-                + [w(t["weight"]), f"{r['old_pct']:,.1f}%", "—",
-                   m(t["idle_wage"])]))
-        fill(self.t_models, cols, data)
-        fit_columns(self.t_models, [20, 9, 12, 12, 12, 12, 13, 10, 12, 15])
-        ledger_rows(self.t_models, wrap_cols=(0,))
-        if data:
-            self._mark(self.t_models, [len(data) - 1])
-
-        # ── قطعة قطعة ──
+            rows.append(("٠٠٠١", "رصيد تجميعي", "—", "—", "—",
+                         "بلا عمر — خارج الفئات",
+                         w(r["bulk"]["weight"])))
         fill(self.t_items,
              ["رقم التشغيل", "الموديل", "النوع", "تاريخ الدخول",
-              "العمر (يوم)", "الفئة", f"الوزن ({u})",
-              "أجرة الجرام", "أجرة راكدة (ريال)"],
-             [(x["wo_no"], x["model"], x["item_type"] or "—",
-               x["in_date"], f"{x['days']:,}",
-               BUCKET_LABELS[x["bucket"]], w(x["weight"]),
-               m(x["wage_per_gram"]), m(x["idle_wage"]))
-              for x in r["items"]])
-        fit_columns(self.t_items, [14, 18, 10, 13, 10, 12, 12, 10, 14])
-        ledger_rows(self.t_items, wrap_cols=(1,))
-        self.tabs.setTabText(2, f"قطعة قطعة ({len(r['items'])})")
+              "العمر (يوم)", "الفئة", f"الوزن ({u})"], rows)
+        fit_columns(self.t_items, [15, 21, 12, 15, 11, 15, 14])
+        ledger_rows(self.t_items, wrap_cols=(1, 5))
+        self._mark(self.t_items, marks)
+        self.tabs.setTabText(0, f"برقم التشغيل ({len(r['items']):,})")
 
     def _mark(self, table, rows):
         from ui import theme
@@ -275,21 +230,19 @@ class StockAgingScreen(QtWidgets.QWidget):
         def m(v):
             return f"{v:,.2f}"
 
-        out = [f"أعمار المخزون — حتى {r['as_of']}"]
+        out = [f"أعمار الموديلات — حتى {r['as_of']}"]
         if r.get("model"):
             out.append(f"الموديل: {r['model']}")
         out += ["", *sa.verdict(r, w, m), ""]
         for b in r["buckets"]:
             out.append(f"  {b['label']:<14} {b['count']:>6,} قطعة   "
-                       f"{w(b['weight']):>12} {u}   "
-                       f"{m(b['idle_wage']):>12} ريال")
+                       f"{w(b['weight']):>12} {u}")
         if r["bulk"]["count"]:
             out.append(f"  {'تجميعي (بلا عمر)':<14} "
                        f"{r['bulk']['count']:>6,} قطعة   "
                        f"{w(r['bulk']['weight']):>12} {u}")
         out += ["", f"  الإجمالي: {r['total']['count']:,} قطعة · "
-                    f"{w(r['total']['weight'])} {u} · "
-                    f"{m(r['total']['idle_wage'])} ريال أجرةً راكدة"]
+                    f"{w(r['total']['weight'])} {u}"]
         QtWidgets.QApplication.clipboard().setText("\n".join(out))
         self.verdict.setText("نُسخت الخلاصة — الصقها في أي رسالة.")
 

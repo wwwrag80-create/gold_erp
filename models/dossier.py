@@ -8,7 +8,7 @@
     كم رصيده؟ · هل تجاوز سقفه؟ · كم من دينه قديم؟
     ماذا جرى معه الشهر الماضي؟ · متى آخر مرةٍ سدّد؟
     أيَّ الموديلات يأخذ؟ · كم يُرجع مما يأخذ؟
-    هل أجرته كما اتُّفق؟
+    وكم سدّد ممّا كان تحت يده؟
 
 وكل جوابٍ من هذه موجودٌ في النظام، لكنه في شاشةٍ غير شاشة الأخرى.
 وسبعُ شاشاتٍ تُفتح في مكالمةٍ هاتفية تعني أن أحداً لن يفتحها.
@@ -21,6 +21,11 @@
 
 **ونسبة المرتجع تُقاس بالوزن لا بالعدد**: عميلٌ يُرجع طقماً صغيراً من
 عشرة غير عميلٍ يُرجع نصف ما أخذ وزناً.
+
+**والنسب كلها تُقاس على «ما كان عنده»** — رصيدُ أول المدة + ما خرج
+إليه فيها — لا على مبيعات الفترة وحدها: عميلٌ عليه أربعون كيلواً من
+قبلُ وأخذ كيلواً هذا الشهر وسدّد كيلواً، لو قيس سدادُه على مبيعات
+الشهر لقيل «سدّد ١٠٠٪» وهو لم يمسّ الأربعين.
 
 قراءةٌ محضة: لا تكتب رقماً ولا تُنشئ قيداً.
 """
@@ -116,10 +121,54 @@ def _flow(conn, entity_id, date_from=None, date_to=None):
         "back_wages": float(r["back_wg"] or 0.0) if r else 0.0,
         "sold_lines": int(r["n_sale"] or 0) if r else 0,
         "return_lines": int(r["n_ret"] or 0) if r else 0,
-        # بالوزن لا بالعدد: طقمٌ صغير من عشرة ليس كنصف ما أخذ وزناً
-        "return_pct": (round(back_wt * 100.0 / out_wt, 1)
-                       if out_wt > EPS_G else None),
     }
+
+
+def _collected(conn, entity_id, date_from=None, date_to=None):
+    """ما سدّده العميل فعلاً — من سندات القبض، وزناً ونقداً."""
+    p = [entity_id]
+    c = ""
+    if date_from:
+        c += " AND voucher_date>=?"
+        p.append(date_from)
+    if date_to:
+        c += " AND voucher_date<=?"
+        p.append(date_to)
+    r = conn.execute(
+        "SELECT ROUND(COALESCE(SUM(gold_equiv18),0),3) g,"
+        "  ROUND(COALESCE(SUM(cash_amount),0),2) c, COUNT(*) n"
+        " FROM vouchers WHERE is_deleted=0 AND kind='receipt'"
+        "   AND customer_id=?" + c, p).fetchone()
+    return {"gold": float(r["g"] or 0.0) if r else 0.0,
+            "cash": float(r["c"] or 0.0) if r else 0.0,
+            "count": int(r["n"] or 0) if r else 0}
+
+
+def _ratios(flow, opening_gold):
+    """النسب تُقاس على **ما كان عنده**: الافتتاحي + ما خرج إليه.
+
+    **ولماذا لا تُقاس على المبيعات وحدها**: عميلٌ عليه أربعون كيلواً
+    من قبلُ وأخذ كيلواً هذا الشهر وسدّد كيلواً — لو قيست نسبة سداده
+    على مبيعات الشهر وحدها لقيل «سدّد ١٠٠٪» وهو لم يمسّ الأربعين.
+    فالأساس ما كان تحت يده خلال الفترة كلّه، لا ما استلمه فيها.
+
+    والرصيد الافتتاحي يُضمّ إلى «ما خرج إليه» لأنه بضاعةٌ عنده فعلاً
+    — خرجت في فترةٍ سابقة ولم تعد بعد.
+    """
+    op = max(float(opening_gold or 0.0), 0.0)
+    base = round(op + flow["out_weight"], 3)
+    flow["opening_weight"] = round(op, 3)
+    flow["held_weight"] = base                 # ما كان عنده
+    flow["paid_weight"] = flow.get("paid_weight", 0.0)
+
+    def _pct(part):
+        return (round(part * 100.0 / base, 1) if base > EPS_G else None)
+
+    # بالوزن لا بالعدد: طقمٌ صغير من عشرة ليس كنصف ما أخذ وزناً
+    flow["return_pct"] = _pct(flow["back_weight"])
+    flow["paid_pct"] = _pct(flow["paid_weight"])
+    flow["settled_pct"] = _pct(flow["back_weight"] + flow["paid_weight"])
+    return flow
 
 
 def _last_voucher(conn, entity_id, kind="receipt", as_of=None):
@@ -146,38 +195,6 @@ def _last_voucher(conn, entity_id, kind="receipt", as_of=None):
             "since": since}
 
 
-def _wage_check(conn, entity_id, date_from, date_to):
-    """أجرة الجهة: المتفق عليه، والمطبَّق، وأثر الفرق بالمال."""
-    rows = conn.execute(
-        "SELECT i.invoice_date d, i.kind, it.registered_weight wt,"
-        "  it.wage_per_gram wpg"
-        " FROM invoice_items it JOIN invoices i ON i.id=it.invoice_id"
-        " WHERE i.is_deleted=0 AND i.customer_id=?"
-        "   AND i.invoice_date>=? AND i.invoice_date<=?",
-        (entity_id, date_from, date_to)).fetchall()
-    agreed_now = entities.agreed_wage(conn, entity_id)
-    wt = impact = applied = 0.0
-    n_dev = 0
-    for r in rows:
-        w = float(r["wt"] or 0.0)
-        a = entities.agreed_wage_on(conn, entity_id, r["d"])
-        sign = 1.0 if r["kind"] == "sale" else -1.0
-        wt += w
-        applied += w * float(r["wpg"] or 0.0)
-        if a is None:
-            continue
-        d = float(r["wpg"] or 0.0) - a
-        if abs(d) > 0.005:
-            n_dev += 1
-        impact += d * w * sign
-    return {
-        "agreed": agreed_now,
-        "avg_applied": round(applied / wt, 2) if wt > EPS_G else None,
-        "lines": len(rows), "deviations": n_dev,
-        "impact": round(impact, 2),
-    }
-
-
 def build(conn, entity_id, date_from=None, date_to=None):
     """يجمع الملف كله — كل قسمٍ من مصدره الأصلي."""
     e = entities.get_entity(conn, entity_id)
@@ -194,6 +211,21 @@ def build(conn, entity_id, date_from=None, date_to=None):
 
     bridge = movement.analyze(conn, e["account_id"], d1, as_of)
 
+    # النسب تُقاس على ما كان تحت يده: رصيدُ أول المدة + ما خرج
+    # إليه فيها. والافتتاحي من الجسر نفسه فلا يختلف رقمٌ عن رقم.
+    paid = _collected(conn, entity_id, d1, as_of)
+    paid_life = _collected(conn, entity_id)
+    flow = _flow(conn, entity_id, d1, as_of)
+    flow["paid_weight"] = paid["gold"]
+    flow["paid_cash"] = paid["cash"]
+    flow["paid_count"] = paid["count"]
+    _ratios(flow, bridge["opening"]["gold"])
+    flow_life = _flow(conn, entity_id)
+    flow_life["paid_weight"] = paid_life["gold"]
+    flow_life["paid_cash"] = paid_life["cash"]
+    flow_life["paid_count"] = paid_life["count"]
+    _ratios(flow_life, 0.0)        # من البداية لا افتتاحيَّ قبلها
+
     return {
         "as_of": as_of, "date_from": d1,
         "entity": {"id": e["id"], "name": e["name"],
@@ -206,11 +238,9 @@ def build(conn, entity_id, date_from=None, date_to=None):
         "bridge": bridge,
         "models": _top_models(conn, entity_id, d1, as_of),
         "models_life": _top_models(conn, entity_id),
-        "flow": _flow(conn, entity_id, d1, as_of),
-        "flow_life": _flow(conn, entity_id),
+        "flow": flow, "flow_life": flow_life,
         "last_receipt": _last_voucher(conn, entity_id, "receipt", as_of),
         "last_payment": _last_voucher(conn, entity_id, "payment", as_of),
-        "wage": _wage_check(conn, entity_id, d1, as_of),
     }
 
 
@@ -278,19 +308,22 @@ def verdict(d, fmt=None, money=None):
         out.append(f"وآخر تحصيلٍ منه في {lr['date']}.")
 
     fl = d["flow"]
+    if fl["held_weight"] > EPS_G:
+        out.append(
+            f"كان تحت يده في الفترة {fmt(fl['held_weight'])} "
+            f"(افتتاحيٌّ {fmt(fl['opening_weight'])} + خرج إليه "
+            f"{fmt(fl['out_weight'])})"
+            + (f"، سدّد منها {fl['paid_pct']:,.1f}%"
+               if fl["paid_pct"] is not None else "")
+            + (f" وأرجع {fl['return_pct']:,.1f}%."
+               if fl["return_pct"] is not None else "."))
     if fl["return_pct"] is not None and fl["return_pct"] >= 20:
         out.append(
-            f"نسبة مرتجعه في الفترة {fl['return_pct']:,.1f}% من وزن ما "
-            "أخذ — مرتفعة، راجع الموديلات أو الاتفاق.")
-
-    w = d["wage"]
-    if w["impact"] < -0.005:
+            "ونسبة مرتجعه مرتفعة — راجع الموديلات أو الاتفاق.")
+    if fl["paid_pct"] is not None and fl["paid_pct"] < 20 \
+            and fl["held_weight"] > EPS_G:
         out.append(
-            f"وأجرته أقلّ من المتفق عليه بـ {money(abs(w['impact']))} ريال "
-            f"في {w['deviations']:,} سطراً.")
-    elif w["impact"] > 0.005:
-        out.append(
-            f"وأجرته أعلى من المتفق عليه بـ {money(w['impact'])} ريال.")
+            "وسدادُه دون الخُمس ممّا كان عنده — الدين يتراكم لا ينحسر.")
 
     top = d["models"] or d["models_life"]
     if top:

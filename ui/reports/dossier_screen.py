@@ -11,7 +11,7 @@
 ├ **الفترة**: جسر الرصيد — ما زاد وما نقص وكم سُدّد
 ├ **أعمار دينه**: كم منه أقلّ من ٣٠ وكم فوق التسعين
 ├ **موديلاته**: أكثر ما يأخذ، بالصافي بعد المرتجع
-└ **أجرته**: المتفق عليه مقابل المطبَّق وأثر الفرق
+└ **حركته**: ما كان عنده وما رجع وما سدّد — والنسب عليها
 
 لا رقمَ يُحسب هنا: كل قسمٍ يُستدعى من مصدره الأصلي فلا يخالف الكشف.
 """
@@ -91,7 +91,7 @@ class DossierScreen(QtWidgets.QWidget):
         self.tabs.addTab(self.t_bridge, "الفترة")
         self.tabs.addTab(self.t_aging, "أعمار دينه")
         self.tabs.addTab(self.t_models, "موديلاته")
-        self.tabs.addTab(self.t_wage, "أجرته وحركته")
+        self.tabs.addTab(self.t_wage, "حركته")
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
@@ -99,9 +99,9 @@ class DossierScreen(QtWidgets.QWidget):
         lay.addWidget(title_label("ملف الجهة — كل ما يخصّها في صفحة"))
         intro = QtWidgets.QLabel(
             "رصيده وسقفه وأعمار دينه وحركة فترته وآخر تحصيلٍ منه "
-            "وموديلاته ونسبة مرتجعه وأجرته — مجموعةً في صفحةٍ تُقرأ "
-            "في مكالمةٍ هاتفية. ولا رقمَ يُحسب هنا: كل قسمٍ من مصدره "
-            "الأصلي فلا يخالف كشف الحساب.")
+            "وموديلاته ونسبة مرتجعه وسداده — مجموعةً في صفحةٍ تُقرأ في "
+            "مكالمةٍ هاتفية. والنسب تُقاس على «ما كان تحت يده» — رصيدُ "
+            "أول المدة + ما خرج إليه — لا على مبيعات الفترة وحدها.")
         intro.setObjectName("cardSub")
         intro.setWordWrap(True)
         lay.addWidget(intro)
@@ -203,13 +203,13 @@ class DossierScreen(QtWidgets.QWidget):
             if abs(x["gold"]) < 0.0005 and abs(x["cash"]) < 0.005:
                 continue
             rows.append((x["label"], w(x["gold"]), m(x["cash"]),
-                         f"{x['docs']:,}", f"{x['days']:,}"))
+                         f"{x['docs']:,}", x["days_label"]))
         marks = [0, len(rows)]
         rows.append(("رصيد آخر المدة", w(r["closing"]["gold"]),
                      m(r["closing"]["cash"]), "", ""))
         fill(self.t_bridge,
-             ["البند", f"الوزن ({u})", "النقد (ريال)", "مستندات", "أيام"],
-             rows)
+             ["البند", f"الوزن ({u})", "النقد (ريال)", "مستندات",
+              "أيام من الفترة"], rows)
         fit_columns(self.t_bridge, [30, 20, 20, 15, 15])
         ledger_rows(self.t_bridge, wrap_cols=(0,))
         self._mark(self.t_bridge, marks)
@@ -253,39 +253,56 @@ class DossierScreen(QtWidgets.QWidget):
         self.tabs.setTabText(2, f"موديلاته ({len(d['models_life'])})")
 
     def _fill_wage(self, d, u, w, m):
-        f, fl, wg = d["flow"], d["flow_life"], d["wage"]
+        """حركته: ما كان عنده، وما رجع، وما سدّد — والنسب عليها.
+
+        الترتيب ترتيبُ المعنى: ما كان تحت يده أولاً (افتتاحيّ + خارج)،
+        ثم ما ردّه أو سدّده، ثم ما بقي — فيُقرأ السطر تحت السطر كما
+        يُحكى الحال.
+        """
+        f, fl = d["flow"], d["flow_life"]
+        cl = d["bridge"]["closing"]
 
         def _pct(v):
             return f"{v:,.1f}%" if v is not None else "—"
 
         rows = [
-            ("ما خرج إليه", w(f["out_weight"]), w(fl["out_weight"]),
+            ("رصيد أول المدة", w(f["opening_weight"]), "",
+             w(fl["opening_weight"]), "ما كان عنده قبل الفترة"),
+            ("ما خرج إليه في الفترة", w(f["out_weight"]),
+             m(f["out_wages"]), w(fl["out_weight"]),
              f"{f['sold_lines']:,} / {fl['sold_lines']:,} سطراً"),
-            ("ما رجع منه", w(f["back_weight"]), w(fl["back_weight"]),
-             f"{f['return_lines']:,} / {fl['return_lines']:,} سطراً"),
-            ("الصافي", w(f["net_weight"]), w(fl["net_weight"]), ""),
-            ("نسبة المرتجع (بالوزن)", _pct(f["return_pct"]),
-             _pct(fl["return_pct"]), "بالوزن لا بالعدد"),
-            ("أجور ما خرج (ريال)", m(f["out_wages"]), m(fl["out_wages"]),
-             ""),
         ]
-        # يُبرَز ما يُقرأ حكماً: نسبة المرتجع وأثر فرق الأجرة
-        marks = [3]
+        marks = [len(rows)]
+        rows.append(("ما كان عنده (افتتاحيّ + خارج)", w(f["held_weight"]),
+                     "", w(fl["held_weight"]),
+                     "الأساس الذي تُقاس عليه النسب"))
         rows += [
-            ("الأجرة المتفق عليها",
-             m(kv.rate(wg["agreed"])) if wg["agreed"] else "بلا اتفاق",
-             "", "من بطاقة الجهة"),
-            ("متوسط الأجرة المطبَّقة",
-             m(kv.rate(wg["avg_applied"])) if wg["avg_applied"] else "—",
-             "", f"{wg['lines']:,} سطراً في الفترة"),
-            ("أثر فرق الأجرة (ريال)", m(wg["impact"]), "",
-             f"{wg['deviations']:,} سطراً مخالفاً"),
+            ("ما رجع منه", w(f["back_weight"]), m(f["back_wages"]),
+             w(fl["back_weight"]),
+             f"{f['return_lines']:,} / {fl['return_lines']:,} سطراً"),
+            ("ما سدّده", w(f["paid_weight"]), m(f["paid_cash"]),
+             w(fl["paid_weight"]),
+             f"{f['paid_count']:,} / {fl['paid_count']:,} سند قبض"),
         ]
-        marks.append(len(rows) - 1)
+        marks.append(len(rows))
+        rows.append(("الباقي عليه (رصيد آخر المدة)", w(cl["gold"]),
+                     m(cl["cash"]), w(d["balance"]["gold"]),
+                     "من الدفتر لا من جمع الأسطر"))
+        rows += [
+            ("نسبة المرتجع (من الذي كان عنده)", _pct(f["return_pct"]), "",
+             _pct(fl["return_pct"]), "بالوزن لا بالعدد"),
+            ("نسبة السداد (من الذي كان عنده)", _pct(f["paid_pct"]), "",
+             _pct(fl["paid_pct"]), "كم سدّد ممّا كان تحت يده"),
+        ]
+        marks.append(len(rows))
+        rows.append(("نسبة التصفية (مرتجع + سداد)",
+                     _pct(f["settled_pct"]), "", _pct(fl["settled_pct"]),
+                     "ما خرج من ذمّته بأي طريق"))
         fill(self.t_wage,
-             ["البند", "الفترة", "من البداية", "ملاحظة"], rows)
-        fit_columns(self.t_wage, [30, 20, 20, 30])
-        ledger_rows(self.t_wage, wrap_cols=(0, 3))
+             ["البند", f"الفترة ({u})", "الفترة (ريال)",
+              f"من البداية ({u})", "ملاحظة"], rows)
+        fit_columns(self.t_wage, [28, 15, 15, 15, 27])
+        ledger_rows(self.t_wage, wrap_cols=(0, 4))
         self._mark(self.t_wage, marks)
 
     def _mark(self, table, rows):
@@ -338,13 +355,17 @@ class DossierScreen(QtWidgets.QWidget):
         if a:
             out.append(f"  أقدم دين    : {a['days']:,} يوماً ({a['oldest']})")
         lr = d["last_receipt"]
-        out.append(f"  آخر تحصيل   : "
+        out.append("  آخر تحصيل   : "
                    + (f"{lr['date']} — {w(lr['gold'])} {u} · "
                       f"{m(lr['cash'])} ريال" if lr else "لا شيء"))
         f = d["flow"]
-        out.append(f"  خرج/رجع     : {w(f['out_weight'])} / "
-                   f"{w(f['back_weight'])} {u}"
-                   + (f"  (مرتجع {f['return_pct']:,.1f}%)"
+        out.append(f"  كان عنده    : {w(f['held_weight'])} {u} "
+                   f"(افتتاحيّ {w(f['opening_weight'])} + خرج "
+                   f"{w(f['out_weight'])})")
+        out.append(f"  رجع/سدّد    : {w(f['back_weight'])} / "
+                   f"{w(f['paid_weight'])} {u}"
+                   + (f"  (مرتجع {f['return_pct']:,.1f}% · سداد "
+                      f"{f['paid_pct']:,.1f}%)"
                       if f["return_pct"] is not None else ""))
         if d["models"]:
             out.append("  موديلاته    : "

@@ -1293,18 +1293,10 @@ def build_body(doc_type, doc_id, **kw):
                                  kw.get("only")))
         if doc_type == "day_close":
             return en(_tpl_day_close(conn, doc_id, kw.get("date")))
-        if doc_type == "gold_map":
-            return en(_tpl_gold_map(conn, doc_id, kw.get("as_of"),
-                                    kw.get("compare_to"),
-                                    kw.get("detail", False)))
         if doc_type == "stock_aging":
             return en(_tpl_stock_aging(conn, doc_id, kw.get("as_of"),
                                        kw.get("model"),
                                        kw.get("detail", False)))
-        if doc_type == "wage_audit":
-            return en(_tpl_wage_audit(conn, doc_id, kw.get("date_from"),
-                                      kw.get("date_to"),
-                                      kw.get("only_deviations", True)))
         if doc_type == "dossier":
             return en(_tpl_dossier(conn, doc_id, kw.get("date_from"),
                                    kw.get("date_to")))
@@ -2085,235 +2077,42 @@ def _tpl_day_close(conn, _id=0, date=None):
             + html)
 
 
-def _tpl_gold_map(conn, _id=0, as_of=None, compare_to=None, detail=False):
-    """خريطة الذهب — صفحةٌ تقول أين كل جرام، وتُثبت أنها لم تُسقط شيئاً.
-
-    الورقة تُسلَّم للإدارة أو تُرفق بالجرد، فلا بدّ أن تحمل معها
-    **دليل صحّتها**: سطرُ القفلة في ذيلها يُظهر أن مجموع الخريطة
-    يقابله تماماً ما على الجانب الآخر — فمن قرأها لا يحتاج أن
-    يصدّقها، يتحقّق منها بنفسه.
-    """
-    from models import gold_map
-    from services import karat_view
-    m = gold_map.gold_map(conn, as_of, compare_to)
-    u = karat_view.unit()
-    today = _qd(QtCore.QDate.currentDate())
-    cmp_on = bool(compare_to)
-
-    def _g(v):
-        """السالب بين قوسين — اصطلاح المحاسبين، ولا يزيغ في ورقةٍ عربية.
-
-        علامة الناقص أمام رقمٍ داخل نصٍّ عربيٍّ تُرسم على طرفه الآخر،
-        فيقرأ المستلم «1,313.667−» موجبةً. والقوسان لا يتحرّكان.
-        """
-        s = _gw(abs(v or 0.0), 3)
-        return f"({s})" if (v or 0.0) < 0 else s
-
-    def _side(v):
-        return ("له (دائن)" if v > 0.0005
-                else ("عليه (مدين)" if v < -0.0005 else "—"))
-
-    head = [thw("المكان"), thw("ما فيه"), thw(f"الوزن ({u})"),
-            thw("النسبة")]
-    if cmp_on:
-        head += [thw(f"سابقاً ({u})"), thw("الاتجاه"), thw(f"التغيّر ({u})")]
-    ncols = len(head)
-
-    def _grp(title, total, prev=None):
-        tds = [thw(title), thw("—"), thw(_g(total)), thw("")]
-        if cmp_on:
-            ch = round(total - (prev or 0.0), 3)
-            tds += [thw(_g(prev or 0.0)),
-                    thw("▲" if ch > 0 else ("▼" if ch < 0 else "—")),
-                    thw(_g(abs(ch)))]
-        return "<tr>" + cells(*tds) + "</tr>"
-
-    def _row(b):
-        tds = [tdw(b["label"], align="right"), tdw(b["hint"], align="right"),
-               tdw(_g(b["gold"])),
-               tdw(en(f"{b['share']:,.1f}%") if b["share"] is not None
-                   else "—")]
-        if cmp_on:
-            ch = b["change"] or 0.0
-            tds += [tdw(_g(b["prev"] or 0.0)),
-                    tdw("▲" if ch > 0 else ("▼" if ch < 0 else "—")),
-                    tdw(_g(abs(ch)) if ch else "—")]
-        return "<tr>" + cells(*tds) + "</tr>"
-
-    body = _grp("في يد المصنع", m["hand"], m.get("prev_hand"))
-    for b in m["buckets"]:
-        if b["side"] == "hand":
-            body += _row(b)
-    body += _grp("عند الغير", m["outside_hands"],
-                 m.get("prev_outside_hands"))
-    for b in m["buckets"]:
-        if b["side"] == "out":
-            body += _row(b)
-    if abs(m["unmapped"]) > 0.0005:
-        for r in m["outside"]:
-            tds = [tdw(r["name"], align="right"),
-                   tdw("خارج الدلاء — " + en(r["code"]), align="right"),
-                   tdw(_g(r["gold"])), tdw("—")]
-            if cmp_on:
-                tds += [tdw("—"), tdw("—"), tdw("—")]
-            body += "<tr>" + cells(*tds) + "</tr>"
-    tot = [thw("إجمالي الذهب"), thw("—"), thw(_g(m["total"])), thw("100%")]
-    if cmp_on:
-        ch = m.get("change_total") or 0.0
-        tot += [thw(_g(m.get("prev_total") or 0.0)),
-                thw("▲" if ch > 0 else ("▼" if ch < 0 else "—")),
-                thw(_g(abs(ch)))]
-
-    src = ""
-    for r in m["other"]:
-        src += "<tr>" + cells(tdw(r["name"], align="right"),
-                              tdw(en(r["code"])),
-                              tdw(r.get("group", "—"), align="right"),
-                              tdw(_side(-r["gold"])),
-                              tdw(_gw(abs(r["gold"]), 3))) + "</tr>"
-    if not src:
-        src = f'<tr><td {TD} colspan="5">لا يقابله شيء</td></tr>'
-
-    det = ""
-    if detail:
-        for b in m["buckets"]:
-            if not b["leaves"]:
-                continue
-            det += (f'<div class="party">{b["label"]} — '
-                    f'{en(_g(b["gold"]))} {u}</div>{TBL}'
-                    + "<tr>" + cells(thw("الحساب"), thw("الكود"),
-                                     thw(f"الوزن ({u})")) + "</tr>")
-            for lf in b["leaves"]:
-                det += "<tr>" + cells(tdw(lf["name"], align="right"),
-                                      tdw(en(lf["code"])),
-                                      tdw(_g(lf["gold"]))) + "</tr>"
-            det += "</table>"
-
-    lines = "".join(f"<li>{v}</li>" for v in gold_map.verdict(m, _g))
-    closed = ("مقفلة ✔" if m["balanced"]
-              else f"غير مقفلة — فرق {en(_g(abs(m['diff'])))}")
-
-    html = f'''
-    {TBL}
-      <tr><td {TH} width="25%">بتاريخ</td><td>{en(as_of or today)}</td>
-          <th>مقارنةً بتاريخ</th><td>{en(compare_to or "—")}</td></tr>
-      <tr><th>في يد المصنع</th><td>{en(_g(m["hand"]))} {u}</td>
-          <th>عند الغير</th><td>{en(_g(m["outside_hands"]))} {u}</td></tr>
-      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
-    </table>
-
-    {TBL}
-      <tr>{cells(*head)}</tr>
-      {body}
-      <tr>{cells(*tot)}</tr>
-    </table>
-
-    <div class="party">لمن هذا الذهب — الطرف المقابل</div>
-    {TBL}
-      <tr>{cells(thw("الحساب"), thw("الكود"), thw("التصنيف"),
-                 thw("الطرف"), thw(f"الوزن ({u})"))}</tr>
-      {src}
-      <tr>{cells(thw("الصافي — يقابل مجموع الخريطة"), thw("—"), thw("—"),
-                 thw(_side(-m["other_total"])),
-                 thw(_gw(abs(m["other_total"]), 3)))}</tr>
-    </table>
-    {det}
-
-    <div class="note"><b>القفلة:</b> مجموع الخريطة
-      {en(_g(m["total"]))} {u} ويقابله على الجانب الآخر
-      {en(_g(-m["other_total"]))} {u} — {closed}. القيد المزدوج في بُعد
-      الذهب يوجب تساويهما، فأيُّ فرقٍ دليلُ حسابٍ لم تبلغه الخريطة لا
-      دليلُ ذهبٍ ضائع.</div>
-    <div class="note"><ul>{lines}</ul></div>
-    '''
-    return (_header("خريطة الذهب — أين الذهب الآن", "—", today,
-                    show_meta=False) + html + _footer(""))
-
-
 def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
-    """أعمار المخزون — ورقةٌ تُرفق بالجرد أو تُسلَّم للإدارة.
+    """أعمار الموديلات — ورقةٌ تُرفق بالجرد أو تُسلَّم للإدارة.
 
-    رأسٌ من صفّين: صفٌّ يجمع أعمدة **الوزن** تحت عنوانٍ واحد، وآخر
-    يجمع **الأجرة الراكدة** — فالعين تعرف أيّ وحدةٍ تقرأ قبل أن تقرأ
-    الرقم، وهو رأس ورقة أعمار الديون نفسه فلا يتعلّم المستخدم قراءتين.
+    جدولٌ واحد بالقطع، الأقدم أولاً، ورأسٌ يقول الخلاصة قبله. والفئات
+    والموديلات لا تُطبع جداولَ لأن السؤال عن **القطعة**، والتجميع
+    يخفي القطعةَ التي يُراد الوصول إليها.
     """
     from models import stock_aging
     from services import karat_view
     r = stock_aging.report(conn, as_of, model)
     u = karat_view.unit()
     today = _qd(QtCore.QDate.currentDate())
-    nb = len(stock_aging.BUCKET_LABELS)
+    t = r["total"]
 
     def _g(v):
         return _gw(v, 3)
 
     body = ""
-    for b in r["buckets"]:
+    for x in r["items"]:
         body += "<tr>" + cells(
-            tdw(b["label"], align="right"), tdw(en(f"{b['count']:,}")),
-            tdw(_g(b["weight"])), tdw(en(f"{b['weight_pct']:,.1f}%")),
-            tdw(_w(b["idle_wage"], 2))) + "</tr>"
-    # الفئات، ثم مجموعُها، ثم ما لا عمر له، ثم المخزون كلّه — فلا
-    # يبدو مجموعٌ وكأنه يشمل سطراً فوقه وهو لا يشمله
-    t, g = r["total"], r["grand"]
-    body += "<tr>" + cells(
-        thw("إجمالي القطع المفردة"), thw(en(f"{t['count']:,}")),
-        thw(_g(t["weight"])), thw("100%"),
-        thw(_w(t["idle_wage"], 2))) + "</tr>"
-    tot = ""
+            tdw(en(x["wo_no"])), tdw(x["model"], align="right"),
+            tdw(x["item_type"] or "—"), tdw(en(x["in_date"])),
+            tdw(en(f"{x['days']:,}")),
+            tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
+            tdw(_g(x["weight"]))) + "</tr>"
     if r["bulk"]["count"]:
         body += "<tr>" + cells(
-            tdw("رصيد تجميعي — خارج الفئات (بلا عمر)", align="right"),
-            tdw(en(f"{r['bulk']['count']:,}")),
-            tdw(_g(r["bulk"]["weight"])), tdw("—"),
-            tdw(_w(r["bulk"]["idle_wage"], 2))) + "</tr>"
-        tot = "<tr>" + cells(
-            thw("إجمالي المخزون"), thw(en(f"{g['count']:,}")),
-            thw(_g(g["weight"])), thw("—"),
-            thw(_w(g["idle_wage"], 2))) + "</tr>"
+            thw("٠٠٠١"), thw("رصيد تجميعي"), thw("—"), thw("—"), thw("—"),
+            thw("بلا عمر — خارج الفئات"),
+            thw(_g(r["bulk"]["weight"]))) + "</tr>"
+    if not body:
+        body = f'<tr><td {TD} colspan="7">لا مخزون</td></tr>'
 
-    # ── جدول الموديلات برأسٍ من صفّين ──
-    top = [thspan("الموديل", rowspan=2, align="right"),
-           thspan("العدد", rowspan=2),
-           thspan(f"الوزن ({u})", colspan=nb + 1),
-           thspan("فوق ٩٠", rowspan=2),
-           thspan("أقدم قطعة", rowspan=2),
-           thspan("أجرة راكدة", rowspan=2)]
-    sub = [thw(b) for b in stock_aging.BUCKET_LABELS] + [thw("الإجمالي")]
-    mhead = "<tr>" + cells(*top) + "</tr><tr>" + cells(*sub) + "</tr>"
-    mbody = ""
-    for mm in r["models"]:
-        mbody += "<tr>" + cells(
-            tdw(mm["model"], align="right"), tdw(en(f"{mm['count']:,}")),
-            *[tdw(_g(b["weight"]) if b["weight"] else "—")
-              for b in mm["buckets"]],
-            tdw(_g(mm["weight"])), tdw(en(f"{mm['old_pct']:,.1f}%")),
-            tdw(en(f"{mm['oldest']:,}")),
-            tdw(_w(mm["idle_wage"], 2))) + "</tr>"
-    if mbody:
-        mbody += "<tr>" + cells(
-            thw("الإجمالي"), thw(en(f"{t['count']:,}")),
-            *[thw(_g(b["weight"])) for b in r["buckets"]],
-            thw(_g(t["weight"])), thw(en(f"{r['old_pct']:,.1f}%")),
-            thw("—"), thw(_w(t["idle_wage"], 2))) + "</tr>"
-    else:
-        mbody = f'<tr><td {TD} colspan="{nb + 6}">لا مخزون</td></tr>'
-
-    det = ""
-    if detail and r["items"]:
-        det = (f'<div class="party">قطعة قطعة — الأقدم أولاً</div>{TBL}'
-               + "<tr>" + cells(
-                   thw("رقم التشغيل"), thw("الموديل"), thw("تاريخ الدخول"),
-                   thw("العمر (يوم)"), thw("الفئة"), thw(f"الوزن ({u})"),
-                   thw("أجرة راكدة")) + "</tr>")
-        for x in r["items"]:
-            det += "<tr>" + cells(
-                tdw(en(x["wo_no"])), tdw(x["model"], align="right"),
-                tdw(en(x["in_date"])), tdw(en(f"{x['days']:,}")),
-                tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
-                tdw(_g(x["weight"])), tdw(_w(x["idle_wage"], 2))) + "</tr>"
-        det += "</table>"
-
+    # الفئات في سطرٍ واحد أعلى الورقة — خلاصةٌ لا جدول
+    bl = " · ".join(
+        f'{b["label"]}: {en(_g(b["weight"]))}' for b in r["buckets"])
     lines = "".join(f"<li>{v}</li>"
                     for v in stock_aging.verdict(r, _g, lambda v: _w(v, 2)))
     html = f'''
@@ -2325,140 +2124,26 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
           <th>فوق ٩٠ يوماً</th>
           <td>{en(_g(r["old_weight"]))} {u}
               ({en(f"{r['old_pct']:,.1f}%")})</td></tr>
+      <tr><th>الفئات ({u})</th><td {TD} colspan="3">{bl}</td></tr>
       <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
     </table>
 
     {TBL}
-      <tr>{cells(thw("الفئة العمرية"), thw("عدد القطع"),
-                 thw(f"الوزن ({u})"), thw("النسبة"),
-                 thw("أجرة راكدة (ريال)"))}</tr>
+      <tr>{cells(thw("رقم التشغيل"), thw("الموديل"), thw("النوع"),
+                 thw("تاريخ الدخول"), thw("العمر (يوم)"), thw("الفئة"),
+                 thw(f"الوزن ({u})"))}</tr>
       {body}
-      {tot}
     </table>
 
-    <div class="party">بالموديل — أيّها يرقد</div>
-    {TBL}
-      {mhead}
-      {mbody}
-    </table>
-    {det}
-
-    <div class="note">الأجرة الراكدة ليست ربحاً ضائعاً بل <b>أجرةً
-      صُرفت على العامل ولم تُحصَّل من أحد</b>: الوزن × أجرة الجرام
-      المسجّلة على أمر التشغيل. تُقرأ لقياس الركود ولا تدخل أي قائمة
-      دخل. وتاريخ الدخول من قيد التوريد لا من وقت كتابة السجل.</div>
+    <div class="note">تاريخ الدخول من قيد التوريد لا من وقت كتابة
+      السجل، فالدفعة التي تُسجَّل اليوم وقد ورَدَت الشهر الماضي عمرها
+      من تاريخ قيدها. والرقم التجميعي ٠٠٠١ رصيدُ وزنٍ لا قطعة فلا عمر
+      له — يُعرض في ذيل الجدول خارج الفئات.</div>
     <div class="note"><ul>{lines}</ul></div>
     '''
-    return (_header("أعمار المخزون — رأس المال الراكد", "—", today,
+    return (_header("أعمار الموديلات — ما رقد في المخزن", "—", today,
                     show_meta=False) + html + _footer(""))
 
-
-def _tpl_wage_audit(conn, _id=0, date_from=None, date_to=None,
-                    only_deviations=True):
-    """انحرافات الأجرة — ورقةٌ تُوضع أمام الإدارة لا سجلٌّ خام.
-
-    السالب بين قوسين كما يكتبه المحاسبون: إشارةُ الناقص أمام رقمٍ في
-    نصٍّ عربيٍّ تُرسم على طرفه الآخر فتُقرأ موجبةً.
-    """
-    from models import wage_audit
-    from services import karat_view
-    r = wage_audit.report(conn, date_from, date_to, only_deviations)
-    u = karat_view.unit()
-    today = _qd(QtCore.QDate.currentDate())
-    t = r["total"]
-
-    def _m(v):
-        s = _w(abs(v), 2)
-        return f"({s})" if v < 0 else s
-
-    def _g(v):
-        return _gw(v, 3)
-
-    parties = ""
-    for p in r["parties"]:
-        parties += "<tr>" + cells(
-            tdw(p["name"], align="right"), tdw(en(f"{p['lines']:,}")),
-            tdw(_g(p["weight"])), tdw(_w(p["avg_applied"], 2)),
-            tdw(_w(p["avg_agreed"], 2)), tdw(en(f"{p['below']:,}")),
-            tdw(en(f"{p['above']:,}")), tdw(en(f"{p['match']:,}")),
-            tdw(_m(p["impact"]))) + "</tr>"
-    if parties:
-        parties += "<tr>" + cells(
-            thw("الإجمالي"), thw(en(f"{t['lines']:,}")),
-            thw(_g(t["weight"])), thw(_w(t["avg_applied"], 2)),
-            thw(_w(t["avg_agreed"], 2)), thw(en(f"{t['below']:,}")),
-            thw(en(f"{t['above']:,}")), thw(en(f"{t['match']:,}")),
-            thw(_m(t["impact"]))) + "</tr>"
-    else:
-        parties = (f'<tr><td {TD} colspan="9">لا جهةَ لها أجرةٌ متفق '
-                   'عليها في هذه الفترة</td></tr>')
-
-    lines = ""
-    for x in r["lines"]:
-        lines += "<tr>" + cells(
-            tdw(en(x["date"])), tdw(en(x["invoice_no"] or "—")),
-            tdw("بيع" if x["kind"] == "sale" else "مرتجع"),
-            tdw(x["party"], align="right"), tdw(en(x["wo_no"])),
-            tdw(_g(x["weight"])), tdw(_w(x["applied"], 2)),
-            tdw(_w(x["agreed"], 2)), tdw(_m(x["diff"])),
-            tdw(_m(x["impact"]))) + "</tr>"
-    if not lines:
-        lines = f'<tr><td {TD} colspan="10">لا انحرافات</td></tr>'
-
-    miss = ""
-    for x in r["missing"]:
-        miss += "<tr>" + cells(
-            tdw(x["name"], align="right"), tdw(en(f"{x['lines']:,}")),
-            tdw(_g(x["weight"])), tdw(_m(x["wages"]))) + "</tr>"
-    miss_block = ""
-    if miss:
-        miss_block = (
-            '<div class="party">بلا اتفاقٍ مكتوب — لا يُقاس عليها شيء'
-            f'</div>{TBL}<tr>'
-            + cells(thw("الجهة"), thw("أسطر"), thw(f"الوزن ({u})"),
-                    thw("الأجور المحصَّلة (ريال)"))
-            + "</tr>" + miss + "</table>")
-
-    verdict = "".join(f"<li>{v}</li>" for v in wage_audit.verdict(r))
-    html = f'''
-    {TBL}
-      <tr><td {TH} width="25%">الفترة</td>
-          <td>{en(date_from or "—")} إلى {en(date_to or today)}</td>
-          <th>النطاق</th>
-          <td>{"الانحرافات فقط" if only_deviations else "كل الأسطر"}</td></tr>
-      <tr><th>أقلّ من المتفق</th>
-          <td>{_w(abs(r["loss"]), 2)} ريال</td>
-          <th>أعلى من المتفق</th>
-          <td>{_w(r["gain"], 2)} ريال</td></tr>
-      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
-    </table>
-
-    <div class="party">بالعميل</div>
-    {TBL}
-      <tr>{cells(thw("العميل"), thw("أسطر"), thw(f"الوزن ({u})"),
-                 thw("متوسط المطبَّق"), thw("متوسط المتفق"), thw("أقلّ"),
-                 thw("أعلى"), thw("مطابق"), thw("الأثر (ريال)"))}</tr>
-      {parties}
-    </table>
-
-    <div class="party">سطراً سطراً — الأسوأ أولاً</div>
-    {TBL}
-      <tr>{cells(thw("التاريخ"), thw("الفاتورة"), thw("النوع"),
-                 thw("العميل"), thw("رقم التشغيل"), thw(f"الوزن ({u})"),
-                 thw("المطبَّق"), thw("المتفق"), thw("الفرق"),
-                 thw("الأثر (ريال)"))}</tr>
-      {lines}
-    </table>
-    {miss_block}
-
-    <div class="note">كل فاتورةٍ تُقاس بالاتفاق الذي كان نافذاً <b>يوم
-      صدورها</b> لا باتفاق اليوم — وإلا صار تغييرُ الاتفاق انحرافاً في كل
-      فاتورةٍ سبقته. والأثر = (المطبَّق − المتفق) × الوزن، وإشارته في
-      المرتجع معكوسة لأن الوزن يعود لا يخرج. والسالب بين قوسين.</div>
-    <div class="note"><ul>{verdict}</ul></div>
-    '''
-    return (_header("انحرافات الأجرة — أين يتسرّب الربح", "—", today,
-                    show_meta=False) + html + _footer(""))
 
 
 def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
@@ -2496,7 +2181,7 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
         bridge += "<tr>" + cells(
             tdw(x["label"], align="right"), tdw(_g(x["gold"])),
             tdw(_m(x["cash"])), tdw(en(f"{x['docs']:,}")),
-            tdw(en(f"{x['days']:,}"))) + "</tr>"
+            tdw(en(x["days_label"]))) + "</tr>"
     bridge += "<tr>" + cells(
         thw("رصيد آخر المدة"), thw(_g(r["closing"]["gold"])),
         thw(_m(r["closing"]["cash"])), thw("—"), thw("—")) + "</tr>"
@@ -2527,7 +2212,7 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
     if not mdl:
         mdl = f'<tr><td {TD} colspan="6">لا مبيعات مسجّلة</td></tr>'
 
-    fl, flife, wg = d["flow"], d["flow_life"], d["wage"]
+    fl, flife = d["flow"], d["flow_life"]
 
     def _pct(v):
         return en(f"{v:,.1f}%") if v is not None else "—"
@@ -2570,7 +2255,7 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
     <div class="party">ما جرى في الفترة — جسر الرصيد</div>
     {TBL}
       <tr>{cells(thw("البند"), thw(f"الوزن ({u})"), thw("النقد (ريال)"),
-                 thw("مستندات"), thw("أيام"))}</tr>
+                 thw("مستندات"), thw("أيام من الفترة"))}</tr>
       {bridge}
     </table>
 
@@ -2581,32 +2266,50 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
       {age}
     </table>
 
-    <div class="party">حركته وأجرته</div>
+    <div class="party">حركته — وما كان تحت يده</div>
     {TBL}
-      <tr>{cells(thw("البند"), thw("الفترة"), thw("من البداية"),
-                 thw("ملاحظة"))}</tr>
-      <tr>{cells(tdw("ما خرج إليه", align="right"),
-                 tdw(_g(fl["out_weight"])), tdw(_g(flife["out_weight"])),
+      <tr>{cells(thw("البند"), thw(f"الفترة ({u})"), thw("الفترة (ريال)"),
+                 thw(f"من البداية ({u})"), thw("ملاحظة"))}</tr>
+      <tr>{cells(tdw("رصيد أول المدة", align="right"),
+                 tdw(_g(fl["opening_weight"])), tdw("—"),
+                 tdw(_g(flife["opening_weight"])),
+                 tdw("ما كان عنده قبل الفترة"))}</tr>
+      <tr>{cells(tdw("ما خرج إليه في الفترة", align="right"),
+                 tdw(_g(fl["out_weight"])), tdw(_m(fl["out_wages"])),
+                 tdw(_g(flife["out_weight"])),
                  tdw(en(f"{fl['sold_lines']:,} / "
                         f"{flife['sold_lines']:,} سطراً")))}</tr>
+      <tr>{cells(thw("ما كان عنده (افتتاحيّ + خارج)"),
+                 thw(_g(fl["held_weight"])), thw("—"),
+                 thw(_g(flife["held_weight"])),
+                 thw("الأساس الذي تُقاس عليه النسب"))}</tr>
       <tr>{cells(tdw("ما رجع منه", align="right"),
-                 tdw(_g(fl["back_weight"])), tdw(_g(flife["back_weight"])),
+                 tdw(_g(fl["back_weight"])), tdw(_m(fl["back_wages"])),
+                 tdw(_g(flife["back_weight"])),
                  tdw(en(f"{fl['return_lines']:,} / "
                         f"{flife['return_lines']:,} سطراً")))}</tr>
-      <tr>{cells(thw("نسبة المرتجع (بالوزن)"), thw(_pct(fl["return_pct"])),
-                 thw(_pct(flife["return_pct"])),
-                 thw("بالوزن لا بالعدد"))}</tr>
-      <tr>{cells(tdw("الأجرة المتفق عليها", align="right"),
-                 tdw(_w(karat_view.rate(wg["agreed"]), 2)
-                     if wg["agreed"] else "بلا اتفاق"), tdw("—"),
-                 tdw("من بطاقة الجهة"))}</tr>
-      <tr>{cells(tdw("متوسط الأجرة المطبَّقة", align="right"),
-                 tdw(_w(karat_view.rate(wg["avg_applied"]), 2)
-                     if wg["avg_applied"] else "—"), tdw("—"),
-                 tdw(en(f"{wg['lines']:,} سطراً في الفترة")))}</tr>
-      <tr>{cells(thw("أثر فرق الأجرة (ريال)"), thw(_m(wg["impact"])),
-                 thw("—"),
-                 thw(en(f"{wg['deviations']:,} سطراً مخالفاً")))}</tr>
+      <tr>{cells(tdw("ما سدّده", align="right"),
+                 tdw(_g(fl["paid_weight"])), tdw(_m(fl["paid_cash"])),
+                 tdw(_g(flife["paid_weight"])),
+                 tdw(en(f"{fl['paid_count']:,} / "
+                        f"{flife['paid_count']:,} سند قبض")))}</tr>
+      <tr>{cells(thw("الباقي عليه (رصيد آخر المدة)"),
+                 thw(_g(d["bridge"]["closing"]["gold"])),
+                 thw(_m(d["bridge"]["closing"]["cash"])),
+                 thw(_g(b["gold"])),
+                 thw("من الدفتر لا من جمع الأسطر"))}</tr>
+      <tr>{cells(tdw("نسبة المرتجع (من الذي كان عنده)", align="right"),
+                 tdw(_pct(fl["return_pct"])), tdw("—"),
+                 tdw(_pct(flife["return_pct"])),
+                 tdw("بالوزن لا بالعدد"))}</tr>
+      <tr>{cells(tdw("نسبة السداد (من الذي كان عنده)", align="right"),
+                 tdw(_pct(fl["paid_pct"])), tdw("—"),
+                 tdw(_pct(flife["paid_pct"])),
+                 tdw("كم سدّد ممّا كان تحت يده"))}</tr>
+      <tr>{cells(thw("نسبة التصفية (مرتجع + سداد)"),
+                 thw(_pct(fl["settled_pct"])), thw("—"),
+                 thw(_pct(flife["settled_pct"])),
+                 thw("ما خرج من ذمّته بأي طريق"))}</tr>
     </table>
 
     <div class="party">أكثر ما يأخذ من الموديلات (من البداية)</div>
@@ -2751,9 +2454,7 @@ BUILDERS = {
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,
     "day_close": _tpl_day_close,
-    "gold_map": _tpl_gold_map,
     "stock_aging": _tpl_stock_aging,
-    "wage_audit": _tpl_wage_audit,
     "dossier": _tpl_dossier,
     "doc_edits": _tpl_doc_edits,
 }

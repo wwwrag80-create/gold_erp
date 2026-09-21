@@ -751,7 +751,7 @@ class SalesScreen(QtWidgets.QWidget):
                 f"{self._agreed_wage:,.2f} — "
                 + ("أقلّ" if d < 0 else "أعلى") +
                 f" بـ {abs(d):,.2f} ريال لكل {kv.unit()}. "
-                "أُضيف كما أدخلتَه، ويظهر في «انحرافات الأجرة».")
+                "أُضيف كما أدخلتَه — راجعه إن لم يكن عن قصد.")
 
     def new_customer(self):
         dlg = NewCustomerDialog(self, self.user["username"])

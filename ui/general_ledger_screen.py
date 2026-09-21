@@ -155,10 +155,21 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         pal = theme.palette(theme.current_theme())
         bg = QtGui.QColor(pal.get("sumBg", "#FDF3E2"))
         ink = QtGui.QColor(pal.get("sumInk", "#7A4F10"))
+        # ══ خطُّ الإجمالي أصغر قليلاً ══
+        # أرقام الإجمالي أكبر من أرقام الأسطر بطبيعتها (مجموع مئة
+        # سطر) والعمود بعرضه، فكان الرقم الكبير يُقصّ فيُقرأ ناقصاً —
+        # وهو أسوأ ما يقع في صفٍّ اسمه «الإجمالي». والإبراز باقٍ في
+        # العريض واللون؛ الحجم وحده تنازل.
+        # والأساس خطُّ **الجدول** لا خطُّ الخانة: الخانة التي لم
+        # يُضبط خطها تعيد خط التطبيق لا خط الجدول الذي تضبطه الأنماط،
+        # فلو قيس عليه لخرج صفُّ الإجمالي أصغر من إخوته بكثير.
+        sf = QtGui.QFont(self.table.font())
+        sf.setBold(True)
+        base = sf.pointSizeF()
+        if base > 0:
+            sf.setPointSizeF(max(8.0, base - 1.5))
         for c, it in enumerate(items):
-            f = it.font()
-            f.setBold(True)
-            it.setFont(f)
+            it.setFont(sf)
             it.setBackground(bg)
             it.setForeground(ink)
             self.table.setItem(row, c, it)

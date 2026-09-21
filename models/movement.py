@@ -46,6 +46,12 @@ ORDER = ["مبيعات", "مرتجع", "قبض", "صرف", "تسكير", "تور
          "مشتريات", "صب", "تسوية", "قيد يومية"]
 OTHER = "أخرى"
 
+# **قيد الرصيد الافتتاحي ليس حركة**: هو الرصيد الذي بدأت به الفترة،
+# فمكانه سطرُ «أول المدة» لا سطرُ «أخرى». وكان يقع في «أخرى» لأن
+# اسمه ليس في القائمة أعلاه، فيقرأ المستخدم رصيدَ افتتاحٍ على أنه
+# حركةٌ مجهولة وقعت في الفترة — وهو أشدّ ما يُربك في الجسر.
+OPENING_OP = "رصيد افتتاحي"
+
 
 def _d(s):
     try:
@@ -54,16 +60,44 @@ def _d(s):
         return None
 
 
-def analyze(conn, account_id, date_from, date_to):
-    """جسر الرصيد وتحليل الأيام لحسابٍ بين تاريخين."""
-    rows = journal.statement(conn, account_id, date_from, date_to)
+def account_ids(conn, account_id):
+    """الحساب وحده إن كان قابلاً للترحيل، وشجرتُه كلها إن كان تجميعياً.
 
-    # سطر «رصيد سابق» هو الافتتاحي — يُفصل عن الحركة
+    الحساب التجميعي («إجمالي العملاء») لا يُرحَّل عليه شيء، فقراءتُه
+    وحده تعطي كشفاً خاوياً. والمقصود منه مجموعُ فروعه.
+    """
+    try:
+        r = conn.execute("SELECT is_postable FROM accounts WHERE id=?",
+                         (account_id,)).fetchone()
+        if r is not None and not r["is_postable"]:
+            from models.accounts import subtree_ids
+            ids = subtree_ids(conn, account_id)
+            return ids or [account_id]
+    except Exception:
+        pass
+    return [account_id]
+
+
+def analyze(conn, account_id, date_from, date_to):
+    """جسر الرصيد وتحليل الأيام لحسابٍ (أو شجرةِ حسابٍ) بين تاريخين."""
+    rows = journal.statement(conn, account_ids(conn, account_id),
+                             date_from, date_to)
+
+    # سطر «رصيد سابق» هو الافتتاحي — يُفصل عن الحركة. ويُضمّ إليه
+    # قيدُ الرصيد الافتتاحي الواقع **داخل** الفترة: هو رصيدُ بدايةٍ
+    # لا حركةٌ جرت. والجسر يبقى مقفلاً لأن ما يُضاف إلى الافتتاحي
+    # يُطرح من الحركة بالقدر نفسه.
     opening_g = opening_c = 0.0
     moves = []
     for r in rows:
         if r["op"] == "رصيد سابق":
             opening_g, opening_c = r["gbal"], r["cbal"]
+            continue
+        if r["op"] == OPENING_OP:
+            opening_g = round(
+                opening_g + float(r["gd"] or 0) - float(r["gc"] or 0), 3)
+            opening_c = round(
+                opening_c + float(r["cd"] or 0) - float(r["cc"] or 0), 2)
             continue
         moves.append(r)
 
@@ -97,11 +131,17 @@ def analyze(conn, account_id, date_from, date_to):
         d["docs"] += 1
         d["ops"].add(key)
 
+    # **الأيام تُقرأ نسبةً إلى الفترة لا عدداً مجرّداً**: «٣ كيلو في
+    # ٣٠ يوماً» بيعٌ منتظم، و«٣ كيلو في يومٍ واحد من ٣٠» صفقةٌ واحدة
+    # — والرقم نفسه في الحالتين. فكل بندٍ يحمل مدى الفترة معه ليُعرض
+    # «س من ص يوماً» أينما عُرض، في هذه الشاشة وفي غيرها.
+    span = _span(date_from, date_to, daily)
     out_b = []
     for key in ORDER + [OTHER]:
         b = buckets.get(key)
         if not b:
             continue
+        n = len(b["days"])
         out_b.append({
             "label": b["label"],
             "gold": round(b["gold"], 3), "cash": round(b["cash"], 2),
@@ -109,7 +149,9 @@ def analyze(conn, account_id, date_from, date_to):
             "gold_dn": round(b["gold_dn"], 3),
             "cash_up": round(b["cash_up"], 2),
             "cash_dn": round(b["cash_dn"], 2),
-            "docs": b["docs"], "days": len(b["days"]),
+            "docs": b["docs"], "days": n, "span": span,
+            "days_pct": round(n * 100.0 / span, 1) if span else 0.0,
+            "days_label": days_label(n, span),
             "day_list": sorted(b["days"]),
         })
 
@@ -143,17 +185,36 @@ def analyze(conn, account_id, date_from, date_to):
     }
 
 
+def _span(date_from, date_to, daily):
+    """عدد أيام الفترة — وطولُ الحركة إن لم يُحدَّد طرفاها."""
+    a, b = _d(date_from), _d(date_to)
+    return ((b - a).days + 1) if (a and b and b >= a) else len(daily)
+
+
+def days_label(n, span):
+    """«س من ص يوماً» — الصيغة المعتمدة لعرض الأيام في كل شاشة.
+
+    مصدرٌ واحد للصيغة: من قرأ «٢ من ٣٠» في الجسر يقرؤها نفسها في
+    نشاط الأيام وفي ملف الجهة، فلا يتعلّم قراءتين للمعنى الواحد.
+    """
+    if not span:
+        return f"{n:,}"
+    return f"{n:,} من {span:,}"
+
+
 def _day_stats(date_from, date_to, buckets, daily):
     """كم يوماً في الفترة، وكم منها فيه حركة، وكم صامت."""
-    a, b = _d(date_from), _d(date_to)
-    span = ((b - a).days + 1) if (a and b and b >= a) else len(daily)
+    span = _span(date_from, date_to, daily)
     active = len(daily)
     return {
         "span": span,
         "active": active,
+        "active_label": days_label(active, span),
         "silent": max(0, span - active),
         "active_pct": round(active * 100.0 / span, 1) if span else 0.0,
         "by_op": [{"label": x["label"], "days": x["days"],
+                   "span": x["span"], "days_label": x["days_label"],
+                   "days_pct": x["days_pct"],
                    "docs": x["docs"], "gold": x["gold"], "cash": x["cash"]}
                   for x in buckets],
     }

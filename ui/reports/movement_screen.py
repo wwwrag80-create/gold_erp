@@ -116,11 +116,20 @@ class MovementScreen(QtWidgets.QWidget):
 
     # ─────────────────────────────── بيانات
     def _load_accounts(self):
-        """الجهات أولاً ثم بقية الحسابات — السؤال عن عميلٍ غالباً."""
+        """الجهات أولاً ثم بقية الحسابات — السؤال عن عميلٍ غالباً.
+
+        **والحسابات التجميعية معها**: «إجمالي العملاء» لا يُرحَّل عليه
+        شيء، لكنّ السؤال «كم صارت مديونية العملاء كلهم» سؤالٌ يُسأل —
+        وجوابه مجموع شجرته. فتُدرج مُعلَّمةً بـ«(مجمّع)» ليعرف القارئ
+        أنه يقرأ شجرةً لا حساباً.
+        """
         try:
             with db(readonly=True) as conn:
                 ents = entities.list_entities(conn)
                 accs = list_postable(conn)
+                groups = conn.execute(
+                    "SELECT id, code, name FROM accounts"
+                    " WHERE is_postable=0 ORDER BY code").fetchall()
         except Exception as e:
             err(self, e)
             return
@@ -137,6 +146,12 @@ class MovementScreen(QtWidgets.QWidget):
             if a["id"] in seen:
                 continue
             self.account.addItem(f"{a['code']} — {a['name']}", a["id"])
+            seen.add(a["id"])
+        for a in groups:
+            if a["id"] in seen:
+                continue
+            self.account.addItem(
+                f"{a['code']} — {a['name']} (مجمّع)", a["id"])
         self.account.blockSignals(False)
         try:
             self.account.clear_selection()
@@ -200,7 +215,7 @@ class MovementScreen(QtWidgets.QWidget):
 
         # ── جسر الرصيد ──
         cols = ["البند", "الأثر", f"المبلغ ({u})", "خرج", "رجع/سُدّد",
-                "مستندات", "أيام"]
+                "مستندات", "أيام من الفترة"]
         rows = [("رصيد أول المدة", "", self._fmt(op, dim), "", "", "", "")]
         for b in r["buckets"]:
             v = b[dim]
@@ -215,27 +230,27 @@ class MovementScreen(QtWidgets.QWidget):
                 self._fmt(abs(v), dim),
                 self._fmt(up, dim) if up else "",
                 self._fmt(dn, dim) if dn else "",
-                f"{b['docs']:,}", f"{b['days']:,}"))
+                f"{b['docs']:,}", b["days_label"]))
         rows.append(("رصيد آخر المدة", "", self._fmt(cl, dim), "", "",
                      "", ""))
         fill(self.t_bridge, cols, rows)
         self._mark(self.t_bridge, [0, len(rows) - 1])
 
         # ── نشاط الأيام ──
-        cols2 = ["نوع العملية", "عدد الأيام", "من أيام الفترة",
+        cols2 = ["نوع العملية", "أيام من الفترة", "النسبة",
                  "عدد المستندات", f"الإجمالي ({u})", "متوسط اليوم النشط"]
         rows2 = []
         for x in d["by_op"]:
             v = abs(x[dim])
             n = x["days"] or 1
             rows2.append((
-                x["label"], f"{x['days']:,}",
-                f"{round(x['days'] * 100.0 / (d['span'] or 1), 1)}%",
+                x["label"], x["days_label"], f"{x['days_pct']}%",
                 f"{x['docs']:,}", self._fmt(v, dim),
                 self._fmt(v / n, dim)))
-        rows2.append(("— أيام فيها حركة —", f"{d['active']:,}",
+        rows2.append(("— أيام فيها حركة —", d["active_label"],
                       f"{d['active_pct']}%", "", "", ""))
-        rows2.append(("— أيام صامتة —", f"{d['silent']:,}", "", "", "", ""))
+        rows2.append(("— أيام صامتة —", f"{d['silent']:,} من {d['span']:,}",
+                      "", "", "", ""))
         fill(self.t_days, cols2, rows2)
         self._mark(self.t_days, [len(rows2) - 2, len(rows2) - 1])
 
@@ -284,14 +299,14 @@ class MovementScreen(QtWidgets.QWidget):
                 continue
             out.append(f"  {b['label']:<10} {('زيادة' if v > 0 else 'نقص')} "
                        f"{self._fmt(abs(v), dim)}   "
-                       f"({b['docs']} مستند · {b['days']} يوم)")
+                       f"({b['docs']} مستند · {b['days_label']} يوماً)")
         out += [f"رصيد آخر المدة : {self._fmt(r['closing'][dim], dim)} {u}",
                 ""]
         d = r["days"]
         out.append(f"نشاط الأيام: {d['active']} يوماً فيها حركة من "
                    f"{d['span']} ({d['active_pct']}%)")
         for x in d["by_op"]:
-            out.append(f"  {x['label']:<10} في {x['days']} يوماً")
+            out.append(f"  {x['label']:<10} في {x['days_label']} يوماً")
         QtWidgets.QApplication.clipboard().setText("\n".join(out))
         self.verdict.setText("نُسخت الخلاصة — الصقها في أي رسالة.")
 

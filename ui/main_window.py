@@ -45,11 +45,9 @@ from ui.reports.aging_screen import AgingScreen
 from ui.reports.bank_recon_screen import BankReconScreen
 from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.assets_screen import AssetsScreen
-from ui.reports.gold_map_screen import GoldMapScreen
 from ui.reports.stock_aging_screen import StockAgingScreen
 from ui.reports.doc_edits_screen import DocEditsScreen
 from ui.reports.dossier_screen import DossierScreen
-from ui.reports.wage_audit_screen import WageAuditScreen
 from ui.reports.movement_screen import MovementScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
@@ -186,21 +184,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("تحليل حركة الرصيد",
                      Lazy(lambda: MovementScreen(user),
                           "تحليل حركة الرصيد")),
-                    # «أين ذهبي الآن؟» كان جوابه عشرَ شاشاتٍ تُفتح
-                    # وتُجمع باليد — وكل جمعٍ باليد خطأٌ ينتظر
-                    ("خريطة الذهب (أين الذهب الآن)",
-                     Lazy(lambda: GoldMapScreen(user),
-                          "خريطة الذهب (أين الذهب الآن)")),
                     # «في المخزن ٨٤٠ طقماً» رقمٌ لا يُتَّخذ عليه قرار؛
                     # القرار على «كم منها راقدٌ فوق التسعين يوماً»
-                    ("أعمار المخزون (رأس المال الراكد)",
+                    ("أعمار الموديلات (ما رقد في المخزن)",
                      Lazy(lambda: StockAgingScreen(user),
-                          "أعمار المخزون (رأس المال الراكد)")),
-                    # الأجرة تُكتب من ذاكرة البائع في كل سطر، فينزل
-                    # عميلٌ درجةً بلا أن يقارن أحد
-                    ("انحرافات الأجرة (المتفق عليه والمطبَّق)",
-                     Lazy(lambda: WageAuditScreen(user),
-                          "انحرافات الأجرة (المتفق عليه والمطبَّق)")),
+                          "أعمار الموديلات (ما رقد في المخزن)")),
                     # سبعُ شاشاتٍ تُفتح في مكالمةٍ هاتفية تعني أن
                     # أحداً لن يفتحها — فجُمعت في صفحة
                     ("ملف الجهة (كل ما يخصّها في صفحة)",

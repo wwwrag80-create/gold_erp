@@ -2458,115 +2458,7 @@ def main():
           and abs(_empty["opening"]["gold"]
                   - _empty["closing"]["gold"]) < 0.0011)
 
-    step("34) خريطة الذهب — أين الذهب، وهل تقفل الخريطة")
-    # ══ الضمانة التي تقوم عليها الخريطة ══
-    # القيد المزدوج في بُعد الذهب يوجب أن يكون مجموع أرصدة **كل**
-    # الحسابات صفراً. فالخريطة (الدلاء الثمانية + ما خرج عنها) يجب
-    # أن تساوي تماماً سالبَ الطرف المقابل. ولو نُسي حسابُ ذهبٍ جديد
-    # لم يضع رصيده: يظهر في «خارج الخريطة» باسمه. وهذا ما يُفحص هنا
-    # بحسابٍ ذهبيٍّ متعمَّدٍ خارج الدلاء الثمانية.
-    from models import gold_map as _gm
-
-    with db() as conn:
-        post_entry(conn, "2026-04-01", "فصوص خارج دلاء الخريطة",
-                   [{"account_id": acc_id(conn, "1150"), "gold_debit": 12.0},
-                    {"account_id": acc_id(conn, "3900"),
-                     "gold_credit": 12.0}], username="admin")
-    with db(readonly=True) as conn:
-        _map = _gm.gold_map(conn, "2026-12-31", "2026-02-28")
-        _all = conn.execute(
-            "SELECT ROUND(COALESCE(SUM(l.gold_debit-l.gold_credit),0),3) g"
-            " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-            " WHERE e.is_deleted=0 AND e.entry_date<=?",
-            ("2026-12-31",)).fetchone()["g"]
-
-    check("الدفتر نفسه صفرٌ في بُعد الذهب — أساس القفلة",
-          abs(float(_all or 0)) < 0.0011, f"{_all}")
-    check("الخريطة تقفل: مجموعها + الطرف المقابل = صفر",
-          _map["balanced"],
-          f"خريطة {_map['total']} · مقابل {_map['other_total']} · "
-          f"فرق {_map['diff']}")
-    check("الدلاء الثمانية كلها حاضرة ولا حساب منها مفقود",
-          len(_map["buckets"]) == 8
-          and not any(b["missing"] for b in _map["buckets"]),
-          " · ".join(f"{b['label']}={b['gold']}" for b in _map["buckets"]))
-
-    _by = {b["code"]: b for b in _map["buckets"]}
-    check("ما عند العملاء يساوي مجموع شجرة 1600 لا حسابها وحده",
-          _by["1600"]["gold"] > 0 and len(_by["1600"]["leaves"]) >= 1,
-          f"{_by['1600']['gold']} من {len(_by['1600']['leaves'])} حساباً")
-    check("والمجموع = مجموع أوراق الدلو",
-          abs(_by["1600"]["gold"]
-              - sum(x["gold"] for x in _by["1600"]["leaves"])) < 0.0011)
-
-    check("حساب الذهب خارج الدلاء يظهر منبَّهاً عليه لا يضيع",
-          any(r["code"] == "1150" and abs(r["gold"] - 12.0) < 0.0011
-              for r in _map["outside"]),
-          " · ".join(f"{r['code']}={r['gold']}" for r in _map["outside"]))
-    check("والخلاصة تسمّيه باسمه",
-          any("خارج الدلاء" in v for v in _gm.verdict(_map)),
-          " | ".join(_gm.verdict(_map))[:110])
-
-    check("في اليد + عند الغير + خارج الخريطة = الإجمالي",
-          abs(_map["hand"] + _map["outside_hands"] + _map["unmapped"]
-              - _map["total"]) < 0.0011,
-          f"{_map['hand']} + {_map['outside_hands']} + "
-          f"{_map['unmapped']} = {_map['total']}")
-    check("النسب تُحسب على الموجود لا على الصافي فلا تنفجر",
-          all(b["share"] is None or 0 <= b["share"] <= 100
-              for b in _map["buckets"]),
-          " · ".join(f"{b['label']}={b['share']}" for b in _map["buckets"]))
-
-    # المقارنة بتاريخٍ سابق: الفرق يُقرأ لا يُحسب باليد
-    check("المقارنة تعطي رصيد التاريخ السابق وفرقَه",
-          all(b["prev"] is not None and b["change"] is not None
-              for b in _map["buckets"])
-          and abs(_map["change_total"]
-                  - (_map["total"] - _map["prev_total"])) < 0.0011,
-          f"الإجمالي {_map['prev_total']} ← {_map['total']}")
-    check("وأكبر المتغيّرين يتصدّر القائمة",
-          bool(_map["movers"])
-          and abs(_map["movers"][0]["change"])
-          >= abs(_map["movers"][-1]["change"]),
-          " · ".join(f"{b['label']}={b['change']}"
-                     for b in _map["movers"]))
-
-    # بلا مقارنة: لا ينهار التحليل ولا تُخترع أرقام
-    with db(readonly=True) as conn:
-        _solo = _gm.gold_map(conn, "2026-12-31")
-    check("خريطةٌ بلا مقارنة تُرسم ولا تُخترع لها أرقام",
-          _solo["balanced"] and _solo["movers"] == []
-          and all(b["prev"] is None for b in _solo["buckets"]))
-    # تاريخٌ قبل أي حركة: أصفارٌ لا قسمةٌ على صفر
-    with db(readonly=True) as conn:
-        _zero = _gm.gold_map(conn, "2020-01-01")
-    check("تاريخٌ قبل أي حركة يُعطي أصفاراً لا انهياراً",
-          _zero["balanced"] and abs(_zero["total"]) < 0.0011
-          and _zero["hand_share"] is None
-          and "لا رصيد" in " ".join(_gm.verdict(_zero)))
-
-    # الورقة تُبنى فعلاً — قالبٌ يكسر لا يُكتشف إلا عند الطباعة
-    from services import print_manager as _pm
-    _html = _pm.build_body("gold_map", 0, as_of="2026-12-31",
-                           compare_to="2026-02-28", detail=True)
-    check("ورقة الخريطة تُبنى وتحمل دليل قفلتها",
-          "خريطة الذهب" in _html and "القفلة" in _html
-          and "لمن هذا الذهب" in _html, f"{len(_html)} حرفاً")
-    # ══ السالب بين قوسين لا بإشارةٍ أمامه ══
-    # علامة الناقص أمام رقمٍ داخل نصٍّ عربيٍّ تُرسم على طرفه الآخر،
-    # فيقرأ المستلم «1,313.667−» موجبةً — وهذه ورقةٌ تُسلَّم للإدارة.
-    # والخريطة تعرض أرصدةً سالبةً فعلاً (خزينةٌ خرج منها أكثر ممّا
-    # دخل)، فالفحص واقعيٌّ لا افتراضي.
-    import re as _re
-    _raw = _re.findall(r"-[\d,]+\.\d", _html)
-    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
-          not _raw, " · ".join(_raw[:5]) or "لا شيء")
-    check("بل تضع السالب بين قوسين كما يكتبه المحاسبون",
-          any(b["gold"] < 0 for b in _map["buckets"]) and "(" in _html,
-          " · ".join(f"{b['label']}={b['gold']}"
-                     for b in _map["buckets"] if b["gold"] < 0))
-
-    step("35) أعمار المخزون — رأس المال الراكد")
+    step("34) أعمار الموديلات — ما رقد في المخزن ومنذ متى")
     # ══ ثلاث ضمانات ══
     # 1) العمر من **قيد التوريد** لا من وقت كتابة السجل: دفعةٌ تُسجَّل
     #    اليوم وقد وردت قبل سنةٍ عمرها سنة. و`created_at` هو الآن
@@ -2661,21 +2553,22 @@ def main():
 
     _html2 = _pm.build_body("stock_aging", 0, as_of="2026-06-30",
                             detail=True)
-    check("ورقة أعمار المخزون تُبنى برأسها ذي الصفّين",
-          "أعمار المخزون" in _html2 and "بالموديل" in _html2
-          and "الأجرة الراكدة" in _html2, f"{len(_html2)} حرفاً")
+    check("ورقة أعمار الموديلات تُبنى بجدول القطع",
+          "أعمار الموديلات" in _html2 and "رقم التشغيل" in _html2
+          and "OLD-1" in _html2, f"{len(_html2)} حرفاً")
     check("وتستعمل تسميات أعمار الديون نفسها لا تسمياتٍ أخرى",
           all(b in _html2 for b in _sa.BUCKET_LABELS),
           " · ".join(_sa.BUCKET_LABELS))
+    check("ولا تحمل عمودَي الأجرة اللذين حُذفا",
+          "أجرة الجرام" not in _html2 and "أجرة راكدة" not in _html2)
 
-    step("36) الأجرة المتفق عليها وانحرافاتها")
-    # ══ الضمانة التي يقوم عليها التقرير ══
-    # كل فاتورةٍ تُقاس بالاتفاق الذي كان نافذاً **يوم صدورها**. لو
-    # قِيست بالاتفاق الحالي لصارت كلُّ فاتورةٍ قبل آخر تعديلٍ
-    # «انحرافاً»، فيمتلئ التقرير بما ليس بخطأ ويُهمَل — والمُهمَل
-    # كأنه لم يُكتب. وهذا ما يُفحص هنا باتفاقين متتاليين.
+    step("35) الأجرة المتفق عليها — تصل إلى البائع وقت البيع")
+    # ══ الضمانة ══
+    # الاتفاق يتغيّر، فتُقرأ أجرةُ كل يومٍ من سجلّه لا من آخر قيمة.
+    # ولولا ذلك لقرأ من يراجع فاتورةً قديمةً أجرةَ اليوم لا أجرتها.
+    # والأهم أن الاتفاق **يصل إلى شاشة المبيعات** فيُملأ أمام البائع
+    # ويُنبَّه إن خالفه — فالأصل ألّا يقع الخطأ لا أن يُكشف بعد شهر.
     from models import entities as _ent
-    from models import wage_audit as _wa
 
     with db() as conn:
         _wc = add_entity(conn, "عميل فحص الأجرة", "customer",
@@ -2692,7 +2585,6 @@ def main():
     check("صفرٌ يعني بلا اتفاق لا اتفاقاً بصفر",
           _ent.agreed_wage(conn, _mc) == 0.0)
 
-    # فاتورةٌ مطابقة، وأخرى أقلّ بريالين — كلتاهما تحت الاتفاق الأول
     with db() as conn:
         create_sale(conn, _wc, [{"work_order_id": _wg[0],
                                  "wage_override": 20.0}],
@@ -2700,74 +2592,16 @@ def main():
         create_sale(conn, _wc, [{"work_order_id": _wg[1],
                                  "wage_override": 18.0}],
                     "2026-02-10", "admin", apply_vat=False)
-    # ثم يرتفع الاتفاق إلى 25، وتُباع قطعةٌ بالسعر الجديد
+    # ثم يرتفع الاتفاق إلى 25، وتُباع قطعتان بالسعر الجديد
     with db() as conn:
         _ent.set_agreed_wage(conn, _wc, 25.0, "2026-03-01", "رفع الأجرة",
                              "admin")
         create_sale(conn, _wc, [{"work_order_id": _wg[2],
                                  "wage_override": 25.0}],
                     "2026-03-15", "admin", apply_vat=False)
-
-    with db(readonly=True) as conn:
-        _wr = _wa.report(conn, "2026-01-01", "2026-12-31",
-                         only_deviations=False)
-
-    _by = {x["invoice_no"]: x for x in _wr["lines"]
-           if x["party"] == "عميل فحص الأجرة"}
-    _feb = [x for x in _by.values() if x["date"] == "2026-02-01"]
-    _low = [x for x in _by.values() if x["date"] == "2026-02-10"]
-    _mar = [x for x in _by.values() if x["date"] == "2026-03-15"]
-    check("فاتورةُ فبراير تُقاس بالاتفاق الأول (20) لا بالحالي (25)",
-          bool(_feb) and _feb[0]["agreed"] == 20.0
-          and _feb[0]["state"] == "مطابق",
-          f"{_feb[0]['agreed'] if _feb else '—'}")
-    check("وفاتورةُ مارس تُقاس بالاتفاق الجديد (25) فتُطابقه",
-          bool(_mar) and _mar[0]["agreed"] == 25.0
-          and _mar[0]["state"] == "مطابق",
-          f"{_mar[0]['agreed'] if _mar else '—'}")
-    check("ورفعُ الاتفاق لا يجعل الفواتير السابقة انحرافاً",
-          _feb[0]["impact"] == 0.0 and _mar[0]["impact"] == 0.0)
-
-    check("الأقلّ من المتفق يُرصد بالمال لا بالفرق",
-          bool(_low) and _low[0]["state"] == "أقلّ من المتفق"
-          and abs(_low[0]["impact"] + 2.0 * _low[0]["weight"]) < 0.011,
-          f"فرق {_low[0]['diff'] if _low else '—'} · "
-          f"أثر {_low[0]['impact'] if _low else '—'}")
-
-    _p = {x["name"]: x for x in _wr["parties"]}["عميل فحص الأجرة"]
-    check("وتجميع العميل يجمع أسطره الثلاثة",
-          _p["lines"] == 3 and _p["below"] == 1 and _p["match"] == 2,
-          f"أسطر {_p['lines']} · أقلّ {_p['below']} · مطابق {_p['match']}")
-    check("والخسارة تُجمع في لوحة «أقلّ من المتفق»",
-          _wr["loss"] < -0.005 and abs(_wr["gain"]) < 0.005,
-          f"خسارة {_wr['loss']} · زيادة {_wr['gain']}")
-
-    # أعلى من المتفق: يُرصد أيضاً — العميل قد يراجعها
-    with db() as conn:
         create_sale(conn, _wc, [{"work_order_id": _wg[3],
                                  "wage_override": 30.0}],
                     "2026-03-20", "admin", apply_vat=False)
-    with db(readonly=True) as conn:
-        _wr2 = _wa.report(conn, "2026-01-01", "2026-12-31",
-                          only_deviations=True)
-    check("والأعلى من المتفق يُرصد كذلك لا يُسكت عنه",
-          _wr2["gain"] > 0.005
-          and any(x["state"] == "أعلى من المتفق" for x in _wr2["lines"]),
-          f"زيادة {_wr2['gain']}")
-    check("و«الانحرافات فقط» تُسقط الأسطر المطابقة",
-          all(abs(x["diff"]) > 0.004 for x in _wr2["lines"]),
-          f"{len(_wr2['lines'])} سطراً")
-
-    # جهةٌ تبيع لها بلا اتفاق: تُفرز ولا تُحسب انحرافاً
-    check("الجهات بلا اتفاقٍ تُفرز في بابها ولا تُتّهم",
-          bool(_wr2["missing"])
-          and all(x["name"] != "عميل فحص الأجرة"
-                  for x in _wr2["missing"]),
-          " · ".join(x["name"] for x in _wr2["missing"][:3]))
-    check("والخلاصة تسمّيها وتقول الخسارة بالمال",
-          any("بلا اتفاقٍ مكتوب" in v for v in _wa.verdict(_wr2))
-          and any("أقلّ من المتفق عليه" in v for v in _wa.verdict(_wr2)),
-          " | ".join(_wa.verdict(_wr2))[:110])
 
     # الأجرة السالبة مرفوضة، والصفر مقبولٌ بمعنى «بلا اتفاق»
     def _neg_wage():
@@ -2782,25 +2616,14 @@ def main():
         _before = _ent.agreed_wage_on(conn, _wc, "2025-12-01")
     check("سجلّ الاتفاقات يحفظ كل تغييرٍ بتاريخه",
           len(_hist) == 2, f"{len(_hist)} اتفاقاً")
-    check("والأجرة النافذة تُقرأ لأي يومٍ مضى",
+    check("والأجرة النافذة تُقرأ لأي يومٍ مضى لا آخرُ قيمةٍ وحدها",
           _on_feb == 20.0 and _on_mar == 25.0,
           f"فبراير {_on_feb} · مارس {_on_mar}")
-    check("وما قبل أول اتفاقٍ لا مرجعَ له فلا انحراف",
+    check("وما قبل أول اتفاقٍ لا مرجعَ له",
           _before is None, f"{_before}")
 
-    _html3 = _pm.build_body("wage_audit", 0, date_from="2026-01-01",
-                            date_to="2026-12-31", only_deviations=True)
-    check("ورقة انحرافات الأجرة تُبنى بأبوابها الثلاثة",
-          "انحرافات الأجرة" in _html3 and "بالعميل" in _html3
-          and "سطراً سطراً" in _html3, f"{len(_html3)} حرفاً")
-    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
-          not _re.findall(r"-[\d,]+\.\d", _html3),
-          " · ".join(_re.findall(r"-[\d,]+\.\d", _html3)[:4]) or "لا شيء")
-
     # ══ الاتفاق يصل إلى شاشة المبيعات فعلاً ══
-    # تقريرٌ يكشف الانحراف بعد شهرٍ خيرٌ من لا شيء، والأصل أن **لا
-    # يقع** الانحراف: الأجرة تُملأ أمام البائع وقت البيع. وهذا أكثر
-    # ما يُخشى انكساره صامتاً لأنه في الواجهة لا في النموذج.
+    # وهذا أكثر ما يُخشى انكساره صامتاً لأنه في الواجهة لا في النموذج.
     try:
         from PyQt5 import QtWidgets as _QW3
         _QW3.QApplication.instance() or _QW3.QApplication([])
@@ -2832,11 +2655,13 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
-    step("37) ملف الجهة — كل ما يخصّها في صفحة")
+
+    step("36) ملف الجهة — كل ما يخصّها في صفحة")
     # ══ الضمانة التي يقوم عليها الملف ══
     # لا يُحسب فيه رقمٌ جديد: كل قسمٍ من مصدره الأصلي. فلو حُسب
     # الرصيد هنا مرةً وفي الكشف مرة لصار الملفُ مصدراً سادساً للخلاف
     # بدل أن يكون جواباً. وهذا ما يُفحص: كل رقمٍ يُطابق مصدره.
+    from models import accounts as _acc
     from models import aging as _aging
     from models import dossier as _ds
     from services.accounting_engine import account_balance as _bal
@@ -2906,17 +2731,88 @@ def main():
           and "متزن" in " ".join(_ds.verdict(_dd4)),
           " | ".join(_ds.verdict(_dd4))[:80])
 
+    # ══ الرصيد الافتتاحي رصيدُ بدايةٍ لا حركةٌ مجهولة ══
+    # كان قيدُ الافتتاح يقع في بند «أخرى» لأن اسمه ليس في قائمة
+    # الأنواع، فيقرأ المستخدم رصيداً افتتاحياً على أنه حركةٌ جرت في
+    # الفترة. الآن يُضمّ إلى «رصيد أول المدة»، والجسر يبقى مقفلاً.
+    with db() as conn:
+        _oc = add_entity(conn, "عميل رصيدٍ افتتاحي", "customer",
+                         username="admin", open_gold=300.0,
+                         opening_date="2026-05-02")
+        _oacc = get_entity(conn, _oc)["account_id"]
+    with db(readonly=True) as conn:
+        _om = _mv.analyze(conn, _oacc, "2026-05-01", "2026-05-31")
+    check("قيد الافتتاح يدخل «رصيد أول المدة» لا بند «أخرى»",
+          abs(_om["opening"]["gold"] - 300.0) < 0.0011
+          and not any(b["label"] == "أخرى" for b in _om["buckets"]),
+          f"افتتاحي {_om['opening']['gold']} · بنود "
+          + " · ".join(b["label"] for b in _om["buckets"]))
+    check("والجسر يبقى مقفلاً بعد ضمّه",
+          abs(_om["opening"]["gold"]
+              + sum(b["gold"] for b in _om["buckets"])
+              - _om["closing"]["gold"]) < 0.0011,
+          f"{_om['closing']['gold']}")
+
+    # ══ نظام الأيام: «س من ص» في كل بند ══
+    check("كل بندٍ يحمل مدى الفترة معه فيُقرأ «س من ص يوماً»",
+          all(b["span"] == _r["days"]["span"]
+              and b["days_label"] == f"{b['days']:,} من {b['span']:,}"
+              for b in _r["buckets"]),
+          " · ".join(f"{b['label']}={b['days_label']}"
+                     for b in _r["buckets"]))
+    check("ونشاط الأيام يستعمل الصيغة نفسها",
+          _r["days"]["active_label"]
+          == f"{_r['days']['active']:,} من {_r['days']['span']:,}"
+          and all("من" in x["days_label"] for x in _r["days"]["by_op"]),
+          _r["days"]["active_label"])
+
+    # ══ كشف الحساب على حسابٍ تجميعي = مجموع شجرته ══
+    with db(readonly=True) as conn:
+        _root = acc_id(conn, "1600")
+        _kids = _acc.subtree_ids(conn, _root)
+        _tree = _mv.analyze(conn, _root, "2026-01-01", "2026-12-31")
+        _sum_g = 0.0
+        for _k in _kids:
+            _sum_g += _bal(conn, _k, date_to="2026-12-31")[0]
+    check("الحساب التجميعي يُحلَّل بشجرته لا وحده",
+          len(_mv.account_ids(conn, _root)) > 1,
+          f"{len(_kids)} حساباً تحت 1600")
+    check("ورصيده الختامي = مجموع أرصدة فروعه",
+          abs(_tree["closing"]["gold"] - _sum_g) < 0.0011,
+          f"الشجرة {_tree['closing']['gold']} · المجموع "
+          f"{round(_sum_g, 3)}")
+
+    # ══ النِّسَب تُقاس على «ما كان عنده» ══
+    _fl = _dd["flow"]
+    check("«ما كان عنده» = رصيد أول المدة + ما خرج إليه",
+          abs(_fl["held_weight"]
+              - (_fl["opening_weight"] + _fl["out_weight"])) < 0.0011,
+          f"{_fl['opening_weight']} + {_fl['out_weight']} = "
+          f"{_fl['held_weight']}")
+    check("ونسبة المرتجع والسداد تُقاسان عليه لا على المبيعات وحدها",
+          (_fl["return_pct"] is None
+           or abs(_fl["return_pct"]
+                  - _fl["back_weight"] * 100.0 / _fl["held_weight"]) < 0.11)
+          and (_fl["paid_pct"] is None
+               or abs(_fl["paid_pct"]
+                      - _fl["paid_weight"] * 100.0
+                      / _fl["held_weight"]) < 0.11),
+          f"مرتجع {_fl['return_pct']}% · سداد {_fl['paid_pct']}%")
+    check("وما سدّده يُقرأ من سندات القبض لا يُستنتج",
+          _fl["paid_count"] >= 0 and _fl["paid_weight"] >= 0,
+          f"{_fl['paid_count']} سنداً · {_fl['paid_weight']}")
+
     _html4 = _pm.build_body("dossier", _wc, date_from="2026-01-01",
                             date_to="2026-12-31")
     check("ورقة الملف تُبنى بأقسامها كلها",
           "ملف الجهة" in _html4 and "جسر الرصيد" in _html4
-          and "أعمار دينه" in _html4 and "حركته وأجرته" in _html4,
-          f"{len(_html4)} حرفاً")
+          and "أعمار دينه" in _html4 and "ما كان تحت يده" in _html4
+          and "ما سدّده" in _html4, f"{len(_html4)} حرفاً")
     check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
           not _re.findall(r"-[\d,]+\.\d", _html4),
           " · ".join(_re.findall(r"-[\d,]+\.\d", _html4)[:4]) or "لا شيء")
 
-    step("38) من عدّل ماذا بعد الترحيل")
+    step("37) من عدّل ماذا بعد الترحيل")
     # ══ الضمانة التي يقوم عليها السجلّ ══
     # الفرق يُحفظ **رقمين** قبل وبعد لا نصّاً يُحلَّل. وتحليلُ نصٍّ
     # عربيٍّ بتعبيرٍ نمطي يكسر بأول تغييرٍ في الصياغة — ويكسر صامتاً
