@@ -2090,6 +2090,8 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
     u = karat_view.unit()
     today = _qd(QtCore.QDate.currentDate())
     t = r["total"]
+    _chosen = ("، ".join(r["filter_models"]) if r["filter_models"]
+               else "كل الموديلات")
 
     def _g(v):
         return _gw(v, 3)
@@ -2118,7 +2120,7 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
     html = f'''
     {TBL}
       <tr><td {TH} width="25%">حتى تاريخ</td><td>{en(as_of or today)}</td>
-          <th>الموديل</th><td>{model or "كل الموديلات"}</td></tr>
+          <th>الموديل</th><td>{_chosen}</td></tr>
       <tr><th>في المخزن</th>
           <td>{en(f"{t['count']:,}")} قطعة · {en(_g(t["weight"]))} {u}</td>
           <th>فوق ٩٠ يوماً</th>
@@ -2217,6 +2219,14 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
     def _pct(v):
         return en(f"{v:,.1f}%") if v is not None else "—"
 
+    _other_up = ""
+    if abs(fl["other_up"]) > 0.0005 or abs(flife["other_up"]) > 0.0005:
+        _other_up = "<tr>" + cells(
+            tdw("وما زاد ذمّته بغير البضاعة", align="right"),
+            tdw(_g(fl["other_up"])), tdw("—"),
+            tdw(_g(flife["other_up"])),
+            tdw("صرفٌ له · تسوياتٌ عليه")) + "</tr>"
+
     lr, lp = d["last_receipt"], d["last_payment"]
     lim_g, lim_c = d["limit"]["gold"], d["limit"]["cash"]
 
@@ -2273,16 +2283,17 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
       <tr>{cells(tdw("رصيد أول المدة", align="right"),
                  tdw(_g(fl["opening_weight"])), tdw("—"),
                  tdw(_g(flife["opening_weight"])),
-                 tdw("ما كان عنده قبل الفترة"))}</tr>
-      <tr>{cells(tdw("ما خرج إليه في الفترة", align="right"),
+                 tdw("شاملاً الأرصدة الافتتاحية والقيود اليومية"))}</tr>
+      <tr>{cells(tdw("ما خرج إليه — بضاعة (مبيعات)", align="right"),
                  tdw(_g(fl["out_weight"])), tdw(_m(fl["out_wages"])),
                  tdw(_g(flife["out_weight"])),
                  tdw(en(f"{fl['sold_lines']:,} / "
                         f"{flife['sold_lines']:,} سطراً")))}</tr>
-      <tr>{cells(thw("ما كان عنده (افتتاحيّ + خارج)"),
+      {_other_up}
+      <tr>{cells(thw("ما كان عنده (الأساس)"),
                  thw(_g(fl["held_weight"])), thw("—"),
                  thw(_g(flife["held_weight"])),
-                 thw("الأساس الذي تُقاس عليه النسب"))}</tr>
+                 thw("أول المدة + كل ما زاد ذمّته"))}</tr>
       <tr>{cells(tdw("ما رجع منه", align="right"),
                  tdw(_g(fl["back_weight"])), tdw(_m(fl["back_wages"])),
                  tdw(_g(flife["back_weight"])),
@@ -2294,9 +2305,9 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
                  tdw(en(f"{fl['paid_count']:,} / "
                         f"{flife['paid_count']:,} سند قبض")))}</tr>
       <tr>{cells(thw("الباقي عليه (رصيد آخر المدة)"),
-                 thw(_g(d["bridge"]["closing"]["gold"])),
-                 thw(_m(d["bridge"]["closing"]["cash"])),
-                 thw(_g(b["gold"])),
+                 thw(_g(fl["closing_weight"])),
+                 thw(_m(fl["closing_cash"])),
+                 thw(_g(flife["closing_weight"])),
                  thw("من الدفتر لا من جمع الأسطر"))}</tr>
       <tr>{cells(tdw("نسبة المرتجع (من الذي كان عنده)", align="right"),
                  tdw(_pct(fl["return_pct"])), tdw("—"),

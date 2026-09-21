@@ -260,22 +260,26 @@ class DossierScreen(QtWidgets.QWidget):
         يُحكى الحال.
         """
         f, fl = d["flow"], d["flow_life"]
-        cl = d["bridge"]["closing"]
 
         def _pct(v):
             return f"{v:,.1f}%" if v is not None else "—"
 
         rows = [
             ("رصيد أول المدة", w(f["opening_weight"]), "",
-             w(fl["opening_weight"]), "ما كان عنده قبل الفترة"),
-            ("ما خرج إليه في الفترة", w(f["out_weight"]),
+             w(fl["opening_weight"]),
+             "شاملاً الأرصدة الافتتاحية والقيود اليومية"),
+            ("ما خرج إليه — بضاعة (مبيعات)", w(f["out_weight"]),
              m(f["out_wages"]), w(fl["out_weight"]),
              f"{f['sold_lines']:,} / {fl['sold_lines']:,} سطراً"),
         ]
+        if abs(f["other_up"]) > 0.0005 or abs(fl["other_up"]) > 0.0005:
+            rows.append(("وما زاد ذمّته بغير البضاعة", w(f["other_up"]),
+                         "", w(fl["other_up"]),
+                         "صرفٌ له · تسوياتٌ عليه"))
         marks = [len(rows)]
-        rows.append(("ما كان عنده (افتتاحيّ + خارج)", w(f["held_weight"]),
+        rows.append(("ما كان عنده (الأساس)", w(f["held_weight"]),
                      "", w(fl["held_weight"]),
-                     "الأساس الذي تُقاس عليه النسب"))
+                     "أول المدة + كل ما زاد ذمّته"))
         rows += [
             ("ما رجع منه", w(f["back_weight"]), m(f["back_wages"]),
              w(fl["back_weight"]),
@@ -285,8 +289,8 @@ class DossierScreen(QtWidgets.QWidget):
              f"{f['paid_count']:,} / {fl['paid_count']:,} سند قبض"),
         ]
         marks.append(len(rows))
-        rows.append(("الباقي عليه (رصيد آخر المدة)", w(cl["gold"]),
-                     m(cl["cash"]), w(d["balance"]["gold"]),
+        rows.append(("الباقي عليه (رصيد آخر المدة)", w(f["closing_weight"]),
+                     m(f["closing_cash"]), w(fl["closing_weight"]),
                      "من الدفتر لا من جمع الأسطر"))
         rows += [
             ("نسبة المرتجع (من الذي كان عنده)", _pct(f["return_pct"]), "",
@@ -360,7 +364,7 @@ class DossierScreen(QtWidgets.QWidget):
                       f"{m(lr['cash'])} ريال" if lr else "لا شيء"))
         f = d["flow"]
         out.append(f"  كان عنده    : {w(f['held_weight'])} {u} "
-                   f"(افتتاحيّ {w(f['opening_weight'])} + خرج "
+                   f"(أول المدة {w(f['opening_weight'])} + بضاعة "
                    f"{w(f['out_weight'])})")
         out.append(f"  رجع/سدّد    : {w(f['back_weight'])} / "
                    f"{w(f['paid_weight'])} {u}"

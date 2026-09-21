@@ -20,13 +20,10 @@ from models import stock_aging as sa
 from models.aging import BUCKET_LABELS
 from services import karat_view as kv
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
-                               ledger_rows, make_table, run_bg, search_combo,
-                               tab_widget, title_label)
+                               ledger_rows, make_table, run_bg, tab_widget,
+                               title_label)
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
-
-ALL = "— كل الموديلات —"
-
 
 class StockAgingScreen(QtWidgets.QWidget):
     def __init__(self, user):
@@ -35,9 +32,22 @@ class StockAgingScreen(QtWidgets.QWidget):
         self.res = None
 
         self.as_of = date_edit()
-        self.model = search_combo("كل الموديلات — أو اكتب موديلاً…")
-        self.model.setMinimumWidth(240)
-        self.model.setMaximumWidth(280)
+        # **اختيارٌ متعدّد لا واحد**: السؤال غالباً عن مجموعةِ موديلات
+        # («أرِني القمر والياسمين») لا عن موديلٍ واحد ولا عن المخزن
+        # كلّه. والقائمةُ المنسدلة تُجيب عن واحدٍ فقط، فصار الاختيار
+        # نافذةً بمربّعات تأشير — كما في تقرير أعمار الديون تماماً،
+        # فلا يتعلّم المستخدم طريقتين.
+        self.models_sel = []                    # فارغة = كل الموديلات
+        self.all_models = []
+        self.btn_models = QtWidgets.QPushButton("الموديلات: الكل ▾")
+        self.btn_models.setObjectName("ghost")
+        self.btn_models.setMinimumWidth(200)
+        self.btn_models.clicked.connect(self.pick_models)
+        self.btn_models_clear = QtWidgets.QPushButton("↺")
+        self.btn_models_clear.setObjectName("ghost")
+        self.btn_models_clear.setMaximumWidth(36)
+        self.btn_models_clear.setToolTip("إلغاء التحديد — يعود الكل")
+        self.btn_models_clear.clicked.connect(self.clear_models)
 
         btn = QtWidgets.QPushButton("📦 إعداد التقرير")
         btn.clicked.connect(self.load)
@@ -52,7 +62,8 @@ class StockAgingScreen(QtWidgets.QWidget):
         head.addWidget(QtWidgets.QLabel("حتى تاريخ:"))
         head.addWidget(self.as_of, 0)
         head.addWidget(QtWidgets.QLabel("الموديل:"))
-        head.addWidget(self.model, 0)
+        head.addWidget(self.btn_models, 0)
+        head.addWidget(self.btn_models_clear, 0)
         head.addWidget(btn, 0)
         head.addWidget(btn_print, 0)
         head.addWidget(btn_copy, 0)
@@ -104,27 +115,110 @@ class StockAgingScreen(QtWidgets.QWidget):
 
     # ─────────────────────────────── بيانات
     def _load_models(self):
+        """موديلات المخزون — ومعها «بلا موديل» إن وُجدت قطعٌ بلا موديل.
+
+        القطعةُ بلا موديلٍ جزءٌ من المخزون، فلو غابت عن قائمة الاختيار
+        تعذّر على المستخدم أن يرى ما لم يُصنَّف — وهو أوّل ما يُراجع.
+        """
         try:
             with db(readonly=True) as conn:
                 rows = conn.execute(
-                    "SELECT DISTINCT TRIM(model_no) m FROM work_orders"
+                    "SELECT COALESCE(NULLIF(TRIM(model_no),''),?) m,"
+                    "  COUNT(*) n"
+                    " FROM work_orders"
                     " WHERE is_deleted=0 AND status='in_stock'"
-                    "   AND TRIM(COALESCE(model_no,''))<>''"
-                    " ORDER BY m").fetchall()
+                    "   AND is_bulk=0"
+                    " GROUP BY m ORDER BY m", (sa.NO_MODEL,)).fetchall()
         except Exception as e:
             err(self, e)
             return
-        self.model.blockSignals(True)
-        self.model.clear()
-        self.model.addItem(ALL, "")
-        for r in rows:
-            self.model.addItem(r["m"], r["m"])
-        self.model.blockSignals(False)
-        self.model.setCurrentIndex(0)
+        self.all_models = [(r["m"], int(r["n"] or 0)) for r in rows]
+        self._update_models_label()
+
+    def pick_models(self):
+        """نافذةُ تأشيرٍ بالموديلات — بحثٌ وتحديدُ الظاهر وإلغاء."""
+        if not self.all_models:
+            self._load_models()
+        if not self.all_models:
+            err(self, "لا موديلات في المخزون")
+            return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("اختيار الموديلات")
+        dlg.setMinimumSize(420, 480)
+        search = QtWidgets.QLineEdit()
+        search.setPlaceholderText("اكتب أول حروف الموديل للتصفية…")
+        lst = QtWidgets.QListWidget()
+        chosen = set(self.models_sel)
+        for name, n in self.all_models:
+            it = QtWidgets.QListWidgetItem(f"{name}   ({n:,} قطعة)")
+            it.setData(QtCore.Qt.UserRole, name)
+            it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.Checked if name in chosen
+                             else QtCore.Qt.Unchecked)
+            lst.addItem(it)
+
+        def _filter(txt):
+            q = (txt or "").strip()
+            for i in range(lst.count()):
+                it = lst.item(i)
+                it.setHidden(bool(q) and q not in it.text())
+        search.textChanged.connect(_filter)
+
+        def _set_all(state):
+            for i in range(lst.count()):
+                if not lst.item(i).isHidden():
+                    lst.item(i).setCheckState(state)
+
+        btn_all = QtWidgets.QPushButton("تحديد الظاهر")
+        btn_all.setObjectName("ghost")
+        btn_all.clicked.connect(lambda: _set_all(QtCore.Qt.Checked))
+        btn_none = QtWidgets.QPushButton("إلغاء التحديد")
+        btn_none.setObjectName("ghost")
+        btn_none.clicked.connect(lambda: _set_all(QtCore.Qt.Unchecked))
+        box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok
+            | QtWidgets.QDialogButtonBox.Cancel)
+        box.accepted.connect(dlg.accept)
+        box.rejected.connect(dlg.reject)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(btn_all)
+        row.addWidget(btn_none)
+        row.addStretch(1)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addWidget(search)
+        lay.addWidget(lst, 1)
+        lay.addLayout(row)
+        lay.addWidget(box)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        self.models_sel = [lst.item(i).data(QtCore.Qt.UserRole)
+                           for i in range(lst.count())
+                           if lst.item(i).checkState() == QtCore.Qt.Checked]
+        self._update_models_label()
+        if self.res:
+            self.load()
+
+    def clear_models(self):
+        self.models_sel = []
+        self._update_models_label()
+        if self.res:
+            self.load()
+
+    def _models_label(self):
+        n = len(self.models_sel)
+        if not n:
+            return "الكل"
+        if n == 1:
+            return self.models_sel[0]
+        return f"{n} موديلات"
+
+    def _update_models_label(self):
+        self.btn_models.setText(f"الموديلات: {self._models_label()} ▾")
 
     def load(self):
         d = dstr(self.as_of)
-        mdl = self.model.currentData() or None
+        mdl = list(self.models_sel) or None
 
         def _read():
             with db(readonly=True) as conn:
@@ -214,7 +308,7 @@ class StockAgingScreen(QtWidgets.QWidget):
         try:
             print_manager.preview_document(
                 self, "stock_aging", 0, as_of=self.res["as_of"],
-                model=self.res.get("model"), detail=True)
+                model=self.res.get("filter_models") or None, detail=True)
         except Exception as e:
             err(self, e)
 
@@ -231,8 +325,8 @@ class StockAgingScreen(QtWidgets.QWidget):
             return f"{v:,.2f}"
 
         out = [f"أعمار الموديلات — حتى {r['as_of']}"]
-        if r.get("model"):
-            out.append(f"الموديل: {r['model']}")
+        if r.get("filter_models"):
+            out.append("الموديلات: " + "، ".join(r["filter_models"]))
         out += ["", *sa.verdict(r, w, m), ""]
         for b in r["buckets"]:
             out.append(f"  {b['label']:<14} {b['count']:>6,} قطعة   "

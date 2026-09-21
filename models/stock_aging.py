@@ -57,18 +57,37 @@ def _today():
     return _dt.date.today().isoformat()
 
 
+def as_list(model):
+    """يقبل المرشِّح نصّاً واحداً أو قائمةً — والفارغ يعني «الكل».
+
+    شاشةُ التقرير تُرشِّح بموديلٍ أو بعدة موديلات، والنموذج لا يعرف
+    أيَّهما جاء. فيُوحَّد هنا مرةً واحدة بدل أن يتكرّر الفحص في كل
+    موضع يستعمل المرشِّح.
+    """
+    if not model:
+        return []
+    if isinstance(model, str):
+        return [model.strip()] if model.strip() else []
+    return [str(x).strip() for x in model if str(x).strip()]
+
+
 def items(conn, as_of=None, model=None):
     """كل قطعةٍ في المخزن بعمرها — الأقدم أولاً.
 
     `as_of` تاريخ القياس؛ ما دخل بعده لا يُحسب، فالتقرير يُعاد بناؤه
     لأي تاريخٍ مضى كما كان يومها لا كما هو اليوم.
+
+    `model` موديلٌ واحد أو عدة موديلات — والفارغ يعني كلَّ المخزن.
     """
     as_of = as_of or _today()
     p = [as_of]
     extra = ""
-    if model:
-        extra = (" AND COALESCE(NULLIF(TRIM(w.model_no),''),?)=?")
-        p += [NO_MODEL, model]
+    chosen = as_list(model)
+    if chosen:
+        ph = ",".join("?" * len(chosen))
+        extra = (f" AND COALESCE(NULLIF(TRIM(w.model_no),''),?)"
+                 f" IN ({ph})")
+        p += [NO_MODEL] + chosen
     rows = conn.execute(
         "SELECT w.id, w.work_order_no wo, w.model_no,"
         "  w.registered_weight wt, w.wage_per_gram wpg, w.is_bulk,"
@@ -160,7 +179,7 @@ def report(conn, as_of=None, model=None):
     }
 
     return {
-        "as_of": as_of, "model": model,
+        "as_of": as_of, "model": model, "filter_models": as_list(model),
         "items": aged, "buckets": buckets, "models": models,
         "total": total, "bulk": bulk_sum, "bulk_rows": bulk,
         "grand": grand,

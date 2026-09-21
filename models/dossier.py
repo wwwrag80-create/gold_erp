@@ -37,6 +37,9 @@ from services.accounting_engine import account_balance
 EPS_G = 0.0005
 EPS_C = 0.005
 
+# «من البداية» = من أول يومٍ ممكن في الدفتر
+LIFE_START = "1900-01-01"
+
 
 def _today():
     return _dt.date.today().isoformat()
@@ -124,50 +127,47 @@ def _flow(conn, entity_id, date_from=None, date_to=None):
     }
 
 
-def _collected(conn, entity_id, date_from=None, date_to=None):
-    """ما سدّده العميل فعلاً — من سندات القبض، وزناً ونقداً."""
-    p = [entity_id]
-    c = ""
-    if date_from:
-        c += " AND voucher_date>=?"
-        p.append(date_from)
-    if date_to:
-        c += " AND voucher_date<=?"
-        p.append(date_to)
-    r = conn.execute(
-        "SELECT ROUND(COALESCE(SUM(gold_equiv18),0),3) g,"
-        "  ROUND(COALESCE(SUM(cash_amount),0),2) c, COUNT(*) n"
-        " FROM vouchers WHERE is_deleted=0 AND kind='receipt'"
-        "   AND customer_id=?" + c, p).fetchone()
-    return {"gold": float(r["g"] or 0.0) if r else 0.0,
-            "cash": float(r["c"] or 0.0) if r else 0.0,
-            "count": int(r["n"] or 0) if r else 0}
+def _ratios(flow, bridge):
+    """يملأ حركة الجهة **من الجسر** ويحسب النسب على ما كان تحت يدها.
 
+    **ولماذا من الجسر لا من الفواتير**: الفواتير تعرف المبيعات
+    والمرتجع وحدهما، والذمّة تزيد وتنقص بغيرهما — رصيدٌ افتتاحي،
+    قيدٌ يدوي، سندُ صرفٍ له، تسويةٌ على حسابه. فلو بُني الأساس من
+    الفواتير لسقط منه كلُّ ذلك، ولاختلف «ما كان عنده» عمّا يقوله
+    كشفُ حسابه. والجسر يقرأ الدفتر كلَّه، فما يُبنى عليه لا يخالفه.
 
-def _ratios(flow, opening_gold):
-    """النسب تُقاس على **ما كان عنده**: الافتتاحي + ما خرج إليه.
-
-    **ولماذا لا تُقاس على المبيعات وحدها**: عميلٌ عليه أربعون كيلواً
-    من قبلُ وأخذ كيلواً هذا الشهر وسدّد كيلواً — لو قيست نسبة سداده
-    على مبيعات الشهر وحدها لقيل «سدّد ١٠٠٪» وهو لم يمسّ الأربعين.
-    فالأساس ما كان تحت يده خلال الفترة كلّه، لا ما استلمه فيها.
-
-    والرصيد الافتتاحي يُضمّ إلى «ما خرج إليه» لأنه بضاعةٌ عنده فعلاً
-    — خرجت في فترةٍ سابقة ولم تعد بعد.
+    **ولماذا الأساس «ما كان عنده» لا «مبيعات الفترة»**: عميلٌ عليه
+    أربعون كيلواً من قبلُ وأخذ كيلواً هذا الشهر وسدّد كيلواً — لو
+    قيست نسبة سداده على مبيعات الشهر وحدها لقيل «سدّد ١٠٠٪» وهو لم
+    يمسّ الأربعين.
     """
-    op = max(float(opening_gold or 0.0), 0.0)
-    base = round(op + flow["out_weight"], 3)
+    by = {b["label"]: b for b in bridge["buckets"]}
+    op = float(bridge["opening"]["gold"] or 0.0)
+    # كلُّ ما زاد الذمّة في الفترة — بأي اسمٍ زادها
+    up = round(sum(b["gold_up"] for b in bridge["buckets"]), 3)
+    sales = round(by.get("مبيعات", {}).get("gold_up", 0.0), 3)
+    rets = round(by.get("مرتجع", {}).get("gold_dn", 0.0), 3)
+    paid = by.get("قبض", {})
+
     flow["opening_weight"] = round(op, 3)
-    flow["held_weight"] = base                 # ما كان عنده
-    flow["paid_weight"] = flow.get("paid_weight", 0.0)
+    flow["out_weight"] = sales            # البضاعة: مبيعات
+    flow["other_up"] = round(up - sales, 3)
+    flow["held_weight"] = round(op + up, 3)
+    flow["back_weight"] = rets
+    flow["paid_weight"] = round(paid.get("gold_dn", 0.0), 3)
+    flow["paid_cash"] = round(paid.get("cash_dn", 0.0), 2)
+    flow["paid_count"] = int(paid.get("docs", 0))
+    flow["closing_weight"] = round(bridge["closing"]["gold"], 3)
+    flow["closing_cash"] = round(bridge["closing"]["cash"], 2)
+    base = flow["held_weight"]
 
     def _pct(part):
         return (round(part * 100.0 / base, 1) if base > EPS_G else None)
 
     # بالوزن لا بالعدد: طقمٌ صغير من عشرة ليس كنصف ما أخذ وزناً
-    flow["return_pct"] = _pct(flow["back_weight"])
+    flow["return_pct"] = _pct(rets)
     flow["paid_pct"] = _pct(flow["paid_weight"])
-    flow["settled_pct"] = _pct(flow["back_weight"] + flow["paid_weight"])
+    flow["settled_pct"] = _pct(rets + flow["paid_weight"])
     return flow
 
 
@@ -210,21 +210,15 @@ def build(conn, entity_id, date_from=None, date_to=None):
     age = ag[0] if ag else None
 
     bridge = movement.analyze(conn, e["account_id"], d1, as_of)
+    # **«من البداية» جسرٌ مثله لا حسابٌ آخر**: يُقرأ من أول يومٍ في
+    # الدفتر، فتقع فيه الأرصدة الافتتاحية داخل المدة فتُضمّ إلى
+    # افتتاحيّه — فيكون «ما كان عنده من البداية» شاملاً لها. ولو
+    # بُني من الفواتير وحدها لسقط منه الافتتاحيّ فظهرت نسبةُ سدادٍ
+    # مضاعفة.
+    bridge_life = movement.analyze(conn, e["account_id"], LIFE_START, as_of)
 
-    # النسب تُقاس على ما كان تحت يده: رصيدُ أول المدة + ما خرج
-    # إليه فيها. والافتتاحي من الجسر نفسه فلا يختلف رقمٌ عن رقم.
-    paid = _collected(conn, entity_id, d1, as_of)
-    paid_life = _collected(conn, entity_id)
-    flow = _flow(conn, entity_id, d1, as_of)
-    flow["paid_weight"] = paid["gold"]
-    flow["paid_cash"] = paid["cash"]
-    flow["paid_count"] = paid["count"]
-    _ratios(flow, bridge["opening"]["gold"])
-    flow_life = _flow(conn, entity_id)
-    flow_life["paid_weight"] = paid_life["gold"]
-    flow_life["paid_cash"] = paid_life["cash"]
-    flow_life["paid_count"] = paid_life["count"]
-    _ratios(flow_life, 0.0)        # من البداية لا افتتاحيَّ قبلها
+    flow = _ratios(_flow(conn, entity_id, d1, as_of), bridge)
+    flow_life = _ratios(_flow(conn, entity_id), bridge_life)
 
     return {
         "as_of": as_of, "date_from": d1,
@@ -235,7 +229,7 @@ def build(conn, entity_id, date_from=None, date_to=None):
         "balance": {"gold": round(gold, 3), "cash": round(cash, 2)},
         "limit": _limit_state(lim_c, lim_g, cash, gold),
         "aging": age,
-        "bridge": bridge,
+        "bridge": bridge, "bridge_life": bridge_life,
         "models": _top_models(conn, entity_id, d1, as_of),
         "models_life": _top_models(conn, entity_id),
         "flow": flow, "flow_life": flow_life,
@@ -311,7 +305,7 @@ def verdict(d, fmt=None, money=None):
     if fl["held_weight"] > EPS_G:
         out.append(
             f"كان تحت يده في الفترة {fmt(fl['held_weight'])} "
-            f"(افتتاحيٌّ {fmt(fl['opening_weight'])} + خرج إليه "
+            f"(أول المدة {fmt(fl['opening_weight'])} + بضاعة "
             f"{fmt(fl['out_weight'])})"
             + (f"، سدّد منها {fl['paid_pct']:,.1f}%"
                if fl["paid_pct"] is not None else "")

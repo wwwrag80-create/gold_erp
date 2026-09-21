@@ -107,7 +107,9 @@ class MovementScreen(QtWidgets.QWidget):
         note = QtWidgets.QLabel(
             "الجسر يقفل دائماً: أثر كل حركة يُؤخذ من «مدين − دائن» لا "
             "من اسمها، فلا يسقط منه شيء ولو أُضيف نوعُ عملياتٍ جديد. "
-            "وما لا يُعرف اسمه يظهر في «أخرى» ولا يضيع.")
+            "وما لا يُعرف اسمه يظهر في «أخرى» ولا يضيع. والأرصدة "
+            "الافتتاحية والقيود اليومية تُضمّ إلى «رصيد أول المدة» "
+            "لأنها رصيدُ بدايةٍ لا حركة — وتلميحُ السطر يقول كم ضُمّ.")
         note.setObjectName("cardSub")
         note.setWordWrap(True)
         lay.addWidget(note)
@@ -235,6 +237,7 @@ class MovementScreen(QtWidgets.QWidget):
                      "", ""))
         fill(self.t_bridge, cols, rows)
         self._mark(self.t_bridge, [0, len(rows) - 1])
+        self._opening_tip(self.t_bridge, 0, dim, u)
 
         # ── نشاط الأيام ──
         cols2 = ["نوع العملية", "أيام من الفترة", "النسبة",
@@ -263,6 +266,25 @@ class MovementScreen(QtWidgets.QWidget):
                ("▲ " if x[dim] > 0 else ("▼ " if x[dim] < 0 else ""))
                + self._fmt(abs(x[dim]), dim),
                self._fmt(x[bal], dim)) for x in r["daily"]])
+
+    def _opening_tip(self, table, row, dim, unit):
+        """يُعلن ما ضُمّ إلى الافتتاحي من داخل الفترة.
+
+        الرصيد الافتتاحي والقيد اليومي يُضمّان إلى «أول المدة» لأنهما
+        رصيدُ بدايةٍ لا حركة. ولئلّا يُخفى ذلك، يقوله تلميحُ السطر
+        بالرقم والعدد.
+        """
+        d = (self.res or {}).get("opening_in_period") or {}
+        v = d.get(dim, 0.0)
+        if not d.get("docs") or abs(v) < 0.0005:
+            return
+        tip = (f"يشمل {d['docs']:,} قيداً افتتاحياً/يومياً وقع داخل "
+               f"الفترة بمقدار {self._fmt(v, dim)} {unit} — "
+               "أُضيف إلى الرصيد لأنه رصيدُ بدايةٍ لا حركة.")
+        for c in range(table.columnCount()):
+            it = table.item(row, c)
+            if it is not None:
+                it.setToolTip(tip)
 
     def _mark(self, table, rows):
         """يُلبس صفوف الخلاصة نبرة الإبراز نفسها في كل النظام."""

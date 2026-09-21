@@ -2398,12 +2398,20 @@ def main():
             create_voucher(conn, "receipt", f"2026-03-{i + 20:02d}",
                            "admin", entity_id=_mc, gold_weight=25.0,
                            gold_karat=18)
-    # وحركةٌ **لا اسم لها** في قائمة الأنواع — قيدٌ يدوي على الحساب
+    # قيدٌ يدوي على الحساب — رصيدُ بدايةٍ لا حركة، فمكانه «أول المدة»
     with db() as conn:
-        post_entry(conn, "2026-03-25", "تسوية يدوية على العميل",
+        post_entry(conn, "2026-03-25", "رصيدٌ افتتاحي بقيدٍ يدوي",
                    [{"account_id": _macc, "gold_debit": 7.0},
                     {"account_id": acc_id(conn, "5300"),
                      "gold_credit": 7.0}], username="admin")
+    # وحركةٌ **لا اسم لها** في قائمة الأنواع — نوعٌ يعرفه الدفتر ولا
+    # يعرفه الجسر، وهو ما يجب ألّا يسقط منه
+    with db() as conn:
+        post_entry(conn, "2026-03-26", "جردٌ على الحساب",
+                   [{"account_id": _macc, "gold_debit": 4.0},
+                    {"account_id": acc_id(conn, "5300"),
+                     "gold_credit": 4.0}], source_table="stocktakes",
+                   username="admin")
 
     with db(readonly=True) as conn:
         _r = _mv.analyze(conn, _macc, "2026-03-01", "2026-03-31")
@@ -2428,8 +2436,20 @@ def main():
           f"بيع {_by['مبيعات']['days']} · مرتجع {_by['مرتجع']['days']}"
           f" · قبض {_by['قبض']['days']}")
     check("والحركة التي لا اسم لها تدخل «أخرى» ولا تسقط من الجسر",
-          "أخرى" in _by and abs(_by["أخرى"]["gold"] - 7.0) < 0.0011,
+          "أخرى" in _by and abs(_by["أخرى"]["gold"] - 4.0) < 0.0011,
           f"{_by.get('أخرى', {}).get('gold')}")
+    # ══ القيد اليدوي رصيدُ بدايةٍ لا حركة ══
+    # كان يسقط في «أخرى» لأن اسمه في الدفتر «قيد يومي» والقائمة
+    # تحمل «قيد يومية» — حرفٌ واحد جعله لا يلتقي ببنده أبداً، فيقرأ
+    # المستخدم رصيدَ افتتاحٍ على أنه حركةٌ مجهولة جرت في الفترة.
+    check("والقيد اليدوي يدخل «رصيد أول المدة» لا بنداً في الحركة",
+          abs(_r["opening_in_period"]["gold"] - 7.0) < 0.0011
+          and _r["opening_in_period"]["docs"] == 1
+          and abs(_by["أخرى"]["gold"] - 4.0) < 0.0011,
+          f"ضُمّ {_r['opening_in_period']['gold']} من "
+          f"{_r['opening_in_period']['docs']} قيداً")
+    check("وما ضُمّ منه داخل الفترة يُعلَن ولا يُخفى",
+          _r["opening_in_period"]["docs"] > 0)
 
     _d = _r["days"]
     check("أيام الفترة ٣١ ومنها ٧ فيها حركة",
@@ -2540,9 +2560,19 @@ def main():
     # ترشيحٌ بموديل: الأرقام تتبع ما رُشّح لا كل المخزن
     with db(readonly=True) as conn:
         _sb = _sa.report(conn, "2026-06-30", "BETA")
+        _sm = _sa.report(conn, "2026-06-30", ["ALPHA", "BETA"])
+        _se = _sa.report(conn, "2026-06-30", [])
     check("الترشيح بموديل يقصر التقرير عليه",
           {x["wo_no"] for x in _sb["items"]} == {"MID-2", "NEW-1"},
           " · ".join(x["wo_no"] for x in _sb["items"]))
+    check("والترشيح بعدة موديلات يجمعها كلها",
+          {x["wo_no"] for x in _sm["items"]}
+          == {"OLD-1", "MID-1", "MID-2", "NEW-1"},
+          " · ".join(x["wo_no"] for x in _sm["items"]))
+    check("وقائمةٌ فارغة تعني كلَّ المخزون لا لا شيء",
+          len(_se["items"]) == len(_sr["items"])
+          and _se["filter_models"] == [],
+          f"{len(_se['items'])} قطعة")
 
     # تاريخٌ قبل أي توريد: لا مخزون ولا انهيار
     with db(readonly=True) as conn:
@@ -2561,6 +2591,11 @@ def main():
           " · ".join(_sa.BUCKET_LABELS))
     check("ولا تحمل عمودَي الأجرة اللذين حُذفا",
           "أجرة الجرام" not in _html2 and "أجرة راكدة" not in _html2)
+    _html2b = _pm.build_body("stock_aging", 0, as_of="2026-06-30",
+                             model=["ALPHA", "BETA"], detail=True)
+    check("وورقةُ المرشَّح تسمّي الموديلات المختارة في رأسها",
+          "ALPHA" in _html2b and "BETA" in _html2b
+          and "كل الموديلات" not in _html2b, f"{len(_html2b)} حرفاً")
 
     step("35) الأجرة المتفق عليها — تصل إلى البائع وقت البيع")
     # ══ الضمانة ══
@@ -2784,11 +2819,27 @@ def main():
 
     # ══ النِّسَب تُقاس على «ما كان عنده» ══
     _fl = _dd["flow"]
-    check("«ما كان عنده» = رصيد أول المدة + ما خرج إليه",
+    check("«ما كان عنده» = أول المدة + كل ما زاد ذمّته",
           abs(_fl["held_weight"]
-              - (_fl["opening_weight"] + _fl["out_weight"])) < 0.0011,
-          f"{_fl['opening_weight']} + {_fl['out_weight']} = "
+              - (_fl["opening_weight"] + _fl["out_weight"]
+                 + _fl["other_up"])) < 0.0011,
+          f"{_fl['opening_weight']} + {_fl['out_weight']} + "
+          f"{_fl['other_up']} = {_fl['held_weight']}")
+    # ══ «من البداية» يشمل الأرصدة الافتتاحية ══
+    # لو بُني من الفواتير وحدها لسقط منه الافتتاحيّ، فظهرت نسبةُ
+    # سدادٍ مضاعفة: ١٢٠ من ١٩٠ بدل ١٢٠ من ١٠٤٠.
+    _fll = _dd["flow_life"]
+    check("و«من البداية» يشمل الأرصدة الافتتاحية لا المبيعات وحدها",
+          abs(_fll["held_weight"]
+              - (_fll["opening_weight"] + _fll["out_weight"]
+                 + _fll["other_up"])) < 0.0011
+          and _fll["held_weight"] >= _fl["held_weight"] - 0.0011,
+          f"من البداية {_fll['held_weight']} · الفترة "
           f"{_fl['held_weight']}")
+    check("وما سدّده وما رجع منه من الجسر لا من جدولٍ آخر",
+          abs(_fl["closing_weight"]
+              - _dd["bridge"]["closing"]["gold"]) < 0.0011,
+          f"{_fl['closing_weight']}")
     check("ونسبة المرتجع والسداد تُقاسان عليه لا على المبيعات وحدها",
           (_fl["return_pct"] is None
            or abs(_fl["return_pct"]
@@ -2798,9 +2849,9 @@ def main():
                       - _fl["paid_weight"] * 100.0
                       / _fl["held_weight"]) < 0.11),
           f"مرتجع {_fl['return_pct']}% · سداد {_fl['paid_pct']}%")
-    check("وما سدّده يُقرأ من سندات القبض لا يُستنتج",
+    check("وما سدّده يُقرأ من بند القبض في الجسر لا يُستنتج",
           _fl["paid_count"] >= 0 and _fl["paid_weight"] >= 0,
-          f"{_fl['paid_count']} سنداً · {_fl['paid_weight']}")
+          f"{_fl['paid_count']} مستنداً · {_fl['paid_weight']}")
 
     _html4 = _pm.build_body("dossier", _wc, date_from="2026-01-01",
                             date_to="2026-12-31")
