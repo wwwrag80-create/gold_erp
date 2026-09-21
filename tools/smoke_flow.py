@@ -2832,6 +2832,90 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("37) ملف الجهة — كل ما يخصّها في صفحة")
+    # ══ الضمانة التي يقوم عليها الملف ══
+    # لا يُحسب فيه رقمٌ جديد: كل قسمٍ من مصدره الأصلي. فلو حُسب
+    # الرصيد هنا مرةً وفي الكشف مرة لصار الملفُ مصدراً سادساً للخلاف
+    # بدل أن يكون جواباً. وهذا ما يُفحص: كل رقمٍ يُطابق مصدره.
+    from models import aging as _aging
+    from models import dossier as _ds
+    from services.accounting_engine import account_balance as _bal
+
+    with db(readonly=True) as conn:
+        _dd = _ds.build(conn, _wc, "2026-01-01", "2026-12-31")
+        _acc_g, _acc_c = _bal(conn, get_entity(conn, _wc)["account_id"])
+        _ag_src = _aging.report(conn, "customer", "2026-12-31")
+        _mv_src = _mv.analyze(conn, get_entity(conn, _wc)["account_id"],
+                              "2026-01-01", "2026-12-31")
+
+    check("الرصيد في الملف = رصيد الحساب في الدفتر",
+          abs(_dd["balance"]["gold"] - _acc_g) < 0.0011
+          and abs(_dd["balance"]["cash"] - _acc_c) < 0.011,
+          f"ملف {_dd['balance']} · دفتر ({_acc_g}, {_acc_c})")
+    _mine = [x for x in _ag_src if x["entity_id"] == _wc]
+    check("وأعمار دينه = صفُّه في تقرير أعمار الديون",
+          bool(_mine) == bool(_dd["aging"])
+          and (not _mine or abs(_dd["aging"]["gold"]
+                                - _mine[0]["gold"]) < 0.0011),
+          f"ملف {_dd['aging']['gold'] if _dd['aging'] else None} · "
+          f"تقرير {_mine[0]['gold'] if _mine else None}")
+    check("وجسر فترته = ما يعطيه تحليل حركة الرصيد",
+          abs(_dd["bridge"]["closing"]["gold"]
+              - _mv_src["closing"]["gold"]) < 0.0011,
+          f"{_dd['bridge']['closing']['gold']} مقابل "
+          f"{_mv_src['closing']['gold']}")
+
+    check("وموديلاته تُحسب بالصافي بعد المرتجع لا بالإجمالي",
+          all(m["net_count"] == m["sold"] - m["returned"]
+              for m in _dd["models_life"]),
+          f"{len(_dd['models_life'])} موديلاً")
+    _f = _dd["flow_life"]
+    check("ونسبة مرتجعه تُقاس بالوزن لا بالعدد",
+          _f["return_pct"] is None
+          or abs(_f["return_pct"]
+                 - _f["back_weight"] * 100.0 / _f["out_weight"]) < 0.11,
+          f"خرج {_f['out_weight']} · رجع {_f['back_weight']} · "
+          f"{_f['return_pct']}%")
+
+    # سقفٌ يُتجاوز: الملف يقوله صراحةً لا يتركه للقارئ يستنتجه
+    with db() as conn:
+        _ent.set_credit_limit(conn, _wc, 1.0, 1.0, "admin")
+    with db(readonly=True) as conn:
+        _dd2 = _ds.build(conn, _wc, "2026-01-01", "2026-12-31")
+    check("تجاوز السقف يُقال صراحةً في الخلاصة",
+          _dd2["limit"]["gold"]["over"]
+          and any("تجاوز سقفه" in v for v in _ds.verdict(_dd2)),
+          " | ".join(_ds.verdict(_dd2))[:110])
+    with db() as conn:
+        _ent.set_credit_limit(conn, _wc, 0.0, 0.0, "admin")
+    with db(readonly=True) as conn:
+        _dd3 = _ds.build(conn, _wc, "2026-01-01", "2026-12-31")
+    check("وصفرُ السقف يعني بلا حدّ فلا يُقال تجاوز",
+          not _dd3["limit"]["gold"]["over"]
+          and _dd3["limit"]["gold"]["pct"] is None)
+
+    # جهةٌ بلا أي حركة: الملف يُفتح ولا ينهار
+    with db() as conn:
+        _fresh = add_entity(conn, "عميل بلا حركة", "customer",
+                            username="admin")
+    with db(readonly=True) as conn:
+        _dd4 = _ds.build(conn, _fresh, "2026-01-01", "2026-12-31")
+    check("جهةٌ بلا حركةٍ تُفتح ولا تنهار",
+          _dd4["aging"] is None and _dd4["last_receipt"] is None
+          and _dd4["flow"]["return_pct"] is None
+          and "متزن" in " ".join(_ds.verdict(_dd4)),
+          " | ".join(_ds.verdict(_dd4))[:80])
+
+    _html4 = _pm.build_body("dossier", _wc, date_from="2026-01-01",
+                            date_to="2026-12-31")
+    check("ورقة الملف تُبنى بأقسامها كلها",
+          "ملف الجهة" in _html4 and "جسر الرصيد" in _html4
+          and "أعمار دينه" in _html4 and "حركته وأجرته" in _html4,
+          f"{len(_html4)} حرفاً")
+    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
+          not _re.findall(r"-[\d,]+\.\d", _html4),
+          " · ".join(_re.findall(r"-[\d,]+\.\d", _html4)[:4]) or "لا شيء")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

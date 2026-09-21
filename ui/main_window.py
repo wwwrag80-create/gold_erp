@@ -47,6 +47,7 @@ from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.assets_screen import AssetsScreen
 from ui.reports.gold_map_screen import GoldMapScreen
 from ui.reports.stock_aging_screen import StockAgingScreen
+from ui.reports.dossier_screen import DossierScreen
 from ui.reports.wage_audit_screen import WageAuditScreen
 from ui.reports.movement_screen import MovementScreen
 from ui.reports.day_close_screen import DayCloseScreen
@@ -199,6 +200,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("انحرافات الأجرة (المتفق عليه والمطبَّق)",
                      Lazy(lambda: WageAuditScreen(user),
                           "انحرافات الأجرة (المتفق عليه والمطبَّق)")),
+                    # سبعُ شاشاتٍ تُفتح في مكالمةٍ هاتفية تعني أن
+                    # أحداً لن يفتحها — فجُمعت في صفحة
+                    ("ملف الجهة (كل ما يخصّها في صفحة)",
+                     Lazy(lambda: DossierScreen(user),
+                          "ملف الجهة (كل ما يخصّها في صفحة)")),
                     ("الأصول الثابتة والإهلاك",
                      Lazy(lambda: AssetsScreen(user),
                           "الأصول الثابتة والإهلاك")),

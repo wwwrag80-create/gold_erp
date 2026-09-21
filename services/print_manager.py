@@ -1305,6 +1305,9 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_wage_audit(conn, doc_id, kw.get("date_from"),
                                       kw.get("date_to"),
                                       kw.get("only_deviations", True)))
+        if doc_type == "dossier":
+            return en(_tpl_dossier(conn, doc_id, kw.get("date_from"),
+                                   kw.get("date_to")))
         if doc_type == "balance_tree":
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
@@ -2453,6 +2456,170 @@ def _tpl_wage_audit(conn, _id=0, date_from=None, date_to=None,
                     show_meta=False) + html + _footer(""))
 
 
+def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
+    """ملف الجهة في ورقةٍ واحدة — تُطبع وتُوضع في الملف أو تُرسل.
+
+    ترتيبها ترتيبُ السؤال لا ترتيبُ قاعدة البيانات: الخلاصة أولاً،
+    ثم الرصيد والسقف، ثم ما جرى في الفترة، ثم أعمار الدين، ثم
+    موديلاته وأجرته. فمن قرأ السطر الأول عرف الحال، ومن أراد التفصيل
+    وجده تحته.
+    """
+    from models import dossier
+    from models.aging import BUCKET_LABELS
+    from services import karat_view
+    d = dossier.build(conn, entity_id, date_from, date_to)
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+    e, b = d["entity"], d["balance"]
+
+    def _g(v):
+        s = _gw(abs(v or 0.0), 3)
+        return f"({s})" if (v or 0.0) < 0 else s
+
+    def _m(v):
+        s = _w(abs(v or 0.0), 2)
+        return f"({s})" if (v or 0.0) < 0 else s
+
+    # ── جسر الفترة ──
+    r = d["bridge"]
+    bridge = "<tr>" + cells(
+        thw("رصيد أول المدة"), thw(_g(r["opening"]["gold"])),
+        thw(_m(r["opening"]["cash"])), thw("—"), thw("—")) + "</tr>"
+    for x in r["buckets"]:
+        if abs(x["gold"]) < 0.0005 and abs(x["cash"]) < 0.005:
+            continue
+        bridge += "<tr>" + cells(
+            tdw(x["label"], align="right"), tdw(_g(x["gold"])),
+            tdw(_m(x["cash"])), tdw(en(f"{x['docs']:,}")),
+            tdw(en(f"{x['days']:,}"))) + "</tr>"
+    bridge += "<tr>" + cells(
+        thw("رصيد آخر المدة"), thw(_g(r["closing"]["gold"])),
+        thw(_m(r["closing"]["cash"])), thw("—"), thw("—")) + "</tr>"
+
+    # ── أعمار دينه ──
+    a = d["aging"]
+    if a:
+        age = "<tr>" + cells(
+            tdw("الوزن", align="right"),
+            *[tdw(_g(x)) for x in a["gold_buckets"]],
+            thw(_g(a["gold"]))) + "</tr><tr>" + cells(
+            tdw("النقد", align="right"),
+            *[tdw(_m(x)) for x in a["cash_buckets"]],
+            thw(_m(a["cash"]))) + "</tr>"
+        oldest = f'{en(str(a["days"]))} يوماً — منذ {en(a["oldest"])}'
+    else:
+        age = (f'<tr><td {TD} colspan="{len(BUCKET_LABELS) + 2}">'
+               'لا دينَ قائمٌ على هذه الجهة</td></tr>')
+        oldest = "—"
+
+    # ── موديلاته ──
+    mdl = ""
+    for x in (d["models_life"] or [])[:10]:
+        mdl += "<tr>" + cells(
+            tdw(x["model"], align="right"), tdw(en(f"{x['sold']:,}")),
+            tdw(en(f"{x['returned']:,}")), tdw(en(f"{x['net_count']:,}")),
+            tdw(_g(x["weight"])), tdw(_m(x["wages"]))) + "</tr>"
+    if not mdl:
+        mdl = f'<tr><td {TD} colspan="6">لا مبيعات مسجّلة</td></tr>'
+
+    fl, flife, wg = d["flow"], d["flow_life"], d["wage"]
+
+    def _pct(v):
+        return en(f"{v:,.1f}%") if v is not None else "—"
+
+    lr, lp = d["last_receipt"], d["last_payment"]
+    lim_g, lim_c = d["limit"]["gold"], d["limit"]["cash"]
+
+    def _lim(st, f):
+        if not st["limit"]:
+            return "بلا سقف"
+        tag = " ⚠ تجاوز" if st["over"] else ""
+        pct = en("{:,.0f}%".format(st["pct"] or 0))
+        return f'{f(st["used"])} من {f(st["limit"])} ({pct}){tag}'
+
+    lines = "".join(f"<li>{v}</li>"
+                    for v in dossier.verdict(d, _g, _m))
+    html = f'''
+    <div class="note"><ul>{lines}</ul></div>
+
+    {TBL}
+      <tr><td {TH} width="22%">الجهة</td><td>{e["name"]}</td>
+          <th>الفترة</th>
+          <td>{en(d["date_from"])} إلى {en(d["as_of"])}</td></tr>
+      <tr><th>الهاتف</th><td>{en(e["phone"] or "—")}</td>
+          <th>الرقم الضريبي</th><td>{en(e["vat"] or "—")}</td></tr>
+      <tr><th>الرصيد</th>
+          <td>{en(_g(b["gold"]))} {u} · {en(_m(b["cash"]))} ريال</td>
+          <th>أقدم دين</th><td>{oldest}</td></tr>
+      <tr><th>سقف وزني</th><td>{_lim(lim_g, _g)}</td>
+          <th>سقف نقدي</th><td>{_lim(lim_c, _m)}</td></tr>
+      <tr><th>آخر تحصيل</th>
+          <td>{(en(lr["date"]) + " — " + en(_g(lr["gold"])) + " " + u
+                + " · " + en(_m(lr["cash"])) + " ريال") if lr
+               else "لم يُسدَّد منه شيءٌ قط"}</td>
+          <th>آخر صرفٍ له</th>
+          <td>{en(lp["date"]) if lp else "—"}</td></tr>
+      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
+    </table>
+
+    <div class="party">ما جرى في الفترة — جسر الرصيد</div>
+    {TBL}
+      <tr>{cells(thw("البند"), thw(f"الوزن ({u})"), thw("النقد (ريال)"),
+                 thw("مستندات"), thw("أيام"))}</tr>
+      {bridge}
+    </table>
+
+    <div class="party">أعمار دينه</div>
+    {TBL}
+      <tr>{cells(thw("البُعد"), *[thw(x) for x in BUCKET_LABELS],
+                 thw("الإجمالي"))}</tr>
+      {age}
+    </table>
+
+    <div class="party">حركته وأجرته</div>
+    {TBL}
+      <tr>{cells(thw("البند"), thw("الفترة"), thw("من البداية"),
+                 thw("ملاحظة"))}</tr>
+      <tr>{cells(tdw("ما خرج إليه", align="right"),
+                 tdw(_g(fl["out_weight"])), tdw(_g(flife["out_weight"])),
+                 tdw(en(f"{fl['sold_lines']:,} / "
+                        f"{flife['sold_lines']:,} سطراً")))}</tr>
+      <tr>{cells(tdw("ما رجع منه", align="right"),
+                 tdw(_g(fl["back_weight"])), tdw(_g(flife["back_weight"])),
+                 tdw(en(f"{fl['return_lines']:,} / "
+                        f"{flife['return_lines']:,} سطراً")))}</tr>
+      <tr>{cells(thw("نسبة المرتجع (بالوزن)"), thw(_pct(fl["return_pct"])),
+                 thw(_pct(flife["return_pct"])),
+                 thw("بالوزن لا بالعدد"))}</tr>
+      <tr>{cells(tdw("الأجرة المتفق عليها", align="right"),
+                 tdw(_w(karat_view.rate(wg["agreed"]), 2)
+                     if wg["agreed"] else "بلا اتفاق"), tdw("—"),
+                 tdw("من بطاقة الجهة"))}</tr>
+      <tr>{cells(tdw("متوسط الأجرة المطبَّقة", align="right"),
+                 tdw(_w(karat_view.rate(wg["avg_applied"]), 2)
+                     if wg["avg_applied"] else "—"), tdw("—"),
+                 tdw(en(f"{wg['lines']:,} سطراً في الفترة")))}</tr>
+      <tr>{cells(thw("أثر فرق الأجرة (ريال)"), thw(_m(wg["impact"])),
+                 thw("—"),
+                 thw(en(f"{wg['deviations']:,} سطراً مخالفاً")))}</tr>
+    </table>
+
+    <div class="party">أكثر ما يأخذ من الموديلات (من البداية)</div>
+    {TBL}
+      <tr>{cells(thw("الموديل"), thw("خرج"), thw("رجع"), thw("الصافي"),
+                 thw(f"الوزن الصافي ({u})"), thw("الأجور (ريال)"))}</tr>
+      {mdl}
+    </table>
+
+    <div class="note">لا رقمَ يُحسب في هذه الورقة: الأعمار من تقرير
+      أعمار الديون، والجسر من تحليل حركة الرصيد، والرصيد من الدفتر —
+      فلا تخالف الورقةُ كشفَ الحساب. والسالب بين قوسين كما يكتبه
+      المحاسبون.</div>
+    '''
+    return (_header(f"ملف الجهة — {e['name']}", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
 BUILDERS = {
     "invoice": _tpl_invoice, "invoices": _tpl_invoice,
     "voucher": _tpl_voucher, "vouchers": _tpl_voucher,
@@ -2475,6 +2642,7 @@ BUILDERS = {
     "gold_map": _tpl_gold_map,
     "stock_aging": _tpl_stock_aging,
     "wage_audit": _tpl_wage_audit,
+    "dossier": _tpl_dossier,
 }
 
 DOC_LABELS = {

@@ -86,7 +86,7 @@ def _fifo(rows, dim, eps):
     return lots, round(credit, 3)
 
 
-def _entity_rows(conn, entity_type=None, as_of=None):
+def _entity_rows(conn, entity_type=None, as_of=None, entity_id=None):
     """حركة كل الجهات دفعةً واحدة — استعلام واحد لا استعلام لكل جهة.
 
     الاستعلام لكل جهة كان يعني مئات الاستعلامات على مصنع بمئة عميل،
@@ -107,14 +107,19 @@ def _entity_rows(conn, entity_type=None, as_of=None):
     if as_of:
         q += " AND en.entry_date<=?"
         p.append(as_of)
+    # جهةٌ بعينها: «ملف العميل» يحتاج صفَّ جهةٍ واحدة، وقراءةُ حركة
+    # المصنع كلّه من أجلها هدرٌ يظهر أثره على دفترٍ كبير.
+    if entity_id:
+        q += " AND e.id=?"
+        p.append(entity_id)
     q += " ORDER BY e.id, en.entry_date, en.id, l.id"
     return conn.execute(q, p).fetchall()
 
 
-def report(conn, entity_type="customer", as_of=None):
+def report(conn, entity_type="customer", as_of=None, entity_id=None):
     """صفوف التقرير: لكل جهة رصيدها موزَّعاً على الفئات العمرية."""
     as_of = str(as_of or _dt.date.today().isoformat())[:10]
-    rows = _entity_rows(conn, entity_type, as_of)
+    rows = _entity_rows(conn, entity_type, as_of, entity_id)
     by_entity = {}
     for r in rows:
         by_entity.setdefault(
