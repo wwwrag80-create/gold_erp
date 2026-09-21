@@ -10,8 +10,6 @@
 **تسريع الإدخال**: زر Enter ينقل المؤشر للخلية **أسفلها في نفس
 العمود** بدل الانتقال أفقياً — وهو ما يناسب إدخال عمود كامل دفعةً.
 """
-import calendar
-
 from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
@@ -38,9 +36,12 @@ TARGET_COLS = [
 ]
 
 SALARY_COLS = [
-    ("name", "اسم العامل", True),
+    ("name", "اسم العامل", False),        # يُعدَّل ويتبعه دليل الحسابات
     ("basic_salary", "الأساسي", False),
-    ("hours", "ساعات", True),
+    # **ساعات الإضافي لا ساعات الدوام**: العمود الثالث كان «ساعات»
+    # فيُضرب معاملُ الإضافي في ساعات الشهر كلها ويصير «الإضافي»
+    # راتباً ثانياً. الصواب عمود «إضافية» من شاشة التارجت.
+    ("overtime_hours", "إضافية", True),
     ("overtime_rate", "معامل", False),
     ("overtime", "الإضافي", True),
     ("absence", "الغياب", True),
@@ -49,11 +50,17 @@ SALARY_COLS = [
     ("gold_deduction", "خصم/ذهب", False),
     ("target_amount", "التارجت", False),
     ("bonus", "المكافأة", False),
-    # السحوبات محذوفة من العرض: تظهر في كشف حساب العامل نفسه،
-    # ووجودها هنا يُكرّر المعلومة ويوسّع الجدول بلا فائدة.
-    # (تُحتسب في الصافي كما كانت — الحذف من العرض لا من المحاسبة)
     ("net_salary", "الصافي", True),
+    # المسحوبات والمستحق للعرض والطباعة وحدهما: **الصافي** هو ما
+    # يُنزَل في حساب كل عامل عند الترحيل.
+    ("draws", "مسحوبات", True),
+    ("due", "المستحق", True),
 ]
+
+# أوزان أعمدة الجدولين — تُوزَّع على العرض المتاح بلا تمرير أفقي
+# ولا سحبٍ باليد. الاسم أعرضها لأنه نصٌّ، والباقي أرقام.
+TARGET_W = [20, 7, 7, 7, 7, 7, 9, 9, 8, 8, 7, 8]
+SALARY_W = [19, 8, 7, 6, 7, 6, 7, 7, 7, 7, 7, 8, 8, 8]
 
 
 class VerticalEnterTable(QtWidgets.QTableWidget):
@@ -114,10 +121,31 @@ class VerticalEnterTable(QtWidgets.QTableWidget):
 
 
 def _num(v, d=2):
+    """السالب بين قوسين — لا بإشارةٍ تزيغ في نصٍّ عربي.
+
+    الإشارة الأمامية تُرمى في السطر العربي إلى آخر الرقم، فيُقرأ
+    «571.66-» موجباً وهو سالب. والقوسان عُرف المحاسبة للسالب،
+    وهما لا يزيغان مع اتجاه الكتابة.
+    """
     try:
-        return f"{float(v or 0):,.{d}f}"
+        f = float(v or 0)
     except Exception:
         return "0.00"
+    return f"({abs(f):,.{d}f})" if f < 0 else f"{f:,.{d}f}"
+
+
+def _val(text):
+    """يقرأ ما كتبه `_num` — والقوسان سالبٌ لا زينة.
+
+    الخلية تُعرض بالقوسين وتُقرأ كما هي عند الحفظ؛ فلو قُرئت قراءةً
+    ساذجة لصار السالبُ صفراً في أول حفظٍ بلا تعديل.
+    """
+    s = str(text or "").strip().replace(",", "").replace("٬", "")
+    neg = s.startswith("(") and s.endswith(")")
+    if neg:
+        s = s[1:-1].strip()
+    v = float(s or 0)
+    return -v if neg else v
 
 
 class MfgCostsScreen(QtWidgets.QWidget):
@@ -141,11 +169,42 @@ class MfgCostsScreen(QtWidgets.QWidget):
         btn_reload = QtWidgets.QPushButton("↻ تحديث")
         btn_reload.clicked.connect(self.reload)
 
+        self.s_date = QtWidgets.QDateEdit()
+        self.s_date.setCalendarPopup(True)
+        self.s_date.setDisplayFormat("yyyy-MM-dd")
+        self.s_date.setDate(QtCore.QDate.currentDate())
+        self.s_date.setMaximumWidth(130)
+
+        btn_save = QtWidgets.QPushButton("💾 حفظ")
+        btn_save.setToolTip("يحفظ التبويب المعروض — التارجت أو الرواتب")
+        btn_save.clicked.connect(self.save_current)
+        btn_post = QtWidgets.QPushButton("📥 إنزال رواتب العمال")
+        btn_post.setObjectName("homeBtn")
+        btn_post.clicked.connect(self.post_salaries)
+        btn_print = QtWidgets.QPushButton("🖨 طباعة")
+        btn_print.clicked.connect(self.print_current)
+        btn_add = QtWidgets.QPushButton("➕ إضافة حساب")
+        btn_add.setObjectName("ghost")
+        btn_add.setToolTip("يضيف موظفاً من خارج عمال التصنيع لجدول الرواتب")
+        btn_add.clicked.connect(self.add_staff)
+        btn_drop = QtWidgets.QPushButton("➖ رفع المضاف")
+        btn_drop.setObjectName("ghost")
+        btn_drop.setToolTip("يرفع الصف المضاف يدوياً — لا يمسّ عمال القسم")
+        btn_drop.clicked.connect(self.drop_staff)
+
         head = QtWidgets.QHBoxLayout()
+        head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("الشهر:"))
         head.addWidget(self.month)
         head.addWidget(self.year)
         head.addWidget(btn_reload)
+        head.addWidget(QtWidgets.QLabel("تاريخ القيد:"))
+        head.addWidget(self.s_date)
+        head.addWidget(btn_save)
+        head.addWidget(btn_post)
+        head.addWidget(btn_print)
+        head.addWidget(btn_add)
+        head.addWidget(btn_drop)
         head.addStretch(1)
 
         self.tabs = QtWidgets.QTabWidget()
@@ -153,20 +212,16 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self.tabs.addTab(self._salary_tab(), "رواتب العمال")
         self.tabs.addTab(self._summary_tab(), "الملخص")
 
-        # شريط مسح بيانات الشهر — فوق شريط الشهر مباشرةً
-        wipe_row = QtWidgets.QHBoxLayout()
-        btn_wipe = QtWidgets.QPushButton(
-            "🔥 مسح بيانات هذا الشهر (تارجت ورواتب)")
-        btn_wipe.setObjectName("dangerBtn")
-        btn_wipe.setToolTip(
-            "يمسح صفوف التارجت والرواتب غير المرحَّلة للشهر المحدد")
-        btn_wipe.clicked.connect(self.wipe_month)
-        wipe_row.addWidget(btn_wipe)
-        wipe_row.addStretch(1)
-
+        # ══ الأزرار كلُّها في شريطٍ واحد أعلى الشاشة ══
+        # كانت موزّعةً: شريطُ مسحٍ فوق، وأزرارُ التارجت تحت جدوله،
+        # وأزرارُ الرواتب فوق جدولها. فيختلف موضع الزرّ باختلاف
+        # التبويب، ويأكل كلُّ شريطٍ سطراً من ارتفاع الجدول.
+        # وزرُّ «مسح بيانات الشهر» حُذف: عمليةٌ لا رجعة فيها ليس
+        # مكانُها شاشةَ إدخالٍ يومية.
         lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(6, 4, 6, 4)
+        lay.setSpacing(4)
         lay.addWidget(title_label("تكاليف ورواتب قسم التصنيع"))
-        lay.addLayout(wipe_row)
         lay.addLayout(head)
         lay.addWidget(self.tabs, 1)
 
@@ -174,69 +229,46 @@ class MfgCostsScreen(QtWidgets.QWidget):
     def _target_tab(self):
         w = QtWidgets.QWidget()
         self.t_table = VerticalEnterTable()
-        self._setup_table(self.t_table)
+        self._setup_table(self.t_table, TARGET_W)
         self.t_table.cellChanged.connect(self.on_target_edit)
-        btn_save = QtWidgets.QPushButton("💾 حفظ التارجت")
-        btn_save.setObjectName("homeBtn")
-        btn_save.clicked.connect(self.save_targets)
-        btn_print_t = QtWidgets.QPushButton("🖨 طباعة")
-        btn_print_t.clicked.connect(self.print_current)
         note = QtWidgets.QLabel(
             "الأعمدة المحسوبة (الخصم · المفترض إنتاجه · الفرق) تتحدّث "
             "تلقائياً ولا تُدخل يدوياً. اضغط Enter للانتقال للخلية "
             "التي أسفلها في نفس العمود.")
         note.setObjectName("cardSub")
         note.setWordWrap(True)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(btn_save)
-        row.addWidget(btn_print_t)
-        row.addStretch(1)
         lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(0, 2, 0, 0)
+        lay.setSpacing(3)
         lay.addWidget(note)
         lay.addWidget(self.t_table, 1)
-        lay.addLayout(row)
         return w
 
     # ══════════ التبويب الثاني: الرواتب ══════════
     def _salary_tab(self):
         w = QtWidgets.QWidget()
         self.s_table = VerticalEnterTable()
-        self._setup_table(self.s_table)
+        self._setup_table(self.s_table, SALARY_W)
         self.s_table.cellChanged.connect(self.on_salary_edit)
 
-        self.s_date = QtWidgets.QDateEdit()
-        self.s_date.setCalendarPopup(True)
-        self.s_date.setDisplayFormat("yyyy-MM-dd")
-        self.s_date.setDate(QtCore.QDate.currentDate())
-
-        btn_save = QtWidgets.QPushButton("💾 حفظ")
-        btn_save.clicked.connect(self.save_salaries)
-        btn_post = QtWidgets.QPushButton("📥 إنزال رواتب العمال")
-        btn_post.setObjectName("homeBtn")
-        btn_post.clicked.connect(self.post_salaries)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة")
-        btn_print.clicked.connect(self.print_current)
-
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel("تاريخ القيد:"))
-        row.addWidget(self.s_date)
-        row.addWidget(btn_save)
-        row.addWidget(btn_post)
-        row.addWidget(btn_print)
-        row.addStretch(1)
-
         note = QtWidgets.QLabel(
-            "الساعات والغياب والخصم تُجلب من شاشة التارجت، والسحوبات "
-            "من سندات الصرف المسجّلة على حساب العامل خلال الشهر. "
-            "الصافي = (الأساسي + الإضافي + التارجت + المكافأة) − "
-            "(الخصم + خصم/ذهب + السحوبات).")
+            "الإضافية والغياب تُجلبان من شاشة التارجت، والمسحوبات من "
+            "سندات الصرف المسجّلة على حساب العامل خلال الشهر.\n"
+            "الصافي = الأساسي + الإضافي + التارجت + المكافأة − الخصم − "
+            "خصم/ذهب.   والمستحق = الصافي − المسحوبات.\n"
+            "المُرحَّل في حساب كل عامل هو **الصافي**: السحب قُيّد يوم "
+            "وقوعه بسند صرف، فطرحُه هنا يخصمه مرتين. والمسحوبات "
+            "والمستحق للعرض والطباعة. واسم العامل يُعدَّل من خانته "
+            "فيتبعه دليل الحسابات."
+            .replace("**", "«").replace("«الصافي«", "«الصافي»"))
         note.setObjectName("cardSub")
         note.setWordWrap(True)
 
         self.s_total = big_label("")
         lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(0, 2, 0, 0)
+        lay.setSpacing(3)
         lay.addWidget(note)
-        lay.addLayout(row)
         lay.addWidget(self.s_table, 1)
         lay.addWidget(self.s_total)
         return w
@@ -334,24 +366,32 @@ class MfgCostsScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
-    def _setup_table(self, t):
+    def _setup_table(self, t, weights=None):
+        """جدولٌ مرتّب لا يتمدّد ولا يُسحب عموده باليد.
+
+        **الوزن لا التساوي**: `Stretch` يعطي كل عمودٍ العرض نفسه،
+        فيضيق عمود الاسم — وهو النصّ الوحيد — ويتّسع عمودُ «معامل»
+        وفيه رقمٌ من خانتين. الأوزان تعطي كلاً بقدر ما يحمل.
+        """
+        from ui.widgets.table_fit import fit_columns
         t.setAlternatingRowColors(True)
         t.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectItems)
-        t.verticalHeader().setVisible(False)
-        t.verticalHeader().setDefaultSectionSize(34)
+        vh = t.verticalHeader()
+        vh.setVisible(False)
+        vh.setDefaultSectionSize(32)
+        vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
         hh = t.horizontalHeader()
-        # الأعمدة تتوزّع على عرض الشاشة كاملاً فلا يُقصّ أو يختفي عمود،
-        # ولا يظهر شريط تمرير أفقي إطلاقاً.
-        hh.setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-        hh.setMinimumSectionSize(44)
+        hh.setMinimumSectionSize(40)
         hh.setStretchLastSection(False)
         hh.setDefaultAlignment(QtCore.Qt.AlignCenter)
+        try:
+            hh.setTextElideMode(QtCore.Qt.ElideNone)
+        except Exception:
+            pass
         t.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        # لفّ العناوين والنصوص داخل خاناتها بدل تصغير الخط
         t.setWordWrap(True)
         t.setTextElideMode(QtCore.Qt.ElideNone)
-        t.verticalHeader().setSectionResizeMode(
-            QtWidgets.QHeaderView.ResizeToContents)
+        fit_columns(t, list(weights or []), min_px=40)
 
     # ══════════ العرض ══════════
     def period(self):
@@ -392,6 +432,15 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 f.setBold(True)
                 it.setFont(f)
                 table.setItem(last, j, it)
+            # عددُ الأعمدة قد يتغيّر بين تبويبٍ وآخر، والمُحجِّم يعيد
+            # التوزيع عند تغيّره — لكنه لا يسمع تغييراً لم يُصحبه
+            # حدثُ حجم، فيُطلب منه صراحةً بعد كل تعبئة.
+            f = table.property("_fitter")
+            if f is not None:
+                try:
+                    f.refit()
+                except Exception:
+                    pass
         finally:
             self._loading = False
 
@@ -405,7 +454,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 if it is None:
                     continue
                 try:
-                    r[key] = float(str(it.text()).replace(",", "") or 0)
+                    r[key] = _val(it.text())
                 except ValueError:
                     r[key] = 0.0
         return rows
@@ -426,6 +475,9 @@ class MfgCostsScreen(QtWidgets.QWidget):
             return
         col = self.s_table.currentColumn()
         edited = SALARY_COLS[col][0] if 0 <= col < len(SALARY_COLS) else ""
+        if edited == "name":
+            self._rename_worker()
+            return
         self._read(self.s_table, SALARY_COLS, self.salary_rows)
         for i, r in enumerate(self.salary_rows):
             # الكتابة في خانة الخصم تعني خصماً يدوياً يتجاوز المعادلة
@@ -440,12 +492,107 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self.s_table.setCurrentCell(*cur)
         self._update_total()
 
+    def _rename_worker(self):
+        """اسمٌ يُكتب في الخانة يُعاد تسميته في **دليل الحسابات**.
+
+        الاسم يُخزَّن في ثلاثة مواضع: الحساب، والجهة، وسجلّ الموظف.
+        فتغييرُه هنا وحده يجعل الجدول يقول اسماً وكشفُ الحساب آخر —
+        ولا يُصدَّق نظامٌ يسمّي الرجل باسمين. لذلك يمرّ التعديل من
+        `coa.rename_account` وهو الذي يُزامن المواضع الثلاثة.
+        """
+        r = self.s_table.currentRow()
+        it = self.s_table.item(r, 0)
+        if it is None or not (0 <= r < len(self.salary_rows)):
+            return
+        new = str(it.text()).strip()
+        row = self.salary_rows[r]
+        old = str(row.get("name") or "").strip()
+        if not new or new == old:
+            self._fill(self.s_table, SALARY_COLS, self.salary_rows)
+            return
+        try:
+            from models import coa
+            with db() as conn:
+                ent = conn.execute(
+                    "SELECT account_id FROM entities WHERE employee_id=?"
+                    " AND is_deleted=0", (row.get("employee_id"),)
+                ).fetchone()
+                if not ent or not ent["account_id"]:
+                    raise ValueError(f"«{old}» بلا حساب في الشجرة")
+                coa.rename_account(conn, ent["account_id"], new,
+                                   self.user["username"])
+            info(self, f"أُعيدت التسمية: «{old}» ← «{new}»\n"
+                       "وتبعها اسمُ الحساب في الدليل وكشوفه.")
+        except Exception as e:
+            err(self, e)
+        self.reload()
+
+    def save_current(self):
+        """يحفظ التبويب المعروض — فزرٌّ واحد يكفي التبويبين."""
+        if self.tabs.currentIndex() == 0:
+            self.save_targets()
+        else:
+            self.save_salaries()
+
+    # ══════════ إضافة حسابٍ لجدول الرواتب ══════════
+    def add_staff(self):
+        """يضيف موظفاً من خارج عمال التصنيع لجدول الرواتب."""
+        try:
+            from models import payroll
+            with db() as conn:
+                have = {r.get("employee_id") for r in self.salary_rows}
+                people = [e for e in payroll.list_employees(conn)
+                          if e["id"] not in have]
+            if not people:
+                raise ValueError("كل الموظفين مضافون مسبقاً")
+            items = [f"{e['name']}   (#{e['id']})" for e in people]
+            txt, ok = QtWidgets.QInputDialog.getItem(
+                self, "إضافة حساب لجدول الرواتب",
+                "اختر الموظف — يُضاف صفُّه ويبقى حتى ترفعه:",
+                items, 0, True)
+            if not ok or not txt:
+                return
+            pick = people[items.index(txt)] if txt in items else None
+            if pick is None:
+                raise ValueError("اختر اسماً من القائمة")
+            ids = mfg_costs.load_extra_staff()
+            if pick["id"] not in ids:
+                ids.append(pick["id"])
+            mfg_costs.save_extra_staff(ids)
+            self.reload()
+            info(self, f"أُضيف «{pick['name']}» لجدول الرواتب.")
+        except Exception as e:
+            err(self, e)
+
+    def drop_staff(self):
+        """يرفع صفاً مضافاً يدوياً — ولا يمسّ عمال القسم."""
+        try:
+            r = self.s_table.currentRow()
+            if not (0 <= r < len(self.salary_rows)):
+                raise ValueError("اختر صفاً من جدول الرواتب أولاً")
+            row = self.salary_rows[r]
+            if not row.get("is_extra"):
+                raise ValueError(
+                    f"«{row.get('name')}» من عمال قسم التصنيع — "
+                    "يُرفع من دليل الجهات لا من هنا")
+            if not ask(self, f"رفع «{row.get('name')}» من جدول الرواتب؟\n"
+                             "لا يُحذف الموظف ولا قيوده — يُرفع صفُّه فقط."):
+                return
+            ids = [i for i in mfg_costs.load_extra_staff()
+                   if i != row.get("employee_id")]
+            mfg_costs.save_extra_staff(ids)
+            self.reload()
+        except Exception as e:
+            err(self, e)
+
     def _update_total(self):
         tot = sum(float(r.get("net_salary") or 0) for r in self.salary_rows)
+        dr = sum(float(r.get("draws") or 0) for r in self.salary_rows)
         n = len([r for r in self.salary_rows
                  if float(r.get("net_salary") or 0)])
         self.s_total.setText(
-            f"{n} عامل   |   إجمالي الرواتب الصافية: {tot:,.2f} ريال")
+            f"{n} عامل   |   الصافي: {tot:,.2f}   |   المسحوبات: "
+            f"{dr:,.2f}   |   المستحق: {tot - dr:,.2f} ريال")
 
     # ══════════ الإجراءات ══════════
     def reload(self):
@@ -594,40 +741,6 @@ class MfgCostsScreen(QtWidgets.QWidget):
             print_manager.preview_document(
                 self, kind, 0, period=self.period(),
                 targets=self.target_rows, salaries=self.salary_rows)
-        except Exception as e:
-            err(self, e)
-
-    def wipe_month(self):
-        """يمسح بيانات الشهر المحدد — التارجت والرواتب غير المرحَّلة.
-
-        لا يمسّ القيود المرحَّلة: الرواتب التي أُنزلت محاسبياً تبقى
-        كما هي، فلا يختلّ أي ميزان. تُحذف بيانات الإدخال فقط.
-        """
-        try:
-            per = self.period()
-            with db() as conn:
-                posted = conn.execute(
-                    "SELECT COUNT(*) c FROM mfg_salaries"
-                    " WHERE period=? AND is_posted=1", (per,)).fetchone()["c"]
-            msg = (f"مسح بيانات شهر {self.period_label()}؟\n\n"
-                   f"سيُحذف: صفوف التارجت + صفوف الرواتب غير المرحَّلة.")
-            if posted:
-                msg += (f"\n\n⚠ يوجد {posted} راتب مُرحَّل محاسبياً — "
-                        f"لن يُمسّ ويبقى قيده كما هو.")
-            msg += "\n\nلا يمكن التراجع."
-            if not ask(self, msg):
-                return
-            with db() as conn:
-                n1 = conn.execute("DELETE FROM mfg_targets WHERE period=?",
-                                  (per,)).rowcount or 0
-                n2 = conn.execute(
-                    "DELETE FROM mfg_salaries WHERE period=?"
-                    " AND COALESCE(is_posted,0)=0", (per,)).rowcount or 0
-            info(self, f"مُسحت بيانات {self.period_label()}.\n"
-                       f"تارجت: {n1} صف   ·   رواتب: {n2} صف"
-                       + (f"\nبقي {posted} راتب مُرحَّل بلا مساس."
-                          if posted else ""))
-            self.reload()
         except Exception as e:
             err(self, e)
 

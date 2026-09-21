@@ -27,7 +27,7 @@ from ui.widgets.table_tools import enhance as _enhance
 
 
 class MovementScreen(QtWidgets.QWidget):
-    def __init__(self, user):
+    def __init__(self, user, embedded=False):
         super().__init__()
         self.user = user
         self.res = None
@@ -91,8 +91,9 @@ class MovementScreen(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
-        lay.addWidget(title_label(
-            "تحليل حركة الرصيد — من أين جاء وإلى أين ذهب"))
+        if not embedded:
+            lay.addWidget(title_label(
+                "تحليل حركة الرصيد — من أين جاء وإلى أين ذهب"))
         intro = QtWidgets.QLabel(
             "كشف الحساب يسرد الحركات؛ هذه الشاشة تُجيب: كم كان الرصيد "
             "أول المدة، وكم خرج وكم رجع وكم سُدّد، وكم صار آخرها — "

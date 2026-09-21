@@ -43,12 +43,8 @@ from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
 from ui.reports.aging_screen import AgingScreen
 from ui.reports.bank_recon_screen import BankReconScreen
-from ui.reports.model_profit_screen import ModelProfitScreen
-from ui.reports.assets_screen import AssetsScreen
-from ui.reports.stock_aging_screen import StockAgingScreen
+from ui.reports.analysis_hub_screen import AnalysisHubScreen
 from ui.reports.doc_edits_screen import DocEditsScreen
-from ui.reports.dossier_screen import DossierScreen
-from ui.reports.movement_screen import MovementScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
@@ -177,31 +173,21 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("مطابقة كشف البنك",
                      Lazy(lambda: BankReconScreen(user), "مطابقة كشف البنك")),
                     ("أرشيف المستندات والطباعة", self.archive_screen),
-                    # المكائن والسيارات كانت تُشترى ولا تُهلَك:
-                    # ربحٌ لم يتحقّق وأصولٌ بثمن شرائها للأبد
-                    # «كانت المديونية ٤٠ كيلو — كم صارت وماذا
-                    # حصل؟» سؤالٌ لا يجيبه كشفُ الحساب
-                    ("تحليل حركة الرصيد",
-                     Lazy(lambda: MovementScreen(user),
-                          "تحليل حركة الرصيد")),
-                    # «في المخزن ٨٤٠ طقماً» رقمٌ لا يُتَّخذ عليه قرار؛
-                    # القرار على «كم منها راقدٌ فوق التسعين يوماً»
-                    ("أعمار الموديلات (ما رقد في المخزن)",
-                     Lazy(lambda: StockAgingScreen(user),
-                          "أعمار الموديلات (ما رقد في المخزن)")),
-                    # سبعُ شاشاتٍ تُفتح في مكالمةٍ هاتفية تعني أن
-                    # أحداً لن يفتحها — فجُمعت في صفحة
-                    ("ملف الجهة (كل ما يخصّها في صفحة)",
-                     Lazy(lambda: DossierScreen(user),
-                          "ملف الجهة (كل ما يخصّها في صفحة)")),
+                    # ══ أربعة تقارير في بندٍ واحد ══
+                    # حركةُ الرصيد وملفُ الجهة وأعمارُ الموديلات
+                    # وربحيةُ الموديل أسئلةٌ متجاورة — كانت أربعة
+                    # بنودٍ لكلٍّ عنوانه، فضاع نصفُ الارتفاع في
+                    # عناوين تتكرّر. صارت أقساماً أعلى شاشةٍ واحدة.
+                    ("التحليل والدراسات (٤ أقسام)",
+                     Lazy(lambda: AnalysisHubScreen(user),
+                          "التحليل والدراسات (٤ أقسام)")),
                     # التعديل مشروع؛ المقصود أن يكون مرئياً —
                     # فتعديلٌ يُرى يُسأل عنه، ولا يُرى لا يُسأل
                     ("من عدّل ماذا بعد الترحيل",
                      Lazy(lambda: DocEditsScreen(user),
                           "من عدّل ماذا بعد الترحيل")),
-                    ("الأصول الثابتة والإهلاك",
-                     Lazy(lambda: AssetsScreen(user),
-                          "الأصول الثابتة والإهلاك")),
+                    # الأصول الثابتة والإهلاك صارت تبويباً في شاشة
+                    # المشتريات: الأصل يُشترى هناك، فإهلاكُه بجانبه
                     ("الرواتب والموظفون", self.payroll_screen),
                     ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
                     ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
@@ -220,10 +206,6 @@ class MainWindow(QtWidgets.QMainWindow):
                      Lazy(lambda: StockReportScreen(user),
                           "أرصدة المخازن (جرد لحظي)")),
                     ("تحليل مبيعات العملاء", self.analytics_screen),
-                    # «أيّ موديلٍ يكسب» كان يُجاب بالانطباع: ما يُرى
-                    # يخرج كثيراً قد يكون كثيرَ الخروج قليلَ الأجرة
-                    ("ربحية الموديل",
-                     Lazy(lambda: ModelProfitScreen(user), "ربحية الموديل")),
                     ("إنتاج خزينة التصنيع (مطابقة)",
                      Lazy(lambda: KhazinaReportScreen(user),
                           "إنتاج خزينة التصنيع (مطابقة)")),

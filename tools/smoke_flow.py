@@ -2968,6 +2968,137 @@ def main():
           not _re.findall(r"-[\d,]+\.\d", _html5),
           " · ".join(_re.findall(r"-[\d,]+\.\d", _html5)[:4]) or "لا شيء")
 
+    step("38) رواتب عمال التصنيع — الصافي والمسحوبات والمستحق")
+    # ══ ثلاث ضمانات ══
+    # 1) الإضافي من **ساعات الإضافي** لا من ساعات الدوام كلها: كان
+    #    معاملُ الإضافي يُضرب في ساعات الشهر فيصير الإضافي راتباً
+    #    ثانياً — خطأٌ صامت لأن الرقم يبدو معقولاً.
+    # 2) السحب **لا يُطرح من الصافي**: قُيّد يوم وقوعه بسند صرف،
+    #    فطرحُه من الصافي المُرحَّل يخصمه مرتين ويظهر حساب العامل
+    #    مديناً بما لم يأخذه.
+    # 3) المستحق = الصافي − المسحوبات، للعرض لا للترحيل.
+    from models import mfg_costs as _mc2
+    from models import payroll as _pr
+
+    with db() as conn:
+        _wk = add_entity(conn, "عامل تصنيع للفحص", "worker",
+                         username="admin", basic_salary=3000.0)
+        _wacc = get_entity(conn, _wk)["account_id"]
+        _weid = conn.execute(
+            "SELECT employee_id FROM entities WHERE id=?",
+            (_wk,)).fetchone()["employee_id"]
+    _per = "2026-07"
+    with db() as conn:
+        _mc2.save_targets(conn, _per, [{
+            "employee_id": _weid, "month_days": 30, "hours": 8,
+            "overtime_hours": 20, "absence": 0, "actual_output": 0,
+            "target_amount": 0}], "admin")
+    # سندُ صرفٍ للعامل خلال الشهر — هذا هو «المسحوبات»
+    with db() as conn:
+        create_voucher(conn, "payment", "2026-07-10", "admin",
+                       entity_id=_wk, cash_amount=500.0)
+
+    with db(readonly=True) as conn:
+        _sal = {r["employee_id"]: r
+                for r in _mc2.list_salaries(conn, _per)}[_weid]
+
+    check("الإضافي = ساعات الإضافي × المعامل لا ساعات الدوام كلها",
+          abs(_sal["overtime_hours"] - 20.0) < 0.011
+          and abs(_sal["overtime"]
+                  - 20.0 * _sal["overtime_rate"]) < 0.011,
+          f"إضافية {_sal['overtime_hours']} × {_sal['overtime_rate']}"
+          f" = {_sal['overtime']}")
+    _want = round(3000.0 + _sal["overtime"], 2)
+    check("والصافي = الأساسي + الإضافي + التارجت + المكافأة − الخصوم",
+          abs(_sal["net_salary"] - _want) < 0.011,
+          f"{_sal['net_salary']} مقابل {_want}")
+    check("والمسحوبات تُقرأ من سندات الصرف",
+          abs(_sal["draws"] - 500.0) < 0.011, f"{_sal['draws']}")
+    check("والمستحق = الصافي − المسحوبات",
+          abs(_sal["due"] - (_sal["net_salary"] - 500.0)) < 0.011,
+          f"{_sal['due']}")
+    check("والسحب لا يُطرح من الصافي فلا يُخصم مرتين",
+          _sal["net_salary"] > _sal["due"] - 0.011
+          and abs(_sal["net_salary"] - _want) < 0.011)
+
+    # ══ الترحيل يُنزل الصافي، ورصيد العامل يطرح السحب من نفسه ══
+    with db() as conn:
+        _mc2.save_salaries(conn, _per, [_sal], "admin")
+        _res = _mc2.post_salaries(conn, _per, "admin",
+                                  entry_date="2026-07-31", rows=[_sal])
+    with db(readonly=True) as conn:
+        _wg, _wc2 = _bal(conn, _wacc)
+    check("الترحيل يُنزل الصافي في حساب العامل",
+          abs(_res["total"] - _sal["net_salary"]) < 0.011,
+          f"{_res['total']}")
+    check("ورصيدُ حسابه = المسحوبات − الصافي بلا خصمٍ مزدوج",
+          abs(_wc2 - (500.0 - _sal["net_salary"])) < 0.011,
+          f"رصيد {_wc2} · صافي {_sal['net_salary']} · سحب 500")
+
+    # ══ إضافة موظفٍ من خارج عمال التصنيع ══
+    with db() as conn:
+        _emp = add_entity(conn, "موظف إداري مع القسم", "employee",
+                          username="admin", basic_salary=2000.0)
+        _eeid = conn.execute(
+            "SELECT employee_id FROM entities WHERE id=?",
+            (_emp,)).fetchone()["employee_id"]
+    with db(readonly=True) as conn:
+        _before = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
+    check("الموظف الإداري ليس في جدول رواتب التصنيع افتراضاً",
+          _eeid not in _before)
+    _mc2.save_extra_staff(_mc2.load_extra_staff() + [_eeid])
+    with db(readonly=True) as conn:
+        _after = {r["employee_id"]: r
+                  for r in _mc2.list_salaries(conn, _per)}
+    check("وإضافتُه تُدرج صفَّه ويُعلَّم بأنه مضاف",
+          _eeid in _after and _after[_eeid]["is_extra"]
+          and not _after[_weid]["is_extra"],
+          f"{len(_after)} صفاً")
+    _mc2.save_extra_staff([])
+    with db(readonly=True) as conn:
+        _back = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
+    check("ورفعُه يُعيد الجدول لعمال القسم وحدهم",
+          _eeid not in _back and _weid in _back)
+
+    # ══ الاسم يُعدَّل في دليل الحسابات ══
+    from models import coa as _coa
+    with db() as conn:
+        _coa.rename_account(conn, _wacc, "عامل التصنيع بعد التسمية",
+                            "admin")
+    with db(readonly=True) as conn:
+        _nm = conn.execute("SELECT name FROM entities WHERE id=?",
+                           (_wk,)).fetchone()["name"]
+        _an = conn.execute("SELECT name FROM accounts WHERE id=?",
+                           (_wacc,)).fetchone()["name"]
+        _rn = {r["employee_id"]: r["name"]
+               for r in _mc2.list_salaries(conn, _per)}[_weid]
+    check("تعديل الاسم يتبعه دليل الحسابات والجهة وجدول الرواتب",
+          _an == "عامل التصنيع بعد التسمية"
+          and _nm == "عامل التصنيع بعد التسمية"
+          and _rn == "عامل التصنيع بعد التسمية",
+          f"حساب «{_an}» · جهة «{_nm}» · جدول «{_rn}»")
+
+    _html6 = _pm.build_body("mfg_salary", 0, period=_per,
+                            salaries=list(_after.values()))
+    check("وورقةُ الرواتب تحمل العمودين الجديدين",
+          "مسحوبات" in _html6 and "المستحق" in _html6
+          and "إضافية" in _html6, f"{len(_html6)} حرفاً")
+
+    # ══ السالب في جدول الرواتب: قوسان يُقرآن ويُكتبان ══
+    # الإشارة الأمامية تزيغ في السطر العربي فيُقرأ السالب موجباً؛
+    # والقوسان يُعرضان — فإن لم تُقرأ القوسان عند الحفظ صار السالب
+    # صفراً في أول حفظٍ بلا تعديل، وهذا أسوأ من العرض نفسه.
+    from ui.mfg_costs_screen import _num as _mnum, _val as _mval
+    check("سالبُ جدول الرواتب يُعرض بين قوسين لا بإشارةٍ زائغة",
+          _mnum(-571.66) == "(571.66)" and _mnum(1646.68) == "1,646.68",
+          f"{_mnum(-571.66)} · {_mnum(1646.68)}")
+    check("والقوسان يُقرآن سالباً عند الحفظ فلا يضيع الرقم",
+          abs(_mval("(571.66)") + 571.66) < 0.001
+          and abs(_mval("1,646.68") - 1646.68) < 0.001
+          and abs(_mval("-25") + 25.0) < 0.001
+          and _mval("") == 0.0,
+          f"{_mval('(571.66)')} · {_mval('1,646.68')}")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

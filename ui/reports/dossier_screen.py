@@ -34,7 +34,7 @@ def rnum(v, d=2):
 
 
 class DossierScreen(QtWidgets.QWidget):
-    def __init__(self, user):
+    def __init__(self, user, embedded=False):
         super().__init__()
         self.user = user
         self.res = None
@@ -96,7 +96,9 @@ class DossierScreen(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
-        lay.addWidget(title_label("ملف الجهة — كل ما يخصّها في صفحة"))
+        if not embedded:
+            lay.addWidget(
+                title_label("ملف الجهة — كل ما يخصّها في صفحة"))
         intro = QtWidgets.QLabel(
             "رصيده وسقفه وأعمار دينه وحركة فترته وآخر تحصيلٍ منه "
             "وموديلاته ونسبة مرتجعه وسداده — مجموعةً في صفحةٍ تُقرأ في "

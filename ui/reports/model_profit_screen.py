@@ -41,7 +41,7 @@ def _cols_unsold():
 
 
 class ModelProfitScreen(QtWidgets.QWidget):
-    def __init__(self, user):
+    def __init__(self, user, embedded=False):
         super().__init__()
         self.user = user
         self.rows = []
@@ -84,7 +84,8 @@ class ModelProfitScreen(QtWidgets.QWidget):
         tabs.addTab(self.table_unsold, "ما لم يُبَع بعد (من المخزن)")
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label("ربحية الموديل — أين يكسب المصنع"))
+        if not embedded:
+            lay.addWidget(title_label("ربحية الموديل — أين يكسب المصنع"))
         intro = QtWidgets.QLabel(
             "مصدر الربح في مصنع ذهب هو **الأجرة** لا الذهب: الذهب يدخل "
             "ويخرج بوزنه (انتقال أصلٍ لا بيع)، والمكسب أجرةُ التصنيع على "

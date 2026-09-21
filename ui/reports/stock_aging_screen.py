@@ -26,7 +26,7 @@ from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
 
 class StockAgingScreen(QtWidgets.QWidget):
-    def __init__(self, user):
+    def __init__(self, user, embedded=False):
         super().__init__()
         self.user = user
         self.res = None
@@ -90,7 +90,9 @@ class StockAgingScreen(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
-        lay.addWidget(title_label("أعمار الموديلات — ما رقد في المخزن"))
+        if not embedded:
+            lay.addWidget(
+                title_label("أعمار الموديلات — ما رقد في المخزن"))
         intro = QtWidgets.QLabel(
             "الطقم الذي دخل أمس بضاعة، والذي دخل قبل سنةٍ مالٌ مدفونٌ في "
             "الرفّ لا يدور. هنا كل قطعةٍ برقم تشغيلها وعمرها وفئتها — "

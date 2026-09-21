@@ -31,7 +31,7 @@ COLS = ["الأصل", "الحساب", "بدء الإهلاك", "التكلفة",
 
 
 class AssetsScreen(QtWidgets.QWidget):
-    def __init__(self, user):
+    def __init__(self, user, embedded=False):
         super().__init__()
         self.user = user
         self.rows = []
@@ -111,8 +111,9 @@ class AssetsScreen(QtWidgets.QWidget):
         _enhance(self.table, key="fixed_assets")
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label(
-            "الأصول الثابتة والإهلاك — قسطٌ ثابتٌ شهري"))
+        if not embedded:
+            lay.addWidget(title_label(
+                "الأصول الثابتة والإهلاك — قسطٌ ثابتٌ شهري"))
         intro = QtWidgets.QLabel(
             "الإهلاك مصروفٌ حقيقي لا يُدفع نقداً: إغفاله يُظهر ربحاً لم "
             "يتحقّق، ويُبقي المكينة في الميزانية بثمن شرائها إلى الأبد. "
