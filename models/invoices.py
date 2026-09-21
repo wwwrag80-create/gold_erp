@@ -583,6 +583,9 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     ent = get_entity(conn, entity_id)
     if not ent:
         raise ValueError("جهة الفاتورة غير موجودة")
+    # قيمة الفاتورة **قبل** أن يُمسّ قيدها — سطرُ «من عدّل ماذا»
+    from models import doc_edits as _de
+    _before = _de.totals(conn, inv["entry_id"])
     internal = ent["entity_type"] == "internal"
     vat = bool(inv["vat_applied"]) if apply_vat is None else bool(apply_vat)
 
@@ -772,6 +775,10 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                f"تعديل {inv['invoice_no']} في مكانه: +{len(added)} · "
                f"~{len(updated)} · -{len(removed)} · "
                f"وزن {dw:+.3f} · أجور {dg:+.2f}")
+    _de.record(conn, "invoices", invoice_id, username, _before,
+               doc_no=inv["invoice_no"] or "", entry_id=inv["entry_id"],
+               kind="inplace",
+               note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}")
     return {"id": invoice_id, "invoice_no": inv["invoice_no"],
             "added": added, "updated": updated, "removed": removed,
             "stock_touched": sorted(set(touched)),

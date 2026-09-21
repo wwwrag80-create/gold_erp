@@ -1308,6 +1308,11 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "dossier":
             return en(_tpl_dossier(conn, doc_id, kw.get("date_from"),
                                    kw.get("date_to")))
+        if doc_type == "doc_edits":
+            return en(_tpl_doc_edits(conn, doc_id, kw.get("date_from"),
+                                     kw.get("date_to"),
+                                     kw.get("source_table"),
+                                     kw.get("min_lag", 0)))
         if doc_type == "balance_tree":
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
@@ -2620,6 +2625,113 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
                     show_meta=False) + html + _footer(""))
 
 
+def _tpl_doc_edits(conn, _id=0, date_from=None, date_to=None,
+                   source_table=None, min_lag=0):
+    """من عدّل ماذا بعد الترحيل — ورقةٌ تُوضع أمام المدقّق.
+
+    المتأخّر أولاً في جدولٍ مستقل: هو ما يُسأل عنه، وإدراجه ضمن
+    المئة سطرٍ الأخرى يجعله لا يُرى.
+    """
+    from models import doc_edits
+    from services import karat_view
+    rows = doc_edits.report(conn, date_from, date_to,
+                            source_table=source_table, min_lag=min_lag)
+    s = doc_edits.summarize(conn, rows)
+    t = s["total"]
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+
+    def _g(v):
+        x = _gw(abs(v or 0.0), 3)
+        return f"({x})" if (v or 0.0) < 0 else x
+
+    def _m(v):
+        x = _w(abs(v or 0.0), 2)
+        return f"({x})" if (v or 0.0) < 0 else x
+
+    def _row(r):
+        return "<tr>" + cells(
+            tdw(en(r["edited_at"])), tdw(r["user"], align="right"),
+            tdw(r["label"], align="right"), tdw(en(r["doc_no"])),
+            tdw(en(r["doc_date"])),
+            tdw(en(f"{r['lag']:,}") if r["lag"] is not None else "—"),
+            tdw(_g(r["old_gold"])), tdw(_g(r["new_gold"])),
+            tdw(_g(r["d_gold"])), tdw(_m(r["old_cash"])),
+            tdw(_m(r["new_cash"])), tdw(_m(r["d_cash"]))) + "</tr>"
+
+    late = [r for r in rows if r["lag"] is not None
+            and r["lag"] >= doc_edits.LATE_DAYS]
+    head = cells(thw("وقت التعديل"), thw("المستخدم"), thw("النوع"),
+                 thw("المستند"), thw("تاريخ المستند"), thw("التأخّر"),
+                 thw(f"قبل ({u})"), thw(f"بعد ({u})"), thw(f"الفرق ({u})"),
+                 thw("قبل (ريال)"), thw("بعد (ريال)"), thw("الفرق (ريال)"))
+    body = "".join(_row(r) for r in rows) \
+        or f'<tr><td {TD} colspan="12">لا تعديلات في هذه الفترة</td></tr>'
+    late_block = ""
+    if late:
+        late_block = (
+            f'<div class="party">المتأخّر — بعد {en(doc_edits.LATE_DAYS)} '
+            f'يوماً أو أكثر من الترحيل ({en(len(late))})</div>{TBL}'
+            + "<tr>" + head + "</tr>" + "".join(_row(r) for r in late)
+            + "</table>")
+
+    users = ""
+    for x in s["users"]:
+        users += "<tr>" + cells(
+            tdw(x["name"], align="right"), tdw(en(f"{x['count']:,}")),
+            tdw(en(f"{x['late']:,}")), tdw(_g(x["d_gold"])),
+            tdw(_m(x["d_cash"]))) + "</tr>"
+    if users:
+        users += "<tr>" + cells(
+            thw("الإجمالي"), thw(en(f"{t['count']:,}")),
+            thw(en(f"{t['late']:,}")), thw(_g(t["d_gold"])),
+            thw(_m(t["d_cash"]))) + "</tr>"
+    else:
+        users = f'<tr><td {TD} colspan="5">لا تعديلات</td></tr>'
+
+    lines = "".join(f"<li>{v}</li>"
+                    for v in doc_edits.verdict(s, _g, _m))
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="22%">الفترة</td>
+          <td>{en(date_from or "—")} إلى {en(date_to or today)}</td>
+          <th>النوع</th>
+          <td>{doc_edits.LABELS.get(source_table, "كل المستندات")}</td></tr>
+      <tr><th>عدد التعديلات</th><td>{en(f"{t['count']:,}")}</td>
+          <th>منها غيّرت القيمة</th>
+          <td>{en(f"{t['changed']:,}")}</td></tr>
+      <tr><th>تعديلٌ متأخّر</th>
+          <td>{en(f"{t['late']:,}")} (أقصاه
+              {en(f"{t['max_lag']:,}")} يوماً)</td>
+          <th>تاريخ الطباعة</th><td>{en(today)}</td></tr>
+    </table>
+
+    <div class="note"><ul>{lines}</ul></div>
+    {late_block}
+
+    <div class="party">كل التعديلات — الأحدث أولاً</div>
+    {TBL}
+      <tr>{head}</tr>
+      {body}
+    </table>
+
+    <div class="party">بالمستخدم</div>
+    {TBL}
+      <tr>{cells(thw("المستخدم"), thw("تعديلات"), thw("منها متأخّر"),
+                 thw(f"صافي الوزن ({u})"), thw("صافي النقد (ريال)"))}</tr>
+      {users}
+    </table>
+
+    <div class="note">قيمة المستند = مجموع الطرف المدين من قيده —
+      مقياسٌ واحد يصلح لكل نوع لأن القيد متوازنٌ بالضرورة. والفرق رقمٌ
+      محفوظٌ لحظة التعديل لا نصٌّ يُحلَّل بعده. والتأخّر يُقاس من لحظة
+      الترحيل لا من تاريخ المستند. والتعديل مشروعٌ في هذا النظام؛
+      المقصود أن يكون مرئياً.</div>
+    '''
+    return (_header("من عدّل ماذا بعد الترحيل", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
 BUILDERS = {
     "invoice": _tpl_invoice, "invoices": _tpl_invoice,
     "voucher": _tpl_voucher, "vouchers": _tpl_voucher,
@@ -2643,6 +2755,7 @@ BUILDERS = {
     "stock_aging": _tpl_stock_aging,
     "wage_audit": _tpl_wage_audit,
     "dossier": _tpl_dossier,
+    "doc_edits": _tpl_doc_edits,
 }
 
 DOC_LABELS = {

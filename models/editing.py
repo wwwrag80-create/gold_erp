@@ -56,6 +56,11 @@ def void_for_edit(conn, entry_id, username, note=""):
         raise ValueError("القيد الأصلي غير موجود")
     if e["is_deleted"]:
         raise ValueError("القيد الأصلي محذوف — لا يمكن تعديله")
+    # قيمةُ المستند تُلتقط **قبل** العكس — بعده لا يبقى منها شيء
+    from models import doc_edits
+    doc_edits.begin(conn, e["source_table"], e["source_id"], username,
+                    entry_id, doc_no=e["doc_no"] or "", kind="repost",
+                    note=note)
     reverse_entry(conn, entry_id, username)
     log_action(conn, username, "edit_void", e["source_table"], e["source_id"],
               f"إلغاء تمهيداً للتعديل — قيد {entry_id} {note}")
@@ -68,6 +73,10 @@ def log_edit(conn, username, source_table, old_id, new_id, new_entry_id):
     log_action(conn, username, "edit", source_table, new_id,
               f"تعديل: حلّ محل السجل رقم {old_id} — القيد الجديد "
               f"{new_entry_id}")
+    # ويُقفل سطر «من عدّل ماذا» بقيمة المستند بعد التعديل، فيصير
+    # الفرقُ رقماً محفوظاً لا نصّاً يُحلَّل
+    from models import doc_edits
+    doc_edits.finish(conn, source_table, old_id, new_entry_id, new_id)
 
 
 def repost(conn, entry_id, username, create_fn, *args, **kwargs):

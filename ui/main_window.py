@@ -47,6 +47,7 @@ from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.assets_screen import AssetsScreen
 from ui.reports.gold_map_screen import GoldMapScreen
 from ui.reports.stock_aging_screen import StockAgingScreen
+from ui.reports.doc_edits_screen import DocEditsScreen
 from ui.reports.dossier_screen import DossierScreen
 from ui.reports.wage_audit_screen import WageAuditScreen
 from ui.reports.movement_screen import MovementScreen
@@ -205,6 +206,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("ملف الجهة (كل ما يخصّها في صفحة)",
                      Lazy(lambda: DossierScreen(user),
                           "ملف الجهة (كل ما يخصّها في صفحة)")),
+                    # التعديل مشروع؛ المقصود أن يكون مرئياً —
+                    # فتعديلٌ يُرى يُسأل عنه، ولا يُرى لا يُسأل
+                    ("من عدّل ماذا بعد الترحيل",
+                     Lazy(lambda: DocEditsScreen(user),
+                          "من عدّل ماذا بعد الترحيل")),
                     ("الأصول الثابتة والإهلاك",
                      Lazy(lambda: AssetsScreen(user),
                           "الأصول الثابتة والإهلاك")),

@@ -2916,6 +2916,111 @@ def main():
           not _re.findall(r"-[\d,]+\.\d", _html4),
           " · ".join(_re.findall(r"-[\d,]+\.\d", _html4)[:4]) or "لا شيء")
 
+    step("38) من عدّل ماذا بعد الترحيل")
+    # ══ الضمانة التي يقوم عليها السجلّ ══
+    # الفرق يُحفظ **رقمين** قبل وبعد لا نصّاً يُحلَّل. وتحليلُ نصٍّ
+    # عربيٍّ بتعبيرٍ نمطي يكسر بأول تغييرٍ في الصياغة — ويكسر صامتاً
+    # فيعطي صفراً بدل أن يعطي خطأ. وهذا ما يُفحص: التعديل يُسجَّل
+    # بقيمتيه، والفرق يُطابق ما تغيّر في الدفتر فعلاً.
+    from models import doc_edits as _de
+    from models import vouchers as _vo
+
+    with db() as conn:
+        _ec = add_entity(conn, "عميل تتبّع التعديل", "customer",
+                         username="admin")
+        _batch(conn, [{"wo_no": f"ED{i}", "gold": 100.0,
+                       "wage_per_gram": 20.0} for i in range(1, 4)],
+               "2026-05-01", "admin")
+        _ew = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no LIKE 'ED%'"
+            " ORDER BY id")]
+    with db() as conn:
+        _inv = create_sale(conn, _ec, [{"work_order_id": _ew[0]}],
+                           "2026-05-05", "admin", apply_vat=False)
+    with db(readonly=True) as conn:
+        _v0 = _de.totals(conn, _inv["entry_id"])
+    check("قيمة المستند = مجموع الطرف المدين من قيده",
+          _v0[0] > 0 and _v0[1] > 0, f"وزن {_v0[0]} · نقد {_v0[1]}")
+
+    # تعديلٌ في مكانه يُضيف طقماً ثانياً
+    with db() as conn:
+        invoices.update_invoice(conn, _inv["id"],
+                                [{"work_order_id": _ew[0]},
+                                 {"work_order_id": _ew[1]}], "admin")
+    with db(readonly=True) as conn:
+        _v1 = _de.totals(conn, _inv["entry_id"])
+        _ed = _de.report(conn)
+    _mine = [r for r in _ed if r["table"] == "invoices"
+             and r["source_id"] == _inv["id"]]
+    check("التعديل في مكانه يُسجَّل بقيمتيه قبل وبعد",
+          len(_mine) == 1 and _mine[0]["kind"] == "inplace",
+          f"{len(_mine)} سطراً")
+    check("والفرق المسجَّل = ما تغيّر في الدفتر فعلاً",
+          abs(_mine[0]["d_gold"] - (_v1[0] - _v0[0])) < 0.0011
+          and abs(_mine[0]["d_cash"] - (_v1[1] - _v0[1])) < 0.011,
+          f"مسجَّل ({_mine[0]['d_gold']}, {_mine[0]['d_cash']}) · "
+          f"دفتر ({round(_v1[0] - _v0[0], 3)}, "
+          f"{round(_v1[1] - _v0[1], 2)})")
+    check("ويُنسب لمن عدّله لا لمن أنشأه",
+          _mine[0]["user"] == "admin" and _mine[0]["changed"],
+          f"{_mine[0]['user']}")
+
+    # تعديلٌ بالإلغاء وإعادة الترحيل (سندٌ عبر `repost`)
+    with db() as conn:
+        _vch = create_voucher(conn, "receipt", "2026-05-10", "admin",
+                              entity_id=_ec, gold_weight=30.0,
+                              gold_karat=18)
+    with db(readonly=True) as conn:
+        _vb = _de.totals(conn, _vch["entry_id"])
+    with db() as conn:
+        _vo.update_voucher(conn, _vch["id"], "admin",
+                           entity_id=_ec, gold_weight=55.0,
+                           gold_karat=18)
+    with db(readonly=True) as conn:
+        _ed2 = _de.report(conn)
+    _mv2 = [r for r in _ed2 if r["table"] == "vouchers"
+            and r["source_id"] == _vch["id"]]
+    check("وتعديل السند يُسجَّل كذلك بفرقه",
+          len(_mv2) == 1 and abs(_mv2[0]["d_gold"] - 25.0) < 0.0011,
+          f"فرق {_mv2[0]['d_gold'] if _mv2 else '—'}")
+
+    _s = _de.summarize(conn, _ed2)
+    check("التجميع بالمستخدم وبنوع المستند يجمع الكل",
+          sum(x["count"] for x in _s["users"]) == len(_ed2)
+          and sum(x["count"] for x in _s["types"]) == len(_ed2),
+          f"{len(_ed2)} تعديلاً · {len(_s['users'])} مستخدماً · "
+          f"{len(_s['types'])} نوعاً")
+    check("والزيادة والنقص لا يُقاصّان في العرض",
+          abs(_s["total"]["up_gold"] + _s["total"]["dn_gold"]
+              - _s["total"]["d_gold"]) < 0.0011,
+          f"زيادة {_s['total']['up_gold']} · نقص "
+          f"{_s['total']['dn_gold']}")
+    check("والخلاصة تقول إن التعديل مشروعٌ ما دام مرئياً",
+          any("مرئياً" in v for v in _de.verdict(_s)),
+          " | ".join(_de.verdict(_s))[:110])
+
+    # تاريخ مستندٍ بعينه — يُفتح من الأرشيف
+    with db(readonly=True) as conn:
+        _h = _de.history(conn, "invoices", _inv["id"])
+    check("وتاريخ مستندٍ بعينه يُقرأ وحده",
+          len(_h) == 1 and _h[0]["source_id"] == _inv["id"])
+
+    # مُرشِّح «المتأخّر فقط» لا يُدرج تعديلاً وقع في يومه
+    with db(readonly=True) as conn:
+        _late = _de.report(conn, min_lag=_de.LATE_DAYS)
+    check("ومُرشِّح المتأخّر يستبعد ما عُدِّل في يومه",
+          all(r["lag"] >= _de.LATE_DAYS for r in _late),
+          f"{len(_late)} من {len(_ed2)}")
+
+    _html5 = _pm.build_body("doc_edits", 0, date_from="2026-01-01",
+                            date_to="2030-12-31")
+    check("ورقة التعديلات تُبنى بأبوابها",
+          "من عدّل ماذا" in _html5 and "بالمستخدم" in _html5
+          and "قيمة المستند" in _html5, f"{len(_html5)} حرفاً")
+    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
+          not _re.findall(r"-[\d,]+\.\d", _html5),
+          " · ".join(_re.findall(r"-[\d,]+\.\d", _html5)[:4]) or "لا شيء")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

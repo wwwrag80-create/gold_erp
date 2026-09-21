@@ -948,6 +948,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
         (entry_id,)).fetchone()
     if not entry:
         raise ValueError("القيد غير موجود أو محذوف")
+    # قيمة الدفعة **قبل** أن يُعدَّل قيدها
+    from models import doc_edits as _de
+    _before = _de.totals(conn, entry_id)
 
     # ══ الحالة الحالية: أطقم الدفعة كما هي الآن ══
     # الدفعات المُنشأة قبل وجود جدول السطور لا سطور لها؛ ولو اعتمدنا
@@ -1143,6 +1146,10 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
                f"تعديل دفعة توريد: +{len(added)} · ~{len(updated)} · "
                f"-{len(removed)} · مباع محفوظ {len(set(kept_sold))} · "
                f"صافي الوزن {delta:+.3f} جم")
+    _de.record(conn, "work_orders", entry_id, username, _before,
+               doc_no=entry["doc_no"] or "", entry_id=entry_id,
+               kind="inplace",
+               note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}")
     # ══ `total_registered` — مفتاحٌ كان ناقصاً ══
     # الشاشة تعرضه في رسالة «تم الترحيل» للمسارين معاً: الإنشاء
     # والتعديل. وكان الإنشاء وحده يعيده، فالتعديل يرفع
