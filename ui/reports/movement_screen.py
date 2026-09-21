@@ -191,7 +191,12 @@ class MovementScreen(QtWidgets.QWidget):
         d = r["days"]
         self.c_days.set_value(f"{d['active']} من {d['span']}",
                               f"{d['active_pct']}% · صامتة {d['silent']}")
-        self.verdict.setText(movement.verdict(r, dim).replace("**", ""))
+        # المنسِّق والوحدة من الواجهة: الأرقام في النموذج مكافئُ عيار
+        # 18، والمستخدم يقرأ بعيار مصنعه — فلولا تمريرهما لاختلف رقم
+        # الجملة عن رقم الجدول للحركة نفسها
+        self.verdict.setText(
+            movement.verdict(r, dim, lambda v: self._fmt(v, dim), u)
+            .replace("**", ""))
 
         # ── جسر الرصيد ──
         cols = ["البند", "الأثر", f"المبلغ ({u})", "خرج", "رجع/سُدّد",
@@ -270,7 +275,8 @@ class MovementScreen(QtWidgets.QWidget):
         u = self._unit(dim)
         out = [f"تحليل حركة الرصيد — {self.account.currentText()}",
                f"الفترة: {r['date_from']} إلى {r['date_to']}", "",
-               movement.verdict(r, dim).replace("**", ""), "",
+               movement.verdict(r, dim, lambda v: self._fmt(v, dim), u)
+               .replace("**", ""), "",
                f"رصيد أول المدة : {self._fmt(r['opening'][dim], dim)} {u}"]
         for b in r["buckets"]:
             v = b[dim]

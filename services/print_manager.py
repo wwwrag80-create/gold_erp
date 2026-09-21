@@ -1293,6 +1293,10 @@ def build_body(doc_type, doc_id, **kw):
                                  kw.get("only")))
         if doc_type == "day_close":
             return en(_tpl_day_close(conn, doc_id, kw.get("date")))
+        if doc_type == "gold_map":
+            return en(_tpl_gold_map(conn, doc_id, kw.get("as_of"),
+                                    kw.get("compare_to"),
+                                    kw.get("detail", False)))
         if doc_type == "balance_tree":
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
@@ -2064,6 +2068,152 @@ def _tpl_day_close(conn, _id=0, date=None):
     return (_header("الإغلاق اليومي", d["date"], today, show_meta=False)
             + html)
 
+
+def _tpl_gold_map(conn, _id=0, as_of=None, compare_to=None, detail=False):
+    """خريطة الذهب — صفحةٌ تقول أين كل جرام، وتُثبت أنها لم تُسقط شيئاً.
+
+    الورقة تُسلَّم للإدارة أو تُرفق بالجرد، فلا بدّ أن تحمل معها
+    **دليل صحّتها**: سطرُ القفلة في ذيلها يُظهر أن مجموع الخريطة
+    يقابله تماماً ما على الجانب الآخر — فمن قرأها لا يحتاج أن
+    يصدّقها، يتحقّق منها بنفسه.
+    """
+    from models import gold_map
+    from services import karat_view
+    m = gold_map.gold_map(conn, as_of, compare_to)
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+    cmp_on = bool(compare_to)
+
+    def _g(v):
+        """السالب بين قوسين — اصطلاح المحاسبين، ولا يزيغ في ورقةٍ عربية.
+
+        علامة الناقص أمام رقمٍ داخل نصٍّ عربيٍّ تُرسم على طرفه الآخر،
+        فيقرأ المستلم «1,313.667−» موجبةً. والقوسان لا يتحرّكان.
+        """
+        s = _gw(abs(v or 0.0), 3)
+        return f"({s})" if (v or 0.0) < 0 else s
+
+    def _side(v):
+        return ("له (دائن)" if v > 0.0005
+                else ("عليه (مدين)" if v < -0.0005 else "—"))
+
+    head = [thw("المكان"), thw("ما فيه"), thw(f"الوزن ({u})"),
+            thw("النسبة")]
+    if cmp_on:
+        head += [thw(f"سابقاً ({u})"), thw("الاتجاه"), thw(f"التغيّر ({u})")]
+    ncols = len(head)
+
+    def _grp(title, total, prev=None):
+        tds = [thw(title), thw("—"), thw(_g(total)), thw("")]
+        if cmp_on:
+            ch = round(total - (prev or 0.0), 3)
+            tds += [thw(_g(prev or 0.0)),
+                    thw("▲" if ch > 0 else ("▼" if ch < 0 else "—")),
+                    thw(_g(abs(ch)))]
+        return "<tr>" + cells(*tds) + "</tr>"
+
+    def _row(b):
+        tds = [tdw(b["label"], align="right"), tdw(b["hint"], align="right"),
+               tdw(_g(b["gold"])),
+               tdw(en(f"{b['share']:,.1f}%") if b["share"] is not None
+                   else "—")]
+        if cmp_on:
+            ch = b["change"] or 0.0
+            tds += [tdw(_g(b["prev"] or 0.0)),
+                    tdw("▲" if ch > 0 else ("▼" if ch < 0 else "—")),
+                    tdw(_g(abs(ch)) if ch else "—")]
+        return "<tr>" + cells(*tds) + "</tr>"
+
+    body = _grp("في يد المصنع", m["hand"], m.get("prev_hand"))
+    for b in m["buckets"]:
+        if b["side"] == "hand":
+            body += _row(b)
+    body += _grp("عند الغير", m["outside_hands"],
+                 m.get("prev_outside_hands"))
+    for b in m["buckets"]:
+        if b["side"] == "out":
+            body += _row(b)
+    if abs(m["unmapped"]) > 0.0005:
+        for r in m["outside"]:
+            tds = [tdw(r["name"], align="right"),
+                   tdw("خارج الدلاء — " + en(r["code"]), align="right"),
+                   tdw(_g(r["gold"])), tdw("—")]
+            if cmp_on:
+                tds += [tdw("—"), tdw("—"), tdw("—")]
+            body += "<tr>" + cells(*tds) + "</tr>"
+    tot = [thw("إجمالي الذهب"), thw("—"), thw(_g(m["total"])), thw("100%")]
+    if cmp_on:
+        ch = m.get("change_total") or 0.0
+        tot += [thw(_g(m.get("prev_total") or 0.0)),
+                thw("▲" if ch > 0 else ("▼" if ch < 0 else "—")),
+                thw(_g(abs(ch)))]
+
+    src = ""
+    for r in m["other"]:
+        src += "<tr>" + cells(tdw(r["name"], align="right"),
+                              tdw(en(r["code"])),
+                              tdw(r.get("group", "—"), align="right"),
+                              tdw(_side(-r["gold"])),
+                              tdw(_gw(abs(r["gold"]), 3))) + "</tr>"
+    if not src:
+        src = f'<tr><td {TD} colspan="5">لا يقابله شيء</td></tr>'
+
+    det = ""
+    if detail:
+        for b in m["buckets"]:
+            if not b["leaves"]:
+                continue
+            det += (f'<div class="party">{b["label"]} — '
+                    f'{en(_g(b["gold"]))} {u}</div>{TBL}'
+                    + "<tr>" + cells(thw("الحساب"), thw("الكود"),
+                                     thw(f"الوزن ({u})")) + "</tr>")
+            for lf in b["leaves"]:
+                det += "<tr>" + cells(tdw(lf["name"], align="right"),
+                                      tdw(en(lf["code"])),
+                                      tdw(_g(lf["gold"]))) + "</tr>"
+            det += "</table>"
+
+    lines = "".join(f"<li>{v}</li>" for v in gold_map.verdict(m, _g))
+    closed = ("مقفلة ✔" if m["balanced"]
+              else f"غير مقفلة — فرق {en(_g(abs(m['diff'])))}")
+
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="25%">بتاريخ</td><td>{en(as_of or today)}</td>
+          <th>مقارنةً بتاريخ</th><td>{en(compare_to or "—")}</td></tr>
+      <tr><th>في يد المصنع</th><td>{en(_g(m["hand"]))} {u}</td>
+          <th>عند الغير</th><td>{en(_g(m["outside_hands"]))} {u}</td></tr>
+      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
+    </table>
+
+    {TBL}
+      <tr>{cells(*head)}</tr>
+      {body}
+      <tr>{cells(*tot)}</tr>
+    </table>
+
+    <div class="party">لمن هذا الذهب — الطرف المقابل</div>
+    {TBL}
+      <tr>{cells(thw("الحساب"), thw("الكود"), thw("التصنيف"),
+                 thw("الطرف"), thw(f"الوزن ({u})"))}</tr>
+      {src}
+      <tr>{cells(thw("الصافي — يقابل مجموع الخريطة"), thw("—"), thw("—"),
+                 thw(_side(-m["other_total"])),
+                 thw(_gw(abs(m["other_total"]), 3)))}</tr>
+    </table>
+    {det}
+
+    <div class="note"><b>القفلة:</b> مجموع الخريطة
+      {en(_g(m["total"]))} {u} ويقابله على الجانب الآخر
+      {en(_g(-m["other_total"]))} {u} — {closed}. القيد المزدوج في بُعد
+      الذهب يوجب تساويهما، فأيُّ فرقٍ دليلُ حسابٍ لم تبلغه الخريطة لا
+      دليلُ ذهبٍ ضائع.</div>
+    <div class="note"><ul>{lines}</ul></div>
+    '''
+    return (_header("خريطة الذهب — أين الذهب الآن", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
 BUILDERS = {
     "invoice": _tpl_invoice, "invoices": _tpl_invoice,
     "voucher": _tpl_voucher, "vouchers": _tpl_voucher,
@@ -2083,6 +2233,7 @@ BUILDERS = {
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,
     "day_close": _tpl_day_close,
+    "gold_map": _tpl_gold_map,
 }
 
 DOC_LABELS = {

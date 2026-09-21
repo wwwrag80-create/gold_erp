@@ -2458,6 +2458,114 @@ def main():
           and abs(_empty["opening"]["gold"]
                   - _empty["closing"]["gold"]) < 0.0011)
 
+    step("34) خريطة الذهب — أين الذهب، وهل تقفل الخريطة")
+    # ══ الضمانة التي تقوم عليها الخريطة ══
+    # القيد المزدوج في بُعد الذهب يوجب أن يكون مجموع أرصدة **كل**
+    # الحسابات صفراً. فالخريطة (الدلاء الثمانية + ما خرج عنها) يجب
+    # أن تساوي تماماً سالبَ الطرف المقابل. ولو نُسي حسابُ ذهبٍ جديد
+    # لم يضع رصيده: يظهر في «خارج الخريطة» باسمه. وهذا ما يُفحص هنا
+    # بحسابٍ ذهبيٍّ متعمَّدٍ خارج الدلاء الثمانية.
+    from models import gold_map as _gm
+
+    with db() as conn:
+        post_entry(conn, "2026-04-01", "فصوص خارج دلاء الخريطة",
+                   [{"account_id": acc_id(conn, "1150"), "gold_debit": 12.0},
+                    {"account_id": acc_id(conn, "3900"),
+                     "gold_credit": 12.0}], username="admin")
+    with db(readonly=True) as conn:
+        _map = _gm.gold_map(conn, "2026-12-31", "2026-02-28")
+        _all = conn.execute(
+            "SELECT ROUND(COALESCE(SUM(l.gold_debit-l.gold_credit),0),3) g"
+            " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+            " WHERE e.is_deleted=0 AND e.entry_date<=?",
+            ("2026-12-31",)).fetchone()["g"]
+
+    check("الدفتر نفسه صفرٌ في بُعد الذهب — أساس القفلة",
+          abs(float(_all or 0)) < 0.0011, f"{_all}")
+    check("الخريطة تقفل: مجموعها + الطرف المقابل = صفر",
+          _map["balanced"],
+          f"خريطة {_map['total']} · مقابل {_map['other_total']} · "
+          f"فرق {_map['diff']}")
+    check("الدلاء الثمانية كلها حاضرة ولا حساب منها مفقود",
+          len(_map["buckets"]) == 8
+          and not any(b["missing"] for b in _map["buckets"]),
+          " · ".join(f"{b['label']}={b['gold']}" for b in _map["buckets"]))
+
+    _by = {b["code"]: b for b in _map["buckets"]}
+    check("ما عند العملاء يساوي مجموع شجرة 1600 لا حسابها وحده",
+          _by["1600"]["gold"] > 0 and len(_by["1600"]["leaves"]) >= 1,
+          f"{_by['1600']['gold']} من {len(_by['1600']['leaves'])} حساباً")
+    check("والمجموع = مجموع أوراق الدلو",
+          abs(_by["1600"]["gold"]
+              - sum(x["gold"] for x in _by["1600"]["leaves"])) < 0.0011)
+
+    check("حساب الذهب خارج الدلاء يظهر منبَّهاً عليه لا يضيع",
+          any(r["code"] == "1150" and abs(r["gold"] - 12.0) < 0.0011
+              for r in _map["outside"]),
+          " · ".join(f"{r['code']}={r['gold']}" for r in _map["outside"]))
+    check("والخلاصة تسمّيه باسمه",
+          any("خارج الدلاء" in v for v in _gm.verdict(_map)),
+          " | ".join(_gm.verdict(_map))[:110])
+
+    check("في اليد + عند الغير + خارج الخريطة = الإجمالي",
+          abs(_map["hand"] + _map["outside_hands"] + _map["unmapped"]
+              - _map["total"]) < 0.0011,
+          f"{_map['hand']} + {_map['outside_hands']} + "
+          f"{_map['unmapped']} = {_map['total']}")
+    check("النسب تُحسب على الموجود لا على الصافي فلا تنفجر",
+          all(b["share"] is None or 0 <= b["share"] <= 100
+              for b in _map["buckets"]),
+          " · ".join(f"{b['label']}={b['share']}" for b in _map["buckets"]))
+
+    # المقارنة بتاريخٍ سابق: الفرق يُقرأ لا يُحسب باليد
+    check("المقارنة تعطي رصيد التاريخ السابق وفرقَه",
+          all(b["prev"] is not None and b["change"] is not None
+              for b in _map["buckets"])
+          and abs(_map["change_total"]
+                  - (_map["total"] - _map["prev_total"])) < 0.0011,
+          f"الإجمالي {_map['prev_total']} ← {_map['total']}")
+    check("وأكبر المتغيّرين يتصدّر القائمة",
+          bool(_map["movers"])
+          and abs(_map["movers"][0]["change"])
+          >= abs(_map["movers"][-1]["change"]),
+          " · ".join(f"{b['label']}={b['change']}"
+                     for b in _map["movers"]))
+
+    # بلا مقارنة: لا ينهار التحليل ولا تُخترع أرقام
+    with db(readonly=True) as conn:
+        _solo = _gm.gold_map(conn, "2026-12-31")
+    check("خريطةٌ بلا مقارنة تُرسم ولا تُخترع لها أرقام",
+          _solo["balanced"] and _solo["movers"] == []
+          and all(b["prev"] is None for b in _solo["buckets"]))
+    # تاريخٌ قبل أي حركة: أصفارٌ لا قسمةٌ على صفر
+    with db(readonly=True) as conn:
+        _zero = _gm.gold_map(conn, "2020-01-01")
+    check("تاريخٌ قبل أي حركة يُعطي أصفاراً لا انهياراً",
+          _zero["balanced"] and abs(_zero["total"]) < 0.0011
+          and _zero["hand_share"] is None
+          and "لا رصيد" in " ".join(_gm.verdict(_zero)))
+
+    # الورقة تُبنى فعلاً — قالبٌ يكسر لا يُكتشف إلا عند الطباعة
+    from services import print_manager as _pm
+    _html = _pm.build_body("gold_map", 0, as_of="2026-12-31",
+                           compare_to="2026-02-28", detail=True)
+    check("ورقة الخريطة تُبنى وتحمل دليل قفلتها",
+          "خريطة الذهب" in _html and "القفلة" in _html
+          and "لمن هذا الذهب" in _html, f"{len(_html)} حرفاً")
+    # ══ السالب بين قوسين لا بإشارةٍ أمامه ══
+    # علامة الناقص أمام رقمٍ داخل نصٍّ عربيٍّ تُرسم على طرفه الآخر،
+    # فيقرأ المستلم «1,313.667−» موجبةً — وهذه ورقةٌ تُسلَّم للإدارة.
+    # والخريطة تعرض أرصدةً سالبةً فعلاً (خزينةٌ خرج منها أكثر ممّا
+    # دخل)، فالفحص واقعيٌّ لا افتراضي.
+    import re as _re
+    _raw = _re.findall(r"-[\d,]+\.\d", _html)
+    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
+          not _raw, " · ".join(_raw[:5]) or "لا شيء")
+    check("بل تضع السالب بين قوسين كما يكتبه المحاسبون",
+          any(b["gold"] < 0 for b in _map["buckets"]) and "(" in _html,
+          " · ".join(f"{b['label']}={b['gold']}"
+                     for b in _map["buckets"] if b["gold"] < 0))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

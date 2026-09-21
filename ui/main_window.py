@@ -45,6 +45,7 @@ from ui.reports.aging_screen import AgingScreen
 from ui.reports.bank_recon_screen import BankReconScreen
 from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.assets_screen import AssetsScreen
+from ui.reports.gold_map_screen import GoldMapScreen
 from ui.reports.movement_screen import MovementScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
@@ -181,6 +182,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("تحليل حركة الرصيد",
                      Lazy(lambda: MovementScreen(user),
                           "تحليل حركة الرصيد")),
+                    # «أين ذهبي الآن؟» كان جوابه عشرَ شاشاتٍ تُفتح
+                    # وتُجمع باليد — وكل جمعٍ باليد خطأٌ ينتظر
+                    ("خريطة الذهب (أين الذهب الآن)",
+                     Lazy(lambda: GoldMapScreen(user),
+                          "خريطة الذهب (أين الذهب الآن)")),
                     ("الأصول الثابتة والإهلاك",
                      Lazy(lambda: AssetsScreen(user),
                           "الأصول الثابتة والإهلاك")),

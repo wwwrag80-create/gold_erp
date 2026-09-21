@@ -206,16 +206,22 @@ def _signals(buckets, daily, date_to, og, cg, oc, cc):
     }
 
 
-def verdict(res, dim="gold"):
+def verdict(res, dim="gold", fmt=None, unit=None):
     """جملةٌ واحدة تلخّص الفترة — تُقرأ قبل الأرقام.
 
     التقرير الذي يترك القارئ يستنتج لا يُقرأ. وهذه تقول الخلاصة
     صراحةً: الدين زاد أم نقص، وهل التحصيل يكفي.
+
+    **ولماذا يُمرَّر المنسِّق من فوق**: الأوزان هنا مكافئُ عيار 18 —
+    وهو ما يُخزَّن — والمستخدم يقرأ بعيار مصنعه. فلولا أن تُنسّقها
+    الواجهةُ لقال المصنعُ الذي يعمل بـ21 رقماً في الجملة وآخر في
+    الجدول للحركة نفسها.
     """
+    fmt = fmt or (lambda v: f"{v:,.3f}")
     s = res["signals"]
     by = {b["label"]: b for b in res["buckets"]}
     d = s["gold_dir"] if dim == "gold" else s["cash_dir"]
-    unit = "جم" if dim == "gold" else "ريال"
+    unit = unit or ("جم" if dim == "gold" else "ريال")
     up, dn = ("gold_up", "gold_dn") if dim == "gold" else ("cash_up",
                                                            "cash_dn")
     sold = by.get("مبيعات", {}).get(up, 0.0)
@@ -225,9 +231,9 @@ def verdict(res, dim="gold"):
     if abs(d) < 0.005:
         head = "الرصيد لم يتغيّر خلال الفترة."
     elif d > 0:
-        head = f"الدين **زاد** {abs(d):,.3f} {unit} خلال الفترة."
+        head = f"الدين **زاد** {fmt(abs(d))} {unit} خلال الفترة."
     else:
-        head = f"الدين **نقص** {abs(d):,.3f} {unit} خلال الفترة."
+        head = f"الدين **نقص** {fmt(abs(d))} {unit} خلال الفترة."
 
     # **التمييز الذي يمنع الالتباس**: الدين قد ينقص بالمرتجع وحده
     # والتحصيل دون المبيعات. فيُفصل ما سُدّد نقداً/وزناً عمّا رجع
@@ -243,7 +249,7 @@ def verdict(res, dim="gold"):
             tail += (" أي أن انخفاض الدين جاء من **ردّ البضاعة** أكثر "
                      "مما جاء من السداد.")
     elif coll > 0.0005:
-        tail = f" لا مبيعات في الفترة — تحصيلٌ فقط {coll:,.3f} {unit}."
+        tail = f" لا مبيعات في الفترة — تحصيلٌ فقط {fmt(coll)} {unit}."
 
     gap = s["collect_gap"]
     if not gap.get("last"):
