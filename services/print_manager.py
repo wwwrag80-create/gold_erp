@@ -1301,6 +1301,10 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_stock_aging(conn, doc_id, kw.get("as_of"),
                                        kw.get("model"),
                                        kw.get("detail", False)))
+        if doc_type == "wage_audit":
+            return en(_tpl_wage_audit(conn, doc_id, kw.get("date_from"),
+                                      kw.get("date_to"),
+                                      kw.get("only_deviations", True)))
         if doc_type == "balance_tree":
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
@@ -2331,13 +2335,121 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
     </table>
     {det}
 
-    <div class="note">الأجرة الراكدة ليست ربحاً ضائعاً بل **أجرةً
-      صُرفت على العامل ولم تُحصَّل من أحد**: الوزن × أجرة الجرام
+    <div class="note">الأجرة الراكدة ليست ربحاً ضائعاً بل <b>أجرةً
+      صُرفت على العامل ولم تُحصَّل من أحد</b>: الوزن × أجرة الجرام
       المسجّلة على أمر التشغيل. تُقرأ لقياس الركود ولا تدخل أي قائمة
       دخل. وتاريخ الدخول من قيد التوريد لا من وقت كتابة السجل.</div>
     <div class="note"><ul>{lines}</ul></div>
     '''
     return (_header("أعمار المخزون — رأس المال الراكد", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
+def _tpl_wage_audit(conn, _id=0, date_from=None, date_to=None,
+                    only_deviations=True):
+    """انحرافات الأجرة — ورقةٌ تُوضع أمام الإدارة لا سجلٌّ خام.
+
+    السالب بين قوسين كما يكتبه المحاسبون: إشارةُ الناقص أمام رقمٍ في
+    نصٍّ عربيٍّ تُرسم على طرفه الآخر فتُقرأ موجبةً.
+    """
+    from models import wage_audit
+    from services import karat_view
+    r = wage_audit.report(conn, date_from, date_to, only_deviations)
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+    t = r["total"]
+
+    def _m(v):
+        s = _w(abs(v), 2)
+        return f"({s})" if v < 0 else s
+
+    def _g(v):
+        return _gw(v, 3)
+
+    parties = ""
+    for p in r["parties"]:
+        parties += "<tr>" + cells(
+            tdw(p["name"], align="right"), tdw(en(f"{p['lines']:,}")),
+            tdw(_g(p["weight"])), tdw(_w(p["avg_applied"], 2)),
+            tdw(_w(p["avg_agreed"], 2)), tdw(en(f"{p['below']:,}")),
+            tdw(en(f"{p['above']:,}")), tdw(en(f"{p['match']:,}")),
+            tdw(_m(p["impact"]))) + "</tr>"
+    if parties:
+        parties += "<tr>" + cells(
+            thw("الإجمالي"), thw(en(f"{t['lines']:,}")),
+            thw(_g(t["weight"])), thw(_w(t["avg_applied"], 2)),
+            thw(_w(t["avg_agreed"], 2)), thw(en(f"{t['below']:,}")),
+            thw(en(f"{t['above']:,}")), thw(en(f"{t['match']:,}")),
+            thw(_m(t["impact"]))) + "</tr>"
+    else:
+        parties = (f'<tr><td {TD} colspan="9">لا جهةَ لها أجرةٌ متفق '
+                   'عليها في هذه الفترة</td></tr>')
+
+    lines = ""
+    for x in r["lines"]:
+        lines += "<tr>" + cells(
+            tdw(en(x["date"])), tdw(en(x["invoice_no"] or "—")),
+            tdw("بيع" if x["kind"] == "sale" else "مرتجع"),
+            tdw(x["party"], align="right"), tdw(en(x["wo_no"])),
+            tdw(_g(x["weight"])), tdw(_w(x["applied"], 2)),
+            tdw(_w(x["agreed"], 2)), tdw(_m(x["diff"])),
+            tdw(_m(x["impact"]))) + "</tr>"
+    if not lines:
+        lines = f'<tr><td {TD} colspan="10">لا انحرافات</td></tr>'
+
+    miss = ""
+    for x in r["missing"]:
+        miss += "<tr>" + cells(
+            tdw(x["name"], align="right"), tdw(en(f"{x['lines']:,}")),
+            tdw(_g(x["weight"])), tdw(_m(x["wages"]))) + "</tr>"
+    miss_block = ""
+    if miss:
+        miss_block = (
+            '<div class="party">بلا اتفاقٍ مكتوب — لا يُقاس عليها شيء'
+            f'</div>{TBL}<tr>'
+            + cells(thw("الجهة"), thw("أسطر"), thw(f"الوزن ({u})"),
+                    thw("الأجور المحصَّلة (ريال)"))
+            + "</tr>" + miss + "</table>")
+
+    verdict = "".join(f"<li>{v}</li>" for v in wage_audit.verdict(r))
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="25%">الفترة</td>
+          <td>{en(date_from or "—")} إلى {en(date_to or today)}</td>
+          <th>النطاق</th>
+          <td>{"الانحرافات فقط" if only_deviations else "كل الأسطر"}</td></tr>
+      <tr><th>أقلّ من المتفق</th>
+          <td>{_w(abs(r["loss"]), 2)} ريال</td>
+          <th>أعلى من المتفق</th>
+          <td>{_w(r["gain"], 2)} ريال</td></tr>
+      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
+    </table>
+
+    <div class="party">بالعميل</div>
+    {TBL}
+      <tr>{cells(thw("العميل"), thw("أسطر"), thw(f"الوزن ({u})"),
+                 thw("متوسط المطبَّق"), thw("متوسط المتفق"), thw("أقلّ"),
+                 thw("أعلى"), thw("مطابق"), thw("الأثر (ريال)"))}</tr>
+      {parties}
+    </table>
+
+    <div class="party">سطراً سطراً — الأسوأ أولاً</div>
+    {TBL}
+      <tr>{cells(thw("التاريخ"), thw("الفاتورة"), thw("النوع"),
+                 thw("العميل"), thw("رقم التشغيل"), thw(f"الوزن ({u})"),
+                 thw("المطبَّق"), thw("المتفق"), thw("الفرق"),
+                 thw("الأثر (ريال)"))}</tr>
+      {lines}
+    </table>
+    {miss_block}
+
+    <div class="note">كل فاتورةٍ تُقاس بالاتفاق الذي كان نافذاً <b>يوم
+      صدورها</b> لا باتفاق اليوم — وإلا صار تغييرُ الاتفاق انحرافاً في كل
+      فاتورةٍ سبقته. والأثر = (المطبَّق − المتفق) × الوزن، وإشارته في
+      المرتجع معكوسة لأن الوزن يعود لا يخرج. والسالب بين قوسين.</div>
+    <div class="note"><ul>{verdict}</ul></div>
+    '''
+    return (_header("انحرافات الأجرة — أين يتسرّب الربح", "—", today,
                     show_meta=False) + html + _footer(""))
 
 
@@ -2362,6 +2474,7 @@ BUILDERS = {
     "day_close": _tpl_day_close,
     "gold_map": _tpl_gold_map,
     "stock_aging": _tpl_stock_aging,
+    "wage_audit": _tpl_wage_audit,
 }
 
 DOC_LABELS = {

@@ -121,6 +121,7 @@ SCREENS = [
     ("ui.reports.movement_screen", "MovementScreen"),
     ("ui.reports.gold_map_screen", "GoldMapScreen"),
     ("ui.reports.stock_aging_screen", "StockAgingScreen"),
+    ("ui.reports.wage_audit_screen", "WageAuditScreen"),
     ("ui.super_admin_screen", "SuperAdminScreen"),
     ("ui.main_window", "MainWindow"),
 ]

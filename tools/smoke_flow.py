@@ -2668,6 +2668,170 @@ def main():
           all(b in _html2 for b in _sa.BUCKET_LABELS),
           " · ".join(_sa.BUCKET_LABELS))
 
+    step("36) الأجرة المتفق عليها وانحرافاتها")
+    # ══ الضمانة التي يقوم عليها التقرير ══
+    # كل فاتورةٍ تُقاس بالاتفاق الذي كان نافذاً **يوم صدورها**. لو
+    # قِيست بالاتفاق الحالي لصارت كلُّ فاتورةٍ قبل آخر تعديلٍ
+    # «انحرافاً»، فيمتلئ التقرير بما ليس بخطأ ويُهمَل — والمُهمَل
+    # كأنه لم يُكتب. وهذا ما يُفحص هنا باتفاقين متتاليين.
+    from models import entities as _ent
+    from models import wage_audit as _wa
+
+    with db() as conn:
+        _wc = add_entity(conn, "عميل فحص الأجرة", "customer",
+                         username="admin")
+        _ent.set_agreed_wage(conn, _wc, 20.0, "2026-01-01", "اتفاق أول",
+                             "admin")
+        _batch(conn, [{"wo_no": f"WG{i}", "gold": 100.0,
+                       "wage_per_gram": 99.0} for i in range(1, 5)],
+               "2026-01-05", "admin")
+        _wg = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no LIKE 'WG%'"
+            " ORDER BY id")]
+
+    check("صفرٌ يعني بلا اتفاق لا اتفاقاً بصفر",
+          _ent.agreed_wage(conn, _mc) == 0.0)
+
+    # فاتورةٌ مطابقة، وأخرى أقلّ بريالين — كلتاهما تحت الاتفاق الأول
+    with db() as conn:
+        create_sale(conn, _wc, [{"work_order_id": _wg[0],
+                                 "wage_override": 20.0}],
+                    "2026-02-01", "admin", apply_vat=False)
+        create_sale(conn, _wc, [{"work_order_id": _wg[1],
+                                 "wage_override": 18.0}],
+                    "2026-02-10", "admin", apply_vat=False)
+    # ثم يرتفع الاتفاق إلى 25، وتُباع قطعةٌ بالسعر الجديد
+    with db() as conn:
+        _ent.set_agreed_wage(conn, _wc, 25.0, "2026-03-01", "رفع الأجرة",
+                             "admin")
+        create_sale(conn, _wc, [{"work_order_id": _wg[2],
+                                 "wage_override": 25.0}],
+                    "2026-03-15", "admin", apply_vat=False)
+
+    with db(readonly=True) as conn:
+        _wr = _wa.report(conn, "2026-01-01", "2026-12-31",
+                         only_deviations=False)
+
+    _by = {x["invoice_no"]: x for x in _wr["lines"]
+           if x["party"] == "عميل فحص الأجرة"}
+    _feb = [x for x in _by.values() if x["date"] == "2026-02-01"]
+    _low = [x for x in _by.values() if x["date"] == "2026-02-10"]
+    _mar = [x for x in _by.values() if x["date"] == "2026-03-15"]
+    check("فاتورةُ فبراير تُقاس بالاتفاق الأول (20) لا بالحالي (25)",
+          bool(_feb) and _feb[0]["agreed"] == 20.0
+          and _feb[0]["state"] == "مطابق",
+          f"{_feb[0]['agreed'] if _feb else '—'}")
+    check("وفاتورةُ مارس تُقاس بالاتفاق الجديد (25) فتُطابقه",
+          bool(_mar) and _mar[0]["agreed"] == 25.0
+          and _mar[0]["state"] == "مطابق",
+          f"{_mar[0]['agreed'] if _mar else '—'}")
+    check("ورفعُ الاتفاق لا يجعل الفواتير السابقة انحرافاً",
+          _feb[0]["impact"] == 0.0 and _mar[0]["impact"] == 0.0)
+
+    check("الأقلّ من المتفق يُرصد بالمال لا بالفرق",
+          bool(_low) and _low[0]["state"] == "أقلّ من المتفق"
+          and abs(_low[0]["impact"] + 2.0 * _low[0]["weight"]) < 0.011,
+          f"فرق {_low[0]['diff'] if _low else '—'} · "
+          f"أثر {_low[0]['impact'] if _low else '—'}")
+
+    _p = {x["name"]: x for x in _wr["parties"]}["عميل فحص الأجرة"]
+    check("وتجميع العميل يجمع أسطره الثلاثة",
+          _p["lines"] == 3 and _p["below"] == 1 and _p["match"] == 2,
+          f"أسطر {_p['lines']} · أقلّ {_p['below']} · مطابق {_p['match']}")
+    check("والخسارة تُجمع في لوحة «أقلّ من المتفق»",
+          _wr["loss"] < -0.005 and abs(_wr["gain"]) < 0.005,
+          f"خسارة {_wr['loss']} · زيادة {_wr['gain']}")
+
+    # أعلى من المتفق: يُرصد أيضاً — العميل قد يراجعها
+    with db() as conn:
+        create_sale(conn, _wc, [{"work_order_id": _wg[3],
+                                 "wage_override": 30.0}],
+                    "2026-03-20", "admin", apply_vat=False)
+    with db(readonly=True) as conn:
+        _wr2 = _wa.report(conn, "2026-01-01", "2026-12-31",
+                          only_deviations=True)
+    check("والأعلى من المتفق يُرصد كذلك لا يُسكت عنه",
+          _wr2["gain"] > 0.005
+          and any(x["state"] == "أعلى من المتفق" for x in _wr2["lines"]),
+          f"زيادة {_wr2['gain']}")
+    check("و«الانحرافات فقط» تُسقط الأسطر المطابقة",
+          all(abs(x["diff"]) > 0.004 for x in _wr2["lines"]),
+          f"{len(_wr2['lines'])} سطراً")
+
+    # جهةٌ تبيع لها بلا اتفاق: تُفرز ولا تُحسب انحرافاً
+    check("الجهات بلا اتفاقٍ تُفرز في بابها ولا تُتّهم",
+          bool(_wr2["missing"])
+          and all(x["name"] != "عميل فحص الأجرة"
+                  for x in _wr2["missing"]),
+          " · ".join(x["name"] for x in _wr2["missing"][:3]))
+    check("والخلاصة تسمّيها وتقول الخسارة بالمال",
+          any("بلا اتفاقٍ مكتوب" in v for v in _wa.verdict(_wr2))
+          and any("أقلّ من المتفق عليه" in v for v in _wa.verdict(_wr2)),
+          " | ".join(_wa.verdict(_wr2))[:110])
+
+    # الأجرة السالبة مرفوضة، والصفر مقبولٌ بمعنى «بلا اتفاق»
+    def _neg_wage():
+        with db() as conn:
+            _ent.set_agreed_wage(conn, _wc, -5.0, "2026-01-01", "", "admin")
+    expect_error("الأجرة المتفق عليها لا تقبل السالب", _neg_wage, "سالبة")
+
+    with db(readonly=True) as conn:
+        _hist = _ent.wage_history(conn, _wc)
+        _on_feb = _ent.agreed_wage_on(conn, _wc, "2026-02-05")
+        _on_mar = _ent.agreed_wage_on(conn, _wc, "2026-03-05")
+        _before = _ent.agreed_wage_on(conn, _wc, "2025-12-01")
+    check("سجلّ الاتفاقات يحفظ كل تغييرٍ بتاريخه",
+          len(_hist) == 2, f"{len(_hist)} اتفاقاً")
+    check("والأجرة النافذة تُقرأ لأي يومٍ مضى",
+          _on_feb == 20.0 and _on_mar == 25.0,
+          f"فبراير {_on_feb} · مارس {_on_mar}")
+    check("وما قبل أول اتفاقٍ لا مرجعَ له فلا انحراف",
+          _before is None, f"{_before}")
+
+    _html3 = _pm.build_body("wage_audit", 0, date_from="2026-01-01",
+                            date_to="2026-12-31", only_deviations=True)
+    check("ورقة انحرافات الأجرة تُبنى بأبوابها الثلاثة",
+          "انحرافات الأجرة" in _html3 and "بالعميل" in _html3
+          and "سطراً سطراً" in _html3, f"{len(_html3)} حرفاً")
+    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
+          not _re.findall(r"-[\d,]+\.\d", _html3),
+          " · ".join(_re.findall(r"-[\d,]+\.\d", _html3)[:4]) or "لا شيء")
+
+    # ══ الاتفاق يصل إلى شاشة المبيعات فعلاً ══
+    # تقريرٌ يكشف الانحراف بعد شهرٍ خيرٌ من لا شيء، والأصل أن **لا
+    # يقع** الانحراف: الأجرة تُملأ أمام البائع وقت البيع. وهذا أكثر
+    # ما يُخشى انكساره صامتاً لأنه في الواجهة لا في النموذج.
+    try:
+        from PyQt5 import QtWidgets as _QW3
+        _QW3.QApplication.instance() or _QW3.QApplication([])
+        from ui.sales_screen import SalesScreen as _SS
+
+        _scr = _SS({"id": 1, "username": "admin", "full_name": "م",
+                    "role": "admin", "role_local": "accountant"})
+        _scr._load_agreed_wage(_wc)
+        check("شاشة المبيعات تقرأ أجرة العميل المتفق عليها",
+              abs(_scr._agreed_wage - 25.0) < 0.011,
+              f"{_scr._agreed_wage}")
+        check("وتعرضها للبائع قبل أن يكتب رقماً",
+              "المتفق عليها" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:60])
+        _scr._wage_hint(20.0)
+        check("وتنبّهه فور مخالفتها — بلا منع",
+              "أقلّ" in _scr.wage_note.text()
+              and "5.00" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:80])
+        _scr._wage_hint(25.0)
+        check("وتؤكّد المطابقة حين يوافقها",
+              "مطابقٌ" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:60])
+        _scr._load_agreed_wage(_mc)          # عميلٌ بلا اتفاق
+        check("وعميلٌ بلا اتفاقٍ لا تُفرض عليه أجرةُ غيره",
+              _scr._agreed_wage == 0.0
+              and "لا أجرةَ" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:60])
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

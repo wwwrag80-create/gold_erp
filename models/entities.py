@@ -299,6 +299,82 @@ def credit_limit(conn, entity_id):
     return round(float(r["c"] or 0), 2), round(float(r["g"] or 0), 3)
 
 
+# ══════════════════════════════════════════════════════════════════
+#  الأجرة المتفق عليها مع الجهة
+# ──────────────────────────────────────────────────────────────────
+#  **صفرٌ يعني بلا اتفاق** لا اتفاقاً بصفر — كسقف الائتمان تماماً.
+#  والاتفاق يُحفظ بتاريخه في `wage_agreements`، فكل فاتورةٍ تُقاس
+#  باتفاقها **يوم صدورها** لا بالاتفاق النافذ اليوم. لولا ذلك لصارت
+#  كلُّ فاتورةٍ سبقت آخر تعديلٍ «انحرافاً»، فيمتلئ تقرير الانحرافات
+#  بما ليس بخطأ ويُهمَل — وتقريرٌ يُهمَل كأنه لم يُكتب.
+# ══════════════════════════════════════════════════════════════════
+
+def set_agreed_wage(conn, entity_id, wage, from_date=None, note="",
+                    username=None):
+    """يضبط أجرة الجرام المتفق عليها ويحفظ الاتفاق بتاريخه."""
+    import datetime as _dt
+    e = get_entity(conn, entity_id)
+    if not e:
+        raise ValueError("الجهة غير موجودة")
+    w = round(float(wage or 0), 2)
+    if w < 0:
+        raise ValueError("الأجرة لا تكون سالبة — الصفر يعني بلا اتفاق")
+    d = str(from_date or _dt.date.today().isoformat())[:10]
+    conn.execute("UPDATE entities SET agreed_wage=? WHERE id=?",
+                 (w, entity_id))
+    conn.execute(
+        "INSERT INTO wage_agreements(entity_id,wage,from_date,note,"
+        "created_by) VALUES(?,?,?,?,?)",
+        (entity_id, w, d, (note or "").strip(), username))
+    try:
+        from services.audit import log_action
+        log_action(conn, username, "update", "entities", entity_id,
+                   f"الأجرة المتفق عليها: {w} من {d}")
+    except Exception:
+        pass
+    return w
+
+
+def agreed_wage(conn, entity_id):
+    """الأجرة النافذة الآن — وصفرٌ إن لم يوجد اتفاق."""
+    try:
+        r = conn.execute(
+            "SELECT COALESCE(agreed_wage,0) w FROM entities WHERE id=?",
+            (entity_id,)).fetchone()
+    except Exception:
+        return 0.0                       # قاعدة قبل الترقية
+    return round(float(r["w"] or 0), 2) if r else 0.0
+
+
+def agreed_wage_on(conn, entity_id, on_date):
+    """الأجرة التي كانت نافذةً في تاريخٍ بعينه.
+
+    آخرُ اتفاقٍ تاريخُه **لا يتجاوز** ذلك اليوم. فإن لم يسبقه اتفاقٌ
+    (فاتورةٌ أقدم من أول اتفاق) فلا مرجعَ لها ولا انحراف — تُعاد
+    `None` صراحةً تمييزاً لها عن الصفر الذي يعني «بلا اتفاق».
+    """
+    try:
+        r = conn.execute(
+            "SELECT wage FROM wage_agreements"
+            " WHERE entity_id=? AND from_date<=?"
+            " ORDER BY from_date DESC, id DESC LIMIT 1",
+            (entity_id, str(on_date)[:10])).fetchone()
+    except Exception:
+        return None
+    return round(float(r["wage"]), 2) if r else None
+
+
+def wage_history(conn, entity_id):
+    """سجلّ اتفاقات الجهة — الأحدث أولاً."""
+    try:
+        return conn.execute(
+            "SELECT wage, from_date, note, created_by, created_at"
+            " FROM wage_agreements WHERE entity_id=?"
+            " ORDER BY from_date DESC, id DESC", (entity_id,)).fetchall()
+    except Exception:
+        return []
+
+
 def add_customer(conn, name, phone="", vat_number="", username=None) -> int:
     """اسم متوافق مع الإصدارات السابقة (إضافة سريعة لعميل)."""
     return add_entity(conn, name, "customer", phone, vat_number, username)

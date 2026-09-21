@@ -153,11 +153,11 @@ class EntitiesScreen(QtWidgets.QWidget):
         self._type_changed()
 
     # ══════════════════════════════════════════════════════════════
-    #  حدّ الائتمان
+    #  شروط التعامل: حدّ الائتمان والأجرة المتفق عليها
     # ══════════════════════════════════════════════════════════════
 
     def _credit_box(self):
-        """لوحة ضبط سقف الجهة المحددة ووضع الحارس.
+        """لوحة شروط التعامل: سقف الجهة، ووضع الحارس، وأجرتها المتفق عليها.
 
         موضعها تحت الدليل مقصود: السقف يُضبط لجهةٍ **قائمة** في أغلب
         الأحيان لا لجهةٍ تُنشأ الآن — فالحاجة تظهر بعد أن يكبر الرصيد.
@@ -173,6 +173,17 @@ class EntitiesScreen(QtWidgets.QWidget):
         btn = QtWidgets.QPushButton("حفظ سقف الجهة المحددة")
         btn.clicked.connect(self.save_limit)
 
+        self.agreed_wage = mspin()
+        self.agreed_wage.setToolTip("صفر = بلا اتفاق")
+        self.lbl_agreed = QtWidgets.QLabel(
+            f"الأجرة المتفق عليها (ريال/{kv.unit()}):")
+        self.agreed_from = date_edit()
+        self.lbl_agreed_hist = QtWidgets.QLabel("")
+        self.lbl_agreed_hist.setObjectName("cardSub")
+        self.lbl_agreed_hist.setWordWrap(True)
+        btn_wage = QtWidgets.QPushButton("حفظ الأجرة المتفق عليها")
+        btn_wage.clicked.connect(self.save_agreed_wage)
+
         self.guard_mode = QtWidgets.QComboBox()
         for label, val in (("تنبيه فقط (الافتراضي)", "warn"),
                            ("منع الترحيل عند التجاوز", "block"),
@@ -180,7 +191,8 @@ class EntitiesScreen(QtWidgets.QWidget):
             self.guard_mode.addItem(label, val)
         self.guard_mode.currentIndexChanged.connect(self._mode_changed)
 
-        box = QtWidgets.QGroupBox("حدّ الائتمان — سقف ما يُسلَّم قبل السداد")
+        box = QtWidgets.QGroupBox(
+            "شروط التعامل مع الجهة — سقف الائتمان والأجرة المتفق عليها")
         g = QtWidgets.QGridLayout(box)
         g.addWidget(QtWidgets.QLabel("الجهة:"), 0, 0)
         g.addWidget(self.lbl_credit_who, 0, 1, 1, 3)
@@ -191,14 +203,42 @@ class EntitiesScreen(QtWidgets.QWidget):
         g.addWidget(btn, 1, 4)
         g.addWidget(QtWidgets.QLabel("عند التجاوز:"), 2, 0)
         g.addWidget(self.guard_mode, 2, 1)
+        # ══ الأجرة المتفق عليها ══
+        # موضعها هنا مع السقف مقصود: كلاهما **شرطُ تعاملٍ** مع الجهة
+        # يُضبط مرةً ويُقاس عليه كل مستند — لا بيانٌ تعريفيٌّ كالهاتف.
+        g.addWidget(self.lbl_agreed, 3, 0)
+        g.addWidget(self.agreed_wage, 3, 1)
+        g.addWidget(QtWidgets.QLabel("سارية من:"), 3, 2)
+        g.addWidget(self.agreed_from, 3, 3)
+        g.addWidget(btn_wage, 3, 4)
+        g.addWidget(self.lbl_agreed_hist, 4, 0, 1, 5)
         note = QtWidgets.QLabel(
-            "صفر = بلا حدّ. يُفحص السقف **لحظة الترحيل** لا في تقرير آخر "
+            "صفر = بلا حدّ. يُفحص السقف «لحظة الترحيل» لا في تقرير آخر "
             "الشهر — فالبضاعة تخرج لحظتها. والسداد الذي يخفّض الدين "
-            "يمرّ دائماً ولو كان الرصيد فوق السقف.")
+            "يمرّ دائماً ولو كان الرصيد فوق السقف.\n"
+            "والأجرة المتفق عليها تُملأ تلقائياً في شاشة المبيعات، "
+            "ويُقاس عليها كل سطرٍ في «انحرافات الأجرة». صفرٌ فيها يعني "
+            "«بلا اتفاق» فلا يُقاس عليها شيء. وكل تغييرٍ يُحفظ بتاريخه، "
+            "فتُقاس كلُّ فاتورةٍ باتفاقها يوم صدورها لا باتفاق اليوم.")
         note.setObjectName("cardSub")
         note.setWordWrap(True)
-        g.addWidget(note, 3, 0, 1, 5)
+        g.addWidget(note, 5, 0, 1, 5)
         return box
+
+    def save_agreed_wage(self):
+        try:
+            r = self.table.currentRow()
+            ids = getattr(self, "_row_ids", [])
+            if r < 0 or r >= len(ids):
+                raise ValueError("حدّد جهةً من الدليل أولاً")
+            with db() as conn:
+                entities.set_agreed_wage(
+                    conn, ids[r], kv.rate_store(self.agreed_wage.value()),
+                    dstr(self.agreed_from), "", self.user["username"])
+            info(self, "حُفظت الأجرة المتفق عليها — وسُجّلت بتاريخها.")
+            self.refresh()
+        except Exception as e:
+            err(self, e)
 
     def _row_selected(self):
         """يملأ حقول السقف بقيم الجهة المحددة في الدليل."""
@@ -211,9 +251,19 @@ class EntitiesScreen(QtWidgets.QWidget):
             with db(readonly=True) as conn:
                 e = entities.get_entity(conn, ids[r])
                 c, g = entities.credit_limit(conn, ids[r])
+                aw = entities.agreed_wage(conn, ids[r])
+                hist = entities.wage_history(conn, ids[r])
             self.lbl_credit_who.setText(e["name"] if e else "—")
             self.lim_cash.setValue(c)
             self.lim_gold.setValue(kv.g(g))
+            self.agreed_wage.setValue(kv.rate(aw) if aw else 0.0)
+            # السجلّ يُعرض لأن الرقم وحده لا يقول متى اتُّفق عليه —
+            # ومن راجع فاتورةً قديمة احتاج الاتفاقَ الذي كان نافذاً
+            self.lbl_agreed_hist.setText(
+                ("سجلّ الاتفاقات: " + " · ".join(
+                    f"{kv.rate(float(h['wage'])):,.2f} من {h['from_date']}"
+                    for h in hist[:5]))
+                if hist else "لا سجلّ اتفاقاتٍ لهذه الجهة بعد.")
         except Exception:
             pass          # ضبط السقف رفاهية لا تُعطّل الدليل
 

@@ -47,6 +47,7 @@ from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.assets_screen import AssetsScreen
 from ui.reports.gold_map_screen import GoldMapScreen
 from ui.reports.stock_aging_screen import StockAgingScreen
+from ui.reports.wage_audit_screen import WageAuditScreen
 from ui.reports.movement_screen import MovementScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
@@ -193,6 +194,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("أعمار المخزون (رأس المال الراكد)",
                      Lazy(lambda: StockAgingScreen(user),
                           "أعمار المخزون (رأس المال الراكد)")),
+                    # الأجرة تُكتب من ذاكرة البائع في كل سطر، فينزل
+                    # عميلٌ درجةً بلا أن يقارن أحد
+                    ("انحرافات الأجرة (المتفق عليه والمطبَّق)",
+                     Lazy(lambda: WageAuditScreen(user),
+                          "انحرافات الأجرة (المتفق عليه والمطبَّق)")),
                     ("الأصول الثابتة والإهلاك",
                      Lazy(lambda: AssetsScreen(user),
                           "الأصول الثابتة والإهلاك")),
