@@ -3166,6 +3166,103 @@ def main():
           _r1 in _html7 and "مشترٍ من دفعة اليوم" in _html7
           and _mcat.SAFE in _html7, f"{len(_html7)} حرفاً")
 
+    # ══ ورقة الصور: أربعٌ في الصفحة، والزائد يُختصر لا يفيض ══
+    _html8 = _pm.build_body("models_received_photos", 0,
+                            date_from="2026-08-03", date_to="2026-08-03")
+    check("وورقةُ الصور تعرض الموديل ولو بلا صورة ومعه قطعُه وجهاتُها",
+          "لا صورة لهذا الموديل" in _html8 and _r1 in _html8
+          and "مشترٍ من دفعة اليوم" in _html8
+          and "pgrid" in _html8, f"{len(_html8)} حرفاً")
+    check("وخليةُ الصورة ثابتة الارتفاع فلا تُزيح أختها لصفحةٍ أخرى",
+          "height: 116mm" in _html8 and "height: 110mm" in _html8
+          and _pm.PHOTO_ROWS == 6)
+
+    step("40) لوحة أرقام التشغيل المتاحة للبيع")
+    # اللوحة عرضٌ محض: تقرأ بطاقات الأطقم المتاحة ولا تُنشئ قيداً.
+    from models import dash_panels as _dp9
+    from models.inventory import rename_work_order as _rn9
+    with db() as conn:
+        _b9(conn, [
+            {"wo_no": "T801", "gold": 40.0, "small_stones": 2.0,
+             "big_stones": 6.0, "discount_rate": 0.5,
+             "wage_per_gram": 24.0, "model_no": "لوحة 1"},
+            {"wo_no": "T802", "gold": 30.0, "wage_per_gram": 24.0,
+             "model_no": "لوحة 1"}], "2026-08-14", "admin")
+    with db(readonly=True) as conn:
+        _t2 = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no='T802'"
+            " AND is_deleted=0").fetchone()["id"]
+        _t1 = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no='T801'"
+            " AND is_deleted=0").fetchone()["id"]
+    with db() as conn:
+        _inv9.create_sale(conn, _rc, [{"work_order_id": _t2}],
+                          "2026-08-18", "admin", apply_vat=False)
+    with db(readonly=True) as conn:
+        _st = {r["wo"]: r for r in _dp9.stock_rows(conn)}
+        _sq = _dp9.stock_rows(conn, "T801")
+    check("اللوحة تعرض المتاح للبيع وحده",
+          "T801" in _st and "T802" not in _st, f"{len(_st)} طقماً")
+    check("وكل صفٍّ يحمل الذهب والفصوص والأحجار وبعد الخصم والمقيد"
+          " والقائم",
+          abs(_st["T801"]["gold"] - 40.0) < 0.011
+          and abs(_st["T801"]["small"] - 2.0) < 0.011
+          and abs(_st["T801"]["big"] - 6.0) < 0.011
+          and abs(_st["T801"]["after"] - 3.0) < 0.011
+          and abs(_st["T801"]["reg"] - 45.0) < 0.011
+          and abs(_st["T801"]["standing"] - 48.0) < 0.011,
+          f"مقيد {_st['T801']['reg']} · قائم {_st['T801']['standing']}")
+    check("والبحث يقصرها على ما طابق",
+          [r["wo"] for r in _sq] == ["T801"])
+    with db() as conn:
+        _mcat.assign_model(conn, _t1, "لوحة 2", "admin")
+        _rn9(conn, _t1, "T809", "admin")
+    with db(readonly=True) as conn:
+        _st2 = {r["wo"]: r for r in _dp9.stock_rows(conn)}
+        _ln = conn.execute(
+            "SELECT wo_no FROM wo_batch_lines WHERE work_order_id=?",
+            (_t1,)).fetchone()
+    check("وتعديلُ الطقم يغيّر موديله ورقمه ويتبعه سطر الدفعة",
+          "T809" in _st2 and _st2["T809"]["model"] == "لوحة 2"
+          and (_ln["wo_no"] if _ln else "") == "T809",
+          f"سطر الدفعة {_ln['wo_no'] if _ln else '—'}")
+    _html9 = _pm.build_body("dash_panel", 0, title="أرقام التشغيل",
+                            kind="stock", codes=[])
+    check("وورقةُ اللوحة تطابق جدولها",
+          "T809" in _html9 and "الفصوص" in _html9
+          and "الذهب القائم" in _html9 and "T802" not in _html9,
+          f"{len(_html9)} حرفاً")
+
+    step("41) ترتيب أسماء عمال التصنيع")
+    # الترتيب عرضٌ محض — لا يمسّ راتباً ولا قيداً، لكنه واحدٌ
+    # للتارجت وللرواتب: جدولان بترتيبين يُقارَن فيهما صفٌّ بغير صفّه.
+    _perO = "2026-09"
+    _wids = []
+    with db() as conn:
+        for _n in ("عامل ترتيب ب", "عامل ترتيب أ"):
+            _e = add_entity(conn, _n, "worker", username="admin",
+                            basic_salary=3000.0)
+            _wids.append(conn.execute(
+                "SELECT employee_id FROM entities WHERE id=?",
+                (_e,)).fetchone()["employee_id"])
+    with db(readonly=True) as conn:
+        _names0 = [r["name"] for r in _mc2.list_salaries(conn, _perO)]
+    _mc2.save_staff_order(list(reversed(_wids)))
+    with db(readonly=True) as conn:
+        _names1 = [r["name"] for r in _mc2.list_salaries(conn, _perO)]
+        _tg1 = [r["name"] for r in _mc2.list_targets(conn, _perO)]
+    check("الترتيب المحفوظ يقدّم من قدّمه صاحب النظام",
+          _names1[:2] == ["عامل ترتيب أ", "عامل ترتيب ب"]
+          and _names1 != _names0, f"{_names1[:2]}")
+    check("والتارجت والرواتب بترتيبٍ واحد",
+          _tg1[:2] == _names1[:2], f"{_tg1[:2]}")
+    _mc2.save_staff_order(_wids)
+    with db(readonly=True) as conn:
+        _names2 = [r["name"] for r in _mc2.list_salaries(conn, _perO)]
+    check("وتبديلُ الترتيب يظهر فوراً وبلا مساسٍ بالأرقام",
+          _names2[:2] == ["عامل ترتيب ب", "عامل ترتيب أ"], f"{_names2[:2]}")
+    _mc2.save_staff_order([])
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

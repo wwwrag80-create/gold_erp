@@ -21,7 +21,15 @@ DEFAULTS = [
      "accounts": ["4110", "4120", "1600"], "unit": "gold"},
     {"key": "scrap", "title": "صندوق الكسر",
      "accounts": ["1310"], "kind": "scrap"},
+    {"key": "stock_wos", "title": "أرقام التشغيل المتاحة",
+     "accounts": [], "kind": "stock"},
 ]
+
+# لوحاتٌ تُزرع مرةً واحدة في ملفات المستخدمين القدماء: من كانت له
+# لوحاتٌ محفوظة لا تصله الإضافات الجديدة، فتُزرع عنده أول مرة.
+# والزرع يُسجَّل في ملفٍ مجاور، فإن حذف اللوحة لم تعد تُزرع ثانية —
+# وهو الفرق بين «أضِف ما ينقص» و«أعِد ما حُذف».
+SEEDED = ["stock_wos"]
 
 
 def _cfg_path():
@@ -29,6 +37,40 @@ def _cfg_path():
     d = Path(str(config.DB_PATH)).parent
     d.mkdir(parents=True, exist_ok=True)
     return d / "dashboard_panels.json"
+
+
+def _seed_path():
+    return _cfg_path().with_suffix(".seeded.json")
+
+
+def _seed_new(panels):
+    """يزرع اللوحات المستحدثة في ملفٍ قديم — مرةً واحدة لكلٍّ."""
+    try:
+        done = []
+        p = _seed_path()
+        if p.exists():
+            done = list(json.loads(p.read_text(encoding="utf-8")) or [])
+    except Exception:
+        done = []
+    have = {str(x.get("key") or "") for x in panels}
+    added = False
+    for key in SEEDED:
+        if key in done or key in have:
+            continue
+        src = next((d for d in DEFAULTS if d.get("key") == key), None)
+        if src:
+            panels.append(dict(src))
+            added = True
+        done.append(key)
+    if added or done:
+        try:
+            _seed_path().write_text(
+                json.dumps(done, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+    if added:
+        save_panels(panels)
+    return panels
 
 
 def load_panels():
@@ -57,7 +99,7 @@ def load_panels():
                         "unit": d.get("unit") or "gold",
                     })
                 if out:
-                    return out
+                    return _seed_new(out)
     except Exception:
         pass
     return [dict(x) for x in DEFAULTS]
@@ -210,6 +252,53 @@ def scrap_rows(conn):
 #  رقم الفترة وحده لا يقول إن كان النشاط يصعد أو يهبط. المقارنة
 #  بالفترة السابقة **المساوية لها طولاً** هي ما يحوّل الرقم إلى خبر.
 # ══════════════════════════════════════════════════════════════════
+
+def stock_rows(conn, search=""):
+    """أرقام التشغيل المتاحة للبيع — ببياناتها الوزنية كاملة.
+
+    **لماذا في لوحة التحكم**: السؤال «ما الذي أستطيع بيعه الآن؟»
+    يُسأل كل يوم، وجوابُه كان يقتضي فتح شاشةٍ أخرى. واللوحة عرضٌ
+    محض: الأوزان تُقرأ من بطاقات الأطقم ولا تُنشئ قيداً ولا تمسّه.
+
+    الرقم التجميعي 0001 يظهر كغيره — رصيدُه المتاح وزنٌ حقيقي
+    يُباع منه، وإخفاؤه يجعل مجموع اللوحة أقلَّ من المخزون.
+    """
+    q = str(search or "").strip()
+    p = []
+    clause = ""
+    if q:
+        clause = (" AND (w.work_order_no LIKE ?"
+                  " OR COALESCE(w.model_no,'') LIKE ?)")
+        p = [f"%{q}%", f"%{q}%"]
+    rows = conn.execute(
+        "SELECT w.id, w.work_order_no wo,"
+        " COALESCE(NULLIF(TRIM(w.model_no),''),'') model,"
+        " w.gold_weight gold, w.small_stones small, w.big_stones big,"
+        " w.stones_after_discount after, w.discount_rate rate,"
+        " w.registered_weight reg, w.standing_gold standing,"
+        " w.wage_per_gram wage, w.is_bulk bulk"
+        " FROM work_orders w"
+        " WHERE w.is_deleted=0 AND w.status='in_stock'" + clause +
+        " ORDER BY model<>'' DESC, model, w.work_order_no", p).fetchall()
+    return [{"id": r["id"], "wo": r["wo"], "model": r["model"] or "—",
+             "gold": round(r["gold"] or 0, 2),
+             "small": round(r["small"] or 0, 2),
+             "big": round(r["big"] or 0, 2),
+             "after": round(r["after"] or 0, 2),
+             "rate": round(r["rate"] or 0, 3),
+             "reg": round(r["reg"] or 0, 2),
+             "standing": round(r["standing"] or 0, 2),
+             "wage": round(r["wage"] or 0, 2),
+             "bulk": bool(r["bulk"])} for r in rows]
+
+
+def stock_totals(rows):
+    keys = ("gold", "small", "big", "after", "reg", "standing")
+    t = {k: round(sum(float(r.get(k) or 0) for r in rows), 2) for k in keys}
+    t["count"] = len(rows)
+    t["models"] = len({r["model"] for r in rows if r["model"] != "—"})
+    return t
+
 
 def previous_period(date_from, date_to):
     """الفترة السابقة المساوية في الطول، المنتهية قبل بداية الحالية.

@@ -191,6 +191,16 @@ class MfgCostsScreen(QtWidgets.QWidget):
         btn_drop.setObjectName("ghost")
         btn_drop.setToolTip("يرفع الصف المضاف يدوياً — لا يمسّ عمال القسم")
         btn_drop.clicked.connect(self.drop_staff)
+        btn_up = QtWidgets.QPushButton("▲ أعلى")
+        btn_up.setObjectName("ghost")
+        btn_up.setMaximumWidth(90)
+        btn_up.setToolTip("تحريك العامل المحدَّد لأعلى — الترتيب يُحفظ")
+        btn_up.clicked.connect(lambda: self.move_staff(-1))
+        btn_dn = QtWidgets.QPushButton("▼ أسفل")
+        btn_dn.setObjectName("ghost")
+        btn_dn.setMaximumWidth(90)
+        btn_dn.setToolTip("تحريك العامل المحدَّد لأسفل — الترتيب يُحفظ")
+        btn_dn.clicked.connect(lambda: self.move_staff(1))
 
         head = QtWidgets.QHBoxLayout()
         head.setSpacing(6)
@@ -205,6 +215,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
         head.addWidget(btn_print)
         head.addWidget(btn_add)
         head.addWidget(btn_drop)
+        head.addWidget(btn_up)
+        head.addWidget(btn_dn)
         head.addStretch(1)
 
         self.tabs = QtWidgets.QTabWidget()
@@ -582,6 +594,40 @@ class MfgCostsScreen(QtWidgets.QWidget):
                    if i != row.get("employee_id")]
             mfg_costs.save_extra_staff(ids)
             self.reload()
+        except Exception as e:
+            err(self, e)
+
+    # ══════════ ترتيب الأسماء ══════════
+    def move_staff(self, delta):
+        """يحرّك العامل المحدَّد في ترتيب الجدولين معاً.
+
+        الترتيب واحدٌ للتارجت وللرواتب: لو اختلفا لقرأ المستخدم
+        الاسم في سطرٍ هنا وسطرٍ آخر هناك، فيُقارن صفّاً بصفٍّ ليس له.
+        وهو عرضٌ محض — لا يمسّ راتباً ولا قيداً.
+        """
+        try:
+            salary = self.tabs.currentIndex() == 1
+            table = self.s_table if salary else self.t_table
+            rows = self.salary_rows if salary else self.target_rows
+            if self.tabs.currentIndex() == 2:
+                raise ValueError("الترتيب في جدولَي التارجت والرواتب")
+            i = table.currentRow()
+            if not (0 <= i < len(rows)):
+                raise ValueError("اختر عاملاً من الجدول أولاً")
+            j = i + delta
+            if not (0 <= j < len(rows)):
+                return
+            order = [r.get("employee_id") for r in rows
+                     if r.get("employee_id")]
+            if len(order) != len(rows):
+                raise ValueError("تعذّر قراءة ترتيب الأسماء")
+            order[i], order[j] = order[j], order[i]
+            # الأسماء التي لا تظهر في هذا الجدول تبقى خلفهم بترتيبها
+            rest = [x for x in mfg_costs.load_staff_order()
+                    if x not in set(order)]
+            mfg_costs.save_staff_order(order + rest)
+            self.reload()
+            table.setCurrentCell(j, 0)
         except Exception as e:
             err(self, e)
 

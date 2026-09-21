@@ -1281,6 +1281,11 @@ def build_body(doc_type, doc_id, **kw):
                                            kw.get("date_to"),
                                            kw.get("mode", "all"),
                                            kw.get("sort", "az")))
+        if doc_type == "models_received_photos":
+            return en(_tpl_models_received_photos(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("mode", "all"), kw.get("sort", "az"),
+                kw.get("per_page", 4)))
         if doc_type == "model_photos":
             return en(_tpl_model_photos(conn, doc_id,
                                         kw.get("min_count", 3),
@@ -1291,7 +1296,7 @@ def build_body(doc_type, doc_id, **kw):
                 conn, doc_id, kw.get("title", ""),
                 kw.get("kind", "accounts"), kw.get("codes"),
                 kw.get("ratios"), kw.get("date_from"),
-                kw.get("date_to")))
+                kw.get("date_to"), kw.get("search", "")))
         if doc_type == "aging":
             return en(_tpl_aging(conn, doc_id,
                                  kw.get("entity_type", "customer"),
@@ -1767,10 +1772,185 @@ def _tpl_models_received(conn, _id=0, date_from=None, date_to=None,
             + meta + table)
 
 
+def _img_uri(path):
+    """صورة الموديل كما هي — بلا تصغير، فتُطبع بدقّتها الأصلية."""
+    import base64
+    try:
+        ext = str(path).rsplit(".", 1)[-1].lower()
+        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png",
+                "webp": "webp", "bmp": "bmp"}.get(ext, "png")
+        raw = open(str(path), "rb").read()
+        return ("data:image/" + mime + ";base64,"
+                + base64.b64encode(raw).decode("ascii"))
+    except Exception:
+        return ""
+
+
+# شبكة صور الوارد: خليةٌ ثابتة الارتفاع، لا تتمدّد بعدد القطع.
+# **لماذا ثابتة**: لو تُرك الجدول يطول بطول قائمة أرقام التشغيل
+# لدفع الموديلَ التالي إلى نصف صفحة، فتخرج الورقة بثلاث صورٍ وربع
+# وينتقل الباقي بلا نظام. فالخلية تأخذ مساحتها كاملةً، والزائد عن
+# سعتها يُختصر بسطر «+ كذا قطعة» — فتبقى الأربع صور في كل صفحة.
+# الارتفاعات مقيسةٌ لا مقدَّرة: صفحةُ A4 بهوامش 8 مم تُعطي 281 مم،
+# وترويسةُ المستند تأكل ~44 مم من الصفحة الأولى — فيبقى للشبكة 237
+# مم، أي 118 مم لكل صفّ. أُخذ 116 مم احتياطاً لفروق الخطوط بين
+# الأجهزة، فتخرج الأربع صور في الصفحة الأولى كما في التي بعدها.
+PHOTO_ROWS = 6            # أسطر جدول القطع الظاهرة في كل خلية
+
+RECV_PHOTO_CSS = """
+<style>
+  table.pgrid { table-layout: fixed; width: 100%;
+                border-collapse: separate; }
+  table.pgrid td.cell {
+    width: 50%; height: 116mm; vertical-align: top; padding: 2mm;
+  }
+  /* البطاقة عمودٌ مرن: الجدول يأخذ ما يحتاجه، والصورةُ تبتلع ما
+     بقي. فالموديل ذو القطعتين تكبر صورتُه بدل أن يُترك أسفلَه
+     بياضٌ، والذو ستٍّ تصغر قليلاً — والارتفاع الخارجي واحدٌ في
+     الحالين فتبقى الشبكة منتظمة. */
+  .card { border: 1px solid #D8CDB4; border-radius: 5px;
+          padding: 2mm; background: #FFFFFF; height: 110mm;
+          display: flex; flex-direction: column; }
+  .imgbox { flex: 1 1 auto; min-height: 42mm; width: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: #FCFAF5; border-radius: 3px; overflow: hidden; }
+  .imgbox img { max-width: 97%; max-height: 100%; object-fit: contain; }
+  .noimg { color: #9A8C6E; font-size: 9pt; }
+  .cap { margin: 1.5mm 0 1mm; font-size: 10.5pt; font-weight: bold;
+         color: #4A3A1E; text-align: center; }
+  .sub { font-size: 8pt; color: #6B5B3A; text-align: center;
+         margin-bottom: 1mm; }
+  table.wos { width: 100%; border-collapse: collapse;
+              font-size: 7.6pt; table-layout: fixed; }
+  table.wos th { background: #EFE9DC; color: #4A3A1E; font-weight: bold;
+                 border: 1px solid #DCD3BE; padding: 0.6mm 1mm; }
+  table.wos td { border: 1px solid #E6DFCB; padding: 0.6mm 1mm;
+                 text-align: center; }
+  table.wos td.h { text-align: center; }
+  .more { font-size: 7.4pt; color: #6B5B3A; text-align: center;
+          padding-top: 0.8mm; }
+</style>
+"""
+
+
+def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
+                                mode="all", sort="az", per_page=4):
+    """صور الوارد من التصنيع — أربع في كل صفحة A4، وتحتها بياناتها.
+
+    تحت كل صورة: اسم الموديل وعددُ قطعه ووزنُها، ثم جدولٌ بأرقام
+    التشغيل ووزن كلٍّ ومَن هي عنده الآن.
+
+    **الموديل بلا صورة يُطبع أيضاً** بإطارٍ فارغ: الورقة تقرير وارد
+    قبل أن تكون ألبوم صور، وإسقاطُ موديلٍ لأن صورته ناقصة يجعل
+    الجمع لا يساوي الوارد.
+    """
+    from models import models_catalog as mc
+    res = mc.received(conn, date_from, date_to)
+    today = _qd(QtCore.QDate.currentDate())
+
+    picked = []
+    for m in res["models"]:
+        items = [i for i in m["items"]
+                 if mode == "all"
+                 or (mode == "in_stock" and i["safe"])
+                 or (mode == "sold" and not i["safe"])]
+        if not items:
+            continue
+        picked.append({
+            "model": m["model"], "items": items, "count": len(items),
+            "weight": round(sum(i["reg"] for i in items), 2),
+            "in_count": sum(1 for i in items if i["safe"]),
+        })
+    if sort == "za":
+        picked.sort(key=lambda m: str(m["model"]), reverse=True)
+    elif sort == "most":
+        picked.sort(key=lambda m: (-m["count"], str(m["model"])))
+    elif sort == "least":
+        picked.sort(key=lambda m: (m["count"], str(m["model"])))
+    else:
+        picked.sort(key=lambda m: str(m["model"]))
+
+    span = (en(res["date_from"]) if res["date_from"] == res["date_to"]
+            else f'{en(res["date_from"])} ← {en(res["date_to"])}')
+    if not picked:
+        return (_header("صور الوارد من التصنيع", "—", today,
+                        show_meta=False)
+                + f'<div style="text-align:center;padding:40px">'
+                  f'لا وارد من التصنيع في {span}</div>')
+
+    # يومٌ واحد؟ فلا داعي لعمود تاريخٍ يكرّر ما في العنوان — تُوسَّع
+    # به أعمدةُ رقم التشغيل والجهة، وهي ما جاء القارئ من أجله.
+    one_day = len({i["date"] for m in picked for i in m["items"]}) <= 1
+
+    cards = []
+    for m in picked:
+        uri = _img_uri(mc.image_path(m["model"]) or "")
+        img = (f'<img src="{uri}" />' if uri
+               else '<span class="noimg">لا صورة لهذا الموديل</span>')
+        shown = m["items"][:PHOTO_ROWS]
+        rows = "".join(
+            "<tr>" + f'<td class="h">{en(i["wo"])}</td>'
+            + f'<td>{_gw(i["reg"])}</td>'
+            + f'<td class="h">{i["holder"]}</td>'
+            + ("" if one_day else f'<td>{en(i["date"])}</td>') + "</tr>"
+            for i in shown)
+        extra = len(m["items"]) - len(shown)
+        more = (f'<div class="more">+ {en(extra)} قطعة أخرى — '
+                f'تفصيلُها في ورقة «الوارد»</div>' if extra > 0 else "")
+        out_n = m["count"] - m["in_count"]
+        where = []
+        if m["in_count"]:
+            where.append(f'بالخزنة {en(m["in_count"])}')
+        if out_n:
+            where.append(f'عند الجهات {en(out_n)}')
+        cards.append(
+            '<td class="cell"><div class="card">'
+            f'<div class="imgbox">{img}</div>'
+            f'<div class="cap">الموديل {m["model"]}  ·  '
+            f'{en(m["count"])} قطعة  ·  {_gw(m["weight"])} جم</div>'
+            f'<div class="sub">{"  ·  ".join(where)}</div>'
+            '<table class="wos"><tr>'
+            + ('<th style="width:32%">رقم التشغيل</th>'
+               '<th style="width:22%">الوزن</th>'
+               '<th style="width:46%">مع من</th>' if one_day else
+               '<th style="width:26%">رقم التشغيل</th>'
+               '<th style="width:20%">الوزن</th>'
+               '<th style="width:32%">مع من</th>'
+               '<th style="width:22%">الوارد</th>')
+            + "</tr>"
+            f'{rows}</table>{more}</div></td>')
+
+    per_page = max(2, int(per_page or 4))
+    cols = 2
+    pages = ""
+    total_pages = (len(cards) + per_page - 1) // per_page
+    for pg in range(total_pages):
+        chunk = cards[pg * per_page:(pg + 1) * per_page]
+        while len(chunk) % cols:
+            chunk.append('<td class="cell"></td>')
+        trs = "".join(
+            "<tr>" + "".join(chunk[i:i + cols]) + "</tr>"
+            for i in range(0, len(chunk), cols))
+        brk = ' style="page-break-before:always"' if pg else ""
+        pages += ('<table class="pgrid" width="100%" cellspacing="0"'
+                  ' cellpadding="0"' + brk + ">" + trs + "</table>")
+
+    n = sum(m["count"] for m in picked)
+    w = round(sum(m["weight"] for m in picked), 2)
+    meta = (f'<div {WIDE}>الوارد من التصنيع في: <b>{span}</b>'
+            f' &nbsp;·&nbsp; <b>{en(len(picked))}</b> موديل · '
+            f'<b>{en(n)}</b> قطعة · <b>{_gw(w)}</b> جم'
+            f' &nbsp;·&nbsp; الصفحات: <b>{en(total_pages)}</b></div>')
+    return (_header("صور الوارد من التصنيع", "—", today, show_meta=False)
+            + RECV_PHOTO_CSS + meta + pages)
+
+
 def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
-                    ratios=None, date_from=None, date_to=None):
+                    ratios=None, date_from=None, date_to=None,
+                    search=""):
     """قالب لوحة التحكم — مطابق لما يظهر على الشاشة."""
     from models import dash_panels as dp
+    from services import karat_view
     today = _qd(QtCore.QDate.currentDate())
 
     if kind == "scrap":
@@ -1788,6 +1968,42 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
         table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
         note = (f'<div {WIDE}>صندوق الكسر حساب واحد (1310) يضمّ '
                 f'الأعيرة الأربعة؛ الرصيد المحاسبي بمكافئ 18.</div>')
+        return (_header(f"لوحة التحكم — {title}", "—", today,
+                        show_meta=False) + note + table)
+
+    if kind == "stock":
+        rows = dp.stock_rows(conn, search or "")
+        t = dp.stock_totals(rows)
+        body = "".join(
+            "<tr>" + cells(
+                f'<td class="r">{en(r["wo"])}'
+                + ("  (مجمّع)" if r["bulk"] else "") + "</td>",
+                f'<td class="r">{r["model"]}</td>',
+                f'<td>{_gw(r["gold"])}</td>', f'<td>{_gw(r["small"])}</td>',
+                f'<td>{_gw(r["big"])}</td>', f'<td>{_gw(r["after"])}</td>',
+                f'<td>{_gw(r["reg"])}</td>',
+                f'<td>{_gw(r["standing"])}</td>') + "</tr>"
+            for r in rows)
+        if not body:
+            body = f'<tr><td {TD} colspan="8">لا أطقم متاحة للبيع</td></tr>'
+        u = karat_view.unit()
+        head = cells(thw("رقم التشغيل", 14), thw("الموديل", 16),
+                     thw(f"الذهب ({u})", 11), thw(f"الفصوص ({u})", 10),
+                     thw(f"الأحجار ({u})", 10),
+                     thw(f"بعد الخصم ({u})", 11),
+                     thw(f"الوزن المقيد ({u})", 14),
+                     thw(f"الذهب القائم ({u})", 14))
+        foot = cells(thw(f"الإجمالي — {en(t['count'])} طقم"),
+                     thw(f"{en(t['models'])} موديل"),
+                     thw(_gw(t["gold"])), thw(_gw(t["small"])),
+                     thw(_gw(t["big"])), thw(_gw(t["after"])),
+                     thw(_gw(t["reg"])), thw(_gw(t["standing"])))
+        table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
+        note = (f'<div {WIDE}>المتاح للبيع الآن — ما لم يخرج بفاتورة. '
+                f'الوزن المقيد هو الأثر المالي والمخزني، والذهب القائم '
+                f'للإحصاء وحده.'
+                + (f' &nbsp;·&nbsp; بحث: <b>{en(search)}</b>'
+                   if search else "") + '</div>')
         return (_header(f"لوحة التحكم — {title}", "—", today,
                         show_meta=False) + note + table)
 
@@ -2549,6 +2765,7 @@ BUILDERS = {
     "trial_balance": _tpl_trial_balance,
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
+    "models_received_photos": _tpl_models_received_photos,
     "dash_panel": _tpl_dash_panel,
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,

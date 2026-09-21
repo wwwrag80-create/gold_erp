@@ -128,9 +128,23 @@ class DashboardScreen(QtWidgets.QWidget):
         btn_refresh = QtWidgets.QPushButton("↻ تحديث")
         btn_refresh.clicked.connect(self.refresh)
 
+        # أدوات لوحة أرقام التشغيل — تظهر معها وحدها
+        self.stock_search = QtWidgets.QLineEdit()
+        self.stock_search.setPlaceholderText("ابحث برقم التشغيل أو الموديل…")
+        self.stock_search.setMaximumWidth(230)
+        self.stock_search.textChanged.connect(
+            lambda *_: self.refresh() if self._is_stock() else None)
+        self.btn_edit_wo = QtWidgets.QPushButton("✎ تعديل الطقم")
+        self.btn_edit_wo.setToolTip(
+            "يعدّل موديل الطقم أو رقم تشغيله (نقر مزدوج على الصف)")
+        self.btn_edit_wo.clicked.connect(self.edit_stock_item)
+        self._stock_tools = [self.stock_search, self.btn_edit_wo]
+
         tools = QtWidgets.QHBoxLayout()
         tools.setSpacing(6)
         tools.addWidget(self.tbl_title, 1)
+        tools.addWidget(self.stock_search)
+        tools.addWidget(self.btn_edit_wo)
         tools.addWidget(btn_up)
         tools.addWidget(btn_dn)
         tools.addWidget(btn_add_acc)
@@ -138,6 +152,8 @@ class DashboardScreen(QtWidgets.QWidget):
         tools.addWidget(btn_ratio)
         tools.addWidget(btn_print)
         tools.addWidget(btn_refresh)
+        self._acc_tools = [btn_up, btn_dn, btn_add_acc, btn_del_acc,
+                           btn_ratio]
 
         self.table = make_table()
         self.table.doubleClicked.connect(self._drill_row)
@@ -167,16 +183,21 @@ class DashboardScreen(QtWidgets.QWidget):
             self.compare.stateChanged.connect(lambda *_: self.refresh())
         except Exception:
             pass
+        lbl_from = QtWidgets.QLabel("من:")
+        lbl_to = QtWidgets.QLabel("إلى:")
         per = QtWidgets.QHBoxLayout()
         per.setSpacing(6)
         per.addWidget(self.use_period)
-        per.addWidget(QtWidgets.QLabel("من:"))
+        per.addWidget(lbl_from)
         per.addWidget(self.d_from)
-        per.addWidget(QtWidgets.QLabel("إلى:"))
+        per.addWidget(lbl_to)
         per.addWidget(self.d_to)
         per.addWidget(self.compare)
         per.addStretch(1)
         self._period_row = per
+        # صفُّ الفترة كلُّه — ليُخفى مع عناوينه، لا حقولُه وحدها
+        self._period_tools = [self.use_period, lbl_from, self.d_from,
+                              lbl_to, self.d_to, self.compare]
 
         # أشرطة النسب البارزة أسفل الجدول
         self.ratio_box = QtWidgets.QWidget()
@@ -330,6 +351,10 @@ class DashboardScreen(QtWidgets.QWidget):
                 raise ValueError(
                     "لوحة صندوق الكسر تعرض الأعيرة تلقائياً — "
                     "لا تُضاف إليها حسابات")
+            if p.get("kind") == "stock":
+                raise ValueError(
+                    "لوحة أرقام التشغيل تعرض المتاح للبيع تلقائياً — "
+                    "لا تُضاف إليها حسابات")
             with db(readonly=True) as conn:
                 accs = [dict(r) for r in conn.execute(
                     "SELECT code, name FROM accounts ORDER BY code")]
@@ -375,6 +400,8 @@ class DashboardScreen(QtWidgets.QWidget):
     def del_account(self):
         try:
             p = self.panels[self.current]
+            if p.get("kind") in ("scrap", "stock"):
+                raise ValueError("صفوف هذه اللوحة تُبنى تلقائياً ولا تُحذف")
             i = self.table.currentRow()
             if not (0 <= i < len(self._rows)):
                 raise ValueError("اختر حساباً من الجدول أولاً")
@@ -391,8 +418,8 @@ class DashboardScreen(QtWidgets.QWidget):
         """يحرّك الحساب المحدد في ترتيب الجدول."""
         try:
             p = self.panels[self.current]
-            if p.get("kind") == "scrap":
-                raise ValueError("ترتيب أعيرة صندوق الكسر ثابت")
+            if p.get("kind") in ("scrap", "stock"):
+                raise ValueError("ترتيب صفوف هذه اللوحة تلقائي")
             i = self.table.currentRow()
             accs = p["accounts"]
             if not (0 <= i < len(accs)):
@@ -411,6 +438,8 @@ class DashboardScreen(QtWidgets.QWidget):
         """يضيف شريط نسبة أسفل الجدول: الحساب الثاني ÷ الأول."""
         try:
             p = self.panels[self.current]
+            if p.get("kind") == "stock":
+                raise ValueError("لوحة أرقام التشغيل لا نسب فيها")
             accs = p.get("accounts") or []
             if len(accs) < 2:
                 raise ValueError(
@@ -548,6 +577,11 @@ class DashboardScreen(QtWidgets.QWidget):
             i = self.table.currentRow()
             if not (0 <= i < len(self._rows)):
                 return
+            # في لوحة أرقام التشغيل لا كشفَ حسابٍ يُفتح — النقر
+            # المزدوج على الطقم يفتح تعديله.
+            p = self.panels[min(self.current, len(self.panels) - 1)]
+            if p.get("kind") == "stock":
+                return self.edit_stock_item()
             code = self._rows[i].get("code")
             if code and self.on_drill_code:
                 self.on_drill_code(code)
@@ -576,9 +610,12 @@ class DashboardScreen(QtWidgets.QWidget):
                 self.d_to.setEnabled(has)
             finally:
                 self._loading = False
+            self._sync_tools()
             with db(readonly=True) as conn:
                 if p.get("kind") == "scrap":
                     self._render_scrap(conn, p)
+                elif p.get("kind") == "stock":
+                    self._render_stock(conn, p)
                 else:
                     self._render_accounts(conn, p)
                 self._update_buttons(conn)
@@ -694,6 +731,129 @@ class DashboardScreen(QtWidgets.QWidget):
             f"{kv.g(tot_e):,.2f} جم")
         self._render_ratios([], p)
 
+    # ══════════ لوحة أرقام التشغيل المتاحة ══════════
+    def STOCK_COLS(self):
+        u = kv.unit()
+        return ["رقم التشغيل", "الموديل", f"الذهب ({u})",
+                f"الفصوص ({u})", f"الأحجار ({u})",
+                f"بعد الخصم ({u})", f"الوزن المقيد ({u})",
+                f"الذهب القائم ({u})"]
+
+    def _is_stock(self):
+        try:
+            p = self.panels[min(self.current, len(self.panels) - 1)]
+            return p.get("kind") == "stock"
+        except Exception:
+            return False
+
+    def _sync_tools(self):
+        """كل لوحةٍ وأدواتُها: لا زرَّ لا معنى له في اللوحة المفتوحة."""
+        on = self._is_stock()
+        for w in getattr(self, "_stock_tools", []):
+            w.setVisible(on)
+        for w in getattr(self, "_acc_tools", []):
+            w.setVisible(not on)
+        for w in getattr(self, "_period_tools", []):
+            w.setVisible(not on)
+
+    def _render_stock(self, conn, p):
+        """كل ما يُباع اليوم: رقم التشغيل وموديله وأوزانه."""
+        rows = dp.stock_rows(conn, self.stock_search.text()
+                             if hasattr(self, "stock_search") else "")
+        self._rows = rows
+        t = dp.stock_totals(rows)
+        data = [(r["wo"] + ("  (مجمّع)" if r["bulk"] else ""),
+                 r["model"], f"{kv.g(r['gold']):,.2f}",
+                 f"{kv.g(r['small']):,.2f}", f"{kv.g(r['big']):,.2f}",
+                 f"{kv.g(r['after']):,.2f}", f"{kv.g(r['reg']):,.2f}",
+                 f"{kv.g(r['standing']):,.2f}") for r in rows]
+        data.append(("الإجمالي", f"{t['models']} موديل",
+                     f"{kv.g(t['gold']):,.2f}", f"{kv.g(t['small']):,.2f}",
+                     f"{kv.g(t['big']):,.2f}", f"{kv.g(t['after']):,.2f}",
+                     f"{kv.g(t['reg']):,.2f}",
+                     f"{kv.g(t['standing']):,.2f}"))
+        self._fill(self.STOCK_COLS(), data, bold_last=True,
+                   weights=[16, 18, 11, 10, 10, 11, 12, 12])
+        self.tbl_title.setText(
+            f"◄ {p['title']} — {t['count']} رقم تشغيل متاح للبيع")
+        self.totals.setText(
+            f"المتاح للبيع: {t['count']} طقم في {t['models']} موديل"
+            f"   ·   الوزن المقيد: {kv.g(t['reg']):,.2f} {kv.unit()}"
+            f"   ·   الذهب القائم: {kv.g(t['standing']):,.2f} {kv.unit()}")
+        self._render_ratios([], p)
+
+    def _stock_row(self):
+        i = self.table.currentRow()
+        if not (0 <= i < len(self._rows)) or not isinstance(
+                self._rows[i], dict) or "wo" not in self._rows[i]:
+            raise ValueError("اختر رقم تشغيل من الجدول أولاً")
+        return self._rows[i]
+
+    def edit_stock_item(self, *_):
+        """يعدّل موديل الطقم أو رقم تشغيله — وصفيٌّ بلا أثر مالي."""
+        try:
+            p = self.panels[min(self.current, len(self.panels) - 1)]
+            if p.get("kind") != "stock":
+                raise ValueError(
+                    "هذا التعديل للوحة أرقام التشغيل المتاحة وحدها")
+            r = self._stock_row()
+            from models import models_catalog as mc
+            with db(readonly=True) as conn:
+                names = mc.model_names(conn)
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle(f"تعديل الطقم {r['wo']}")
+            dlg.setMinimumWidth(430)
+            e_wo = QtWidgets.QLineEdit(r["wo"])
+            cb = QtWidgets.QComboBox()
+            cb.setEditable(True)
+            cb.addItem("")
+            for n in names:
+                cb.addItem(n)
+            cb.setCurrentText("" if r["model"] == "—" else r["model"])
+            if r["bulk"]:
+                e_wo.setEnabled(False)
+                e_wo.setToolTip("الرقم 0001 محجوز للرصيد التجميعي")
+            note = QtWidgets.QLabel(
+                "رقم التشغيل والموديل تصنيفٌ وصفي — تعديلهما لا يمسّ "
+                "أي رصيد أو قيد. ويتبع الرقمَ الجديدُ بياناتُ القيود "
+                "والفواتير فيبقى الطقم متتبَّعاً.")
+            note.setObjectName("cardSub")
+            note.setWordWrap(True)
+            box = QtWidgets.QDialogButtonBox(
+                QtWidgets.QDialogButtonBox.Ok
+                | QtWidgets.QDialogButtonBox.Cancel)
+            box.accepted.connect(dlg.accept)
+            box.rejected.connect(dlg.reject)
+            f = QtWidgets.QFormLayout()
+            f.addRow("رقم التشغيل:", e_wo)
+            f.addRow("الموديل:", cb)
+            f.addRow(note)
+            lay = QtWidgets.QVBoxLayout(dlg)
+            lay.addLayout(f)
+            lay.addWidget(box)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            new_wo = e_wo.text().strip()
+            new_model = cb.currentText().strip()
+            done = []
+            with db() as conn:
+                if new_model != ("" if r["model"] == "—" else r["model"]):
+                    mc.assign_model(conn, r["id"], new_model,
+                                    self.user["username"])
+                    done.append(f"الموديل ← {new_model or '—'}")
+                if not r["bulk"] and new_wo and new_wo != r["wo"]:
+                    from models import inventory
+                    res = inventory.rename_work_order(
+                        conn, r["id"], new_wo, self.user["username"])
+                    done.append(f"رقم التشغيل: {res['old']} ← {res['new']}")
+            if not done:
+                return
+            self.refresh()
+            info(self, "تم التعديل:\n• " + "\n• ".join(done)
+                       + "\n\nلا أثر محاسبي — الأوزان والأرصدة كما هي.")
+        except Exception as e:
+            err(self, e)
+
     def _fill(self, cols, data, bold_last=False, weights=None):
         self.table.setUpdatesEnabled(False)
         try:
@@ -736,6 +896,11 @@ class DashboardScreen(QtWidgets.QWidget):
                     v = round(sum(x["eq18"] for x in dp.scrap_rows(conn)), 2)
                     self.buttons[i].set_value(f"{kv.g(v):,.2f} جم")
                     continue
+                if p.get("kind") == "stock":
+                    t = dp.stock_totals(dp.stock_rows(conn))
+                    self.buttons[i].set_value(
+                        f"{t['count']} طقم · {kv.g(t['reg']):,.0f} جم")
+                    continue
                 t = dp.totals(dp.account_rows(
                     conn, p["accounts"],
                     p.get("date_from") or None,
@@ -759,7 +924,9 @@ class DashboardScreen(QtWidgets.QWidget):
                 codes=list(p.get("accounts") or []),
                 ratios=list(p.get("ratios") or []),
                 date_from=p.get("date_from") or None,
-                date_to=p.get("date_to") or None)
+                date_to=p.get("date_to") or None,
+                search=(self.stock_search.text()
+                        if p.get("kind") == "stock" else ""))
         except Exception as e:
             err(self, e)
 

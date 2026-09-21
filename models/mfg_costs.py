@@ -163,7 +163,7 @@ def list_targets(conn, period):
     """صفوف التارجت لكل العمال النشطين — تُنشأ فارغة إن لم توجد."""
     from models import payroll
     rows = []
-    for e in payroll.list_workers(conn):
+    for e in sort_people(payroll.list_workers(conn)):
         r = conn.execute(
             "SELECT * FROM mfg_targets WHERE period=? AND employee_id=?",
             (period, e["id"])).fetchone()
@@ -351,6 +351,76 @@ def save_extra_staff(ids):
         return False
 
 
+def _order_cfg_path():
+    from pathlib import Path
+
+    import config
+    d = Path(str(config.DB_PATH)).parent
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "mfg_staff_order.json"
+
+
+def load_staff_order():
+    """ترتيب أسماء العمال كما رتّبه صاحب النظام.
+
+    **لماذا يُحفظ**: الترتيب الأبجدي ترتيبُ الحاسوب لا ترتيبُ الورشة.
+    صاحب المصنع يقرأ الكشف بترتيب الخطوط أو الأقدمية، فإن أعاد
+    ترتيبه كل شهر لم ينتفع به. والترتيب عرضٌ محض — لا يمسّ راتباً
+    ولا قيداً.
+    """
+    import json
+    try:
+        p = _order_cfg_path()
+        if p.exists():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            out, seen = [], set()
+            for x in (d or []):
+                try:
+                    i = int(x)
+                except (TypeError, ValueError):
+                    continue
+                if i not in seen:
+                    seen.add(i)
+                    out.append(i)
+            return out
+    except Exception:
+        pass
+    return []
+
+
+def save_staff_order(ids):
+    import json
+    try:
+        out, seen = [], set()
+        for x in (ids or []):
+            i = int(x)
+            if i not in seen:
+                seen.add(i)
+                out.append(i)
+        _order_cfg_path().write_text(
+            json.dumps(out, ensure_ascii=False), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def sort_people(people):
+    """يرتّب الأشخاص بالترتيب المحفوظ، ومن لا ترتيب له فبالاسم آخراً."""
+    order = {}
+    for i, e in enumerate(load_staff_order()):
+        order[int(e)] = i
+    big = len(order) + 10 ** 6
+
+    def _key(p):
+        try:
+            pid = int(p["id"])
+        except Exception:
+            pid = -1
+        return (order.get(pid, big), str(p["name"] or ""))
+
+    return sorted(people, key=_key)
+
+
 def _salary_people(conn):
     """عمال التصنيع، ومعهم من أُضيف يدوياً من الموظفين.
 
@@ -375,7 +445,7 @@ def _salary_people(conn):
                 " ORDER BY e.name", extra))
         except Exception:
             pass
-    return people
+    return sort_people(people)
 
 
 def list_salaries(conn, period):

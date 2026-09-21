@@ -70,7 +70,7 @@ class ModelsScreen(QtWidgets.QWidget):
         btn_collapse.clicked.connect(lambda: self.tree.collapseAll())
         btn_print = self.btn_print = QtWidgets.QPushButton("🖨 طباعة الدليل")
         btn_print.clicked.connect(self.print_catalog)
-        btn_photos = QtWidgets.QPushButton("🖼 طباعة الصور")
+        btn_photos = self.btn_photos = QtWidgets.QPushButton("🖼 طباعة الصور")
         btn_photos.setToolTip(
             "أربع صور في كل صفحة A4 — للموديلات التي بلغت حدّاً معيناً")
         btn_photos.clicked.connect(self.print_photos)
@@ -226,9 +226,17 @@ class ModelsScreen(QtWidgets.QWidget):
     def _on_date_mode(self, on=None):
         on = self.by_date.isChecked() if on is None else bool(on)
         self._date_widgets(on)
-        # الزرّ يقول ما يطبعه: في وضع التاريخ ورقةُ الوارد لا الدليل
+        # الزرّان يقولان ما يطبعانه: في وضع التاريخ ورقةُ الوارد
+        # وصورُ وارده، لا الدليل كلَّه
         self.btn_print.setText("🖨 طباعة الوارد" if on
                                else "🖨 طباعة الدليل")
+        self.btn_photos.setText("🖼 صور الوارد" if on
+                                else "🖼 طباعة الصور")
+        self.btn_photos.setToolTip(
+            "صورة كل موديلٍ ورد في الفترة، أربع صور في صفحة A4،\n"
+            "وتحت كل صورة عددُ قطعه وأرقام تشغيلها ومع من هي."
+            if on else
+            "أربع صور في كل صفحة A4 — للموديلات التي بلغت حدّاً معيناً")
         if on:
             self._load_days()
         self.refresh(force=True)
@@ -690,6 +698,16 @@ class ModelsScreen(QtWidgets.QWidget):
         """يطبع صور الموديلات — أربع في كل صفحة A4."""
         try:
             from services import print_manager
+            if self.by_date.isChecked():
+                # في وضع التاريخ: صور وارد الفترة وحدها، وتحت كل
+                # صورة عددُ قطعها وأرقام تشغيلها ومع من هي — بلا
+                # سؤالٍ عن حدٍّ أدنى، فالفترة هي المرشّح.
+                print_manager.preview_document(
+                    self, "models_received_photos", 0,
+                    date_from=dstr(self.d_from), date_to=dstr(self.d_to),
+                    mode=self.view_mode.currentData() or "all",
+                    sort=self.sort_mode.currentData() or "az")
+                return
             n, ok = QtWidgets.QInputDialog.getInt(
                 self, "طباعة صور الموديلات",
                 "اطبع صور الموديلات التي عددها:\n"
