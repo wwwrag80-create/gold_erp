@@ -468,6 +468,57 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addLayout(body, 1)
         self.setCentralWidget(central)
 
+    # ══════════ دخولُ الواجهة ══════════
+    def play_entrance(self):
+        """حركةُ وصولٍ قصيرة بعد البوابة — لا زينةَ دائمة.
+
+        القائمة الجانبية تنزلق من اليمين وشاشةُ الترحيب تصعد قليلاً
+        وهي تظهر، في أقل من ثلثَي ثانية. **ثم تُرفع المؤثّرات
+        كلُّها**: مؤثّرُ شفافيةٍ باقٍ على شجرةٍ أو جدول يُعيد رسمه في
+        كل تمريرة تمرير، فيصير الجمالُ بطئاً — والحركة تُفتتح بها
+        الجلسة لا تُلازمها.
+        """
+        try:
+            from ui.widgets.gold_stage import animations_on
+            if not animations_on():
+                return
+        except Exception:
+            return
+        self._entrance = []
+        for w, dx, dy, delay, ms in ((self.side_panel, 34, 0, 0, 480),
+                                     (self.stack, 0, 22, 110, 520)):
+            eff = QtWidgets.QGraphicsOpacityEffect(w)
+            eff.setOpacity(0.0)
+            w.setGraphicsEffect(eff)
+            base = w.pos()
+            anim = QtCore.QVariantAnimation(self)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setDuration(ms)
+            anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+
+            def _step(v, _w=w, _e=eff, _b=base, _dx=dx, _dy=dy):
+                f = float(v)
+                _e.setOpacity(f)
+                _w.move(_b.x() + int(_dx * (1 - f)),
+                        _b.y() + int(_dy * (1 - f)))
+
+            def _end(_w=w, _b=base):
+                try:
+                    _w.setGraphicsEffect(None)
+                    _w.move(_b)
+                except Exception:
+                    pass
+
+            anim.valueChanged.connect(_step)
+            anim.finished.connect(_end)
+            QtCore.QTimer.singleShot(delay, anim.start)
+            self._entrance.append(anim)
+        try:
+            self.welcome.play_entrance()
+        except Exception:
+            pass
+
     # ══════════ تخصيص القائمة الجانبية ══════════
     def _nav_layout_path(self):
         """مسار ملف الترتيب — **داخل مجلد المصنع النشط**.

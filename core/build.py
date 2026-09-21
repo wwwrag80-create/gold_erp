@@ -99,6 +99,68 @@ def _bundled_env():
     return d / ".env"
 
 
+def _splash_png():
+    """يرسم صورة شاشة البدء التي يعرضها الـexe قبل إقلاع بايثون.
+
+    **الثواني التي لا تغطّيها البوابة**: ملف onefile يفكّ نفسه في
+    مجلدٍ مؤقّت قبل أن يبدأ بايثون أصلاً، فالنقرُ لا يُتبعه شيء
+    لثوانٍ. شاشةُ بدء PyInstaller تظهر في تلك الفجوة بالذات،
+    وتُغلقها البوابةُ حين تفتح — فالتسلسل متّصلٌ من النقرة إلى
+    الترحيب.
+
+    تُرجع مساراً أو `None`؛ وفشلُها لا يمنع البناء.
+    """
+    try:
+        import tempfile
+
+        from PyQt5 import QtCore, QtGui, QtWidgets
+        app = (QtWidgets.QApplication.instance()
+               or QtWidgets.QApplication([]))
+        _ = app
+        w, h = 520, 300
+        img = QtGui.QImage(w, h, QtGui.QImage.Format_ARGB32)
+        img.fill(QtGui.QColor("#17120C"))
+        p = QtGui.QPainter(img)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        p.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+        g = QtGui.QRadialGradient(w / 2, h * 0.42, w * 0.55)
+        c0 = QtGui.QColor("#4A3616")
+        c0.setAlpha(150)
+        c1 = QtGui.QColor("#4A3616")
+        c1.setAlpha(0)
+        g.setColorAt(0.0, c0)
+        g.setColorAt(1.0, c1)
+        p.fillRect(0, 0, w, h, QtGui.QBrush(g))
+        from ui.gate_window import _emblem
+        em = _emblem(96)
+        p.drawPixmap(int(w / 2 - 48), 34, em)
+        f = QtGui.QFont()
+        f.setPointSize(15)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#F6E7B6"))
+        p.drawText(QtCore.QRect(0, 150, w, 40),
+                   int(QtCore.Qt.AlignCenter), "نظام إدارة مصانع الذهب")
+        f.setPointSize(10)
+        f.setBold(False)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#C9A227"))
+        p.drawText(QtCore.QRect(0, 194, w, 30),
+                   int(QtCore.Qt.AlignCenter), "جارٍ التشغيل…")
+        pen = QtGui.QPen(QtGui.QColor("#8A6F1E"))
+        pen.setWidth(2)
+        p.setPen(pen)
+        p.setBrush(QtCore.Qt.NoBrush)
+        p.drawRoundedRect(QtCore.QRectF(6, 6, w - 12, h - 12), 10, 10)
+        p.end()
+        out = Path(tempfile.mkdtemp(prefix="jadeite_splash_")) / "splash.png"
+        img.save(str(out))
+        return out if out.exists() else None
+    except Exception as e:                       # noqa: BLE001
+        print(f"  [i] تعذّر إعداد شاشة البدء ({e}) — يُبنى بدونها")
+        return None
+
+
 def build_app(onefile=False):
     print("── بناء التطبيق الرئيسي ──")
     args = [sys.executable, "-m", "PyInstaller",
@@ -120,6 +182,18 @@ def build_app(onefile=False):
     for pkg in ("barcode", "qrcode"):
         args += ["--collect-all", pkg]
     args.append(str(ROOT / "main.py"))
+
+    # شاشة البدء تُجرَّب، وإن رفضتها أداة البناء (بيئةٌ بلا Tk مثلاً)
+    # يُعاد البناء بدونها — لا يُحرم العميل من الملف لأجل زينة.
+    splash = _splash_png()
+    if splash:
+        try:
+            subprocess.check_call(
+                args[:-1] + ["--splash", str(splash), args[-1]])
+            print("✔ gold_erp.exe جاهز (بشاشة بدء)")
+            return
+        except subprocess.CalledProcessError:
+            print("  [i] تعذّر ضمّ شاشة البدء — يُعاد البناء بدونها")
     subprocess.check_call(args)
     print("✔ gold_erp.exe جاهز")
 

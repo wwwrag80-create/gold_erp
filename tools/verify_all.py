@@ -66,6 +66,11 @@ QT_INHERITED = {
     "selectAll", "setDate", "date", "setCalendarPopup", "setDisplayFormat",
     "setWordWrap", "setAlignment", "setPixmap", "setReadOnly",
     "setPlainText", "setMaximumHeight", "setMinimumHeight",
+    # موروثات الرسم المباشر (بوابة الدخول والمسرح الذهبي)
+    "setLayoutDirection", "setAttribute", "setAutoFillBackground",
+    "palette", "setPalette", "wordWrap", "pixmap", "lower", "hideEvent",
+    "graphicsEffect", "setGraphicsEffect", "setFixedWidth", "isEnabled",
+    "setWindowOpacity", "showFullScreen",
 }
 OPTIONAL = {"on_edit_cancelled", "refresh", "load_document"}
 MIXIN = {"init_edit_mode", "edit_widgets", "begin_edit", "cancel_edit",

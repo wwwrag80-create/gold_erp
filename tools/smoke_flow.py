@@ -3263,6 +3263,46 @@ def main():
           _names2[:2] == ["عامل ترتيب ب", "عامل ترتيب أ"], f"{_names2[:2]}")
     _mc2.save_staff_order([])
 
+    step("42) بوابة الدخول — الترحيب والحركة ومسار الدخول")
+    # البوابة واجهة، لكن تحتها ثلاثة أشياء تُفحص بلا شاشة: نصُّ
+    # الترحيب، ومفاتيح إطفاء الحركة، ومسار الدخول المشترك.
+    import os as _os9
+    from services import login_flow as _lf9
+    from ui import gate_window as _gw9
+    from ui.widgets import gold_stage as _gs9
+    check("الترحيب يقول اسم النظام كما يُخاطَب به صاحبه",
+          _gw9.WELCOME == "مرحباً بك في نظام إدارة مصانع الذهب"
+          and _gw9.ASK_LOGIN == "يرجى تسجيل الدخول", _gw9.WELCOME)
+    _old_anim = _os9.environ.get("GOLD_ERP_NO_ANIM", "")
+    _os9.environ["GOLD_ERP_NO_ANIM"] = "1"
+    _off = _gs9.animations_on()
+    _os9.environ["GOLD_ERP_NO_ANIM"] = _old_anim
+    _old_cfg = getattr(config, "SPLASH_ANIMATION", True)
+    config.SPLASH_ANIMATION = False
+    _off2 = _gs9.animations_on()
+    config.SPLASH_ANIMATION = _old_cfg
+    check("والحركة تُطفأ بالإعداد أو بمتغيّر البيئة — للأجهزة الضعيفة",
+          _off is False and _off2 is False)
+    try:
+        _lf9.sign_in("", "x")
+        _empty = False
+    except _lf9.LoginError as _e9:
+        _empty = "اسم المستخدم" in str(_e9)
+    check("ومسارُ الدخول يرفض الفارغ برسالةٍ مفهومة لا بانهيار", _empty)
+    _lf9.save_last_user("مستخدم الاختبار")
+    check("ويُحفظ اسمُ آخر من دخل وحده — لا كلمة المرور",
+          _lf9.load_last_user() == "مستخدم الاختبار"
+          and _lf9._last_user_path().name == "last_user.txt")
+    _lf9.save_last_user("")
+    check("ورفعُ التذكّر يمحو الاسم", _lf9.load_last_user() == "")
+    import main as _main9
+    _steps9 = _main9.prepare_steps()
+    check("وخطوات الإقلاع مسمّاة تُعرض على البوابة وهي تُنفَّذ",
+          len(_steps9) >= 7
+          and all(isinstance(a, str) and callable(b) for a, b in _steps9)
+          and "قاعدة البيانات" in _steps9[0][0],
+          f"{len(_steps9)} خطوات")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

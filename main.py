@@ -5,38 +5,12 @@ import sys
 
 def main():
     try:
-        from PyQt5 import QtWidgets
+        from PyQt5 import QtCore, QtWidgets
     except ImportError:
         print("يلزم تثبيت PyQt5 أولاً:  pip install PyQt5")
         return
-    from database.database import run_migrations_files, create_tables, db, migrate_schema
-    from database.seed import (ensure_new_accounts, ensure_system_tags,
-                              seed_initial_data)
-    from models.entities import (ensure_employee_accrual_accounts,
-                             ensure_internal_counterparties)
-    create_tables()
-    # استرداد تلقائي: إن كانت القاعدة مفقودة تُسحب أحدث نسخة
-    try:
-        from services import storage
-        rec = storage.auto_recover()
-        if rec.get("recovered"):
-            print(f"[recovery] استُعيدت البيانات من {rec['from']}")
-    except Exception:
-        pass
-    migrate_schema()
-    run_migrations_files()
-    seed_initial_data()
-    ensure_new_accounts()
-    with db() as conn:
-        ensure_internal_counterparties(conn)
-        ensure_employee_accrual_accounts(conn)
-        ensure_system_tags(conn)
-
-    # الخدمات الخلفية تبدأ الآن — بعد جهوزية القاعدة والترقيات
-    start_background_workers()
-
     from ui import styles
-    from ui.login_window import LoginDialog
+    from ui.gate_window import GateWindow
     from ui.main_window import MainWindow
 
     app = QtWidgets.QApplication(sys.argv)
@@ -56,11 +30,64 @@ def main():
     except Exception:
         pass
     styles.apply(app)
-    dlg = LoginDialog()
-    if dlg.exec_() != QtWidgets.QDialog.Accepted:
+
+    # ══ البوابة أولاً، ثم التجهيز خلفها ══
+    # كان التجهيز (إنشاء الجداول · الترقيات · بذر الحسابات) يسبق أول
+    # رسمٍ للشاشة، فيقف صاحب النظام أمام سوادٍ ثوانيَ يظنّ الملف
+    # معطّلاً — وهي أسوأ ثوانٍ في عمر أي برنامج. الآن تظهر البوابة في
+    # أول لحظة ويجري التجهيز وهو يقرأ سطر الحالة يتقدّم.
+    gate = GateWindow()
+    gate.showFullScreen()
+    app.processEvents()
+    # شاشة بدء الـexe تُغلق هنا بالضبط: حين صارت البوابة على الشاشة.
+    # إغلاقها قبل ذلك يترك فراغاً، وبعده يُبقي طبقةً فوق البوابة.
+    try:
+        import pyi_splash                      # داخل الـexe فقط
+        pyi_splash.close()
+    except Exception:
+        pass
+    gate.prepare(prepare_steps())
+
+    if gate.exec_() != QtWidgets.QDialog.Accepted:
         return
-    win = MainWindow(dlg.user)
+    win = MainWindow(gate.user)
+
+    # ══ التسليم ══
+    # لا تُفتح الواجهة فجأة: تتّسع موجةٌ ذهبية في البوابة، وتحتها
+    # يُبنى النظام ويظهر متدرّجاً. المستخدم يرى انتقالاً لا وميضاً.
+    win.setWindowOpacity(0.0 if fade_ok() else 1.0)
     win.showMaximized()
+
+    def _reveal():
+        if not fade_ok():
+            gate.close()
+            win.setWindowOpacity(1.0)
+            return
+        # تمازجٌ لا تعاقب: لو أُخفيت البوابة أولاً لظهر سطحُ المكتب
+        # لحظةً بين الشاشتين — وتلك اللحظة هي ما يجعل الفتح يبدو
+        # «مباشراً». هنا تصعد الواجهة وتذوب البوابة معاً.
+        up = QtCore.QPropertyAnimation(win, b"windowOpacity", win)
+        up.setStartValue(0.0)
+        up.setEndValue(1.0)
+        up.setDuration(700)
+        up.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+        down = QtCore.QPropertyAnimation(gate, b"windowOpacity", gate)
+        down.setStartValue(1.0)
+        down.setEndValue(0.0)
+        down.setDuration(520)
+        down.setEasingCurve(QtCore.QEasingCurve.InCubic)
+        down.finished.connect(gate.close)
+        up.start()
+        down.start()
+        win._boot_anim = (up, down)    # مرجعٌ يمنعهما من الجمع مبكراً
+        win.raise_()
+        win.activateWindow()
+        try:
+            win.play_entrance()
+        except Exception:
+            pass
+
+    gate.hand_off(_reveal)
     # ══ حارس التجمّد ══
     # يرصد توقّف خيط الواجهة عن معالجة أحداثه — وهو ما يراه المستخدم
     # «شاشة سوداء ولا يستجيب» — ويكتب في السجل **موضعه** بالملف
@@ -71,6 +98,56 @@ def main():
     except Exception:
         pass
     sys.exit(app.exec_())
+
+
+def fade_ok():
+    """هل يُسمح بالتلاشي؟ — يتبع مفتاح الحركة نفسه."""
+    try:
+        from ui.widgets.gold_stage import animations_on
+        return animations_on()
+    except Exception:
+        return False
+
+
+def prepare_steps():
+    """خطوات تجهيز النظام — تُعرض أسماؤها على البوابة وهي تُنفَّذ.
+
+    كانت كتلةً واحدة صامتة؛ صارت خطواتٍ مسمّاة: من يقف أمام الشاشة
+    يعرف أين وصل، ومن يُبلّغ عن عطلٍ يعرف **أي** خطوةٍ توقّفت.
+    """
+    from database.database import (create_tables, db, migrate_schema,
+                                   run_migrations_files)
+    from database.seed import (ensure_new_accounts, ensure_system_tags,
+                               seed_initial_data)
+    from models.entities import (ensure_employee_accrual_accounts,
+                                 ensure_internal_counterparties)
+
+    def _recover():
+        # استرداد تلقائي: إن كانت القاعدة مفقودة تُسحب أحدث نسخة
+        try:
+            from services import storage
+            rec = storage.auto_recover()
+            if rec.get("recovered"):
+                print(f"[recovery] استُعيدت البيانات من {rec['from']}")
+        except Exception:
+            pass
+
+    def _identities():
+        with db() as conn:
+            ensure_internal_counterparties(conn)
+            ensure_employee_accrual_accounts(conn)
+            ensure_system_tags(conn)
+
+    return [
+        ("جارٍ تجهيز قاعدة البيانات…", create_tables),
+        ("جارٍ التحقّق من سلامة البيانات…", _recover),
+        ("جارٍ ترقية المخطّط…", migrate_schema),
+        ("جارٍ تطبيق التحديثات…", run_migrations_files),
+        ("جارٍ تهيئة شجرة الحسابات…", seed_initial_data),
+        ("جارٍ ضبط الحسابات المستحدثة…", ensure_new_accounts),
+        ("جارٍ تجهيز الجهات والوسوم…", _identities),
+        ("جارٍ تشغيل الخدمات الخلفية…", start_background_workers),
+    ]
 
 
 def start_background_workers():
