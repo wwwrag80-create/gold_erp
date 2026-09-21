@@ -1297,6 +1297,10 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_gold_map(conn, doc_id, kw.get("as_of"),
                                     kw.get("compare_to"),
                                     kw.get("detail", False)))
+        if doc_type == "stock_aging":
+            return en(_tpl_stock_aging(conn, doc_id, kw.get("as_of"),
+                                       kw.get("model"),
+                                       kw.get("detail", False)))
         if doc_type == "balance_tree":
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
@@ -2214,6 +2218,129 @@ def _tpl_gold_map(conn, _id=0, as_of=None, compare_to=None, detail=False):
                     show_meta=False) + html + _footer(""))
 
 
+def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
+    """أعمار المخزون — ورقةٌ تُرفق بالجرد أو تُسلَّم للإدارة.
+
+    رأسٌ من صفّين: صفٌّ يجمع أعمدة **الوزن** تحت عنوانٍ واحد، وآخر
+    يجمع **الأجرة الراكدة** — فالعين تعرف أيّ وحدةٍ تقرأ قبل أن تقرأ
+    الرقم، وهو رأس ورقة أعمار الديون نفسه فلا يتعلّم المستخدم قراءتين.
+    """
+    from models import stock_aging
+    from services import karat_view
+    r = stock_aging.report(conn, as_of, model)
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+    nb = len(stock_aging.BUCKET_LABELS)
+
+    def _g(v):
+        return _gw(v, 3)
+
+    body = ""
+    for b in r["buckets"]:
+        body += "<tr>" + cells(
+            tdw(b["label"], align="right"), tdw(en(f"{b['count']:,}")),
+            tdw(_g(b["weight"])), tdw(en(f"{b['weight_pct']:,.1f}%")),
+            tdw(_w(b["idle_wage"], 2))) + "</tr>"
+    # الفئات، ثم مجموعُها، ثم ما لا عمر له، ثم المخزون كلّه — فلا
+    # يبدو مجموعٌ وكأنه يشمل سطراً فوقه وهو لا يشمله
+    t, g = r["total"], r["grand"]
+    body += "<tr>" + cells(
+        thw("إجمالي القطع المفردة"), thw(en(f"{t['count']:,}")),
+        thw(_g(t["weight"])), thw("100%"),
+        thw(_w(t["idle_wage"], 2))) + "</tr>"
+    tot = ""
+    if r["bulk"]["count"]:
+        body += "<tr>" + cells(
+            tdw("رصيد تجميعي — خارج الفئات (بلا عمر)", align="right"),
+            tdw(en(f"{r['bulk']['count']:,}")),
+            tdw(_g(r["bulk"]["weight"])), tdw("—"),
+            tdw(_w(r["bulk"]["idle_wage"], 2))) + "</tr>"
+        tot = "<tr>" + cells(
+            thw("إجمالي المخزون"), thw(en(f"{g['count']:,}")),
+            thw(_g(g["weight"])), thw("—"),
+            thw(_w(g["idle_wage"], 2))) + "</tr>"
+
+    # ── جدول الموديلات برأسٍ من صفّين ──
+    top = [thspan("الموديل", rowspan=2, align="right"),
+           thspan("العدد", rowspan=2),
+           thspan(f"الوزن ({u})", colspan=nb + 1),
+           thspan("فوق ٩٠", rowspan=2),
+           thspan("أقدم قطعة", rowspan=2),
+           thspan("أجرة راكدة", rowspan=2)]
+    sub = [thw(b) for b in stock_aging.BUCKET_LABELS] + [thw("الإجمالي")]
+    mhead = "<tr>" + cells(*top) + "</tr><tr>" + cells(*sub) + "</tr>"
+    mbody = ""
+    for mm in r["models"]:
+        mbody += "<tr>" + cells(
+            tdw(mm["model"], align="right"), tdw(en(f"{mm['count']:,}")),
+            *[tdw(_g(b["weight"]) if b["weight"] else "—")
+              for b in mm["buckets"]],
+            tdw(_g(mm["weight"])), tdw(en(f"{mm['old_pct']:,.1f}%")),
+            tdw(en(f"{mm['oldest']:,}")),
+            tdw(_w(mm["idle_wage"], 2))) + "</tr>"
+    if mbody:
+        mbody += "<tr>" + cells(
+            thw("الإجمالي"), thw(en(f"{t['count']:,}")),
+            *[thw(_g(b["weight"])) for b in r["buckets"]],
+            thw(_g(t["weight"])), thw(en(f"{r['old_pct']:,.1f}%")),
+            thw("—"), thw(_w(t["idle_wage"], 2))) + "</tr>"
+    else:
+        mbody = f'<tr><td {TD} colspan="{nb + 6}">لا مخزون</td></tr>'
+
+    det = ""
+    if detail and r["items"]:
+        det = (f'<div class="party">قطعة قطعة — الأقدم أولاً</div>{TBL}'
+               + "<tr>" + cells(
+                   thw("رقم التشغيل"), thw("الموديل"), thw("تاريخ الدخول"),
+                   thw("العمر (يوم)"), thw("الفئة"), thw(f"الوزن ({u})"),
+                   thw("أجرة راكدة")) + "</tr>")
+        for x in r["items"]:
+            det += "<tr>" + cells(
+                tdw(en(x["wo_no"])), tdw(x["model"], align="right"),
+                tdw(en(x["in_date"])), tdw(en(f"{x['days']:,}")),
+                tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
+                tdw(_g(x["weight"])), tdw(_w(x["idle_wage"], 2))) + "</tr>"
+        det += "</table>"
+
+    lines = "".join(f"<li>{v}</li>"
+                    for v in stock_aging.verdict(r, _g, lambda v: _w(v, 2)))
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="25%">حتى تاريخ</td><td>{en(as_of or today)}</td>
+          <th>الموديل</th><td>{model or "كل الموديلات"}</td></tr>
+      <tr><th>في المخزن</th>
+          <td>{en(f"{t['count']:,}")} قطعة · {en(_g(t["weight"]))} {u}</td>
+          <th>فوق ٩٠ يوماً</th>
+          <td>{en(_g(r["old_weight"]))} {u}
+              ({en(f"{r['old_pct']:,.1f}%")})</td></tr>
+      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
+    </table>
+
+    {TBL}
+      <tr>{cells(thw("الفئة العمرية"), thw("عدد القطع"),
+                 thw(f"الوزن ({u})"), thw("النسبة"),
+                 thw("أجرة راكدة (ريال)"))}</tr>
+      {body}
+      {tot}
+    </table>
+
+    <div class="party">بالموديل — أيّها يرقد</div>
+    {TBL}
+      {mhead}
+      {mbody}
+    </table>
+    {det}
+
+    <div class="note">الأجرة الراكدة ليست ربحاً ضائعاً بل **أجرةً
+      صُرفت على العامل ولم تُحصَّل من أحد**: الوزن × أجرة الجرام
+      المسجّلة على أمر التشغيل. تُقرأ لقياس الركود ولا تدخل أي قائمة
+      دخل. وتاريخ الدخول من قيد التوريد لا من وقت كتابة السجل.</div>
+    <div class="note"><ul>{lines}</ul></div>
+    '''
+    return (_header("أعمار المخزون — رأس المال الراكد", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
 BUILDERS = {
     "invoice": _tpl_invoice, "invoices": _tpl_invoice,
     "voucher": _tpl_voucher, "vouchers": _tpl_voucher,
@@ -2234,6 +2361,7 @@ BUILDERS = {
     "aging": _tpl_aging,
     "day_close": _tpl_day_close,
     "gold_map": _tpl_gold_map,
+    "stock_aging": _tpl_stock_aging,
 }
 
 DOC_LABELS = {

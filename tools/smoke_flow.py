@@ -2566,6 +2566,108 @@ def main():
           " · ".join(f"{b['label']}={b['gold']}"
                      for b in _map["buckets"] if b["gold"] < 0))
 
+    step("35) أعمار المخزون — رأس المال الراكد")
+    # ══ ثلاث ضمانات ══
+    # 1) العمر من **قيد التوريد** لا من وقت كتابة السجل: دفعةٌ تُسجَّل
+    #    اليوم وقد وردت قبل سنةٍ عمرها سنة. و`created_at` هو الآن
+    #    دائماً في قاعدةٍ تُبنى في الاختبار، فلو قيس عليه لظهرت كل
+    #    القطع «أقل من ٣٠» ولضاع التقرير كله.
+    # 2) الرقم التجميعي ٠٠٠١ رصيد وزنٍ لا قطعة، فلا عمر له ولا يدخل
+    #    الفئات — وإلا أظهر عشرات الكيلوات «راكدة» وهي تدور كل يوم.
+    # 3) مجموع الفئات = إجمالي المخزون المفرد. الفئة التي لا تُجمع
+    #    تقريرٌ يُقرأ ولا يُصدَّق.
+    from models import stock_aging as _sa
+
+    with db() as conn:
+        _batch(conn, [{"wo_no": "OLD-1", "gold": 40.0,
+                       "wage_per_gram": 30.0, "model_no": "ALPHA"}],
+               "2025-01-05", "admin")          # قديمة جداً
+        _batch(conn, [{"wo_no": "MID-1", "gold": 25.0,
+                       "wage_per_gram": 20.0, "model_no": "ALPHA"},
+                      {"wo_no": "MID-2", "gold": 15.0,
+                       "wage_per_gram": 20.0, "model_no": "BETA"}],
+               "2026-04-20", "admin")          # نحو 70 يوماً
+        _batch(conn, [{"wo_no": "NEW-1", "gold": 10.0,
+                       "wage_per_gram": 25.0, "model_no": "BETA"}],
+               "2026-06-20", "admin")          # نحو 10 أيام
+        # ورصيدٌ تجميعي بتاريخٍ قديم عمداً: لو عُومل كقطعةٍ لظهر
+        # «راكداً فوق التسعين» وهو وزنٌ يدور كل يوم
+        _batch(conn, [{"wo_no": "0001", "gold": 200.0,
+                       "wage_per_gram": 20.0}], "2025-02-01", "admin")
+    with db(readonly=True) as conn:
+        _sr = _sa.report(conn, "2026-06-30")
+
+    _got = {x["wo_no"]: x for x in _sr["items"]}
+    check("العمر يُحسب من تاريخ قيد التوريد لا من وقت كتابة السجل",
+          _got["OLD-1"]["days"] == 541 and _got["NEW-1"]["days"] == 10,
+          f"OLD-1={_got['OLD-1']['days']} · NEW-1={_got['NEW-1']['days']}")
+    check("والقطعة تقع في فئتها الصحيحة",
+          _got["NEW-1"]["bucket"] == 0 and _got["MID-1"]["bucket"] == 2
+          and _got["OLD-1"]["bucket"] == 3,
+          f"NEW={_got['NEW-1']['bucket']} · MID={_got['MID-1']['bucket']}"
+          f" · OLD={_got['OLD-1']['bucket']}")
+
+    _bsum = round(sum(b["weight"] for b in _sr["buckets"]), 3)
+    check("مجموع الفئات = إجمالي المخزون المفرد",
+          abs(_bsum - _sr["total"]["weight"]) < 0.0011,
+          f"{_bsum} مقابل {_sr['total']['weight']}")
+    check("وعدد القطع كذلك",
+          sum(b["count"] for b in _sr["buckets"]) == _sr["total"]["count"])
+
+    check("الرقم التجميعي يُفصل ولا يدخل الفئات",
+          not any(x["is_bulk"] for x in _sr["items"])
+          and _sr["bulk"]["count"] >= 1 and _sr["bulk"]["weight"] > 0,
+          f"تجميعي: {_sr['bulk']['count']} قطعة "
+          f"وزنها {_sr['bulk']['weight']}")
+    check("ولا يُحسب ضمن ما تجاوز التسعين رغم قِدَم سجلّه",
+          abs(_sr["buckets"][-1]["weight"]
+              - sum(x["weight"] for x in _sr["items"]
+                    if x["bucket"] == 3)) < 0.0011,
+          f"فوق التسعين {_sr['buckets'][-1]['weight']}")
+
+    _m = {x["model"]: x for x in _sr["models"]}
+    check("التجميع بالموديل يجمع قطعه كلها",
+          abs(_m["ALPHA"]["weight"]
+              - (_got["OLD-1"]["weight"] + _got["MID-1"]["weight"])) < 0.0011,
+          f"ALPHA={_m['ALPHA']['weight']}")
+    check("وأقدم قطعةٍ في الموديل تُرصد",
+          _m["ALPHA"]["oldest"] == 541, f"{_m['ALPHA']['oldest']}")
+    check("والأجرة الراكدة = الوزن × أجرة الجرام",
+          abs(_got["OLD-1"]["idle_wage"]
+              - _got["OLD-1"]["weight"] * 30.0) < 0.011,
+          f"{_got['OLD-1']['idle_wage']}")
+
+    check("أقدم قطعةٍ في المخزن تتصدّر القائمة",
+          _sr["items"][0]["wo_no"] == "OLD-1",
+          f"{_sr['items'][0]['wo_no']} منذ {_sr['items'][0]['days']} يوماً")
+    check("والخلاصة تسمّيها وتقول نسبة ما فوق التسعين",
+          any("OLD-1" in v for v in _sa.verdict(_sr))
+          and any("التسعين" in v for v in _sa.verdict(_sr)),
+          " | ".join(_sa.verdict(_sr))[:110])
+
+    # ترشيحٌ بموديل: الأرقام تتبع ما رُشّح لا كل المخزن
+    with db(readonly=True) as conn:
+        _sb = _sa.report(conn, "2026-06-30", "BETA")
+    check("الترشيح بموديل يقصر التقرير عليه",
+          {x["wo_no"] for x in _sb["items"]} == {"MID-2", "NEW-1"},
+          " · ".join(x["wo_no"] for x in _sb["items"]))
+
+    # تاريخٌ قبل أي توريد: لا مخزون ولا انهيار
+    with db(readonly=True) as conn:
+        _sz = _sa.report(conn, "2020-01-01")
+    check("تاريخٌ قبل أي توريد يُعطي مخزوناً خاوياً لا انهياراً",
+          _sz["items"] == [] and _sz["total"]["count"] == 0
+          and "لا مخزون" in " ".join(_sa.verdict(_sz)))
+
+    _html2 = _pm.build_body("stock_aging", 0, as_of="2026-06-30",
+                            detail=True)
+    check("ورقة أعمار المخزون تُبنى برأسها ذي الصفّين",
+          "أعمار المخزون" in _html2 and "بالموديل" in _html2
+          and "الأجرة الراكدة" in _html2, f"{len(_html2)} حرفاً")
+    check("وتستعمل تسميات أعمار الديون نفسها لا تسمياتٍ أخرى",
+          all(b in _html2 for b in _sa.BUCKET_LABELS),
+          " · ".join(_sa.BUCKET_LABELS))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

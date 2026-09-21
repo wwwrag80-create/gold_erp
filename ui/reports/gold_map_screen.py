@@ -82,6 +82,8 @@ class GoldMapScreen(QtWidgets.QWidget):
             tiles.addWidget(c)
 
         self.verdict = big_label("اختر التاريخ ثم «ارسم الخريطة».")
+        # الخلاصة عدة جملٍ قد تطول — تُلفّ ولا تُقصّ
+        self.verdict.setWordWrap(True)
 
         self.t_map = make_table()
         _enhance(self.t_map, key="gold_map")

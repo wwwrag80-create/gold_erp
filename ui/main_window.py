@@ -46,6 +46,7 @@ from ui.reports.bank_recon_screen import BankReconScreen
 from ui.reports.model_profit_screen import ModelProfitScreen
 from ui.reports.assets_screen import AssetsScreen
 from ui.reports.gold_map_screen import GoldMapScreen
+from ui.reports.stock_aging_screen import StockAgingScreen
 from ui.reports.movement_screen import MovementScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
@@ -187,6 +188,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("خريطة الذهب (أين الذهب الآن)",
                      Lazy(lambda: GoldMapScreen(user),
                           "خريطة الذهب (أين الذهب الآن)")),
+                    # «في المخزن ٨٤٠ طقماً» رقمٌ لا يُتَّخذ عليه قرار؛
+                    # القرار على «كم منها راقدٌ فوق التسعين يوماً»
+                    ("أعمار المخزون (رأس المال الراكد)",
+                     Lazy(lambda: StockAgingScreen(user),
+                          "أعمار المخزون (رأس المال الراكد)")),
                     ("الأصول الثابتة والإهلاك",
                      Lazy(lambda: AssetsScreen(user),
                           "الأصول الثابتة والإهلاك")),
