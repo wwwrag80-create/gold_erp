@@ -1275,6 +1275,12 @@ def build_body(doc_type, doc_id, **kw):
                                           kw.get("mode", "all"),
                                           kw.get("sort", "az"),
                                           kw.get("expanded")))
+        if doc_type == "models_received":
+            return en(_tpl_models_received(conn, doc_id,
+                                           kw.get("date_from"),
+                                           kw.get("date_to"),
+                                           kw.get("mode", "all"),
+                                           kw.get("sort", "az")))
         if doc_type == "model_photos":
             return en(_tpl_model_photos(conn, doc_id,
                                         kw.get("min_count", 3),
@@ -1677,6 +1683,87 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
             f'<b>{en(len(expanded))}</b> موديل</div>')
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
     return (_header("دليل الموديلات", "—", today, show_meta=False)
+            + meta + table)
+
+
+def _tpl_models_received(conn, _id=0, date_from=None, date_to=None,
+                         mode="all", sort="az"):
+    """قالب «الوارد من التصنيع بتاريخ» — موديلاً موديلاً ومع من هو.
+
+    الورقة تجيب سؤالاً واحداً: ما الذي ورد في ذلك اليوم، وأين كل
+    قطعةٍ منه **اليوم** — في الخزنة أم عند جهة.
+    """
+    from models import models_catalog as mc
+    res = mc.received(conn, date_from, date_to)
+    today = _qd(QtCore.QDate.currentDate())
+    labels = {"all": "الكل", "in_stock": "الباقي بالخزنة",
+              "sold": "الخارج للجهات"}
+
+    models = []
+    for m in res["models"]:
+        items = [i for i in m["items"]
+                 if mode == "all"
+                 or (mode == "in_stock" and i["safe"])
+                 or (mode == "sold" and not i["safe"])]
+        if not items:
+            continue
+        g = dict(m)
+        g["items"] = items
+        g["count"] = len(items)
+        g["weight"] = round(sum(i["reg"] for i in items), 2)
+        g["in_count"] = sum(1 for i in items if i["safe"])
+        g["out_count"] = g["count"] - g["in_count"]
+        models.append(g)
+
+    if sort == "za":
+        models.sort(key=lambda m: str(m["model"]), reverse=True)
+    elif sort == "most":
+        models.sort(key=lambda m: (-m["count"], str(m["model"])))
+    elif sort == "least":
+        models.sort(key=lambda m: (m["count"], str(m["model"])))
+    else:
+        models.sort(key=lambda m: str(m["model"]))
+
+    body = ""
+    for m in models:
+        where = []
+        if m["in_count"]:
+            where.append(f'بالخزنة {en(m["in_count"])}')
+        if m["out_count"]:
+            where.append(f'عند الجهات {en(m["out_count"])}')
+        body += ("<tr>" + cells(
+            f'<td class="r"><b>◄ الموديل {m["model"]}</b></td>',
+            f'<td><b>{en(m["count"])}</b></td>',
+            f'<td><b>{_gw(m["weight"])}</b></td>',
+            f'<td>{"  ·  ".join(where)}</td>') + "</tr>")
+        for i in m["items"]:
+            tail = f'{i["holder"]}  ·  {en(i["date"])}'
+            if i["bulk"]:
+                tail += "  ·  رصيد مجمّع"
+            body += ("<tr>" + cells(
+                f'<td class="r" style="padding-right:22px">'
+                f'{en(i["wo"])}</td>',
+                '<td></td>', f'<td>{_gw(i["reg"])}</td>',
+                f'<td>{tail}</td>') + "</tr>")
+    if not body:
+        body = (f'<tr><td {TD} colspan="4">'
+                f'لا وارد من التصنيع في هذه الفترة</td></tr>')
+
+    n = sum(m["count"] for m in models)
+    w = round(sum(m["weight"] for m in models), 2)
+    n_in = sum(m["in_count"] for m in models)
+    span = (res["date_from"] if res["date_from"] == res["date_to"]
+            else f'{en(res["date_from"])} ← {en(res["date_to"])}')
+    head = cells(thw("الموديل / رقم التشغيل", 38), thw("العدد", 10),
+                 thw("الوزن المقيد (جم)", 22),
+                 thw("مع من الآن · تاريخ الوارد", 30))
+    foot = cells(thw(f"الإجمالي — {en(len(models))} موديل"),
+                 thw(en(n)), thw(_gw(w)),
+                 thw(f"بالخزنة {en(n_in)} · عند الجهات {en(n - n_in)}"))
+    meta = (f'<div {WIDE}>الوارد من التصنيع في: <b>{en(span)}</b>'
+            f' &nbsp;·&nbsp; العرض: <b>{labels.get(mode, mode)}</b></div>')
+    table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
+    return (_header("الوارد من التصنيع بتاريخ", "—", today, show_meta=False)
             + meta + table)
 
 
@@ -2461,6 +2548,7 @@ BUILDERS = {
     "balance_tree": _tpl_balance_tree,
     "trial_balance": _tpl_trial_balance,
     "models_catalog": _tpl_models_catalog,
+    "models_received": _tpl_models_received,
     "dash_panel": _tpl_dash_panel,
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,

@@ -23,6 +23,10 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err, info,
 
 HEADERS = ["الموديل / رقم التشغيل", "العدد", "الوزن المقيد",
            "الجهة / التاريخ"]
+# في وضع «الوارد بتاريخ» يتغيّر معنى العمود الأخير: لا تاريخَ بيعٍ
+# بل مكانُ القطعة اليوم ويومُ ورودها.
+HEADERS_IN = ["الموديل / رقم التشغيل", "العدد", "الوزن المقيد",
+              "مع من الآن  ·  تاريخ الوارد"]
 
 
 class ModelsScreen(QtWidgets.QWidget):
@@ -30,6 +34,8 @@ class ModelsScreen(QtWidgets.QWidget):
         super().__init__()
         self.user = user
         self._fp = None
+        self._days_loaded = False
+        self._sync = False          # يمنع ارتداد الإشارات بين التاريخ والقائمة
 
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("ابحث برقم الموديل أو رقم التشغيل…")
@@ -62,12 +68,47 @@ class ModelsScreen(QtWidgets.QWidget):
         btn_expand.clicked.connect(lambda: self.tree.expandAll())
         btn_collapse = QtWidgets.QPushButton("طيّ الكل")
         btn_collapse.clicked.connect(lambda: self.tree.collapseAll())
-        btn_print = QtWidgets.QPushButton("🖨 طباعة الدليل")
+        btn_print = self.btn_print = QtWidgets.QPushButton("🖨 طباعة الدليل")
         btn_print.clicked.connect(self.print_catalog)
         btn_photos = QtWidgets.QPushButton("🖼 طباعة الصور")
         btn_photos.setToolTip(
             "أربع صور في كل صفحة A4 — للموديلات التي بلغت حدّاً معيناً")
         btn_photos.clicked.connect(self.print_photos)
+
+        # ── الوارد بتاريخ: ماذا دخل ذلك اليوم وأين هو الآن ──
+        self.by_date = QtWidgets.QCheckBox("الوارد بتاريخ")
+        self.by_date.setToolTip(
+            "يعرض الموديلات التي وردت من التصنيع في اليوم المحدَّد —\n"
+            "كل موديل وأرقام تشغيله، ومع من كل قطعة اليوم:\n"
+            "«الخزنة» إن كانت متاحة، أو اسم الجهة إن خرجت إليها.")
+        self.by_date.toggled.connect(self._on_date_mode)
+
+        self.day = QtWidgets.QComboBox()
+        self.day.setMinimumWidth(330)
+        self.day.setToolTip("أيام التوريد الفعلية — الأحدث أولاً")
+        self.day.currentIndexChanged.connect(self._pick_day)
+
+        self.d_from = date_edit()
+        self.d_to = date_edit()
+        for w in (self.d_from, self.d_to):
+            w.setMaximumWidth(130)
+            w.dateChanged.connect(self._on_range)
+
+        self.lbl_day = QtWidgets.QLabel("يوم التوريد:")
+        self.lbl_from = QtWidgets.QLabel("من:")
+        self.lbl_to = QtWidgets.QLabel("إلى:")
+
+        drow = QtWidgets.QHBoxLayout()
+        drow.setSpacing(6)
+        drow.addWidget(self.by_date)
+        drow.addWidget(self.lbl_day)
+        drow.addWidget(self.day, 0)
+        drow.addWidget(self.lbl_from)
+        drow.addWidget(self.d_from)
+        drow.addWidget(self.lbl_to)
+        drow.addWidget(self.d_to)
+        drow.addStretch(1)
+        self.drow = drow
 
         head = QtWidgets.QHBoxLayout()
         head.setSpacing(6)
@@ -106,8 +147,10 @@ class ModelsScreen(QtWidgets.QWidget):
         lay.addWidget(title_label("دليل الموديلات"))
         lay.addWidget(note)
         lay.addLayout(head)
+        lay.addLayout(drow)
         lay.addWidget(self.tree, 1)
         lay.addWidget(self.summary)
+        self._date_widgets(False)
         self.refresh()
 
     # ══════════ البناء ══════════
@@ -142,9 +185,190 @@ class ModelsScreen(QtWidgets.QWidget):
             cells[0].setData(data, QtCore.Qt.UserRole)
         return cells
 
+    # ══════════ الوارد بتاريخ ══════════
+    def _date_widgets(self, on):
+        for w in (self.lbl_day, self.day, self.lbl_from, self.d_from,
+                  self.lbl_to, self.d_to):
+            w.setEnabled(bool(on))
+
+    def _load_days(self):
+        """يملأ قائمة أيام التوريد — مرةً واحدة عند أول تفعيل.
+
+        قائمةُ أيامٍ فيها وارد أنفعُ من تقويمٍ يفتح على يومٍ فارغ:
+        فمن أراد «ماذا ورد آخر مرة» وجده في أول السطر.
+        """
+        if self._days_loaded:
+            return
+        try:
+            with db() as conn:
+                days = mc.received_days(conn)
+        except Exception:
+            days = []
+        self._days_loaded = True
+        self._sync = True
+        try:
+            self.day.clear()
+            if not days:
+                self.day.addItem("لا يوجد وارد مسجَّل", None)
+                return
+            for d in days:
+                self.day.addItem(
+                    f"{d['date']}   —   {d['count']} طقم · "
+                    f"{d['models']} موديل · {kv.g(d['weight']):,.2f}"
+                    f" {kv.unit()}", d["date"])
+            qd = QtCore.QDate.fromString(str(days[0]["date"]), "yyyy-MM-dd")
+            if qd.isValid():
+                self.d_from.setDate(qd)
+                self.d_to.setDate(qd)
+        finally:
+            self._sync = False
+
+    def _on_date_mode(self, on=None):
+        on = self.by_date.isChecked() if on is None else bool(on)
+        self._date_widgets(on)
+        # الزرّ يقول ما يطبعه: في وضع التاريخ ورقةُ الوارد لا الدليل
+        self.btn_print.setText("🖨 طباعة الوارد" if on
+                               else "🖨 طباعة الدليل")
+        if on:
+            self._load_days()
+        self.refresh(force=True)
+
+    def _pick_day(self, *_):
+        """اختيارُ يومٍ من القائمة يضبط المدى على ذلك اليوم وحده."""
+        if self._sync:
+            return
+        d = self.day.currentData()
+        if not d:
+            return
+        self._sync = True
+        try:
+            qd = QtCore.QDate.fromString(str(d), "yyyy-MM-dd")
+            if qd.isValid():
+                self.d_from.setDate(qd)
+                self.d_to.setDate(qd)
+        finally:
+            self._sync = False
+        if self.by_date.isChecked():
+            self.refresh(force=True)
+
+    def _on_range(self, *_):
+        if self._sync or not self.by_date.isChecked():
+            return
+        self.refresh(force=True)
+
+    def _refresh_received(self, force=False):
+        """يبني شجرة الوارد: كل موديلٍ وأرقام تشغيله ومع من هي اليوم."""
+        d1, d2 = dstr(self.d_from), dstr(self.d_to)
+        mode = self.view_mode.currentData() or "all"
+        with db() as conn:
+            sig = conn.execute(
+                "SELECT COUNT(*) n, COALESCE(MAX(id),0) m,"
+                " COALESCE(SUM(status='sold'),0) s"
+                " FROM work_orders WHERE is_deleted=0").fetchone()
+            fp = ("date", sig["n"], sig["m"], sig["s"], d1, d2, mode,
+                  self.sort_mode.currentData())
+            if not force and fp == self._fp:
+                return
+            res = mc.received(conn, d1, d2)
+        self._fp = fp
+        self._render_received(res, mode)
+
+    def _render_received(self, res, mode):
+        """الشجرة في وضع التاريخ: الموديل جذرٌ وأرقامُ تشغيله أوراقُه.
+
+        لا فرعَ وسيطاً هنا: السؤال «ماذا ورد ذلك اليوم وأين هو الآن»
+        يُجاب سطراً لكل قطعة، ومكانُها عمودٌ لا مستوى في الشجرة —
+        فتُقرأ الدفعة كلُّها بنظرةٍ واحدة.
+        """
+        st = self._styles()
+        models = []
+        for m in res["models"]:
+            items = [i for i in m["items"]
+                     if mode == "all"
+                     or (mode == "in_stock" and i["safe"])
+                     or (mode == "sold" and not i["safe"])]
+            if not items:
+                continue
+            g = dict(m)
+            g["items"] = items
+            g["count"] = len(items)
+            g["weight"] = round(sum(i["reg"] for i in items), 2)
+            g["in_count"] = sum(1 for i in items if i["safe"])
+            g["out_count"] = g["count"] - g["in_count"]
+            models.append(g)
+        models = self._sorted(models)
+
+        self.tree.setUpdatesEnabled(False)
+        try:
+            self.model.removeRows(0, self.model.rowCount())
+            self.model.setHorizontalHeaderLabels(HEADERS_IN)
+            root = self.model.invisibleRootItem()
+            for m in models:
+                _img = "🖼 " if mc.image_path(m["model"]) else ""
+                where = []
+                if m["in_count"]:
+                    where.append(f"بالخزنة {m['in_count']}")
+                if m["out_count"]:
+                    where.append(f"عند الجهات {m['out_count']}")
+                node = self._cells(
+                    [f"◄  {_img}الموديل {m['model']}", m["count"],
+                     f"{kv.g(m['weight']):,.2f}", "  ·  ".join(where)],
+                    bold=True, brush=st["model"], data=("model", m["model"]))
+                for it in node:
+                    try:
+                        it.setFont(st["head"])
+                        it.setBackground(st["bg"])
+                    except Exception:
+                        pass
+                root.appendRow(node)
+                for i in m["items"]:
+                    tail = f"{i['holder']}  ·  {i['date']}"
+                    if i["bulk"]:
+                        tail += "  ·  رصيد مجمّع"
+                    row = self._cells(
+                        [i["wo"], "", f"{kv.g(i['reg']):,.2f}", tail],
+                        brush=st["stock"] if i["safe"] else st["sold"],
+                        data=("wo", i["id"]))
+                    node[0].appendRow(row)
+            # الوارد يوماً واحداً قصير — يُفتح مباشرةً فلا يُطوى ما
+            # جاء المستخدم من أجله.
+            self.tree.expandAll()
+        finally:
+            try:
+                self.tree.setUpdatesEnabled(True)
+            except Exception:
+                pass
+        self._size_columns()
+
+        span = (res["date_from"] if res["date_from"] == res["date_to"]
+                else f"{res['date_from']} ← {res['date_to']}")
+        n_in = sum(m["in_count"] for m in models)
+        n_out = sum(m["out_count"] for m in models)
+        w_tot = round(sum(m["weight"] for m in models), 2)
+        if not models:
+            self.summary.setText(
+                f"لا وارد من التصنيع في {span} — جرّب يوماً من القائمة.")
+            return
+        self.summary.setText(
+            f"{len(models)} موديل   |   الوارد في {span}: "
+            f"{n_in + n_out} طقم · {kv.g(w_tot):,.2f} {kv.unit()}"
+            f"   |   بالخزنة: {n_in} · عند الجهات: {n_out}")
+
+    def _size_columns(self):
+        try:
+            hh = self.tree.header()
+            hh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+            for c, w in enumerate((320, 80, 130, 240)):
+                self.tree.setColumnWidth(c, w)
+            hh.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        except Exception:
+            pass
+
     def refresh(self, force=False):
         """يبني الشجرة — فقط إن تغيّرت الأطقم."""
         try:
+            if self.by_date.isChecked():
+                return self._refresh_received(force)
             with db() as conn:
                 sig = conn.execute(
                     "SELECT COUNT(*) n, COALESCE(MAX(id),0) m,"
@@ -273,14 +497,7 @@ class ModelsScreen(QtWidgets.QWidget):
                 self.tree.setUpdatesEnabled(True)
             except Exception:
                 pass
-        try:
-            hh = self.tree.header()
-            hh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
-            for c, w in enumerate((320, 80, 130, 240)):
-                self.tree.setColumnWidth(c, w)
-            hh.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        except Exception:
-            pass
+        self._size_columns()
 
         mode = self.view_mode.currentData() or "all"
         tot_in = sum(m["in_weight"] for m in models)
@@ -308,6 +525,11 @@ class ModelsScreen(QtWidgets.QWidget):
             if not show:
                 for b in range(node.rowCount()):
                     br = node.child(b)
+                    # في وضع التاريخ يكون الابنُ رقمَ تشغيلٍ مباشرةً
+                    # لا فرعاً — فيُفحص نصُّه هو أيضاً.
+                    if text in br.text():
+                        show = True
+                        break
                     for k in range(br.rowCount()):
                         if text in br.child(k).text():
                             show = True
@@ -490,6 +712,14 @@ class ModelsScreen(QtWidgets.QWidget):
         """
         try:
             from services import print_manager
+            if self.by_date.isChecked():
+                # وضع التاريخ يطبع ورقته هو: الوارد ومع من كل قطعة
+                print_manager.preview_document(
+                    self, "models_received", 0,
+                    date_from=dstr(self.d_from), date_to=dstr(self.d_to),
+                    mode=self.view_mode.currentData() or "all",
+                    sort=self.sort_mode.currentData() or "az")
+                return
             print_manager.preview_document(
                 self, "models_catalog", 0,
                 mode=self.view_mode.currentData() or "all",

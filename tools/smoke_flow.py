@@ -3099,6 +3099,73 @@ def main():
           and _mval("") == 0.0,
           f"{_mval('(571.66)')} · {_mval('1,646.68')}")
 
+    step("39) دليل الموديلات — الوارد بتاريخ ومع من كل قطعة")
+    # السؤال: «ماذا ورد من التصنيع يوم كذا، وأين هو الآن؟» — يُجاب
+    # من سطور الدفعات لا من بطاقات الأطقم، لأن الرقم التجميعي 0001
+    # بطاقةٌ واحدة تراكمية: قراءتُها تنسب رصيد الشهر كلِّه ليومٍ واحد.
+    from models import invoices as _inv9
+    from models import models_catalog as _mcat
+    from models.entities import add_entity as _add9
+    from models.inventory import create_work_orders_batch as _b9
+    _r1, _r2 = "R{}".format(901), "R{}".format(902)
+    with db() as conn:
+        _rc = _add9(conn, "مشترٍ من دفعة اليوم", "customer",
+                    username="admin")
+        _b9(conn, [
+            {"wo_no": _r1, "gold": 40.0, "wage_per_gram": 24.0,
+             "model_no": "موديل الوارد"},
+            {"wo_no": _r2, "gold": 25.0, "wage_per_gram": 24.0,
+             "model_no": "موديل الوارد"},
+            {"wo_no": "0001", "gold": 70.0, "wage_per_gram": 20.0,
+             "model_no": "موديل الوارد"}], "2026-08-03", "admin")
+    with db() as conn:
+        _b9(conn, [
+            {"wo_no": "R903", "gold": 30.0, "wage_per_gram": 24.0,
+             "model_no": "موديل الوارد"},
+            {"wo_no": "0001", "gold": 15.0, "wage_per_gram": 20.0,
+             "model_no": "موديل الوارد"}], "2026-08-11", "admin")
+    with db(readonly=True) as conn:
+        _w1 = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no=?"
+            " AND is_deleted=0", (_r1,)).fetchone()["id"]
+    with db() as conn:
+        _inv9.create_sale(conn, _rc, [{"work_order_id": _w1}],
+                          "2026-08-20", "admin", apply_vat=False)
+
+    with db(readonly=True) as conn:
+        _d3 = _mcat.received(conn, "2026-08-03", "2026-08-03")
+        _d11 = _mcat.received(conn, "2026-08-11", "2026-08-11")
+        _days = {d["date"]: d for d in _mcat.received_days(conn)}
+    _m3 = {m["model"]: m for m in _d3["models"]}["موديل الوارد"]
+    _by = {i["wo"]: i for i in _m3["items"]}
+    check("وارد اليوم يُفصَّل موديلاً موديلاً بأرقام تشغيله",
+          sorted(_by) == ["0001", _r1, _r2], f"{sorted(_by)}")
+    check("والمباعة تحمل اسم الجهة التي هي عندها الآن",
+          _by[_r1]["holder"] == "مشترٍ من دفعة اليوم"
+          and not _by[_r1]["safe"], _by[_r1]["holder"])
+    check("والباقية تحمل «الخزنة»",
+          _by[_r2]["holder"] == _mcat.SAFE and _by[_r2]["safe"],
+          _by[_r2]["holder"])
+    check("والرقم التجميعي يُنسب لكل يومٍ بحصته لا برصيده المتراكم",
+          abs(_by["0001"]["reg"] - 70.0) < 0.011
+          and abs({i["wo"]: i for i in
+                   {m["model"]: m for m in _d11["models"]}
+                   ["موديل الوارد"]["items"]}["0001"]["reg"] - 15.0) < 0.011,
+          f"{_by['0001']['reg']} ثم 15")
+    check("ووارد يومٍ لا يختلط بوارد غيره",
+          all(i["wo"] != "R903" for i in _m3["items"])
+          and "2026-08-03" in _days and "2026-08-11" in _days,
+          f"{_days.get('2026-08-03', {}).get('count')} قطعاً يوم 3")
+    check("والإجمالي يفصل ما بالخزنة عمّا خرج للجهات",
+          _d3["count"] == 3 and _d3["out_count"] == 1
+          and _d3["in_count"] == 2,
+          f"{_d3['count']} · خارج {_d3['out_count']}")
+    _html7 = _pm.build_body("models_received", 0, date_from="2026-08-03",
+                            date_to="2026-08-03")
+    check("وورقةُ الوارد تحمل أرقام التشغيل والجهة والخزنة",
+          _r1 in _html7 and "مشترٍ من دفعة اليوم" in _html7
+          and _mcat.SAFE in _html7, f"{len(_html7)} حرفاً")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
