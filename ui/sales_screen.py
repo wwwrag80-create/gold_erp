@@ -20,9 +20,11 @@ from services import gold_math, karat_view as kv
 from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                big_label, date_edit, dstr, enter_chain, err,
                                fill, has_model_image, info, load_pref,
-                               make_table, mspin, reload_combo, run_bg,
-                               save_pref, search_combo, show_model_image,
-                               title_label, wspin)
+                               make_table, mspin, reload_combo,
+                               row_action_buttons, run_bg, save_pref,
+                               search_combo, show_model_image, title_label,
+                               wspin)
+from ui.widgets.table_fit import fit_columns
 
 DRAFT_KEY = "sales"
 
@@ -428,9 +430,12 @@ class SalesScreen(QtWidgets.QWidget):
     ليُعاد عرضه كما كُتب.
     """
 
-    COLS = ["الموديل", "رقم التشغيل", "العيار", "الوزن المقيد",
+    # العمود الأول بلا عنوان: فيه زرّا تعديل السطر وحذفه.
+    COLS = ["", "الموديل", "رقم التشغيل", "العيار", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
             "الأحجار بعد الخصم", "الأجر/جم", "الأجرة (ريال)"]
+    # أوزان العرض (مجموعها 100): عمود الأزرار يكفيه القليل
+    COL_W = [6, 10, 10, 6, 9, 9, 8, 8, 8, 9, 8, 9]
 
     def __init__(self, user):
         super().__init__()
@@ -444,6 +449,8 @@ class SalesScreen(QtWidgets.QWidget):
         self._reg_manual = False     # هل كُتب الوزن المقيد يدوياً؟
         self._rate = config.STONE_DISCOUNT_RATE
         self._wo = None              # آخر طقمٍ استُدعي في سطر الإدخال
+        self._w18 = [0.0] * 6        # ظلُّ الأوزان بمكافئ 18
+        self._wage18 = 0.0           # وظلُّ الأجر
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label(
@@ -453,6 +460,7 @@ class SalesScreen(QtWidgets.QWidget):
         lay.addWidget(self._build_items(), 1)
         lay.addLayout(self._build_footer())
         self._install_shortcuts()
+        self._sync_kind_labels()
         self._update_mode()
 
     # ══════════════════════════════════════════════════════════════
@@ -466,6 +474,7 @@ class SalesScreen(QtWidgets.QWidget):
         self.kind.addItem("مرتجع بيع", "sale_return")
         self.kind.setMinimumWidth(150)
         self.kind.currentIndexChanged.connect(self.clear_items)
+        self.kind.currentIndexChanged.connect(self._sync_kind_labels)
         self.date = date_edit()
         self.customer = search_combo("اكتب اسم العميل أو الطرف المقابل…")
         self.customer.currentIndexChanged.connect(self.customer_changed)
@@ -538,7 +547,11 @@ class SalesScreen(QtWidgets.QWidget):
         g.addWidget(QtWidgets.QLabel("العميل / الطرف:"), 0, 2)
         g.addWidget(self.customer, 0, 3)
         g.addWidget(btn_new_cust, 0, 4)
-        g.addWidget(QtWidgets.QLabel("من حساب:"), 0, 5)
+        # العنوان يتبع نوع العملية: البيع **يخرج من** حساب، والمرتجع
+        # **يدخل إلى** الحساب نفسه — فالكلمة تقول اتجاه الحركة لا
+        # اسم الحقل وحده.
+        self.source_lbl = QtWidgets.QLabel("من حساب:")
+        g.addWidget(self.source_lbl, 0, 5)
         g.addWidget(self.source, 0, 6)
         g.addWidget(self.scrap_lbl, 0, 7)
         g.addWidget(self.scrap_karat, 0, 8)
@@ -606,6 +619,19 @@ class SalesScreen(QtWidgets.QWidget):
         self.line_small = wspin()
         self.line_big = wspin()
         self.line_after = wspin()
+        # ثلاث منازلٍ لا منزلتان في خانات الوزن: تبديل العيار يقسم
+        # ويضرب، وتقريبُ منزلتين يُرجع 40.01 بدل 40.000 بعد ذهابٍ
+        # وإياب — فيبدو للمستخدم أن الرقم تغيّر من تلقاء نفسه.
+        for w in (self.line_reg, self.line_standing, self.line_gold,
+                  self.line_small, self.line_big, self.line_after):
+            w.setDecimals(3)
+        # ══ الأجر يُحفظ بمكافئ 18 في الظلّ ══
+        # خانة الأجر بمنزلتين (ريالٌ وهللتان)، وتبديل العيار يضرب
+        # ويقسم: 22 بعيار 18 تصير 25.67 بعيار 21، والعودة تُرجع
+        # 21.99 — فتخرج فاتورة المئة جرام ناقصةً ريالاً من لا شيء.
+        # فالمرجع قيمةٌ ظلّيةٌ بمكافئ 18 لا تُقرَّب، والخانة عرضٌ لها.
+        self._wage18 = 0.0
+        self.line_wage.valueChanged.connect(self._wage_typed)
         for w in (self.line_gold, self.line_small, self.line_big):
             w.valueChanged.connect(self._parts_changed)
         self.line_after.valueChanged.connect(self._after_changed)
@@ -657,16 +683,12 @@ class SalesScreen(QtWidgets.QWidget):
         self.items_table.cellClicked.connect(self._model_clicked)
         self.items_table.setToolTip(
             "انقر خانة الموديل لعرض صورته المحفوظة في دليل الموديلات")
-        btn_remove = QtWidgets.QPushButton("حذف السطر المحدد")
-        btn_remove.setObjectName("ghost")
-        btn_remove.clicked.connect(self.remove_item)
-        btn_weight = QtWidgets.QPushButton("⚖ تعديل وزن السطر")
-        btn_weight.setObjectName("ghost")
-        btn_weight.setToolTip("تصحيح الوزن المقيد المُدخل خطأً")
-        btn_weight.clicked.connect(self.edit_line_weight)
-        btn_wage = QtWidgets.QPushButton("تعديل أجر السطر")
-        btn_wage.setObjectName("ghost")
-        btn_wage.clicked.connect(self.edit_line_wage)
+        # التعديل والحذف في **عمود السطر الأول** لا تحت الجدول:
+        # زرٌّ في صفّه لا يُخطئ صاحبه، ولا يحتاج تحديداً سابقاً.
+        hint = QtWidgets.QLabel(
+            "✎ يفتح السطر كاملاً للتصحيح   ·   ✕ يحذفه من الفاتورة "
+            "  ·   كلاهما في أول عمودٍ من الجدول")
+        hint.setObjectName("cardSub")
 
         self.p_weight = _Panel("إجمالي الوزن المقيد")
         self.p_wages = _Panel("إجمالي الأجور")
@@ -686,12 +708,7 @@ class SalesScreen(QtWidgets.QWidget):
 
         v = QtWidgets.QVBoxLayout(box)
         v.addWidget(self.items_table, 1)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(btn_remove)
-        row.addWidget(btn_weight)
-        row.addWidget(btn_wage)
-        row.addStretch(1)
-        v.addLayout(row)
+        v.addWidget(hint)
         panels = QtWidgets.QHBoxLayout()
         for p in (self.p_weight, self.p_wages,
                   self.p_gold_bal, self.p_cash_bal):
@@ -771,6 +788,24 @@ class SalesScreen(QtWidgets.QWidget):
         on = self._is_scrap_source()
         self.scrap_lbl.setVisible(on)
         self.scrap_karat.setVisible(on)
+
+    def _is_return(self):
+        return self.kind.currentData() == "sale_return"
+
+    def _sync_kind_labels(self, *_):
+        """«من حساب» في البيع و«إلى حساب» في المرتجع — الحساب واحد.
+
+        المرتجع يُدخل البضاعة إلى المخزن نفسه الذي خرجت منه، فتسميته
+        «من حساب» تقلب المعنى في ذهن من يقرأ الشاشة.
+        """
+        ret = self._is_return()
+        self.source_lbl.setText("إلى حساب:" if ret else "من حساب:")
+        self.source.setToolTip(
+            ("الحساب الذي يدخل إليه ذهب هذا المرتجع. يُحفظ مع العملية "
+             "ويُطبع عليها.") if ret else
+            ("الحساب الذي يخرج منه ذهب هذه الفاتورة — ويعود إليه في "
+             "المرتجع. يُحفظ مع الفاتورة ويُطبع عليها."))
+        self.scrap_lbl.setText("عيار الإضافة:" if ret else "عيار الخصم:")
 
     def _source_changed(self, *_):
         self._sync_scrap_box()
@@ -1076,6 +1111,8 @@ class SalesScreen(QtWidgets.QWidget):
                 w.setValue(0)
         finally:
             self._calc = False
+        self._snap_w18()
+        self._wage18 = 0.0
         self._reg_manual = False
         self._rate = config.STONE_DISCOUNT_RATE
         self._wo = None
@@ -1115,10 +1152,12 @@ class SalesScreen(QtWidgets.QWidget):
                 base = (kv.rate_store(self._agreed_wage)
                         if self._agreed_wage > 0
                         else (wo["wage_per_gram"] or 0))
+                self._wage18 = float(base or 0)
                 self.line_wage.setValue(kv.rate(base, k))
         finally:
             self._calc = False
         self._reg_manual = False
+        self._snap_w18()
 
     def _wo_lookup(self):
         """يستدعي بطاقة الطقم من رقم التشغيل ويملأ السطر بها."""
@@ -1141,6 +1180,22 @@ class SalesScreen(QtWidgets.QWidget):
         if self.line_reg.hasFocus():
             self.line_reg.selectAll()
 
+    def _w_fields(self):
+        """خانات الوزن الست بترتيبها — مرجعٌ واحد لكل ما يمسّها."""
+        return (self.line_reg, self.line_standing, self.line_gold,
+                self.line_small, self.line_big, self.line_after)
+
+    def _snap_w18(self):
+        """لقطةٌ ظلّيةٌ للأوزان بمكافئ 18 — مرجعُ تبديل العيار.
+
+        **لماذا**: الخانة تعرض ثلاث منازل، وتبديل العيار قسمةٌ ثم
+        ضرب. فوزنٌ كُتب 45.000 يعود 44.999 بعد ذهابٍ وإياب، فتنقص
+        أجرة الفاتورة هللتين من لا شيء ويظن المستخدم أن الرقم تغيّر
+        وحده. الظلُّ لا يُقرَّب، فالعودة تُرجع ما كُتب حرفياً.
+        """
+        self._w18 = [kv.store(w.value(), self._karat_now)
+                     for w in self._w_fields()]
+
     def _parts_changed(self, *_):
         """تغيّر الذهب أو الفصوص أو الأحجار ⇒ يُعاد حساب المشتقّات."""
         if self._calc:
@@ -1158,6 +1213,7 @@ class SalesScreen(QtWidgets.QWidget):
                           + self.line_small.value() + after, 3))
         finally:
             self._calc = False
+        self._snap_w18()
 
     def _after_changed(self, *_):
         """كتابةُ «الأحجار بعد الخصم» يدوياً تُعيد اشتقاق نسبة الخصم.
@@ -1178,12 +1234,14 @@ class SalesScreen(QtWidgets.QWidget):
                           + self.line_after.value(), 3))
         finally:
             self._calc = False
+        self._snap_w18()
 
     def _reg_changed(self, *_):
         """الوزن المقيد المكتوب بيدٍ يُحترم ولا يُعاد حسابه بعدها."""
         if self._calc:
             return
         self._reg_manual = True
+        self._snap_w18()
 
     def _karat_changed(self, *_):
         """تبديل العيار يعيد كتابة أوزان السطر بعياره الجديد.
@@ -1198,13 +1256,20 @@ class SalesScreen(QtWidgets.QWidget):
             return
         self._calc = True
         try:
-            for w in (self.line_reg, self.line_standing, self.line_gold,
-                      self.line_small, self.line_big, self.line_after):
-                w.setValue(round(w.value() * old / new, 3))
-            self.line_wage.setValue(
-                round(self.line_wage.value() * new / old, 2))
+            # الأوزان من ظلّها بمكافئ 18 لا من الخانات المقرَّبة
+            for w, base in zip(self._w_fields(), self._w18):
+                w.setValue(kv.g(base, new))
+            # والأجر كذلك — من قيمته الظلّية غير المقرَّبة
+            self.line_wage.setValue(kv.rate(self._wage18, new))
         finally:
             self._calc = False
+
+    def _wage_typed(self, *_):
+        """كلّ أجرٍ يكتبه المستخدم يُحفظ بمكافئ 18 في الظلّ."""
+        if self._calc:
+            return
+        self._wage18 = kv.rate_store(self.line_wage.value(),
+                                     self._karat_now)
 
     # ══════════════════════════════════════════════════════════════
     #  بنود الفاتورة
@@ -1458,14 +1523,17 @@ class SalesScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
-    def remove_item(self):
+    def remove_item(self, row=None):
         """يحذف السطر — ويفكّ ربط الموديل الذي سُجّل في هذه الجلسة.
 
         **لماذا**: لو أخطأ المستخدم في رقم الموديل ثم حذف السطر
         ليعيده، يجب أن يعود الطقم بلا موديل فيُدخل الصحيح — لا أن
         يرث الخطأ. أما موديل كان مسجّلاً قبل الجلسة فيبقى كما هو.
+
+        `row` يأتي من زرّ الصف نفسه؛ وبلا رقمٍ يعمل على المحدَّد
+        (اختصار Delete).
         """
-        r = self.items_table.currentRow()
+        r = self.items_table.currentRow() if row is None else int(row)
         if not (0 <= r < len(self.items)):
             return
         it = self.items.pop(r)
@@ -1483,64 +1551,113 @@ class SalesScreen(QtWidgets.QWidget):
             pass          # الموديل وصفي: فشله لا يعطّل الحذف
         self.render_items()
 
-    def edit_line_weight(self):
-        """يصحّح الوزن المقيد لسطر مُدخَل خطأً.
+    def edit_item(self, row=None):
+        """يفتح السطر كاملاً للتصحيح — بنفس خانات سطر الإدخال.
 
-        الرقم التجميعي 0001 يقبل أي وزن (رصيد وزني مجمّع)، أما الطقم
-        المفرد فوزنه ثابت من بطاقته — فتغييره يعني تسوية وزن يجب أن
-        تمر بشاشة التسوية لا بالفاتورة، حفاظاً على سلامة المخزون.
+        **لماذا الصفّ كلّه لا الوزن وحده**: الخطأ في الإدخال السريع
+        لا يقع في خانةٍ بعينها. وفتحُ نافذةٍ لكل خانة يعني ثلاث
+        نوافذ لتصحيح سطرٍ واحد — فصارت نافذةً واحدة فيها ما في
+        السطر، تُفتح من زرّ السطر نفسه فلا تُخطئ صاحبها.
+
+        والوزن المقيد للطقم المفرد يبقى محروساً: تغييره يخالف بطاقة
+        الطقم، فيُسأل عنه صراحةً قبل القبول.
         """
-        r = self.items_table.currentRow()
+        r = self.items_table.currentRow() if row is None else int(row)
         if not (0 <= r < len(self.items)):
             err(self, "اختر سطراً من جدول البنود أولاً")
             return
         it = self.items[r]
         wo = it["wo"]
-        k = int(it.get("karat") or kv.active())
-        if not wo["is_bulk"]:
-            if not ask(self,
-                       f"الطقم {wo['work_order_no']} وزنه المقيد "
-                       f"{kv.g(wo['registered_weight'], k):,.2f} "
-                       f"{kv.unit(k)} من بطاقته.\n\n"
-                       f"تغييره هنا يخالف بطاقة الطقم — الأصح تعديله "
-                       f"من شاشة تسوية وزن الطقم.\n\n"
-                       f"هل تريد المتابعة على أي حال؟"):
-                return
-        cur = float(it.get("weight") or 0)
-        val, ok = QtWidgets.QInputDialog.getDouble(
-            self, "تعديل الوزن المقيد",
-            f"الوزن المقيد للطقم {wo['work_order_no']} "
-            f"({kv.unit(k)}):",
-            cur, 0.0, 1000000.0, 3)
-        if not ok:
-            return
-        if val <= 0:
-            err(self, "الوزن يجب أن يكون أكبر من صفر")
-            return
-        it["weight"] = round(val, 3)
-        if wo["is_bulk"]:
-            it["gold"] = it["standing"] = round(val, 3)
-        self.render_items()
+        k0 = int(it.get("karat") or kv.active())
+        p = self._parts_of(it)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"تعديل السطر — {wo['work_order_no']}")
+        dlg.setMinimumWidth(460)
+        w_model = QtWidgets.QLineEdit(
+            ((wo["model_no"] if "model_no" in wo.keys() else "") or ""))
+        w_karat = QtWidgets.QComboBox()
+        for kk in config.KARATS:
+            w_karat.addItem(f"عيار {kk}", kk)
+        i = w_karat.findData(k0)
+        if i >= 0:
+            w_karat.setCurrentIndex(i)
+        w_reg, w_stand = wspin(), wspin()
+        w_gold, w_small, w_big, w_after = wspin(), wspin(), wspin(), wspin()
+        w_wage = mspin()
+        w_reg.setValue(float(it.get("weight") or 0))
+        w_stand.setValue(p["standing"])
+        w_gold.setValue(p["gold"])
+        w_small.setValue(p["small"])
+        w_big.setValue(p["big"])
+        w_after.setValue(p["after"])
+        w_wage.setValue(float(it.get("wage") or 0))
+        agreed = QtWidgets.QLabel(
+            f"💠 المتفق عليه مع هذا العميل: {self._agreed_wage:,.2f}"
+            if self._agreed_wage > 0 else "")
+        agreed.setObjectName("cardSub")
 
-    def edit_line_wage(self):
-        r = self.items_table.currentRow()
-        if not (0 <= r < len(self.items)):
-            err(self, "اختر سطراً من جدول البنود أولاً")
+        f = QtWidgets.QFormLayout()
+        f.addRow("رقم الموديل:", w_model)
+        f.addRow("رقم التشغيل:", QtWidgets.QLabel(wo["work_order_no"]))
+        f.addRow("العيار:", w_karat)
+        f.addRow("الوزن المقيد:", w_reg)
+        f.addRow("الوزن القائم:", w_stand)
+        f.addRow("الذهب:", w_gold)
+        f.addRow("الفصوص:", w_small)
+        f.addRow("الأحجار:", w_big)
+        f.addRow("الأحجار بعد الخصم:", w_after)
+        f.addRow("الأجر/جم:", w_wage)
+        f.addRow(agreed)
+        box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save
+            | QtWidgets.QDialogButtonBox.Cancel)
+        box.accepted.connect(dlg.accept)
+        box.rejected.connect(dlg.reject)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addLayout(f)
+        lay.addWidget(box)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
             return
-        it = self.items[r]
-        cur = it["wage"]
-        k = int(it.get("karat") or kv.active())
-        agreed = (f"\nالمتفق عليه مع هذا العميل: {self._agreed_wage:,.2f}"
-                  if self._agreed_wage > 0 else "")
-        val, ok = QtWidgets.QInputDialog.getDouble(
-            self, "تعديل الأجر",
-            f"أجر الجرام ({kv.unit(k)}) للطقم "
-            f"{it['wo']['work_order_no']}:" + agreed,
-            float(cur or 0), 0.0, 100000.0, 2)
-        if ok:
-            it["wage"] = val
-            self._wage_hint(kv.rate(kv.rate_store(val, k)))
-            self.render_items()
+        k = int(w_karat.currentData() or k0)
+        reg = round(w_reg.value(), 3)
+        if reg <= 0:
+            err(self, "الوزن المقيد يجب أن يكون أكبر من صفر")
+            return
+        # وزن الطقم المفرد من بطاقته: تغييره هنا يخالفها، فيُسأل عنه
+        if not wo["is_bulk"] and \
+                abs(kv.store(reg, k) - float(wo["registered_weight"] or 0)) \
+                > 0.001:
+            if not ask(self,
+                       f"الطقم {wo['work_order_no']} وزنه المقيد في "
+                       f"بطاقته {kv.g(wo['registered_weight'], k):,.2f} "
+                       f"{kv.unit(k)}، وأنت تكتب {reg:,.2f}.\n\n"
+                       f"الأصحّ تعديل البطاقة من شاشة تسوية وزن "
+                       f"الطقم.\n\nهل تريد المتابعة على أي حال؟"):
+                return
+        it.update({"karat": k, "weight": reg,
+                   "wage": round(w_wage.value(), 2),
+                   "gold": round(w_gold.value(), 3),
+                   "small": round(w_small.value(), 3),
+                   "big": round(w_big.value(), 3),
+                   "after": round(w_after.value(), 3),
+                   "standing": round(w_stand.value() or reg, 3)})
+        typed = w_model.text().strip()
+        cur_model = ((wo["model_no"] if "model_no" in wo.keys() else "")
+                     or "").strip()
+        if typed and typed != cur_model:
+            try:
+                from models import models_catalog as mc
+                with db() as conn:
+                    mc.assign_model(conn, wo["id"], typed,
+                                    self.user["username"])
+                    it["wo"] = inventory.get_wo_by_no(
+                        conn, wo["work_order_no"]) or wo
+                self._remember_model_change(wo, cur_model)
+                self._reload_models()
+            except Exception:
+                pass      # الموديل وصفي: فشله لا يُبطل تصحيح الأوزان
+        self._wage_hint(kv.rate(kv.rate_store(it["wage"], k)))
+        self.render_items()
 
     def _remember_model_change(self, wo, before):
         """يسجّل أن الموديل رُبط في هذه الجلسة — ليُفكّ عند الحذف."""
@@ -1593,10 +1710,10 @@ class SalesScreen(QtWidgets.QWidget):
         ترك الشاشة والبحث في دليل الموديلات. الصورة وصفية بحتة بلا أي
         أثر محاسبي، فعرضها هنا لا يمسّ شيئاً.
         """
-        if col != 0:
+        if col != 1:          # العمود الأول للأزرار، والموديل يليه
             return
         try:
-            show_model_image(self, cell(self.items_table, row, 0))
+            show_model_image(self, cell(self.items_table, row, 1))
         except Exception as e:
             info(self, str(e), "صورة الموديل")
 
@@ -1621,7 +1738,7 @@ class SalesScreen(QtWidgets.QWidget):
             if mn != "—" and has_model_image(mn):
                 mn = f"🖼 {mn}"
             wages = gold_math.total_wages(wage, weight)
-            rows.append((mn, wo["work_order_no"], f"عيار {k}", weight,
+            rows.append(("", mn, wo["work_order_no"], f"عيار {k}", weight,
                          p["standing"], p["gold"], p["small"], p["big"],
                          p["after"], wage, wages))
             # الإجماليات تُجمع بمكافئ 18 لا بأرقام الشاشة: أسطرٌ
@@ -1632,7 +1749,7 @@ class SalesScreen(QtWidgets.QWidget):
             t["wages"] += wages
         if rows:
             u = kv.active()
-            rows.append(("الإجمالي", f"{len(self.items)} طقم",
+            rows.append(("", "الإجمالي", f"{len(self.items)} طقم",
                          f"عيار {u}", round(kv.g(t['reg']), 3),
                          round(kv.g(t["standing"]), 3),
                          round(kv.g(t["gold"]), 3),
@@ -1641,8 +1758,15 @@ class SalesScreen(QtWidgets.QWidget):
                          round(kv.g(t["after"]), 3), "—",
                          round(t["wages"], 2)))
         fill(self.items_table, self.COLS, rows)
+        fit_columns(self.items_table, self.COL_W)
         if rows:
             self._bold_row(len(rows) - 1)
+            # الأزرار لأسطر البنود وحدها — وصفُّ الإجمالي لا يُعدَّل
+            row_action_buttons(self.items_table, len(self.items),
+                               on_edit=self.edit_item,
+                               on_delete=self.remove_item,
+                               edit_tip="تعديل هذا السطر كاملاً",
+                               del_tip="حذف هذا السطر من الفاتورة")
         self.recalc()
 
     def _bold_row(self, r):
@@ -1765,7 +1889,8 @@ class SalesScreen(QtWidgets.QWidget):
                     self,
                     f"{kind_label}\n\n"
                     f"الطرف: {self.customer.currentText()}\n"
-                    f"من حساب: {self.source.currentText()}"
+                    + ("إلى حساب: " if self._is_return() else "من حساب: ")
+                    + f"{self.source.currentText()}"
                     + (f" — عيار {karat}" if karat else "") + "\n"
                     f"عدد الأطقم: {len(self.items)}\n"
                     f"الوزن المقيد: {kv.g(tot_w):,.2f} {kv.unit()}\n"

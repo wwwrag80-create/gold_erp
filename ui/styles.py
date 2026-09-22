@@ -57,6 +57,13 @@ QToolButton { background: @surface; color: @ink; border: 1px solid @line2;
               border-radius: 8px; padding: 7px 12px; font-weight: bold; }
 QToolButton:hover { background: @hover; border-color: @line3; }
 QToolButton::menu-indicator { width: 0; }
+/* أزرار الصف داخل الجداول: تعديلٌ وحذفٌ لكل سطرٍ في عموده الأول.
+   حشوٌ ضيّق ليسعها ارتفاع الصف، والحذف بلون التحذير فلا يُخلط. */
+QToolButton#rowAct, QToolButton#rowDel { padding: 1px 7px; min-width: 20px;
+  border-radius: 6px; font-size: 11pt; font-weight: bold; }
+QToolButton#rowAct:hover { background: @goldSoft; border-color: @gold; }
+QToolButton#rowDel { color: @redText; border-color: @redSoft; }
+QToolButton#rowDel:hover { background: @red; color: #FFFFFF; }
 QMenu { background: @surface; border: 1px solid @line2; border-radius: 8px;
         padding: 5px; }
 QMenu::item { padding: 7px 24px 7px 14px; border-radius: 6px; }

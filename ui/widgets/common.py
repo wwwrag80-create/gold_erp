@@ -248,6 +248,48 @@ def row_height(table, lines=1, tight=False):
     return int(max(lines, 1) * line + pad)
 
 
+def row_action_buttons(table, count, on_edit=None, on_delete=None,
+                       col=0, skip=(), edit_tip="تعديل هذا السطر",
+                       del_tip="حذف هذا السطر"):
+    """زرّا «تعديل» و«حذف» في أول عمودٍ من الجدول — لكل صفٍّ زرّاه.
+
+    **لماذا في الصف لا تحته**: الأزرار أسفل الجدول تعمل على «السطر
+    المحدد»، فتحتاج نقرتين ونيّةً صحيحة: يحدّد المستخدم سطراً ثم
+    يضغط الزر، وإن سها عن التحديد عدّل غير ما أراد. والزرّ في صفّه
+    لا يُخطئ صاحبه أبداً — نقرةٌ واحدة على السطر المقصود بعينه.
+
+    `skip` لصفوف لا تُعدَّل ولا تُحذف (صفّ الإجمالي مثلاً)، فيبقى
+    عمودها فارغاً.
+    """
+    for r in range(count):
+        if r in skip:
+            continue
+        box = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(box)
+        h.setContentsMargins(2, 0, 2, 0)
+        h.setSpacing(3)
+        if on_edit is not None:
+            b = QtWidgets.QToolButton()
+            b.setObjectName("rowAct")
+            b.setText("✎")
+            b.setToolTip(edit_tip)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            # `r=r` يثبّت رقم الصف لحظة الإنشاء: بدونه تقرأ كل
+            # الأزرار آخر قيمةٍ للمتغيّر فتعدّل جميعها السطر الأخير.
+            b.clicked.connect(lambda _=False, i=r: on_edit(i))
+            h.addWidget(b)
+        if on_delete is not None:
+            d = QtWidgets.QToolButton()
+            d.setObjectName("rowDel")
+            d.setText("✕")
+            d.setToolTip(del_tip)
+            d.setCursor(QtCore.Qt.PointingHandCursor)
+            d.clicked.connect(lambda _=False, i=r: on_delete(i))
+            h.addWidget(d)
+        h.addStretch(1)
+        table.setCellWidget(r, col, box)
+
+
 def fill(table, headers, rows):
     """يملأ الجدول دفعةً واحدة — بلا قياس مكلف على الجداول الكبيرة.
 

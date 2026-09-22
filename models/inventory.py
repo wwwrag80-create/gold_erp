@@ -96,15 +96,64 @@ def create_work_order(conn, wo_no, gold, small_stones, big_stones,
     return item
 
 
-def create_work_orders_batch(conn, rows, entry_date, username):
+def dest_accounts(conn):
+    """المخازن التي يجوز أن تدخلها بضاعة التوريد."""
+    from models import accounts as _a
+    return _a.gold_accounts(conn)
+
+
+def resolve_dest(conn, account_id=None):
+    """يتحقق من حساب الوجهة — وبلا اختيارٍ فالذهب المشغول كما كان."""
+    from models import accounts as _a
+    return _a.resolve_gold_account(conn, account_id, _a.FINISHED_GOLD,
+                                   verb="تدخل إليه")
+
+
+def is_scrap_account(conn, account_id):
+    from models import accounts as _a
+    return _a.is_scrap_account(conn, account_id)
+
+
+def sync_scrap_moves(conn, ref_table, ref_id, account_id, karat, weight18,
+                     sign=1):
+    """يكتب حركة صندوق الكسر بعيارها لمستندٍ ما — أو يمحوها.
+
+    **لماذا**: صندوق الكسر حسابٌ واحد يضمّ الأعيرة الأربعة، والتفصيل
+    بالعيار كلّه في `scrap_moves`. فبضاعةٌ تدخله أو تخرج منه بلا أن
+    تُسجَّل فيه تُغيّر رصيد الحساب ولا تُغيّر أي صندوق — فيظهر في
+    لوحة التحكم وزنٌ بعيارٍ لا وجود له في الواقع.
+
+    والكتابة **استبدالٌ لا إضافة**: تُمحى حركة هذا المستند أولاً ثم
+    تُكتب من جديد، فتعديلُه مرتين لا يُضاعف الخصم.
+    """
+    conn.execute("DELETE FROM scrap_moves WHERE ref_table=? AND ref_id=?",
+                 (ref_table, ref_id))
+    if not karat or not is_scrap_account(conn, account_id):
+        return False
+    k = int(karat)
+    if k not in config.KARATS:
+        raise ValueError(f"عيارٌ غير مدعوم لصندوق الكسر: {karat}")
+    # الوزن المقيد مكافئ 18، وصندوق الكسر يُمسك بالوزن **الفعلي**
+    # بعياره — فيُحوَّل إليه قبل الكتابة.
+    actual = gold_math.from_base_karat(round(float(weight18 or 0), 3), k)
+    add_scrap_move(conn, k, actual * (1 if sign >= 0 else -1),
+                   ref_table, ref_id)
+    return True
+
+
+def create_work_orders_batch(conn, rows, entry_date, username,
+                             dest_account_id=None, scrap_karat=None):
     """توريد دفعة أطقم (إدخال مجمّع من الشاشة Master-Detail) بقيد محاسبي
-    مجمّع واحد: سطر مدين 1200 واحد بإجمالي الوزن المقيد للدفعة كلها /
-    سطر دائن 1100 واحد بنفس الإجمالي — ليظهر الأثر في كشف كل حساب
-    كرقم إجمالي واحد للعملية بدل سطر منفصل لكل طقم.
+    مجمّع واحد: سطر مدين واحد بإجمالي الوزن المقيد للدفعة كلها على
+    **حساب الوجهة** (الذهب المشغول افتراضاً) / سطر دائن 1100 واحد بنفس
+    الإجمالي — ليظهر الأثر في كشف كل حساب كرقم إجمالي واحد للعملية بدل
+    سطر منفصل لكل طقم.
     الرقم التجميعي 0001 حالة خاصة: لا يُنشأ من جديد، بل يزيد رصيده
     الوزني القائم فقط (رصيد تراكمي وليس قطعة مفردة).
     rows: [{"wo_no","gold","small_stones","big_stones","discount_rate",
-            "wage_per_gram","notes"}, ...]
+            "wage_per_gram","notes","karat"}, ...]
+    `karat` في السطر وحدةُ كتابةٍ لا أكثر — الأوزان تصل هنا بمكافئ 18
+    على أي حال، ويُحفظ ليُعاد عرض السطر كما كُتب.
     """
     if not rows:
         raise ValueError("أضف طقماً واحداً على الأقل قبل الترحيل")
@@ -155,13 +204,19 @@ def create_work_orders_batch(conn, rows, entry_date, username):
                          "big": big, "after": after, "reg": reg,
                          "standing": standing, "rate": rate, "wage": wage,
                          "is_bulk": is_bulk, "item_type": item_type,
+                         "karat": int(r.get("karat") or 0),
                          "notes": r.get("notes", "")})
 
     total_reg = round(sum(p["reg"] for p in prepared), 3)
     n = len(prepared)
+    # حساب الوجهة: يُتحقَّق منه قبل أي كتابة، وهو وحده ما تغيّر في
+    # القيد — الطرف الدائن خزينة التصنيع كما كان دائماً.
+    dest_id = resolve_dest(conn, dest_account_id)
+    dest = conn.execute("SELECT code, name FROM accounts WHERE id=?",
+                        (dest_id,)).fetchone()
     lines = [
-        {"account_id": acc_id(conn, "1200"), "gold_debit": total_reg,
-         "line_desc": f"توريد دفعة ({n} طقم) — إجمالي الوزن المقيد"},
+        {"account_id": dest_id, "gold_debit": total_reg,
+         "line_desc": f"توريد دفعة ({n} طقم) إلى {dest['name']}"},
         {"account_id": acc_id(conn, "1100"), "gold_credit": total_reg,
          "line_desc": f"صرف لدفعة إنتاج ({n} طقم)"},
     ]
@@ -217,14 +272,22 @@ def create_work_orders_batch(conn, rows, entry_date, username):
         conn.execute(
             "INSERT INTO wo_batch_lines(entry_id,work_order_id,model_no,"
             "wo_no,gold,small_stones,big_stones,discount_rate,"
-            "registered_weight,wage_per_gram,notes,seq)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "registered_weight,wage_per_gram,notes,karat,seq)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (entry_id, c_["id"], p_.get("model_no"), p_["wo_no"],
              p_["gold"], p_["small"], p_["big"], p_["rate"],
-             p_["reg"], p_.get("wage", 0), p_.get("notes", ""), i))
+             p_["reg"], p_.get("wage", 0), p_.get("notes", ""),
+             p_.get("karat", 0), i))
+
+    # توريدٌ إلى صندوق الكسر: يزيد الصندوق بعياره لا الحساب وحده
+    _k = int(scrap_karat or 0)
+    sync_scrap_moves(conn, "work_orders", entry_id, dest_id, _k,
+                     total_reg, sign=1)
 
     return {"entry_id": entry_id, "total_registered": total_reg,
-            "items": created}
+            "items": created, "dest_account_id": dest_id,
+            "dest_name": f"{dest['code']} — {dest['name']}",
+            "scrap_karat": _k}
 
 
 def list_in_stock(conn):
@@ -942,7 +1005,31 @@ def rename_work_order(conn, wo_id, new_no, username, reason=""):
     return {"old": old_no, "new": new_no, "changed": changed}
 
 
-def update_supply_batch(conn, entry_id, rows, entry_date, username):
+def batch_dest_line(conn, entry_id):
+    """سطر القيد الذي دخلت إليه بضاعة الدفعة — وحسابه.
+
+    الوجهة لا تُحفظ في عمودٍ مستقل: **القيد هو المستند**، فسطره
+    المدين يقول إلى أي مخزنٍ دخلت البضاعة. وقراءته من القيد تجعل
+    الدفعات القديمة (وكلها على الذهب المشغول) تُقرأ كالجديدة بلا
+    ترقيةٍ ولا تخمين.
+    """
+    return conn.execute(
+        "SELECT l.id, l.account_id, l.gold_debit, a.code, a.name"
+        " FROM journal_lines l JOIN accounts a ON a.id=l.account_id"
+        " WHERE l.entry_id=? AND COALESCE(l.gold_debit,0) > 0"
+        " ORDER BY l.id LIMIT 1", (entry_id,)).fetchone()
+
+
+def batch_dest_karat(conn, entry_id):
+    """عيار الكسر الذي دخلته الدفعة — من حركة الصندوق نفسها."""
+    r = conn.execute(
+        "SELECT karat FROM scrap_moves WHERE ref_table='work_orders'"
+        " AND ref_id=? AND is_deleted=0 LIMIT 1", (entry_id,)).fetchone()
+    return int(r["karat"]) if r else 0
+
+
+def update_supply_batch(conn, entry_id, rows, entry_date, username,
+                        dest_account_id=None, scrap_karat=None):
     """يحدّث دفعة توريد مُرحَّلة — **تفاضلياً** لا بإعادة إنشائها.
 
     **لماذا التفاضلي**: إعادة الإنشاء تتطلّب حذف الأطقم القديمة، وهذا
@@ -1052,10 +1139,12 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
             conn.execute(
                 "INSERT INTO wo_batch_lines(entry_id,work_order_id,"
                 "model_no,wo_no,gold,small_stones,big_stones,"
-                "discount_rate,registered_weight,wage_per_gram,notes,seq)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "discount_rate,registered_weight,wage_per_gram,notes,"
+                "karat,seq)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (entry_id, wid, model_no, no, gold, small, big, rate,
-                 reg, wage, r.get("notes", ""), i))
+                 reg, wage, r.get("notes", ""), int(r.get("karat") or 0),
+                 i))
             delta += reg
             added.append(no)
             continue
@@ -1094,9 +1183,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
         conn.execute(
             "UPDATE wo_batch_lines SET model_no=?, gold=?, small_stones=?,"
             " big_stones=?, discount_rate=?, registered_weight=?,"
-            " wage_per_gram=?, notes=?, seq=? WHERE id=?",
+            " wage_per_gram=?, notes=?, karat=?, seq=? WHERE id=?",
             (model_no, gold, small, big, rate, reg, wage,
-             r.get("notes", ""), i, ln["id"]))
+             r.get("notes", ""), int(r.get("karat") or 0), i, ln["id"]))
         delta += (reg - old_reg)
         updated.append(no)
 
@@ -1119,13 +1208,31 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
         delta -= old_reg
         removed.append(no)
 
+    # ══ نقل حساب الوجهة ══
+    # البضاعة دخلت المخزن الخطأ: لا يُصحَّح بقيدٍ ثانٍ (فتُقرأ
+    # عمليتان لعمليةٍ واحدة) بل **بنقل السطر نفسه** إلى حسابه
+    # الصحيح. المبلغ لا يتغيّر فالقيد يبقى متوازناً بالضرورة.
+    dest_line = batch_dest_line(conn, entry_id)
+    _old_dest = dest_line["account_id"] if dest_line else None
+    dest_id = resolve_dest(conn, dest_account_id) if dest_account_id \
+        else _old_dest
+    moved_dest = None
+    if dest_line and dest_id and int(dest_id) != int(_old_dest):
+        from models.accounts import account_name
+        conn.execute("UPDATE journal_lines SET account_id=? WHERE id=?",
+                     (dest_id, dest_line["id"]))
+        moved_dest = (account_name(conn, _old_dest),
+                      account_name(conn, dest_id))
+
     # ── تعديل القيد بالفرق الصافي ──
     delta = round(delta, 3)
     if abs(delta) > 0.001:
+        # السطر المدين يُعرف بكونه **مديناً وزناً** لا بكوده: الوجهة
+        # قد تكون أي مخزنٍ من الشجرة لا الذهب المشغول وحده.
         gold_line = conn.execute(
             "SELECT l.id, l.gold_debit FROM journal_lines l"
-            " JOIN accounts a ON a.id=l.account_id"
-            " WHERE l.entry_id=? AND a.code='1200'", (entry_id,)).fetchone()
+            " WHERE l.entry_id=? AND COALESCE(l.gold_debit,0) > 0"
+            " ORDER BY l.id LIMIT 1", (entry_id,)).fetchone()
         tz_line = conn.execute(
             "SELECT l.id, l.gold_credit FROM journal_lines l"
             " JOIN accounts a ON a.id=l.account_id"
@@ -1177,9 +1284,19 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
     total_reg = conn.execute(
         "SELECT COALESCE(SUM(registered_weight),0) t FROM work_orders"
         " WHERE entry_id=? AND is_deleted=0", (entry_id,)).fetchone()["t"]
+    # حركة صندوق الكسر تُكتب من إجمالي الدفعة **بعد** التعديل لا
+    # بفرقه: استبدالٌ لسطرٍ واحد، فلا يتراكم إدخالان لدفعةٍ عُدِّلت.
+    _dline = batch_dest_line(conn, entry_id)
+    _k = int(scrap_karat if scrap_karat is not None
+             else batch_dest_karat(conn, entry_id) or 0)
+    sync_scrap_moves(conn, "work_orders", entry_id,
+                     _dline["account_id"] if _dline else None, _k,
+                     round(float(total_reg or 0), 3), sign=1)
     return {"entry_id": entry_id, "added": added, "updated": updated,
             "removed": removed, "kept_sold": sorted(set(kept_sold)),
-            "delta": delta,
+            "delta": delta, "moved_dest": moved_dest,
+            "dest_account_id": (_dline["account_id"] if _dline else None),
+            "scrap_karat": _k,
             "total_registered": round(float(total_reg or 0), 3),
             "items": [{"work_order_no": n,
                        "registered_weight": 0, "standing_gold": 0}

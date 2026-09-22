@@ -7,9 +7,10 @@
 from datetime import datetime
 
 import config
-from models.accounts import acc_id, subtree_ids_by_code
+from models import accounts as _acc
+from models.accounts import acc_id
 from models.entities import get_entity
-from models.inventory import SCRAP_ACCOUNT, add_scrap_move, adjust_bulk_wo
+from models.inventory import add_scrap_move, adjust_bulk_wo
 from services import gold_math, zatca
 from services.accounting_engine import post_entry
 from services.audit import log_action
@@ -28,59 +29,27 @@ from services.audit import log_action
 #
 #  والمسموح: كل حسابٍ **قابل للترحيل** تحت مجموعة الذهب والمخازن
 #  (1020). لا حساب عميلٍ ولا صندوق نقدٍ ولا مصروف — فالبيع يُخرج
-#  بضاعةً من مخزنٍ لا من ذمّة.
+#  بضاعةً من مخزنٍ لا من ذمّة. والقائمة والتحقق في `models.accounts`
+#  لأن دفعة التوريد تسأل السؤال نفسه معكوساً: **إلى** أي حساب تدخل.
 # ══════════════════════════════════════════════════════════════════
-GOLD_GROUP = "1020"              # الأصول المتداولة — الذهب والمخازن
-DEFAULT_SOURCE = "1200"          # الذهب المشغول (بضاعة تامة)
+GOLD_GROUP = _acc.GOLD_GROUP     # الأصول المتداولة — الذهب والمخازن
+DEFAULT_SOURCE = _acc.FINISHED_GOLD   # الذهب المشغول (بضاعة تامة)
 
 
 def source_accounts(conn):
-    """الحسابات التي يجوز أن يخرج منها ذهب فاتورة — قابلةٌ للترحيل
-    ونشطة، وكلها تحت مجموعة الذهب والمخازن.
-
-    تُقرأ من الشجرة لا من قائمةٍ مكتوبة في الكود: فالحساب الذي يضيفه
-    المصنع اليوم يظهر في القائمة فوراً بلا تعديل برنامج.
-    """
-    ids = subtree_ids_by_code(conn, GOLD_GROUP)
-    if not ids:
-        return []
-    qs = ",".join("?" * len(ids))
-    return conn.execute(
-        f"SELECT id, code, name, balance_type FROM accounts"
-        f" WHERE id IN ({qs}) AND is_postable=1 AND is_active=1"
-        f" ORDER BY code", ids).fetchall()
+    """الحسابات التي يجوز أن يخرج منها ذهب فاتورة."""
+    return _acc.gold_accounts(conn)
 
 
 def is_scrap_account(conn, account_id):
     """هل هذا الحساب صندوق الكسر؟ — فيلزم بيان العيار المخصوم منه."""
-    if not account_id:
-        return False
-    r = conn.execute("SELECT code FROM accounts WHERE id=?",
-                     (account_id,)).fetchone()
-    return bool(r) and r["code"] == SCRAP_ACCOUNT
+    return _acc.is_scrap_account(conn, account_id)
 
 
 def resolve_source(conn, account_id=None):
-    """يتحقق من حساب المصدر ويعيده — وبلا اختيارٍ يعيد الذهب المشغول.
-
-    التحقق هنا لا في الشاشة: أي طريقٍ يصل إلى `create_sale` (استيراد،
-    تحويل فاتورة، اختبار) يمرّ من هنا، فلا يُرحَّل ذهبٌ من حساب
-    مصروفاتٍ أو ذمّةِ عميلٍ بحال.
-    """
-    default_id = acc_id(conn, DEFAULT_SOURCE)
-    if not account_id or int(account_id) == int(default_id):
-        return default_id
-    allowed = {r["id"] for r in source_accounts(conn)}
-    if int(account_id) not in allowed:
-        r = conn.execute("SELECT code, name FROM accounts WHERE id=?",
-                         (account_id,)).fetchone()
-        raise ValueError(
-            "لا يصلح حساباً يخرج منه ذهب الفاتورة: "
-            + (f"{r['code']} — {r['name']}" if r else str(account_id))
-            + "\n\nالمسموح: الحسابات القابلة للترحيل تحت مجموعة الذهب "
-              "والمخازن (خزينة التصنيع · الذهب المشغول · صندوق الكسر · "
-              "وما يُضاف تحتها).")
-    return int(account_id)
+    """يتحقق من حساب المصدر ويعيده — وبلا اختيارٍ يعيد الذهب المشغول."""
+    return _acc.resolve_gold_account(conn, account_id, DEFAULT_SOURCE,
+                                     verb="يخرج منه")
 
 
 def _sync_scrap_moves(conn, invoice_id, source_id, karat, total_w18, kind):

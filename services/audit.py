@@ -64,6 +64,11 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                     f"تحويلها: {names} — احذف الفاتورة المرتبطة أولاً")
             for w in wos:
                 _mark(conn, "work_orders", w["id"], username)
+            # دفعةٌ ورَدت إلى صندوق الكسر: حذفها يُخرج وزنها من عياره،
+            # وإلا بقي الصندوق زائداً بعيارٍ بلا مستندٍ يفسّره.
+            conn.execute("UPDATE scrap_moves SET is_deleted=1"
+                         " WHERE ref_table='work_orders' AND ref_id=?",
+                         (entry_id,))
         elif src == "invoices":
             from models.inventory import adjust_bulk_wo
             inv = conn.execute("SELECT * FROM invoices WHERE id=?", (sid,)).fetchone()

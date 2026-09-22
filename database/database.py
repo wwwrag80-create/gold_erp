@@ -391,6 +391,9 @@ CREATE TABLE IF NOT EXISTS wo_batch_lines(
   registered_weight REAL NOT NULL DEFAULT 0,
   wage_per_gram REAL NOT NULL DEFAULT 0,
   notes TEXT DEFAULT '',
+  -- عيار كتابة السطر: الأوزان مخزَّنة بمكافئ 18 دائماً، وهذا يقول
+  -- بأي عيارٍ كُتبت ليُعاد عرضها كما كُتبت. صفر = عيار المصنع.
+  karat INTEGER NOT NULL DEFAULT 0,
   seq INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_wbl_entry ON wo_batch_lines(entry_id);
@@ -1326,6 +1329,11 @@ def migrate_schema() -> None:
             "PRAGMA table_info(invoice_items)")]
         if it_cols and "karat" not in it_cols:
             conn.execute("ALTER TABLE invoice_items ADD COLUMN karat"
+                         " INTEGER NOT NULL DEFAULT 0")
+        wbl_cols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(wo_batch_lines)")]
+        if wbl_cols and "karat" not in wbl_cols:
+            conn.execute("ALTER TABLE wo_batch_lines ADD COLUMN karat"
                          " INTEGER NOT NULL DEFAULT 0")
 
         # 18) سلسلة بصمات القيود — سجل تدقيق محصَّن (`models.integrity`).

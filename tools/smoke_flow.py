@@ -3546,8 +3546,8 @@ def main():
                     _scr44.line_big, _scr44.line_after]
         check("سطر الإدخال بالترتيب المطلوب وEnter يمشي عليه",
               _scr44._chain == _order44 and len(_scr44._enter_navs) >= 1)
-        check("وأعمدة الجدول بالترتيب نفسه",
-              _scr44.COLS == ["الموديل", "رقم التشغيل", "العيار",
+        check("وأعمدة الجدول بالترتيب نفسه بعد عمود الأزرار",
+              _scr44.COLS == ["", "الموديل", "رقم التشغيل", "العيار",
                               "الوزن المقيد", "الوزن القائم", "الذهب",
                               "الفصوص", "الأحجار", "الأحجار بعد الخصم",
                               "الأجر/جم", "الأجرة (ريال)"],
@@ -3564,6 +3564,135 @@ def main():
               not _scr44.scrap_karat.isHidden()
               and load_pref("sales_source_account", "") == "1310")
         _scr44.source.setCurrentIndex(_codes_ui.index("1200"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("45) إلى أي حساب تدخل بضاعة التوريد")
+    # ══ السؤال نفسه معكوساً ══
+    # الفاتورة تُخرج ذهباً من مخزن، ودفعة التوريد تُدخله إلى مخزن.
+    # وكلاهما كان حساباً واحداً مكتوباً في الكود. وما يُحرَس هنا: أن
+    # البضاعة تدخل المختار فعلاً، وأن صندوق الكسر يزيد **بعياره**،
+    # وأن تصحيح الوجهة ينقل السطر ولا يكتب قيداً ثانياً.
+    from models import inventory as _iv45
+    with db() as conn:
+        _scrap45 = acc_id(conn, "1310")
+        _b45 = _iv45.create_work_orders_batch(conn, [
+            {"wo_no": "DST-1", "gold": 30.0, "small_stones": 0.0,
+             "big_stones": 0.0, "wage_per_gram": 20.0, "karat": 21},
+        ], "2026-12-23", "admin", dest_account_id=_scrap45, scrap_karat=22)
+
+    def _bal45(code):
+        with db(readonly=True) as conn:
+            return account_balance(conn, acc_id(conn, code))[0]
+
+    with db(readonly=True) as conn:
+        _line45 = _iv45.batch_dest_line(conn, _b45["entry_id"])
+        _mv45 = conn.execute(
+            "SELECT karat, actual_delta d FROM scrap_moves"
+            " WHERE ref_table='work_orders' AND ref_id=? AND is_deleted=0",
+            (_b45["entry_id"],)).fetchall()
+        _wbl45 = conn.execute(
+            "SELECT COALESCE(karat,0) k FROM wo_batch_lines"
+            " WHERE entry_id=?", (_b45["entry_id"],)).fetchone()["k"]
+    check("دفعة التوريد تدخل الحساب المختار لا الذهب المشغول",
+          bool(_line45) and _line45["code"] == "1310",
+          _line45["code"] if _line45 else "—")
+    check("وصندوق الكسر يزيد بوزنه الفعلي بعياره",
+          len(_mv45) == 1 and _mv45[0]["karat"] == 22
+          and abs(_mv45[0]["d"] - _gm44.from_base_karat(30.0, 22)) < 0.011,
+          f"{_mv45[0]['karat'] if _mv45 else '—'} · "
+          f"{_mv45[0]['d'] if _mv45 else 0:.3f}")
+    check("وعيار كتابة السطر يُحفظ في سطر الدفعة", _wbl45 == 21,
+          str(_wbl45))
+    _b_scrap45, _b_worked45 = _bal45("1310"), _bal45("1200")
+    with db(readonly=True) as conn:
+        _n45 = conn.execute(
+            "SELECT COUNT(*) c FROM journal_entries"
+            " WHERE source_table='work_orders'").fetchone()["c"]
+    with db() as conn:
+        _up45 = _iv45.update_supply_batch(
+            conn, _b45["entry_id"],
+            [{"wo_no": "DST-1", "gold": 30.0, "small_stones": 0.0,
+              "big_stones": 0.0, "discount_rate": 0.5,
+              "wage_per_gram": 20.0, "karat": 21}],
+            "2026-12-23", "admin",
+            dest_account_id=acc_id(conn, "1200"))
+    with db(readonly=True) as conn:
+        _n45b = conn.execute(
+            "SELECT COUNT(*) c FROM journal_entries"
+            " WHERE source_table='work_orders'").fetchone()["c"]
+        _left45 = conn.execute(
+            "SELECT COUNT(*) c FROM scrap_moves"
+            " WHERE ref_table='work_orders' AND ref_id=? AND is_deleted=0",
+            (_b45["entry_id"],)).fetchone()["c"]
+        _g45, _c45, _gv45, _cv45 = ledger_balanced(conn)
+    check("وتصحيح الوجهة ينقل سطر القيد نفسه — بلا قيدٍ ثانٍ",
+          _n45b == _n45 and bool(_up45.get("moved_dest"))
+          and abs((_b_scrap45 - _bal45("1310")) - 30.0) < 0.011
+          and abs((_bal45("1200") - _b_worked45) - 30.0) < 0.011,
+          f"قيود {_n45} ← {_n45b}")
+    check("وحركةُ الكسر تُمحى حين لم تعد الدفعة إليه، والدفتر متوازن",
+          _left45 == 0 and _g45 and _c45,
+          f"{_left45} حركة · ذهب {_gv45}")
+
+    def _bad_dest():
+        with db() as conn:
+            _iv45.create_work_orders_batch(
+                conn, [{"wo_no": "DST-9", "gold": 5.0, "small_stones": 0.0,
+                        "big_stones": 0.0}], "2026-12-24", "admin",
+                dest_account_id=acc_id(conn, "1400"))
+    expect_error("ويُرفض إدخال بضاعةٍ إلى حسابٍ ليس مخزن ذهب",
+                 _bad_dest, "لا يصلح")
+
+    # ══ الشاشتان: عمود الأزرار وترتيب الخانات ══
+    try:
+        from PyQt5 import QtWidgets as _QW45
+        _QW45.QApplication.instance() or _QW45.QApplication([])
+        from ui.production_screen import ProductionScreen as _PS45
+        _u45 = {"id": 1, "username": "admin", "full_name": "م",
+                "role": "admin", "role_local": "accountant"}
+        _scr45 = _PS45(_u45)
+        _scr45.refresh()
+        check("شاشة التوريد: الوجهة في رأسها بافتراضها المعروف",
+              _scr45._dest_code() == "1200"
+              and _scr45.scrap_karat.isHidden(), _scr45._dest_code())
+        _codes45 = [r["code"] for r in _scr45.dests]
+        _scr45.dest.setCurrentIndex(_codes45.index("1310"))
+        check("وخانة العيار لا تظهر إلا لصندوق الكسر",
+              not _scr45.scrap_karat.isHidden()
+              and load_pref("supply_dest_account", "") == "1310")
+        _scr45.dest.setCurrentIndex(_codes45.index("1200"))
+        check("وأعمدة جدول الدفعة أولها عمود الأزرار بلا عنوان",
+              _scr45.COLS[0] == ""
+              and _scr45.COLS[1:6] == ["رقم الموديل", "رقم التشغيل",
+                                       "العيار", "الوزن المقيد",
+                                       "الوزن القائم"],
+              " · ".join(_scr45.COLS))
+        _scr45.model_no.setCurrentText("MM")
+        _scr45.wo_no.setText("BTN-1")
+        _scr45.gold.setValue(12.0)
+        _scr45.add_row()
+        check("والزرّان يظهران لسطر الدفعة لا لصفّ الإجمالي",
+              _scr45.grid.cellWidget(0, 0) is not None
+              and _scr45.grid.cellWidget(1, 0) is None
+              and _scr45.grid.rowCount() == 2,
+              f"{_scr45.grid.rowCount()} صف")
+        _scr45.remove_row(0)
+        check("وزرُّ الحذف يحذف سطره بعينه", _scr45.batch == [])
+        from ui.sales_screen import SalesScreen as _SS45
+        _ss45 = _SS45(_u45)
+        _ss45.refresh()
+        check("وشاشة المبيعات كذلك: عمودٌ أول بلا عنوان للأزرار",
+              _ss45.COLS[0] == "" and hasattr(_ss45, "edit_item"),
+              " · ".join(_ss45.COLS[:3]))
+        _ss45.kind.setCurrentIndex(_ss45.kind.findData("sale_return"))
+        check("وفي المرتجع يصير العنوان «إلى حساب» لأن البضاعة تدخل",
+              _ss45.source_lbl.text().startswith("إلى حساب"),
+              _ss45.source_lbl.text())
+        _ss45.kind.setCurrentIndex(_ss45.kind.findData("sale"))
+        check("وفي البيع يعود «من حساب»",
+              _ss45.source_lbl.text().startswith("من حساب"),
+              _ss45.source_lbl.text())
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
