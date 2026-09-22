@@ -3295,7 +3295,30 @@ def main():
           and _lf9._last_user_path().name == "last_user.txt")
     _lf9.save_last_user("")
     check("ورفعُ التذكّر يمحو الاسم", _lf9.load_last_user() == "")
+    # ══ تسلسل الفتح: البوابة لا تختفي قبل ظهور النظام ══
+    # كانت تُعرض بـ`exec_`، و`accept` يُخفيها في لحظته — فيُرى
+    # البرنامجُ يُغلق ثم يُفتح بينما تُبنى الواجهة خلف سطح المكتب.
+    # هذا الفحص يحرس الترتيب: نداءٌ بعد الدخول، لا قبولٌ يُخفي.
+    import inspect as _insp9
+
     import main as _main9
+    _src_main = _insp9.getsource(_main9)
+    _src_login = _insp9.getsource(_gw9.GateWindow.try_login)
+    check("الفتح مربوطٌ بنداءٍ بعد الدخول لا بقبولٍ يُخفي البوابة",
+          hasattr(_main9, "wire_gate")
+          and "gate.exec_()" not in _src_main
+          and "on_signed_in" in _src_login
+          and "self.accept()" not in _src_login.split(
+              "cb = getattr")[0])
+    _build9 = _src_main[_src_main.index("def _build_system"):
+                        _src_main.index("def _on_signed_in")]
+    check("والنظام يُعرض ثم تُطلب الموجة — فلا يسبق الإغلاقُ الظهور",
+          "win.showMaximized()" in _build9
+          and "gate.hand_off" in _build9
+          and _build9.index("win.showMaximized()")
+          < _build9.index("gate.hand_off")
+          and "gate.close" not in _build9,
+          "الإغلاق في نهاية التمازج وحده")
     _steps9 = _main9.prepare_steps()
     check("وخطوات الإقلاع مسمّاة تُعرض على البوابة وهي تُنفَّذ",
           len(_steps9) >= 7

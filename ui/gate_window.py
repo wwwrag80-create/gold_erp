@@ -137,6 +137,9 @@ class GateWindow(QtWidgets.QDialog):
         self.user = None
         self._busy = False
         self._ready = False
+        # يُضبط من `main`: يُنادى بالجلسة بعد نجاح الدخول **والبوابة
+        # ما زالت على الشاشة**، فيبني النظام تحتها ثم يطلب التسليم.
+        self.on_signed_in = None
         self.setWindowTitle(config.APP_NAME)
         self.setObjectName("gateWindow")
         self.setWindowFlags(QtCore.Qt.Window
@@ -451,8 +454,31 @@ class GateWindow(QtWidgets.QDialog):
         name = (session.get("full_name") or session.get("username")
                 or self.username.text().strip())
         self.state.setText(f"أهلاً {name} — جارٍ فتح النظام…")
+        self.form_box.setEnabled(False)
         QtWidgets.QApplication.processEvents()
-        self.accept()
+
+        # ══ لا `accept()` هنا ══
+        # `QDialog.accept` يُخفي النافذة في اللحظة نفسها. والبوابة
+        # ملءُ الشاشة، فإخفاؤها يكشف سطحَ المكتب بينما يُبنى النظام
+        # خلفها — فيرى صاحبُه البرنامجَ **يُغلق ثم يُفتح**، وهو عكس
+        # ما وُضعت له البوابة. لذلك تبقى ظاهرةً ويُبلَّغ من ينتظرها،
+        # وهو الذي يبني النظام ثم يطلب التسليم.
+        cb = getattr(self, "on_signed_in", None)
+        if callable(cb):
+            QtCore.QTimer.singleShot(0, lambda: cb(session))
+            return
+        self.accept()      # مسارٌ احتياطي لمن يستعملها بـ`exec_`
+
+    def fail(self, msg):
+        """عطلٌ بعد الدخول: يُقال على البوابة وتُعاد المحاولة منها.
+
+        البديل أن يُغلق كل شيء صامتاً فلا يعرف صاحبُ النظام ما جرى —
+        والبوابة أقرب مكانٍ يقرأ فيه الخبر.
+        """
+        self._busy = False
+        self.form_box.setEnabled(True)
+        self.btn.setEnabled(True)
+        self._reject_shake(str(msg))
 
     def _reject_shake(self, msg):
         """خطأٌ يُقال في مكانه لا في نافذةٍ تقطع المشهد.
