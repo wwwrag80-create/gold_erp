@@ -2,10 +2,28 @@
 """نقطة تشغيل نظام محاسبة مصنع الذهب — عيار 18."""
 import sys
 
+_SPLASH = {"closed": False}
+
+
+def _close_splash():
+    """يُغلق شاشة بدء الـexe مرةً واحدة — من أي نداءٍ سبق.
+
+    تُنادى من إشارة الرسم ومن مؤقّت الحارس معاً، فالحراسة من
+    التكرار هنا لا عند كل نداء.
+    """
+    if _SPLASH["closed"]:
+        return
+    _SPLASH["closed"] = True
+    try:
+        import pyi_splash                      # داخل الـexe فقط
+        pyi_splash.close()
+    except Exception:
+        pass
+
 
 def main():
     try:
-        from PyQt5 import QtWidgets
+        from PyQt5 import QtCore, QtWidgets
     except ImportError:
         print("يلزم تثبيت PyQt5 أولاً:  pip install PyQt5")
         return
@@ -36,15 +54,16 @@ def main():
     # معطّلاً — وهي أسوأ ثوانٍ في عمر أي برنامج. الآن تظهر البوابة في
     # أول لحظة ويجري التجهيز وهو يقرأ سطر الحالة يتقدّم.
     gate = GateWindow()
+    # ══ تسليمٌ بلا فجوة ولا تداخل ══
+    # شاشة بدء الـexe تُغلق على **أول رسمٍ فعلي** للبوابة لا على
+    # `show()`: بينهما على ويندوز عشراتُ ثانيةٍ يرى فيها المستخدم
+    # الشعار يختفي ثم سواداً ثم البوابة تظهر — وهو «التداخل» الذي
+    # شُكي منه. والمؤقّت حارسٌ إن لم يصل حدثُ الرسم (بيئةٌ بلا
+    # عرض): لا يبقى الشعار فوق البوابة بحال.
+    gate.painted.connect(_close_splash)
+    QtCore.QTimer.singleShot(2500, _close_splash)
     gate.showFullScreen()
     app.processEvents()
-    # شاشة بدء الـexe تُغلق هنا بالضبط: حين صارت البوابة على الشاشة.
-    # إغلاقها قبل ذلك يترك فراغاً، وبعده يُبقي طبقةً فوق البوابة.
-    try:
-        import pyi_splash                      # داخل الـexe فقط
-        pyi_splash.close()
-    except Exception:
-        pass
     gate.prepare(prepare_steps())
 
     wire_gate(app, gate)

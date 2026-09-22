@@ -637,14 +637,52 @@ def search_combo(placeholder="اكتب أول الحروف للبحث…"):
 
 class _EnterNav(QtCore.QObject):
     """ينقل مؤشر الكتابة للخانة التالية عند Enter؛ وعند آخر خانة ينفّذ
-    on_last (إضافة سطر جديد) ثم يعيد التركيز لأول خانة للإدخال الفوري."""
+    on_last (إضافة سطر جديد) ثم يعيد التركيز لأول خانة للإدخال الفوري.
+
+    **الحقول المركّبة**: القائمة المنسدلة القابلة للكتابة وحقلُ
+    التاريخ ليسا حقلاً واحداً — لكلٍّ منهما حقلُ كتابةٍ داخلي هو
+    الذي يتلقّى الضغط. ومرشّح الأحداث المركَّب على الأب لا يرى ما
+    يصل ابنه، فكان Enter يبدو معطَّلاً في خانة الموديل والتاريخ
+    ويعمل فيما عداهما. لذلك يُركَّب المرشّح على الاثنين معاً،
+    ويُردّ الابن إلى أبيه بخريطةٍ صريحة.
+
+    **تسليمُ آخر خانة**: `on_last` قد يُعيد widget — فيُنتقل إليه
+    بدل العودة لأول خانة. وبه تتّصل السلاسل: رأسُ الشاشة يُسلّم
+    لسطر الإدخال، وسطرُ الإدخال يضيف السطر ويعود لأوله.
+    """
 
     def __init__(self, chain, on_last=None, parent=None):
         super().__init__(parent)
         self.chain = list(chain)
         self.on_last = on_last
-        for w in self.chain:
+        self._owner = {}
+        for i, w in enumerate(self.chain):
             w.installEventFilter(self)
+            self._owner[w] = i
+            for child in self._inner(w):
+                child.installEventFilter(self)
+                self._owner[child] = i
+
+    @staticmethod
+    def _inner(w):
+        """حقولُ الكتابة الداخلية لحقلٍ مركّب — إن وُجدت."""
+        out = []
+        try:
+            le = w.lineEdit() if hasattr(w, "lineEdit") else None
+            if le is not None:
+                out.append(le)
+        except Exception:
+            pass
+        return out
+
+    def _index(self, obj):
+        i = self._owner.get(obj)
+        if i is not None:
+            return i
+        try:
+            return self.chain.index(obj)
+        except ValueError:
+            return None
 
     def _focus(self, w):
         w.setFocus(QtCore.Qt.OtherFocusReason)
@@ -652,6 +690,24 @@ class _EnterNav(QtCore.QObject):
             w.selectAll()
         elif hasattr(w, "lineEdit") and w.lineEdit() is not None:
             w.lineEdit().selectAll()
+
+    def _step(self, i, d):
+        """الخانة التالية **الظاهرة** — تُتخطّى المخفيّة والمعطّلة.
+
+        بعض الخانات تظهر بشرط (عيار الكسر مثلاً لا يظهر إلا لصندوق
+        الكسر). والانتقال إلى خانةٍ مخفيّة لا يقع أصلاً، فكان
+        المؤشر يبقى مكانه ويبدو Enter معطَّلاً في تلك الخانة بعينها.
+        """
+        j = i + d
+        while 0 <= j < len(self.chain):
+            w = self.chain[j]
+            try:
+                if w.isVisibleTo(w.parentWidget() or w) and w.isEnabled():
+                    return j
+            except Exception:
+                return j
+            j += d
+        return None
 
     def eventFilter(self, obj, ev):
         if ev.type() != QtCore.QEvent.KeyPress:
@@ -664,9 +720,8 @@ class _EnterNav(QtCore.QObject):
         # لا نعترض السهم إن كان المؤشر داخل نص ولم يبلغ طرفه، فيبقى
         # تحريك المؤشر داخل الحقل ممكناً.
         if key in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right):
-            try:
-                i = self.chain.index(obj)
-            except ValueError:
+            i = self._index(obj)
+            if i is None:
                 return False
             le = obj if hasattr(obj, "cursorPosition") else (
                 obj.lineEdit() if hasattr(obj, "lineEdit") else None)
@@ -686,23 +741,24 @@ class _EnterNav(QtCore.QObject):
                         return False      # ما زال داخل النص
                     if key == QtCore.Qt.Key_Right and pos > 0:
                         return False
-            nxt = i + (1 if key == QtCore.Qt.Key_Left else -1)
-            if 0 <= nxt < len(self.chain):
+            nxt = self._step(i, 1 if key == QtCore.Qt.Key_Left else -1)
+            if nxt is not None:
                 self._focus(self.chain[nxt])
                 return True
             return False
 
         if key in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
-            try:
-                i = self.chain.index(obj)
-            except ValueError:
+            i = self._index(obj)
+            if i is None:
                 return False
-            if i < len(self.chain) - 1:
-                self._focus(self.chain[i + 1])
+            nxt = self._step(i, 1)
+            if nxt is not None:
+                self._focus(self.chain[nxt])
             else:
-                if self.on_last:
-                    self.on_last()
-                if self.chain:
+                nxt = self.on_last() if self.on_last else None
+                if isinstance(nxt, QtWidgets.QWidget):
+                    self._focus(nxt)          # تسليمٌ لسلسلةٍ أخرى
+                elif nxt is not False and self.chain:
                     self._focus(self.chain[0])
             return True
         return False
@@ -710,7 +766,11 @@ class _EnterNav(QtCore.QObject):
 
 def enter_chain(widget_owner, widgets, on_last=None):
     """يفعّل تسلسل Enter على قائمة حقول. يُحفظ المرجع على الشاشة نفسها
-    حتى لا يُلتقط بواسطة جامع المهملات."""
+    حتى لا يُلتقط بواسطة جامع المهملات.
+
+    `on_last` يُعيد widget ⇒ ينتقل إليه المؤشر (تسليمٌ بين السلاسل)،
+    أو `False` ⇒ يبقى مكانه، أو لا شيء ⇒ يعود لأول خانة.
+    """
     nav = _EnterNav(widgets, on_last, widget_owner)
     if not hasattr(widget_owner, "_enter_navs"):
         widget_owner._enter_navs = []

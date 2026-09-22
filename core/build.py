@@ -117,42 +117,30 @@ def _splash_png():
         app = (QtWidgets.QApplication.instance()
                or QtWidgets.QApplication([]))
         _ = app
-        w, h = 520, 300
+        # ══ أول إطارٍ من البوابة، لا لوحةً أخرى ══
+        # كانت الشاشة لوحةً مؤطّرةً بعنوانٍ وسطرِ حالة، فيراها
+        # المستخدم **شعاراً ظهر ثم اختفى** قبل أن تفتح البوابة —
+        # مشهدان لا مشهد. الآن هي نفس خلفية البوابة وشعارُها وحده
+        # بلا إطارٍ ولا نص: فالانتقال اتّساعُ الصورة لا تبديلُها.
+        w, h = 460, 300
         img = QtGui.QImage(w, h, QtGui.QImage.Format_ARGB32)
         img.fill(QtGui.QColor("#17120C"))
         p = QtGui.QPainter(img)
         p.setRenderHint(QtGui.QPainter.Antialiasing, True)
         p.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
-        g = QtGui.QRadialGradient(w / 2, h * 0.42, w * 0.55)
+        g = QtGui.QRadialGradient(w / 2, h * 0.46, w * 0.62)
         c0 = QtGui.QColor("#4A3616")
-        c0.setAlpha(150)
+        c0.setAlpha(120)
         c1 = QtGui.QColor("#4A3616")
         c1.setAlpha(0)
         g.setColorAt(0.0, c0)
         g.setColorAt(1.0, c1)
         p.fillRect(0, 0, w, h, QtGui.QBrush(g))
         from ui.gate_window import _emblem
-        em = _emblem(96)
-        p.drawPixmap(int(w / 2 - 48), 34, em)
-        f = QtGui.QFont()
-        f.setPointSize(15)
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(QtGui.QColor("#F6E7B6"))
-        p.drawText(QtCore.QRect(0, 150, w, 40),
-                   int(QtCore.Qt.AlignCenter), "نظام إدارة مصانع الذهب")
-        f.setPointSize(10)
-        f.setBold(False)
-        p.setFont(f)
-        p.setPen(QtGui.QColor("#C9A227"))
-        p.drawText(QtCore.QRect(0, 194, w, 30),
-                   int(QtCore.Qt.AlignCenter), "جارٍ التشغيل…")
-        pen = QtGui.QPen(QtGui.QColor("#8A6F1E"))
-        pen.setWidth(2)
-        p.setPen(pen)
-        p.setBrush(QtCore.Qt.NoBrush)
-        p.drawRoundedRect(QtCore.QRectF(6, 6, w - 12, h - 12), 10, 10)
+        em = _emblem(120)
+        p.drawPixmap(int(w / 2 - 60), int(h / 2 - 60), em)
         p.end()
+        _ = QtCore
         out = Path(tempfile.mkdtemp(prefix="jadeite_splash_")) / "splash.png"
         img.save(str(out))
         return out if out.exists() else None

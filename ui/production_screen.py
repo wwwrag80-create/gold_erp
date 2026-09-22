@@ -198,6 +198,16 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         btn_new_dest.setObjectName("ghost")
         btn_new_dest.setToolTip("إضافة حساب مخزنٍ جديد تدخل إليه البضاعة")
         btn_new_dest.clicked.connect(self.new_dest)
+        # ══ مرجع العملية ══
+        # ورقةُ الورشة ورقمُ الطلب وكشفُ التسليم — للدفعة مرجعٌ خارج
+        # النظام يعود إليه المحاسب حين يُسأل «من أين جاءت هذه؟».
+        # يُحفظ مع القيد ويظهر في بيان كشف الحساب وحده مُسمّى، فلا
+        # يلتبس برقم التشغيل ولا برقم القيد.
+        self.reference = QtWidgets.QLineEdit()
+        self.reference.setPlaceholderText("رقم ورقة الورشة أو الطلب…")
+        self.reference.setToolTip(
+            "مرجع هذه الدفعة — يظهر في بيان كشف الحساب هكذا: "
+            "«مرجع: …»، ويعود معها عند فتحها للتعديل.")
         self.tazeena_label = big_label()
         self.tazeena_label.setWordWrap(True)
 
@@ -210,8 +220,16 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         g.addWidget(self.scrap_lbl, 0, 4)
         g.addWidget(self.scrap_karat, 0, 5)
         g.addWidget(btn_new_dest, 0, 6)
-        g.addWidget(self.tazeena_label, 1, 0, 1, 7)
+        g.addWidget(QtWidgets.QLabel("المرجع:"), 1, 0)
+        g.addWidget(self.reference, 1, 1, 1, 6)
+        g.addWidget(self.tazeena_label, 2, 0, 1, 7)
         g.setColumnStretch(3, 3)
+        # ══ Enter يمضي إلى الأمام في الشاشة كلها ══
+        # رأسُ الشاشة سلسلةٌ أولى تُسلّم لسطر الإدخال، فالدفعة كلها
+        # بضغطات Enter متتابعة بلا انتقالٍ إلى الفأرة.
+        self._head_chain = [self.date, self.dest, self.scrap_karat,
+                            self.reference]
+        enter_chain(self, self._head_chain, on_last=lambda: self.model_no)
         return box
 
     # ══════════════════════════════════════════════════════════════
@@ -755,6 +773,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         return {"date": dstr(self.date), "karat": kv.active(),
                 "dest": self._dest_code(),
                 "scrap_karat": self.scrap_karat.currentData(),
+                "reference": self.reference.text().strip(),
                 "batch": [dict(b) for b in self.batch]}
 
     def apply_draft(self, d):
@@ -770,6 +789,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             self.date.setDate(QtCore.QDate.fromString(d["date"],
                                                       "yyyy-MM-dd"))
         self._select_dest(d.get("dest"), d.get("scrap_karat"))
+        self.reference.setText(d.get("reference") or "")
         self.render_batch()
         return True
 
@@ -834,12 +854,14 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                         res = inventory.update_supply_batch(
                             conn, self.editing_entry_id, batch,
                             dstr(self.date), self.user["username"],
-                            dest_account_id=dest_id, scrap_karat=karat)
+                            dest_account_id=dest_id, scrap_karat=karat,
+                            reference=self.reference.text().strip())
                     else:
                         res = inventory.create_work_orders_batch(
                             conn, batch, dstr(self.date),
                             self.user["username"],
-                            dest_account_id=dest_id, scrap_karat=karat)
+                            dest_account_id=dest_id, scrap_karat=karat,
+                            reference=self.reference.text().strip())
             # ══ ما بعد هذه النقطة: المعاملة أُغلقت بنجاح ══
             # بناء الرسالة عرضٌ لا ترحيل. خطأٌ فيه كان يظهر للمستخدم
             # «خطأ» على عمليةٍ **تمّت وحُفظت** — فيعيدها ظانّاً أنها
@@ -880,6 +902,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                    editing=was_editing)
             self.end_edit()
             self.batch = []
+            self.reference.clear()
             # المسوّدة تُمحى فور الترحيل: بديلٌ عن الذاكرة لا عن الدفتر
             drafts.clear(DRAFT_KEY, self.user.get("username"))
             self.draft_note.setVisible(False)
@@ -920,6 +943,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 # وجهة الدفعة من قيدها نفسه — لا من عمودٍ مستقل
                 dline = inventory.batch_dest_line(conn, wo["entry_id"])
                 dkarat = inventory.batch_dest_karat(conn, wo["entry_id"])
+                dref = inventory.batch_reference(conn, wo["entry_id"])
             # المخزَّن بمكافئ 18 ← المعروض بعيار سطره
             if src == "batch":
                 self.batch = [_to_view({
@@ -957,6 +981,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             # مخزناً غير الذي دخلته أولاً إلا باختيارٍ صريح.
             self._select_dest(dline["code"] if dline else None,
                               dkarat or None)
+            self.reference.setText(dref or "")
             self.render_batch()
             self.begin_edit(wo["entry_id"], source_id)
         except Exception as e:

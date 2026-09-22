@@ -3696,6 +3696,187 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("46) البيان بيانُ صاحبه · والمرجع · وEnter يمضي للأمام")
+    # ══ البيان ══
+    # عمود «البيان» في كشف الحساب كان يمتلئ بوصف السطر الآلي
+    # («مديونية ذهب وأجور»)، وكانت الفواتير تُستثنى فيُمحى بيانها
+    # أصلاً — فمن كتب بياناً في شاشة المبيعات لم يجده في الكشف.
+    # القاعدة الآن: البيان نصُّ المستخدم، أو فراغ.
+    from models import inventory as _iv46
+    from models import journal as _jr46
+    with db() as conn:
+        _c46 = add_entity(conn, "عميل البيان", "customer", username="admin")
+        create_work_orders_batch(conn, [
+            {"wo_no": "NOTE-1", "gold": 20.0, "small_stones": 0.0,
+             "big_stones": 0.0, "wage_per_gram": 20.0,
+             "notes": "دفعة الورشة الأولى"},
+            {"wo_no": "NOTE-2", "gold": 10.0, "small_stones": 0.0,
+             "big_stones": 0.0, "wage_per_gram": 20.0,
+             "notes": "دفعة الورشة الأولى"},
+        ], "2026-12-25", "admin", reference="ورقة 77")
+        _wo46 = conn.execute(
+            "SELECT id, entry_id FROM work_orders"
+            " WHERE work_order_no='NOTE-1'").fetchone()
+        _sale46 = create_sale(
+            conn, _c46, [{"work_order_id": _wo46["id"]}],
+            "2026-12-26", "admin", apply_vat=False,
+            description="بيان الفاتورة كما كتبه المحاسب")
+    with db(readonly=True) as conn:
+        _st46 = _jr46.statement(conn, acc_id(conn, "1200"),
+                                "2026-12-25", "2026-12-26")
+        _cust46 = _jr46.statement(
+            conn, conn.execute("SELECT account_id a FROM entities"
+                               " WHERE id=?", (_c46,)).fetchone()["a"],
+            "2026-12-25", "2026-12-26")
+    _inv_row = [r for r in _cust46 if r["op"] == "مبيعات"]
+    check("بيانُ الفاتورة الذي كتبه المستخدم يظهر في كشف الحساب",
+          bool(_inv_row)
+          and _inv_row[0]["desc"] == "بيان الفاتورة كما كتبه المحاسب",
+          (_inv_row[0]["desc"] if _inv_row else "—"))
+    _auto = [r for r in _st46 if "مديونية" in (r["desc"] or "")
+             or "خروج الذهب" in (r["desc"] or "")]
+    check("ولا يظهر وصفُ السطر الآلي في عمود البيان",
+          not _auto, f"{len(_auto)} سطراً آلياً")
+    _sup_row = [r for r in _st46 if r["op"] == "توريد"]
+    check("ومرجعُ دفعة التوريد وملاحظاتها في بيانها",
+          bool(_sup_row) and _sup_row[0]["desc"].startswith("مرجع: ورقة 77")
+          and "دفعة الورشة الأولى" in _sup_row[0]["desc"],
+          (_sup_row[0]["desc"] if _sup_row else "—"))
+    check("والملاحظة المكرّرة لا تتكرّر في البيان",
+          (_sup_row[0]["desc"].count("دفعة الورشة الأولى") == 1
+           if _sup_row else False))
+    with db(readonly=True) as conn:
+        _ref46 = _iv46.batch_reference(conn, _wo46["entry_id"])
+    check("والمرجع يُحفظ مع القيد فيعود عند فتح الدفعة للتعديل",
+          _ref46 == "ورقة 77", _ref46)
+    with db() as conn:
+        _iv46.update_supply_batch(
+            conn, _wo46["entry_id"],
+            [{"wo_no": "NOTE-1", "gold": 20.0, "small_stones": 0.0,
+              "big_stones": 0.0, "discount_rate": 0.5,
+              "wage_per_gram": 20.0, "notes": "صُحّحت الملاحظة"},
+             {"wo_no": "NOTE-2", "gold": 10.0, "small_stones": 0.0,
+              "big_stones": 0.0, "discount_rate": 0.5,
+              "wage_per_gram": 20.0, "notes": "صُحّحت الملاحظة"}],
+            "2026-12-25", "admin", reference="ورقة 78")
+    with db(readonly=True) as conn:
+        _un46 = conn.execute(
+            "SELECT user_note FROM journal_entries WHERE id=?",
+            (_wo46["entry_id"],)).fetchone()["user_note"]
+    check("وتعديلُ الدفعة يُعيد كتابة بيانها ومرجعها",
+          _un46.startswith("مرجع: ورقة 78")
+          and "صُحّحت الملاحظة" in _un46, _un46[:60])
+    # وتصحيحُ بيان الفاتورة بعد ترحيلها يصل إلى الكشف كذلك
+    with db() as conn:
+        _it46 = conn.execute(
+            "SELECT id FROM invoice_items WHERE invoice_id=?",
+            (_sale46["id"],)).fetchone()["id"]
+        _upd46 = _upd(conn, _sale46["id"],
+                      [{"work_order_id": _wo46["id"], "item_id": _it46,
+                        "weight": None, "wage_override": None}],
+                      "admin", description="بيانٌ مصحَّح بعد الترحيل")
+    with db(readonly=True) as conn:
+        _row46 = conn.execute(
+            "SELECT e.user_note un, i.description d FROM invoices i"
+            " JOIN journal_entries e ON e.id=i.entry_id WHERE i.id=?",
+            (_sale46["id"],)).fetchone()
+    check("وتصحيحُ بيان الفاتورة ينزل إلى قيدها فيظهر في الكشف",
+          _row46["un"] == "بيانٌ مصحَّح بعد الترحيل"
+          and _row46["d"] == "بيانٌ مصحَّح بعد الترحيل"
+          and not _upd46.get("unchanged"), _row46["un"])
+    # والسند كذلك: بيانه العام وبيان أسطره معاً
+    with db() as conn:
+        _v46 = create_voucher(conn, "receipt", "2026-12-27", "admin",
+                              entity_id=_c46, notes="سداد الشهر",
+                              rows=[{"kind": "cash", "amount": 500.0,
+                                     "notes": "نقداً باليد"}])
+    with db(readonly=True) as conn:
+        _vn46 = conn.execute(
+            "SELECT e.user_note un FROM vouchers v"
+            " JOIN journal_entries e ON e.id=v.entry_id WHERE v.id=?",
+            (_v46["id"],)).fetchone()["un"]
+    check("وبيانُ السند وبيانُ سطره يجتمعان في بيان الكشف",
+          "سداد الشهر" in _vn46 and "نقداً باليد" in _vn46, _vn46)
+
+    # ══ Enter يمضي للأمام ══
+    try:
+        from PyQt5 import QtCore as _QC46
+        from PyQt5 import QtGui as _QG46
+        from PyQt5 import QtWidgets as _QW46
+        _app46 = _QW46.QApplication.instance() or _QW46.QApplication([])
+        _u46 = {"id": 1, "username": "admin", "full_name": "م",
+                "role": "admin", "role_local": "accountant"}
+
+        def _enter(w):
+            _QW46.QApplication.sendEvent(
+                w, _QG46.QKeyEvent(_QC46.QEvent.KeyPress,
+                                   _QC46.Qt.Key_Return,
+                                   _QC46.Qt.NoModifier))
+            _app46.processEvents()
+
+        from ui.sales_screen import SalesScreen as _SS46
+        _s46 = _SS46(_u46)
+        _s46.refresh()
+        _s46.show()
+        _app46.processEvents()
+        _s46.source.setFocus()
+        _enter(_s46.source)
+        check("المبيعات: Enter من حساب المصدر يتقدّم ولا يقف",
+              not _s46.source.hasFocus(),
+              type(_app46.focusWidget()).__name__)
+        _s46.description.setFocus()
+        _enter(_s46.description)
+        check("وEnter من آخر خانةٍ في الرأس يسلّم لسطر الإدخال",
+              _s46.model_no.hasFocus() or _s46.model_no.lineEdit().hasFocus(),
+              type(_app46.focusWidget()).__name__)
+        _s46.close()
+
+        from ui.production_screen import ProductionScreen as _PS46
+        _p46 = _PS46(_u46)
+        _p46.refresh()
+        _p46.show()
+        _app46.processEvents()
+        _p46.dest.setFocus()
+        _enter(_p46.dest)
+        check("والتوريد: Enter من حساب الوجهة يتقدّم كذلك",
+              not _p46.dest.hasFocus(),
+              type(_app46.focusWidget()).__name__)
+        _p46.reference.setFocus()
+        _enter(_p46.reference)
+        check("وEnter من خانة المرجع يسلّم لسطر الإدخال",
+              _p46.model_no.hasFocus() or _p46.model_no.lineEdit().hasFocus(),
+              type(_app46.focusWidget()).__name__)
+        _p46.close()
+
+        # ══ بوابة الدخول: Enter والأسهم ══
+        from ui.gate_window import GateWindow as _GW46
+        _g46 = _GW46()
+        _g46.resize(900, 600)
+        _g46._ensure_card()
+        _g46.show()
+        _app46.processEvents()
+        _g46.username.setFocus()
+        _enter(_g46.username)
+        check("والبوابة: Enter ينزل من الاسم إلى كلمة المرور",
+              _g46.password.hasFocus())
+        _QW46.QApplication.sendEvent(
+            _g46.password, _QG46.QKeyEvent(_QC46.QEvent.KeyPress,
+                                           _QC46.Qt.Key_Up,
+                                           _QC46.Qt.NoModifier))
+        _app46.processEvents()
+        check("والسهم لأعلى يرجع للاسم", _g46.username.hasFocus())
+        _QW46.QApplication.sendEvent(
+            _g46.username, _QG46.QKeyEvent(_QC46.QEvent.KeyPress,
+                                           _QC46.Qt.Key_Down,
+                                           _QC46.Qt.NoModifier))
+        _app46.processEvents()
+        check("والسهم لأسفل ينزل لكلمة المرور", _g46.password.hasFocus())
+        check("وأول رسمٍ للبوابة يُعلَن ليُغلق شعار البدء في لحظته",
+              hasattr(_g46, "painted") and _g46._painted)
+        _g46.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -144,12 +144,50 @@ def _greeting():
     return "أهلاً بك في هدأة الليل"
 
 
+class _CardKeys(QtCore.QObject):
+    """↑ ↓ تتنقّلان بين خانات لوحة الدخول — كأي نموذجٍ في النظام.
+
+    Enter وحده لا يكفي من يستعمل الأسهم بطبعه؛ ومن أخطأ في كلمة
+    المرور يريد الرجوع سطراً لا أن يلتقط الفأرة.
+    """
+
+    def __init__(self, chain, parent=None):
+        super().__init__(parent)
+        self.chain = list(chain)
+        for w in self.chain:
+            w.installEventFilter(self)
+
+    def eventFilter(self, obj, ev):
+        if ev.type() != QtCore.QEvent.KeyPress:
+            return False
+        if ev.key() not in (QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+            return False
+        try:
+            i = self.chain.index(obj)
+        except ValueError:
+            return False
+        nxt = i + (1 if ev.key() == QtCore.Qt.Key_Down else -1)
+        if 0 <= nxt < len(self.chain):
+            w = self.chain[nxt]
+            w.setFocus(QtCore.Qt.OtherFocusReason)
+            if hasattr(w, "selectAll"):
+                w.selectAll()
+            return True
+        return False
+
+
 class GateWindow(QtWidgets.QDialog):
     """شاشة الترحيب والدخول — تُعاد منها الجلسة في `self.user`."""
+
+    # يُطلق **مرةً واحدة** حين يُرسم أول إطارٍ من البوابة فعلاً.
+    # به تُغلق شاشة بدء الـexe في لحظتها بالضبط: لا قبلها فيظهر
+    # فراغٌ بينهما، ولا بعدها فتبقى طبقةٌ فوق البوابة.
+    painted = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.user = None
+        self._painted = False
         self._busy = False
         self._ready = False
         self._queue = []            # طابور خطوات التجهيز
@@ -362,6 +400,21 @@ class GateWindow(QtWidgets.QDialog):
         self.stamp.setAlignment(QtCore.Qt.AlignCenter)
         lay.addWidget(self.stamp)
 
+        # ══ لوحة المفاتيح وحدها تكفي للدخول ══
+        # Enter كان ينتقل من الاسم إلى كلمة المرور ثم يدخل — وهو
+        # الأكثر استعمالاً. وأُضيف إليه: الأسهم ↑ ↓ (وكذلك ← →)
+        # تتنقّل بين الخانات كما في شاشات النظام، فلا تختلف البوابة
+        # عمّا بعدها. وEnter على «تذكّر اسمي» يدخل مباشرةً.
+        from ui.widgets.common import enter_chain
+        enter_chain(self, [self.username, self.password, self.remember],
+                    on_last=lambda: (self.try_login(), False)[1])
+        self._install_card_keys()
+
+    def _install_card_keys(self):
+        """↑ ↓ تتنقّلان بين خانات اللوحة — والأسهم الأفقية في السلسلة."""
+        self._card_keys = _CardKeys(
+            [self.username, self.password, self.remember, self.btn], self)
+
     # ─────────────────────────────── العرض والحركة
     def showEvent(self, e):
         """المشهد على ثلاث مراحل — ولوحةُ الدخول آخرُها.
@@ -394,6 +447,21 @@ class GateWindow(QtWidgets.QDialog):
         self.stage.start()
         QtCore.QTimer.singleShot(HERO_DELAY, self._begin_hero)
         QtCore.QTimer.singleShot(CARD_DELAY, self._begin_card)
+
+    def paintEvent(self, e):
+        """أول رسمٍ حقيقي: تُعلن البوابة أنها صارت على الشاشة.
+
+        شاشةُ بدء الـexe تُغلق على هذه الإشارة — لا على `show()`
+        وحده. الفرق ثلاثُ عشرات من الثانية على ويندوز، وهي التي
+        كانت تُرى: شعارٌ يختفي ثم سوادٌ ثم البوابة.
+        """
+        super().paintEvent(e)
+        if not self._painted:
+            self._painted = True
+            try:
+                self.painted.emit()
+            except Exception:
+                pass
 
     def _begin_hero(self):
         """الترحيب يظهر وحده — والتجهيز يبدأ تحته بلا ضجيج."""

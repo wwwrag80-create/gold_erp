@@ -141,8 +141,33 @@ def sync_scrap_moves(conn, ref_table, ref_id, account_id, karat, weight18,
     return True
 
 
+def batch_note(reference, rows):
+    """بيانُ قيد الدفعة كما يُقرأ في كشف الحساب.
+
+    **ما يظهر هو ما كتبه المستخدم**: مرجعُ العملية أولاً — وحده
+    ومُسمّى فلا يلتبس برقم السند — ثم ملاحظات الأسطر بلا تكرار.
+    وخلوُّ الاثنين يعني بياناً فارغاً لا جملةً يكتبها النظام عن نفسه.
+    """
+    parts = []
+    ref = str(reference or "").strip()
+    if ref:
+        parts.append(f"مرجع: {ref}")
+    seen = []
+    for r in (rows or []):
+        n = str(r.get("notes") or "").strip()
+        if n and n not in seen:
+            seen.append(n)
+    if seen:
+        txt = " · ".join(seen[:3])
+        if len(seen) > 3:
+            txt += f" … (+{len(seen) - 3})"
+        parts.append(txt)
+    return "  —  ".join(parts)
+
+
 def create_work_orders_batch(conn, rows, entry_date, username,
-                             dest_account_id=None, scrap_karat=None):
+                             dest_account_id=None, scrap_karat=None,
+                             reference=""):
     """توريد دفعة أطقم (إدخال مجمّع من الشاشة Master-Detail) بقيد محاسبي
     مجمّع واحد: سطر مدين واحد بإجمالي الوزن المقيد للدفعة كلها على
     **حساب الوجهة** (الذهب المشغول افتراضاً) / سطر دائن 1100 واحد بنفس
@@ -220,9 +245,16 @@ def create_work_orders_batch(conn, rows, entry_date, username,
         {"account_id": acc_id(conn, "1100"), "gold_credit": total_reg,
          "line_desc": f"صرف لدفعة إنتاج ({n} طقم)"},
     ]
+    _note = batch_note(reference, rows)
     entry_id = post_entry(
         conn, entry_date, f"توريد دفعة أطقم مجمّعة ({n} طقم)", lines,
-        source_table="work_orders", username=username)
+        source_table="work_orders", username=username, note=_note)
+    # المرجع يُحفظ في عمود المستند كذلك: نصُّ البيان قد يُعاد بناؤه،
+    # أما هذا فمخزنٌ ثابت يعود منه المرجع عند فتح الدفعة للتعديل.
+    _ref = str(reference or "").strip()
+    if _ref:
+        conn.execute("UPDATE journal_entries SET doc_no=? WHERE id=?",
+                     (_ref, entry_id))
 
     created = []
     for p in prepared:
@@ -1028,8 +1060,16 @@ def batch_dest_karat(conn, entry_id):
     return int(r["karat"]) if r else 0
 
 
+def batch_reference(conn, entry_id):
+    """مرجع الدفعة كما حُفظ مع قيدها — أو فراغ."""
+    r = conn.execute("SELECT doc_no FROM journal_entries WHERE id=?",
+                     (entry_id,)).fetchone()
+    return (r["doc_no"] or "").strip() if r else ""
+
+
 def update_supply_batch(conn, entry_id, rows, entry_date, username,
-                        dest_account_id=None, scrap_karat=None):
+                        dest_account_id=None, scrap_karat=None,
+                        reference=None):
     """يحدّث دفعة توريد مُرحَّلة — **تفاضلياً** لا بإعادة إنشائها.
 
     **لماذا التفاضلي**: إعادة الإنشاء تتطلّب حذف الأطقم القديمة، وهذا
@@ -1255,6 +1295,15 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
         conn.execute("UPDATE journal_entries SET entry_date=? WHERE id=?",
                      (entry_date, entry_id))
 
+    # ── البيان والمرجع يُعادان من الأسطر بعد التعديل ──
+    # ملاحظةٌ أضيفت أو حُذفت أو مرجعٌ صُحّح: كشف الحساب يقرأ القيد لا
+    # الأسطر، فلو لم يُحدَّث بيانه بقي يقول ما لم يعد صحيحاً.
+    _ref = (batch_reference(conn, entry_id) if reference is None
+            else str(reference or "").strip())
+    conn.execute("UPDATE journal_entries SET user_note=?, doc_no=?"
+                 " WHERE id=?",
+                 (batch_note(_ref, rows), _ref or None, entry_id))
+
     # تعديل دفعة التوريد يغيّر مبالغ القيد وتاريخه في مكانهما —
     # تعديلٌ مشروع من داخل النظام موثَّق في سجل التدقيق أدناه. يُوسَم
     # القيد ليُعاد ختمه في سلسلة البصمات عند إغلاق المعاملة، وإلا
@@ -1294,7 +1343,7 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
                      round(float(total_reg or 0), 3), sign=1)
     return {"entry_id": entry_id, "added": added, "updated": updated,
             "removed": removed, "kept_sold": sorted(set(kept_sold)),
-            "delta": delta, "moved_dest": moved_dest,
+            "delta": delta, "moved_dest": moved_dest, "reference": _ref,
             "dest_account_id": (_dline["account_id"] if _dline else None),
             "scrap_karat": _k,
             "total_registered": round(float(total_reg or 0), 3),

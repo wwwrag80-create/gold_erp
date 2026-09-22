@@ -570,6 +570,15 @@ class SalesScreen(QtWidgets.QWidget):
         g.addWidget(self.wage_note, 3, 0, 1, 10)
         g.setColumnStretch(3, 3)
         g.setColumnStretch(6, 3)
+        # ══ Enter يمضي إلى الأمام في الشاشة كلها ══
+        # كان التنقّل بـEnter في سطر الإدخال وحده، فمن اختار العميل
+        # أو الحساب في الرأس وقف — ويده على لوحة المفاتيح — ينتظر
+        # الفأرة لينزل. الآن رأسُ الشاشة سلسلةٌ أولى تُسلّم لسطر
+        # الإدخال، فالفاتورة كلها بضغطات Enter متتابعة.
+        self._head_chain = [self.kind, self.customer, self.source,
+                            self.scrap_karat, self.date, self.description]
+        enter_chain(self, self._head_chain,
+                    on_last=lambda: self.model_no)
         return box
 
     # ══════════════════════════════════════════════════════════════

@@ -27,6 +27,31 @@ def _resolve_target(conn, entity_id, account_id):
     raise ValueError("اختر جهة تعامل أو حساباً مباشراً لتوجيه السند إليه")
 
 
+def doc_note(notes, rows):
+    """بيانُ السند كما يُقرأ في كشف الحساب — نصُّ المستخدم وحده.
+
+    للسند بيانٌ عام، ولكل سطرٍ فيه بيانٌ خاص يكتبه المستخدم كذلك
+    («كسر ٢١» · «دفعة أولى»). وكشفُ الحساب يقرأ القيد لا الأسطر،
+    فما كُتب في السطر كان يضيع. هنا يُجمَع الاثنان في بيانٍ واحد
+    بلا تكرار — ولا يُضاف إليه شيءٌ من عند النظام.
+    """
+    parts = []
+    base = (notes or "").strip()
+    if base:
+        parts.append(base)
+    seen = []
+    for r in (rows or []):
+        n = str(r.get("notes") or "").strip()
+        if n and n != base and n not in seen:
+            seen.append(n)
+    if seen:
+        txt = " · ".join(seen[:3])
+        if len(seen) > 3:
+            txt += f" … (+{len(seen) - 3})"
+        parts.append(txt)
+    return "  —  ".join(parts)
+
+
 def create_voucher(conn, kind, voucher_date, username, *,
                    entity_id=None, account_id=None,
                    gold_weight=0.0, gold_karat=18, cash_amount=0.0,
@@ -187,7 +212,7 @@ def create_voucher(conn, kind, voucher_date, username, *,
     entry_id = post_entry(conn, voucher_date,
                           f"{label} {v_no} — {target_label}", lines,
                           source_table="vouchers", source_id=v_id,
-                          username=username, note=notes)
+                          username=username, note=doc_note(notes, norm))
     conn.execute("UPDATE vouchers SET voucher_no=?, entry_id=? WHERE id=?",
                  (v_no, entry_id, v_id))
     if norm:
@@ -341,9 +366,14 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     # أسطر القيد تنتقل للقيد الأصلي، ويُحذف القيد المؤقّت.
     # الترتيب مهم: يُفكّ مرجع السند المؤقّت للقيد أولاً، وإلا رفض
     # القيد المرجعي حذفه.
-    desc = conn.execute(
-        "SELECT description FROM journal_entries WHERE id=?",
-        (tmp["entry_id"],)).fetchone()["description"]
+    _tmp_e = conn.execute(
+        "SELECT description, user_note FROM journal_entries WHERE id=?",
+        (tmp["entry_id"],)).fetchone()
+    desc = _tmp_e["description"]
+    # **والبيان ينتقل معه**: كان الوصف الداخلي وحده يُنسخ، فمن
+    # صحّح بيان السند بعد ترحيله رآه في شاشة السند ولم يجده في
+    # كشف الحساب — الكشف يقرأ بيان القيد لا بيان السند.
+    _tmp_note = (_tmp_e["user_note"] or "").strip()
     # رأس السند المؤقّت يحمل القيم المحسوبة (الحساب المستهدف
     # والمكافئ والنقد) — ننسخها قبل حذفه.
     src = conn.execute("SELECT * FROM vouchers WHERE id=?",
@@ -351,8 +381,8 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     conn.execute("DELETE FROM journal_lines WHERE entry_id=?", (entry_id,))
     conn.execute("UPDATE journal_lines SET entry_id=? WHERE entry_id=?",
                  (entry_id, tmp["entry_id"]))
-    conn.execute("UPDATE journal_entries SET description=? WHERE id=?",
-                 (desc, entry_id))
+    conn.execute("UPDATE journal_entries SET description=?, user_note=?"
+                 " WHERE id=?", (desc, _tmp_note, entry_id))
     # تعديلٌ مشروع لمضمون قيدٍ قائم: يُوسَم ليُعاد ختمه في سلسلة
     # البصمات عند إغلاق المعاملة، وإلا ظهر التعديل السليم «عبثاً».
     try:

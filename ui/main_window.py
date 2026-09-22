@@ -377,7 +377,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # والأرقام لها شاشاتها (الإغلاق اليومي · لوحة التحكم).
         self.welcome = WelcomeScreen(user)
 
-        self.sidebar = QtWidgets.QTreeWidget()
+        # أبٌ منذ اللحظة الأولى: widget بلا أبٍ يصير **نافذةً مستقلة**
+        # بمجرّد إظهاره، فيومض على الشاشة قبل أن يُضمّ إلى مكانه.
+        self.sidebar = QtWidgets.QTreeWidget(self)
         # قائمة ديناميكية: سحب وإفلات لإعادة الترتيب والتجميع،
         # وإعادة تسمية بالنقر المزدوج — تُحفظ في ملف إعدادات محلي.
         self.sidebar.setDragDropMode(
@@ -443,13 +445,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # الشريط الجانبي ثابت على اليمين دائماً (RTL يضعه يميناً).
         # عمود جانبي: شجرة التنقل ثم شريط سعر الأونصة الحي أسفلها
         self.gold_bar = GoldPriceBar()
-        self.side_panel = QtWidgets.QWidget()
+        self.side_panel = QtWidgets.QWidget(self)
         self.side_panel.setFixedWidth(260)
         sp = QtWidgets.QVBoxLayout(self.side_panel)
         sp.setContentsMargins(0, 0, 0, 0)
         sp.setSpacing(0)
         sp.addWidget(self.sidebar, 1)
         sp.addWidget(self.gold_bar)
+        # الحالة المحفوظة من `switch` أثناء التهيئة تُطبَّق الآن
+        self.side_panel.setVisible(getattr(self, "_panel_visible", True))
 
         body = QtWidgets.QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -775,9 +779,19 @@ class MainWindow(QtWidgets.QMainWindow):
         # إخفاء الشريط الجانبي تماماً عند فتح أي شاشة فرعية لتتوسّع
         # لكامل عرض النافذة، وإظهاره عند العودة لشاشة الترحيب.
         is_sub = row != 0
-        # قد تُستدعى switch() قبل إنشاء العمود الجانبي أثناء التهيئة
-        panel = getattr(self, "side_panel", None) or self.sidebar
-        panel.setVisible(not is_sub)
+        # ══ لا تُظهر شيئاً بلا أب ══
+        # `switch(0)` تُستدعى أثناء التهيئة — قبل أن يُبنى العمود
+        # الجانبي. وكان البديل حينها شجرةَ التنقّل نفسها وهي بلا أبٍ
+        # بعد، و«إظهارُ» widget بلا أب يجعله **نافذةً مستقلة**:
+        # فتومض شجرةٌ عاريةٌ على الشاشة لحظةً بعد تسجيل الدخول ثم
+        # تختفي حين تُضمّ إلى مكانها. وهي «النوافذ السريعة» التي
+        # شُكي منها. الآن: إن لم يُبنَ العمود تُحفظ الحالة وتُطبَّق
+        # عند بنائه — ولا يُعرض شيءٌ بلا أب أبداً.
+        panel = getattr(self, "side_panel", None)
+        if panel is not None:
+            panel.setVisible(not is_sub)
+        else:
+            self._panel_visible = not is_sub
         self.btn_close.setVisible(is_sub)      # زر الإغلاق في كل شاشة فرعية
         # التحديث مؤجَّل لدورة أحداث لاحقة: يظهر التبديل فورياً
         # ثم تُحمَّل البيانات — فلا تتجمّد الواجهة أثناء الاستعلام.

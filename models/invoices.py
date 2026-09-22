@@ -720,6 +720,17 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     if _karat != int(inv["scrap_karat"] or 0) or _moved_src:
         conn.execute("UPDATE invoices SET scrap_karat=? WHERE id=?",
                      (_karat, invoice_id))
+
+    # ══ البيان يتبع الفاتورة إلى قيدها ══
+    # كشف الحساب يقرأ بيان **القيد**، فمن صحّح بيان الفاتورة بعد
+    # ترحيلها كان يراه في شاشة المبيعات ولا يجده في الكشف. البيان
+    # واحدٌ في الاثنين، فيُكتب في الاثنين.
+    _new_desc = None if description is None else description.strip()
+    _desc_moved = (_new_desc is not None
+                   and _new_desc != (inv["description"] or "").strip())
+    if _desc_moved and inv["entry_id"]:
+        conn.execute("UPDATE journal_entries SET user_note=? WHERE id=?",
+                     (_new_desc, inv["entry_id"]))
     if _moved_src:
         inv = conn.execute("SELECT * FROM invoices WHERE id=?",
                            (invoice_id,)).fetchone()
@@ -877,11 +888,18 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         # وكذلك نقلُ حساب المصدر وحده.
         _sync_scrap_moves(conn, invoice_id, _src, _karat,
                           float(inv["total_weight"] or 0), kind)
+        # تصحيحُ البيان وحده تعديلٌ حقيقي كذلك: يُسجَّل ويُحفظ على
+        # الفاتورة، ولا يُقال لصاحبه «لا تغيير» وقد تغيّر بيانه.
+        if _desc_moved:
+            conn.execute("UPDATE invoices SET description=? WHERE id=?",
+                         (_new_desc, invoice_id))
         _notes = []
         if _moved:
             _notes.append(f"التاريخ {_moved[0]} ← {_moved[1]}")
         if _moved_src:
             _notes.append(f"الحساب {_moved_src[0]} ← {_moved_src[1]}")
+        if _desc_moved:
+            _notes.append("البيان")
         if _notes:
             log_action(conn, username, "update", "invoices", invoice_id,
                        f"تعديل {inv['invoice_no']}: " + " · ".join(_notes))
