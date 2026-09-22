@@ -143,11 +143,15 @@ def short_name(code, name):
     return n or "—"
 
 
-def _counterparty(conn, entry_id, account_id, cache, dim=None, ldesc=None):
+def _counterparty(conn, entry_id, self_names, cache, dim=None, ldesc=None):
     """اسم الحساب المقابل في نفس القيد — وجهة الحركة.
 
     `dim`: "gold" أو "cash" لعرض مقابل البُعد المعني فقط، فيظهر سطر
     الذهب مقابل صناديق الكسر وسطر النقد مقابل صندوق النقدي.
+
+    `self_names` أسماء الحساب المعروض — **مجموعةٌ لا اسمٌ واحد**:
+    كشفُ حسابٍ تجميعي يضمّ شجرته كلها، فلو استُثني اسمُ الأب وحده
+    لظهر كلُّ ابنٍ «مقابلاً» لأبيه في حركةٍ داخل الشجرة نفسها.
     """
     key = (entry_id, dim, ldesc or "")
     if key in cache:
@@ -186,12 +190,7 @@ def _counterparty(conn, entry_id, account_id, cache, dim=None, ldesc=None):
                 " JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=?"
                 + base + " ORDER BY l.id", (entry_id,))]
         cache[key] = names
-    self_name = None
-    r = conn.execute("SELECT code, name FROM accounts WHERE id=?",
-                     (account_id,)).fetchone()
-    if r:
-        self_name = short_name(r["code"], r["name"])
-    others = [(n, t) for n, t in names if n != self_name]
+    others = [(n, t) for n, t in names if n not in self_names]
     if not others:
         return "—"
     # أفضلية العرض: الطرف الحقيقي المقابل لا الحساب الفني.
@@ -220,15 +219,27 @@ def statement(conn, account_id, date_from=None, date_to=None):
     البيان (فارغ ما لم يكتب المستخدم ملاحظة) | مدين/دائن/رصيد ذهب |
     مدين/دائن/رصيد نقد.
     """
-    rows, params = [], [account_id]
+    # **حسابٌ واحد أو شجرةُ حسابٍ تجميعي**: يُقبل رقمٌ أو قائمة أرقام.
+    # فكشفُ «إجمالي العملاء» هو كشفُ فروعه مجموعةً — ولا يُرحَّل على
+    # الحساب التجميعي نفسه شيء، فقراءتُه وحده تعطي كشفاً خاوياً.
+    ids = ([int(account_id)] if isinstance(account_id, int)
+           else [int(x) for x in account_id])
+    ph = ",".join("?" * len(ids))
+    self_names = set()
+    for r in conn.execute(
+            f"SELECT code, name FROM accounts WHERE id IN ({ph})", ids):
+        self_names.add(short_name(r["code"], r["name"]))
+
+    rows, params = [], list(ids)
     gb = cb = 0.0
     if date_from:
         op = conn.execute(
             "SELECT COALESCE(SUM(l.gold_debit-l.gold_credit),0) g,"
             " COALESCE(SUM(l.cash_debit-l.cash_credit),0) c"
             " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-            " WHERE e.is_deleted=0 AND l.account_id=? AND e.entry_date<?",
-            (account_id, date_from)).fetchone()
+            f" WHERE e.is_deleted=0 AND l.account_id IN ({ph})"
+            "   AND e.entry_date<?",
+            ids + [date_from]).fetchone()
         gb, cb = round(op["g"], 3), round(op["c"], 2)
         rows.append({"date": date_from, "eid": "", "op": "رصيد سابق",
                      "doc_no": "", "name": "—", "desc": "",
@@ -241,7 +252,7 @@ def statement(conn, account_id, date_from=None, date_to=None):
          " l.line_desc ld, e.doc_no jdoc,"
          " (SELECT i.kind FROM invoices i WHERE i.id=e.source_id) _kind"
          " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-         " WHERE e.is_deleted=0 AND l.account_id=?")
+         f" WHERE e.is_deleted=0 AND l.account_id IN ({ph})")
     if date_from:
         q += " AND e.entry_date>=?"; params.append(date_from)
     if date_to:
@@ -291,7 +302,7 @@ def statement(conn, account_id, date_from=None, date_to=None):
         rows.append({"date": r["d"], "eid": r["eid"], "op": label,
                      "doc_no": doc_no or r.get("jdoc") or f"#{r['eid']}",
                      "name": (_counterparty(
-                         conn, r["eid"], account_id, ccache,
+                         conn, r["eid"], self_names, ccache,
                          "gold" if (r["gd"] or r["gc"]) else
                          ("cash" if (r["cd"] or r["cc"]) else None),
                          ldesc=(r.get("_ld") or None))),

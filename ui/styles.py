@@ -92,8 +92,8 @@ QTableWidget, QTreeWidget, QListWidget {
   background: @surface; alternate-background-color: @surface2;
   gridline-color: @grid; border: 1px solid @line; border-radius: 10px;
   color: @ink; selection-background-color: @goldSoft; selection-color: @ink;
-  font-size: 12pt; }
-QTableWidget::item { padding: 5px 6px; }
+  font-size: 12.5pt; }
+QTableWidget::item { padding: 7px 8px; }
 QTableWidget::item:hover { background: @hover; }
 QHeaderView::section { background: @hdrBg; color: @hdrFg; padding: 9px 6px;
   font-size: 11pt; font-weight: bold; border: none;
@@ -105,6 +105,7 @@ QHeaderView::section:hover { color: @goldDim; }
 QTabWidget::pane { border: 1px solid @line; border-radius: 10px;
                    background: @surface; top: -1px; }
 QTabBar::tab { background: transparent; padding: 9px 20px; margin: 0 2px;
+  min-width: 96px;
   color: @muted; font-weight: bold; border-bottom: 3px solid transparent; }
 QTabBar::tab:hover { color: @goldDim; }
 QTabBar::tab:selected { color: @goldDim; border-bottom: 3px solid @gold; }
@@ -218,6 +219,17 @@ QFrame#card:hover { border: 1px solid @goldBright; background: @focusBg; }
 QLabel#cardTitle { color: @goldDim; font-size: 12.5px; font-weight: bold; }
 QLabel#cardValue { color: @ink; font-size: 19px; font-weight: bold; }
 QLabel#cardSub { color: @muted; font-size: 11.5px; }
+
+/* ══ لوحة الخلاصة: الرصيد وحده ══
+   بين ستّ لوحاتٍ متشابهة يضيع الرصيد — وهو الرقم الذي فُتحت الشاشة
+   لأجله. فتُعطى لوحتاه نبرةً كهرمانيةً خافتة وحدّاً أوضح وخطاً
+   أكبر: تُلتقط أولاً، وتبقى من العائلة نفسها فلا تبدو دخيلة. */
+QFrame#cardSum { background: @sumBg; border: 1px solid @sumEdge;
+  border-radius: 10px; padding: 6px; }
+QFrame#cardSum:hover { border: 1px solid @goldBright; background: @sumBg2; }
+QFrame#cardSum QLabel#cardTitle { color: @sumInk; }
+QFrame#cardSum QLabel#cardValue { color: @sumInk; font-size: 21px; }
+QFrame#cardSum QLabel#cardSub { color: @sumInk; }
 
 /* ══ شاشة البداية الحيّة ══
    بطاقاتٌ تُقرأ لا تُزيَّن: الرقم كبير، وعنوانه فوقه صغير، وحالته

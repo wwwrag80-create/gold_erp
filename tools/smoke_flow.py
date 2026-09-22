@@ -1968,6 +1968,78 @@ def main():
     check("والإضافة سُجّلت طقماً جديداً", _ed["added"] == ["SB-3"],
           str(_ed["added"]))
 
+    step("28ج) تعديل فاتورة لا يبيع طقماً مباعاً مرتين")
+    # ══ الخلل: الذهب يخرج مرة ويُحاسَب عليه عميلان ══
+    # عند تعديل فاتورة كان الإعفاء من فحص حالة الطقم يشمل السلة كلها
+    # — بما فيها **المُضاف حديثاً**. فيُضاف إلى فاتورةٍ قديمة طقمٌ
+    # بِيع في فاتورةٍ أخرى، بلا اعتراض ولا رسالة. النتيجة: الطقم
+    # الواحد مباعٌ لعميلين، وكلاهما مدينٌ بأجرته.
+    from models.inventory import create_work_orders_batch as _b2
+    from models import invoices as invoices
+
+    def _upd2(inv_id, cart):
+        with db() as conn:
+            return invoices.update_invoice(conn, inv_id, cart, "admin")
+
+    with db() as conn:
+        _b2(conn, [{"wo_no": "DS-0", "gold": 15.0, "wage_per_gram": 20.0},
+                   {"wo_no": "DS-1", "gold": 25.0, "wage_per_gram": 20.0}],
+            "2026-03-01", "admin")
+        _w = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'DS-%'")}
+        # فاتورةٌ قديمة لا تحوي DS-1 إطلاقاً
+        _old = create_sale(conn, cust, [{"work_order_id": _w["DS-0"]}],
+                           "2026-03-05", "admin", apply_vat=False)
+        _c2 = conn.execute(
+            "SELECT id FROM entities WHERE entity_type='customer'"
+            " AND is_deleted=0 ORDER BY id DESC").fetchone()["id"]
+        # وفاتورةٌ أحدث تبيع DS-1 لعميلٍ آخر
+        _new = create_sale(conn, _c2, [{"work_order_id": _w["DS-1"]}],
+                           "2026-03-20", "admin", apply_vat=False)
+    check("طقمٌ بِيع لعميل في فاتورةٍ أحدث", bool(_new.get("id")))
+
+    # الآن: محاولة إضافته إلى الفاتورة **القديمة** وهو مباعٌ لغيرها
+    with db(readonly=True) as conn:
+        _, _oit = invoices.get_invoice_full(conn, _old["id"])
+    _cart = [{"work_order_id": t["work_order_id"], "item_id": t["item_id"],
+              "weight": t["registered_weight"]} for t in _oit]
+    _cart.append({"work_order_id": _w["DS-1"]})
+    expect_error("إضافته إلى فاتورةٍ قديمة تُرفض — لا يُباع مرتين",
+                 lambda: _upd2(_old["id"], _cart), "ليس بالمخزون")
+    with db(readonly=True) as conn:
+        _n = conn.execute(
+            "SELECT COUNT(*) c FROM invoice_items it"
+            " JOIN invoices i ON i.id=it.invoice_id"
+            " WHERE it.work_order_id=? AND i.is_deleted=0"
+            "   AND i.kind='sale'", (_w["DS-1"],)).fetchone()["c"]
+    check("ويبقى في فاتورة بيعٍ واحدة", _n == 1, f"{_n}")
+
+    # والطقم المفرد لا يتكرّر في الفاتورة الواحدة
+    expect_error("تكرار الطقم المفرد في فاتورةٍ واحدة يُرفض",
+                 lambda: _upd2(_old["id"], [
+                     {"work_order_id": _w["DS-0"],
+                      "item_id": _oit[0]["item_id"]},
+                     {"work_order_id": _w["DS-0"]}]),
+                 "مكرّر في الفاتورة")
+
+    # والرسالة تدلّ على **أين ذهب** لا تكتفي بالرفض
+    try:
+        _upd2(_old["id"], _cart)
+        _msg = ""
+    except Exception as _e:
+        _msg = str(_e)
+    check("والرسالة تسمّي الفاتورة التي أخذته وتاريخها وجهتها",
+          "آخر حركةٍ له" in _msg and _new["invoice_no"] in _msg,
+          _msg.replace("\n", " ")[:110])
+
+    # وفحصُ الدفتر يكشف ما وقع قبل الإصلاح
+    from services import health as _hh
+    with db(readonly=True) as conn:
+        _dbl = _hh.check_double_sold(conn)
+    check("وفحص «بِيع أكثر من مرة» نظيفٌ على دفترٍ سليم",
+          _dbl == [], str(_dbl)[:120])
+
     step("29أ) تعديل فاتورة على الرقم التجميعي — أسطرٌ مستقلة")
     # ══ الخلل: مئة جرامٍ تضيع من الدفتر بلا أثر ══
     # بنود الفاتورة كانت تُفهرَس بـ`work_order_id`. صحيحٌ للطقم
@@ -2193,6 +2265,1043 @@ def main():
     check("والأجرة غير المحصَّلة = الوزن × أجرة الجرام",
           all(abs(u["potential"] - u["weight"] * u["wage_per_gram"]) < 0.01
               for u in _un.values()))
+
+    step("32) الأصول الثابتة والإهلاك")
+    # ══ لماذا يُفحص بالأرقام ══
+    # الإهلاك مصروفٌ لا يُدفع نقداً، وخطؤه لا يظهر في أي رصيد: قسطٌ
+    # زائد يُنقص الربح وناقصٌ يضخّمه، وكلاهما يمرّ صامتاً إلى قائمة
+    # الدخل. فتُبنى حالةٌ يُعرف جوابها سلفاً ويُتحقَّق من كل رقم.
+    from models import assets as _fa
+    from services.accounting_engine import balance_by_code
+
+    with db(readonly=True) as conn:
+        _da = {a["code"] for a in _fa.depreciable_accounts(conn)}
+    check("حسابات الأصول القابلة للإهلاك تُقرأ من الشجرة",
+          {"1710", "1730"} <= _da and "1790" not in _da,
+          f"المجمّع مستثنى · {sorted(_da)}")
+
+    # مكينة ٦٠٬٠٠٠ · عمر ٦٠ شهراً · تخريدية ٦٬٠٠٠ ⇒ القسط ٩٠٠
+    with db() as conn:
+        _mach = acc_id(conn, "1710")
+        post_entry(conn, "2026-01-05", "شراء مكينة ليزر",
+                   [{"account_id": _mach, "cash_debit": 60_000.0},
+                    {"account_id": acc_id(conn, "1400"),
+                     "cash_credit": 60_000.0}], username="admin")
+        _aid = _fa.add_asset(conn, "مكينة ليزر", _mach, 60_000.0, 60,
+                             "2026-01-01", salvage=6_000.0, username="admin")
+    check("القسط الشهري = (التكلفة − التخريدية) ÷ العمر",
+          abs(_fa.monthly_amount(60_000.0, 6_000.0, 60) - 900.0) < 0.01)
+
+    for _p in ("2026-01", "2026-02", "2026-03"):
+        with db() as conn:
+            _fa.run_depreciation(conn, _p, "admin")
+    with db() as conn:
+        _again = _fa.run_depreciation(conn, "2026-02", "admin")
+    check("الشهر لا يُهلَك مرتين", _again["already"] is True)
+
+    with db(readonly=True) as conn:
+        _a = [x for x in _fa.list_assets(conn) if x["id"] == _aid][0]
+        _exp = balance_by_code(conn, "5860")[1]
+        _accm = balance_by_code(conn, "1790")[1]
+        _cost = balance_by_code(conn, "1710")[1]
+    check("المُهلَك بعد ٣ أشهر = ٢٬٧٠٠",
+          abs(_a["accumulated"] - 2_700.0) < 0.01, f"{_a['accumulated']}")
+    check("والصافي الدفتري = ٥٧٬٣٠٠",
+          abs(_a["net_book"] - 57_300.0) < 0.01, f"{_a['net_book']}")
+    check("مصروف الإهلاك مدينٌ بالمبلغ نفسه",
+          abs(_exp - 2_700.0) < 0.01, f"{_exp}")
+    check("والمجمّع دائنٌ به — لا يُنقص حساب الأصل",
+          abs(_accm + 2_700.0) < 0.01 and abs(_cost - 60_000.0) < 0.01,
+          f"مجمّع {_accm} · تكلفة {_cost}")
+
+    # آخر قسطٍ يأخذ الكسر فينتهي عند التخريدية بالضبط
+    with db() as conn:
+        _sid = _fa.add_asset(conn, "جهاز صغير", acc_id(conn, "1740"),
+                             1_000.0, 3, "2026-04-01", salvage=100.0,
+                             username="admin")
+    for _p in ("2026-04", "2026-05", "2026-06", "2026-07"):
+        with db() as conn:
+            try:
+                _fa.run_depreciation(conn, _p, "admin")
+            except ValueError:
+                pass
+    with db(readonly=True) as conn:
+        _s = [x for x in _fa.list_assets(conn) if x["id"] == _sid][0]
+    check("آخر قسطٍ يأخذ الكسر فلا يتجاوز القيمة القابلة للإهلاك",
+          abs(_s["accumulated"] - 900.0) < 0.01, f"{_s['accumulated']}")
+    check("وينتهي الصافي الدفتري عند التخريدية بالضبط",
+          abs(_s["net_book"] - 100.0) < 0.01, f"{_s['net_book']}")
+
+    # الأصل المُخرَج من الخدمة يتوقّف قسطه
+    with db() as conn:
+        _fa.dispose_asset(conn, _aid, "2026-08-01", "admin")
+        _due = _fa.due_amount(
+            conn, [x for x in _fa.list_assets(conn, include_disposed=True)
+                   if x["id"] == _aid][0], "2026-08")
+    check("الأصل خارج الخدمة لا يُهلَك", abs(_due) < 0.01, f"{_due}")
+
+    # عمرٌ غير محدَّد ⇒ لا يُهلَك بالتخمين
+    with db() as conn:
+        conn.execute("INSERT INTO fixed_assets(name, purchase_date, cost,"
+                     " created_by) VALUES('أصلٌ من المشتريات','2026-01-01',"
+                     " 5000, 'admin')")
+    with db(readonly=True) as conn:
+        _t = _fa.totals(conn)
+        _un = [x for x in _fa.list_assets(conn)
+               if int(x.get("life_months") or 0) <= 0]
+    check("أصلٌ اشتُري بلا عمرٍ إنتاجي يُرصد ولا يُهلَك",
+          _t.get("unset", 0) >= 1 and all(
+              _fa.due_amount(conn, x, "2026-09") == 0 for x in _un),
+          f"{_t.get('unset')} أصلاً")
+
+    with db(readonly=True) as conn:
+        _bg, _bc, _gv, _cv = ledger_balanced(conn)
+    check("والدفتر متوازن بعد الإهلاك كله", _bg and _bc,
+          f"ذهب {_gv} · نقد {_cv}")
+
+    step("33) تحليل حركة الرصيد — الجسر ونشاط الأيام")
+    # ══ الضمانة التي يقوم عليها التصميم ══
+    # الجسر (أول المدة + ما زاد − ما نقص = آخر المدة) يجب أن يقفل
+    # **دائماً**. ولو صُنّفت الحركات بأسمائها لسقط منه كلُّ ما لا اسم
+    # له — تسويةٌ يدوية أو نوعٌ يُضاف لاحقاً — فلا يساوي المجموعُ
+    # الرصيدَ الختامي ويفقد التقرير قيمته كلها. فالأثر يُؤخذ من
+    # «مدين − دائن»، ويُفحص هنا بحركةٍ لا اسم لها في القائمة.
+    from models import movement as _mv
+    from models.entities import add_entity, get_entity
+
+    with db() as conn:
+        _mc = add_entity(conn, "عميل تحليل الحركة", "customer",
+                         username="admin")
+        _macc = get_entity(conn, _mc)["account_id"]
+        _b3 = _batch(conn, [{"wo_no": f"MV{i}", "gold": 100.0,
+                             "wage_per_gram": 20.0} for i in range(1, 6)],
+                     "2026-02-01", "admin")
+        _mw = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no LIKE 'MV%'"
+            " ORDER BY id")]
+    # رصيدٌ افتتاحي: بيعتان في يناير
+    with db() as conn:
+        create_sale(conn, _mc, [{"work_order_id": _mw[0]},
+                                {"work_order_id": _mw[1]}],
+                    "2026-01-15", "admin", apply_vat=False)
+    # الفترة: بيعٌ في يومين · مرتجعٌ في يوم · قبضٌ في ثلاثة أيام
+    for i, wid in enumerate(_mw[2:4]):
+        with db() as conn:
+            create_sale(conn, _mc, [{"work_order_id": wid}],
+                        f"2026-03-{i + 2:02d}", "admin", apply_vat=False)
+    with db() as conn:
+        invoices.create_sale_return(conn, _mc,
+                                    [{"work_order_id": _mw[2]}],
+                                    "2026-03-10", "admin", apply_vat=False)
+    for i in range(3):
+        with db() as conn:
+            create_voucher(conn, "receipt", f"2026-03-{i + 20:02d}",
+                           "admin", entity_id=_mc, gold_weight=25.0,
+                           gold_karat=18)
+    # قيدٌ يدوي على الحساب — رصيدُ بدايةٍ لا حركة، فمكانه «أول المدة»
+    with db() as conn:
+        post_entry(conn, "2026-03-25", "رصيدٌ افتتاحي بقيدٍ يدوي",
+                   [{"account_id": _macc, "gold_debit": 7.0},
+                    {"account_id": acc_id(conn, "5300"),
+                     "gold_credit": 7.0}], username="admin")
+    # وحركةٌ **لا اسم لها** في قائمة الأنواع — نوعٌ يعرفه الدفتر ولا
+    # يعرفه الجسر، وهو ما يجب ألّا يسقط منه
+    with db() as conn:
+        post_entry(conn, "2026-03-26", "جردٌ على الحساب",
+                   [{"account_id": _macc, "gold_debit": 4.0},
+                    {"account_id": acc_id(conn, "5300"),
+                     "gold_credit": 4.0}], source_table="stocktakes",
+                   username="admin")
+
+    with db(readonly=True) as conn:
+        _r = _mv.analyze(conn, _macc, "2026-03-01", "2026-03-31")
+
+    _sum = round(_r["opening"]["gold"]
+                 + sum(b["gold"] for b in _r["buckets"]), 3)
+    check("الجسر يقفل: الافتتاحي + الحركة = الختامي",
+          abs(_sum - _r["closing"]["gold"]) < 0.0011,
+          f"{_sum} مقابل {_r['closing']['gold']}")
+    check("والرصيد التراكمي ينتهي عند الختامي",
+          abs(_r["daily"][-1]["gbal"] - _r["closing"]["gold"]) < 0.0011,
+          f"{_r['daily'][-1]['gbal']}")
+
+    _by = {b["label"]: b for b in _r["buckets"]}
+    check("المبيعات تزيد الدين والمرتجع والقبض يُنقصانه",
+          _by["مبيعات"]["gold"] > 0 and _by["مرتجع"]["gold"] < 0
+          and _by["قبض"]["gold"] < 0,
+          " · ".join(f"{k}={v['gold']}" for k, v in _by.items()))
+    check("عدد الأيام لكل نوع يُحسب بالأيام لا بالمستندات",
+          _by["مبيعات"]["days"] == 2 and _by["مرتجع"]["days"] == 1
+          and _by["قبض"]["days"] == 3,
+          f"بيع {_by['مبيعات']['days']} · مرتجع {_by['مرتجع']['days']}"
+          f" · قبض {_by['قبض']['days']}")
+    check("والحركة التي لا اسم لها تدخل «أخرى» ولا تسقط من الجسر",
+          "أخرى" in _by and abs(_by["أخرى"]["gold"] - 4.0) < 0.0011,
+          f"{_by.get('أخرى', {}).get('gold')}")
+    # ══ القيد اليدوي رصيدُ بدايةٍ لا حركة ══
+    # كان يسقط في «أخرى» لأن اسمه في الدفتر «قيد يومي» والقائمة
+    # تحمل «قيد يومية» — حرفٌ واحد جعله لا يلتقي ببنده أبداً، فيقرأ
+    # المستخدم رصيدَ افتتاحٍ على أنه حركةٌ مجهولة جرت في الفترة.
+    check("والقيد اليدوي يدخل «رصيد أول المدة» لا بنداً في الحركة",
+          abs(_r["opening_in_period"]["gold"] - 7.0) < 0.0011
+          and _r["opening_in_period"]["docs"] == 1
+          and abs(_by["أخرى"]["gold"] - 4.0) < 0.0011,
+          f"ضُمّ {_r['opening_in_period']['gold']} من "
+          f"{_r['opening_in_period']['docs']} قيداً")
+    check("وما ضُمّ منه داخل الفترة يُعلَن ولا يُخفى",
+          _r["opening_in_period"]["docs"] > 0)
+
+    _d = _r["days"]
+    check("أيام الفترة ٣١ ومنها ٧ فيها حركة",
+          _d["span"] == 31 and _d["active"] == 7,
+          f"{_d['active']} من {_d['span']} · صامتة {_d['silent']}")
+    check("والصامتة = الفترة − النشطة",
+          _d["silent"] == _d["span"] - _d["active"])
+
+    _s = _r["signals"]
+    check("نسبة التحصيل تُقاس على المبيعات",
+          _s["collect_pct_gold"] is not None
+          and _s["collect_pct_gold"] > 0, f"{_s['collect_pct_gold']}%")
+    check("وآخر تحصيلٍ وفجوته تُرصدان",
+          _s["collect_gap"]["last"] == "2026-03-22"
+          and _s["collect_gap"]["since"] == 9,
+          f"آخره {_s['collect_gap']['last']} · منذ "
+          f"{_s['collect_gap']['since']} يوماً")
+    check("والخلاصة جملةٌ تُقرأ لا أرقامٌ تُفسَّر",
+          "الدين" in _mv.verdict(_r), _mv.verdict(_r)[:70])
+
+    # فترةٌ بلا أي حركة: لا ينهار التحليل
+    with db(readonly=True) as conn:
+        _empty = _mv.analyze(conn, _macc, "2027-01-01", "2027-01-31")
+    check("فترةٌ بلا حركة تُعطي جسراً مقفلاً لا انهياراً",
+          _empty["buckets"] == [] and _empty["daily"] == []
+          and abs(_empty["opening"]["gold"]
+                  - _empty["closing"]["gold"]) < 0.0011)
+
+    step("34) أعمار الموديلات — ما رقد في المخزن ومنذ متى")
+    # ══ ثلاث ضمانات ══
+    # 1) العمر من **قيد التوريد** لا من وقت كتابة السجل: دفعةٌ تُسجَّل
+    #    اليوم وقد وردت قبل سنةٍ عمرها سنة. و`created_at` هو الآن
+    #    دائماً في قاعدةٍ تُبنى في الاختبار، فلو قيس عليه لظهرت كل
+    #    القطع «أقل من ٣٠» ولضاع التقرير كله.
+    # 2) الرقم التجميعي ٠٠٠١ رصيد وزنٍ لا قطعة، فلا عمر له ولا يدخل
+    #    الفئات — وإلا أظهر عشرات الكيلوات «راكدة» وهي تدور كل يوم.
+    # 3) مجموع الفئات = إجمالي المخزون المفرد. الفئة التي لا تُجمع
+    #    تقريرٌ يُقرأ ولا يُصدَّق.
+    from models import stock_aging as _sa
+
+    with db() as conn:
+        _batch(conn, [{"wo_no": "OLD-1", "gold": 40.0,
+                       "wage_per_gram": 30.0, "model_no": "ALPHA"}],
+               "2025-01-05", "admin")          # قديمة جداً
+        _batch(conn, [{"wo_no": "MID-1", "gold": 25.0,
+                       "wage_per_gram": 20.0, "model_no": "ALPHA"},
+                      {"wo_no": "MID-2", "gold": 15.0,
+                       "wage_per_gram": 20.0, "model_no": "BETA"}],
+               "2026-04-20", "admin")          # نحو 70 يوماً
+        _batch(conn, [{"wo_no": "NEW-1", "gold": 10.0,
+                       "wage_per_gram": 25.0, "model_no": "BETA"}],
+               "2026-06-20", "admin")          # نحو 10 أيام
+        # ورصيدٌ تجميعي بتاريخٍ قديم عمداً: لو عُومل كقطعةٍ لظهر
+        # «راكداً فوق التسعين» وهو وزنٌ يدور كل يوم
+        _batch(conn, [{"wo_no": "0001", "gold": 200.0,
+                       "wage_per_gram": 20.0}], "2025-02-01", "admin")
+    with db(readonly=True) as conn:
+        _sr = _sa.report(conn, "2026-06-30")
+
+    _got = {x["wo_no"]: x for x in _sr["items"]}
+    check("العمر يُحسب من تاريخ قيد التوريد لا من وقت كتابة السجل",
+          _got["OLD-1"]["days"] == 541 and _got["NEW-1"]["days"] == 10,
+          f"OLD-1={_got['OLD-1']['days']} · NEW-1={_got['NEW-1']['days']}")
+    check("والقطعة تقع في فئتها الصحيحة",
+          _got["NEW-1"]["bucket"] == 0 and _got["MID-1"]["bucket"] == 2
+          and _got["OLD-1"]["bucket"] == 3,
+          f"NEW={_got['NEW-1']['bucket']} · MID={_got['MID-1']['bucket']}"
+          f" · OLD={_got['OLD-1']['bucket']}")
+
+    _bsum = round(sum(b["weight"] for b in _sr["buckets"]), 3)
+    check("مجموع الفئات = إجمالي المخزون المفرد",
+          abs(_bsum - _sr["total"]["weight"]) < 0.0011,
+          f"{_bsum} مقابل {_sr['total']['weight']}")
+    check("وعدد القطع كذلك",
+          sum(b["count"] for b in _sr["buckets"]) == _sr["total"]["count"])
+
+    check("الرقم التجميعي يُفصل ولا يدخل الفئات",
+          not any(x["is_bulk"] for x in _sr["items"])
+          and _sr["bulk"]["count"] >= 1 and _sr["bulk"]["weight"] > 0,
+          f"تجميعي: {_sr['bulk']['count']} قطعة "
+          f"وزنها {_sr['bulk']['weight']}")
+    check("ولا يُحسب ضمن ما تجاوز التسعين رغم قِدَم سجلّه",
+          abs(_sr["buckets"][-1]["weight"]
+              - sum(x["weight"] for x in _sr["items"]
+                    if x["bucket"] == 3)) < 0.0011,
+          f"فوق التسعين {_sr['buckets'][-1]['weight']}")
+
+    _m = {x["model"]: x for x in _sr["models"]}
+    check("التجميع بالموديل يجمع قطعه كلها",
+          abs(_m["ALPHA"]["weight"]
+              - (_got["OLD-1"]["weight"] + _got["MID-1"]["weight"])) < 0.0011,
+          f"ALPHA={_m['ALPHA']['weight']}")
+    check("وأقدم قطعةٍ في الموديل تُرصد",
+          _m["ALPHA"]["oldest"] == 541, f"{_m['ALPHA']['oldest']}")
+    check("والأجرة الراكدة = الوزن × أجرة الجرام",
+          abs(_got["OLD-1"]["idle_wage"]
+              - _got["OLD-1"]["weight"] * 30.0) < 0.011,
+          f"{_got['OLD-1']['idle_wage']}")
+
+    check("أقدم قطعةٍ في المخزن تتصدّر القائمة",
+          _sr["items"][0]["wo_no"] == "OLD-1",
+          f"{_sr['items'][0]['wo_no']} منذ {_sr['items'][0]['days']} يوماً")
+    check("والخلاصة تسمّيها وتقول نسبة ما فوق التسعين",
+          any("OLD-1" in v for v in _sa.verdict(_sr))
+          and any("التسعين" in v for v in _sa.verdict(_sr)),
+          " | ".join(_sa.verdict(_sr))[:110])
+
+    # ترشيحٌ بموديل: الأرقام تتبع ما رُشّح لا كل المخزن
+    with db(readonly=True) as conn:
+        _sb = _sa.report(conn, "2026-06-30", "BETA")
+        _sm = _sa.report(conn, "2026-06-30", ["ALPHA", "BETA"])
+        _se = _sa.report(conn, "2026-06-30", [])
+    check("الترشيح بموديل يقصر التقرير عليه",
+          {x["wo_no"] for x in _sb["items"]} == {"MID-2", "NEW-1"},
+          " · ".join(x["wo_no"] for x in _sb["items"]))
+    check("والترشيح بعدة موديلات يجمعها كلها",
+          {x["wo_no"] for x in _sm["items"]}
+          == {"OLD-1", "MID-1", "MID-2", "NEW-1"},
+          " · ".join(x["wo_no"] for x in _sm["items"]))
+    check("وقائمةٌ فارغة تعني كلَّ المخزون لا لا شيء",
+          len(_se["items"]) == len(_sr["items"])
+          and _se["filter_models"] == [],
+          f"{len(_se['items'])} قطعة")
+
+    # تاريخٌ قبل أي توريد: لا مخزون ولا انهيار
+    with db(readonly=True) as conn:
+        _sz = _sa.report(conn, "2020-01-01")
+    check("تاريخٌ قبل أي توريد يُعطي مخزوناً خاوياً لا انهياراً",
+          _sz["items"] == [] and _sz["total"]["count"] == 0
+          and "لا مخزون" in " ".join(_sa.verdict(_sz)))
+
+    _html2 = _pm.build_body("stock_aging", 0, as_of="2026-06-30",
+                            detail=True)
+    check("ورقة أعمار الموديلات تُبنى بجدول القطع",
+          "أعمار الموديلات" in _html2 and "رقم التشغيل" in _html2
+          and "OLD-1" in _html2, f"{len(_html2)} حرفاً")
+    check("وتستعمل تسميات أعمار الديون نفسها لا تسمياتٍ أخرى",
+          all(b in _html2 for b in _sa.BUCKET_LABELS),
+          " · ".join(_sa.BUCKET_LABELS))
+    check("ولا تحمل عمودَي الأجرة اللذين حُذفا",
+          "أجرة الجرام" not in _html2 and "أجرة راكدة" not in _html2)
+    _html2b = _pm.build_body("stock_aging", 0, as_of="2026-06-30",
+                             model=["ALPHA", "BETA"], detail=True)
+    check("وورقةُ المرشَّح تسمّي الموديلات المختارة في رأسها",
+          "ALPHA" in _html2b and "BETA" in _html2b
+          and "كل الموديلات" not in _html2b, f"{len(_html2b)} حرفاً")
+
+    step("35) الأجرة المتفق عليها — تصل إلى البائع وقت البيع")
+    # ══ الضمانة ══
+    # الاتفاق يتغيّر، فتُقرأ أجرةُ كل يومٍ من سجلّه لا من آخر قيمة.
+    # ولولا ذلك لقرأ من يراجع فاتورةً قديمةً أجرةَ اليوم لا أجرتها.
+    # والأهم أن الاتفاق **يصل إلى شاشة المبيعات** فيُملأ أمام البائع
+    # ويُنبَّه إن خالفه — فالأصل ألّا يقع الخطأ لا أن يُكشف بعد شهر.
+    from models import entities as _ent
+
+    with db() as conn:
+        _wc = add_entity(conn, "عميل فحص الأجرة", "customer",
+                         username="admin")
+        _ent.set_agreed_wage(conn, _wc, 20.0, "2026-01-01", "اتفاق أول",
+                             "admin")
+        _batch(conn, [{"wo_no": f"WG{i}", "gold": 100.0,
+                       "wage_per_gram": 99.0} for i in range(1, 5)],
+               "2026-01-05", "admin")
+        _wg = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no LIKE 'WG%'"
+            " ORDER BY id")]
+
+    check("صفرٌ يعني بلا اتفاق لا اتفاقاً بصفر",
+          _ent.agreed_wage(conn, _mc) == 0.0)
+
+    with db() as conn:
+        create_sale(conn, _wc, [{"work_order_id": _wg[0],
+                                 "wage_override": 20.0}],
+                    "2026-02-01", "admin", apply_vat=False)
+        create_sale(conn, _wc, [{"work_order_id": _wg[1],
+                                 "wage_override": 18.0}],
+                    "2026-02-10", "admin", apply_vat=False)
+    # ثم يرتفع الاتفاق إلى 25، وتُباع قطعتان بالسعر الجديد
+    with db() as conn:
+        _ent.set_agreed_wage(conn, _wc, 25.0, "2026-03-01", "رفع الأجرة",
+                             "admin")
+        create_sale(conn, _wc, [{"work_order_id": _wg[2],
+                                 "wage_override": 25.0}],
+                    "2026-03-15", "admin", apply_vat=False)
+        create_sale(conn, _wc, [{"work_order_id": _wg[3],
+                                 "wage_override": 30.0}],
+                    "2026-03-20", "admin", apply_vat=False)
+
+    # الأجرة السالبة مرفوضة، والصفر مقبولٌ بمعنى «بلا اتفاق»
+    def _neg_wage():
+        with db() as conn:
+            _ent.set_agreed_wage(conn, _wc, -5.0, "2026-01-01", "", "admin")
+    expect_error("الأجرة المتفق عليها لا تقبل السالب", _neg_wage, "سالبة")
+
+    with db(readonly=True) as conn:
+        _hist = _ent.wage_history(conn, _wc)
+        _on_feb = _ent.agreed_wage_on(conn, _wc, "2026-02-05")
+        _on_mar = _ent.agreed_wage_on(conn, _wc, "2026-03-05")
+        _before = _ent.agreed_wage_on(conn, _wc, "2025-12-01")
+    check("سجلّ الاتفاقات يحفظ كل تغييرٍ بتاريخه",
+          len(_hist) == 2, f"{len(_hist)} اتفاقاً")
+    check("والأجرة النافذة تُقرأ لأي يومٍ مضى لا آخرُ قيمةٍ وحدها",
+          _on_feb == 20.0 and _on_mar == 25.0,
+          f"فبراير {_on_feb} · مارس {_on_mar}")
+    check("وما قبل أول اتفاقٍ لا مرجعَ له",
+          _before is None, f"{_before}")
+
+    # ══ الاتفاق يصل إلى شاشة المبيعات فعلاً ══
+    # وهذا أكثر ما يُخشى انكساره صامتاً لأنه في الواجهة لا في النموذج.
+    try:
+        from PyQt5 import QtWidgets as _QW3
+        _QW3.QApplication.instance() or _QW3.QApplication([])
+        from ui.sales_screen import SalesScreen as _SS
+
+        _scr = _SS({"id": 1, "username": "admin", "full_name": "م",
+                    "role": "admin", "role_local": "accountant"})
+        _scr._load_agreed_wage(_wc)
+        check("شاشة المبيعات تقرأ أجرة العميل المتفق عليها",
+              abs(_scr._agreed_wage - 25.0) < 0.011,
+              f"{_scr._agreed_wage}")
+        check("وتعرضها للبائع قبل أن يكتب رقماً",
+              "المتفق عليها" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:60])
+        _scr._wage_hint(20.0)
+        check("وتنبّهه فور مخالفتها — بلا منع",
+              "أقلّ" in _scr.wage_note.text()
+              and "5.00" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:80])
+        _scr._wage_hint(25.0)
+        check("وتؤكّد المطابقة حين يوافقها",
+              "مطابقٌ" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:60])
+        _scr._load_agreed_wage(_mc)          # عميلٌ بلا اتفاق
+        check("وعميلٌ بلا اتفاقٍ لا تُفرض عليه أجرةُ غيره",
+              _scr._agreed_wage == 0.0
+              and "لا أجرةَ" in _scr.wage_note.text(),
+              _scr.wage_note.text()[:60])
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+
+    step("36) ملف الجهة — كل ما يخصّها في صفحة")
+    # ══ الضمانة التي يقوم عليها الملف ══
+    # لا يُحسب فيه رقمٌ جديد: كل قسمٍ من مصدره الأصلي. فلو حُسب
+    # الرصيد هنا مرةً وفي الكشف مرة لصار الملفُ مصدراً سادساً للخلاف
+    # بدل أن يكون جواباً. وهذا ما يُفحص: كل رقمٍ يُطابق مصدره.
+    from models import accounts as _acc
+    from models import aging as _aging
+    from models import dossier as _ds
+    from services.accounting_engine import account_balance as _bal
+
+    with db(readonly=True) as conn:
+        _dd = _ds.build(conn, _wc, "2026-01-01", "2026-12-31")
+        _acc_g, _acc_c = _bal(conn, get_entity(conn, _wc)["account_id"])
+        _ag_src = _aging.report(conn, "customer", "2026-12-31")
+        _mv_src = _mv.analyze(conn, get_entity(conn, _wc)["account_id"],
+                              "2026-01-01", "2026-12-31")
+
+    check("الرصيد في الملف = رصيد الحساب في الدفتر",
+          abs(_dd["balance"]["gold"] - _acc_g) < 0.0011
+          and abs(_dd["balance"]["cash"] - _acc_c) < 0.011,
+          f"ملف {_dd['balance']} · دفتر ({_acc_g}, {_acc_c})")
+    _mine = [x for x in _ag_src if x["entity_id"] == _wc]
+    check("وأعمار دينه = صفُّه في تقرير أعمار الديون",
+          bool(_mine) == bool(_dd["aging"])
+          and (not _mine or abs(_dd["aging"]["gold"]
+                                - _mine[0]["gold"]) < 0.0011),
+          f"ملف {_dd['aging']['gold'] if _dd['aging'] else None} · "
+          f"تقرير {_mine[0]['gold'] if _mine else None}")
+    check("وجسر فترته = ما يعطيه تحليل حركة الرصيد",
+          abs(_dd["bridge"]["closing"]["gold"]
+              - _mv_src["closing"]["gold"]) < 0.0011,
+          f"{_dd['bridge']['closing']['gold']} مقابل "
+          f"{_mv_src['closing']['gold']}")
+
+    check("وموديلاته تُحسب بالصافي بعد المرتجع لا بالإجمالي",
+          all(m["net_count"] == m["sold"] - m["returned"]
+              for m in _dd["models_life"]),
+          f"{len(_dd['models_life'])} موديلاً")
+    _f = _dd["flow_life"]
+    check("ونسبة مرتجعه تُقاس بالوزن لا بالعدد",
+          _f["return_pct"] is None
+          or abs(_f["return_pct"]
+                 - _f["back_weight"] * 100.0 / _f["out_weight"]) < 0.11,
+          f"خرج {_f['out_weight']} · رجع {_f['back_weight']} · "
+          f"{_f['return_pct']}%")
+
+    # سقفٌ يُتجاوز: الملف يقوله صراحةً لا يتركه للقارئ يستنتجه
+    with db() as conn:
+        _ent.set_credit_limit(conn, _wc, 1.0, 1.0, "admin")
+    with db(readonly=True) as conn:
+        _dd2 = _ds.build(conn, _wc, "2026-01-01", "2026-12-31")
+    check("تجاوز السقف يُقال صراحةً في الخلاصة",
+          _dd2["limit"]["gold"]["over"]
+          and any("تجاوز سقفه" in v for v in _ds.verdict(_dd2)),
+          " | ".join(_ds.verdict(_dd2))[:110])
+    with db() as conn:
+        _ent.set_credit_limit(conn, _wc, 0.0, 0.0, "admin")
+    with db(readonly=True) as conn:
+        _dd3 = _ds.build(conn, _wc, "2026-01-01", "2026-12-31")
+    check("وصفرُ السقف يعني بلا حدّ فلا يُقال تجاوز",
+          not _dd3["limit"]["gold"]["over"]
+          and _dd3["limit"]["gold"]["pct"] is None)
+
+    # جهةٌ بلا أي حركة: الملف يُفتح ولا ينهار
+    with db() as conn:
+        _fresh = add_entity(conn, "عميل بلا حركة", "customer",
+                            username="admin")
+    with db(readonly=True) as conn:
+        _dd4 = _ds.build(conn, _fresh, "2026-01-01", "2026-12-31")
+    check("جهةٌ بلا حركةٍ تُفتح ولا تنهار",
+          _dd4["aging"] is None and _dd4["last_receipt"] is None
+          and _dd4["flow"]["return_pct"] is None
+          and "متزن" in " ".join(_ds.verdict(_dd4)),
+          " | ".join(_ds.verdict(_dd4))[:80])
+
+    # ══ الرصيد الافتتاحي رصيدُ بدايةٍ لا حركةٌ مجهولة ══
+    # كان قيدُ الافتتاح يقع في بند «أخرى» لأن اسمه ليس في قائمة
+    # الأنواع، فيقرأ المستخدم رصيداً افتتاحياً على أنه حركةٌ جرت في
+    # الفترة. الآن يُضمّ إلى «رصيد أول المدة»، والجسر يبقى مقفلاً.
+    with db() as conn:
+        _oc = add_entity(conn, "عميل رصيدٍ افتتاحي", "customer",
+                         username="admin", open_gold=300.0,
+                         opening_date="2026-05-02")
+        _oacc = get_entity(conn, _oc)["account_id"]
+    with db(readonly=True) as conn:
+        _om = _mv.analyze(conn, _oacc, "2026-05-01", "2026-05-31")
+    check("قيد الافتتاح يدخل «رصيد أول المدة» لا بند «أخرى»",
+          abs(_om["opening"]["gold"] - 300.0) < 0.0011
+          and not any(b["label"] == "أخرى" for b in _om["buckets"]),
+          f"افتتاحي {_om['opening']['gold']} · بنود "
+          + " · ".join(b["label"] for b in _om["buckets"]))
+    check("والجسر يبقى مقفلاً بعد ضمّه",
+          abs(_om["opening"]["gold"]
+              + sum(b["gold"] for b in _om["buckets"])
+              - _om["closing"]["gold"]) < 0.0011,
+          f"{_om['closing']['gold']}")
+
+    # ══ نظام الأيام: «س من ص» في كل بند ══
+    check("كل بندٍ يحمل مدى الفترة معه فيُقرأ «س من ص يوماً»",
+          all(b["span"] == _r["days"]["span"]
+              and b["days_label"] == f"{b['days']:,} من {b['span']:,}"
+              for b in _r["buckets"]),
+          " · ".join(f"{b['label']}={b['days_label']}"
+                     for b in _r["buckets"]))
+    check("ونشاط الأيام يستعمل الصيغة نفسها",
+          _r["days"]["active_label"]
+          == f"{_r['days']['active']:,} من {_r['days']['span']:,}"
+          and all("من" in x["days_label"] for x in _r["days"]["by_op"]),
+          _r["days"]["active_label"])
+
+    # ══ كشف الحساب على حسابٍ تجميعي = مجموع شجرته ══
+    with db(readonly=True) as conn:
+        _root = acc_id(conn, "1600")
+        _kids = _acc.subtree_ids(conn, _root)
+        _tree = _mv.analyze(conn, _root, "2026-01-01", "2026-12-31")
+        _sum_g = 0.0
+        for _k in _kids:
+            _sum_g += _bal(conn, _k, date_to="2026-12-31")[0]
+    check("الحساب التجميعي يُحلَّل بشجرته لا وحده",
+          len(_mv.account_ids(conn, _root)) > 1,
+          f"{len(_kids)} حساباً تحت 1600")
+    check("ورصيده الختامي = مجموع أرصدة فروعه",
+          abs(_tree["closing"]["gold"] - _sum_g) < 0.0011,
+          f"الشجرة {_tree['closing']['gold']} · المجموع "
+          f"{round(_sum_g, 3)}")
+
+    # ══ النِّسَب تُقاس على «ما كان عنده» ══
+    _fl = _dd["flow"]
+    check("«ما كان عنده» = أول المدة + كل ما زاد ذمّته",
+          abs(_fl["held_weight"]
+              - (_fl["opening_weight"] + _fl["out_weight"]
+                 + _fl["other_up"])) < 0.0011,
+          f"{_fl['opening_weight']} + {_fl['out_weight']} + "
+          f"{_fl['other_up']} = {_fl['held_weight']}")
+    # ══ «من البداية» يشمل الأرصدة الافتتاحية ══
+    # لو بُني من الفواتير وحدها لسقط منه الافتتاحيّ، فظهرت نسبةُ
+    # سدادٍ مضاعفة: ١٢٠ من ١٩٠ بدل ١٢٠ من ١٠٤٠.
+    _fll = _dd["flow_life"]
+    check("و«من البداية» يشمل الأرصدة الافتتاحية لا المبيعات وحدها",
+          abs(_fll["held_weight"]
+              - (_fll["opening_weight"] + _fll["out_weight"]
+                 + _fll["other_up"])) < 0.0011
+          and _fll["held_weight"] >= _fl["held_weight"] - 0.0011,
+          f"من البداية {_fll['held_weight']} · الفترة "
+          f"{_fl['held_weight']}")
+    check("وما سدّده وما رجع منه من الجسر لا من جدولٍ آخر",
+          abs(_fl["closing_weight"]
+              - _dd["bridge"]["closing"]["gold"]) < 0.0011,
+          f"{_fl['closing_weight']}")
+    check("ونسبة المرتجع والسداد تُقاسان عليه لا على المبيعات وحدها",
+          (_fl["return_pct"] is None
+           or abs(_fl["return_pct"]
+                  - _fl["back_weight"] * 100.0 / _fl["held_weight"]) < 0.11)
+          and (_fl["paid_pct"] is None
+               or abs(_fl["paid_pct"]
+                      - _fl["paid_weight"] * 100.0
+                      / _fl["held_weight"]) < 0.11),
+          f"مرتجع {_fl['return_pct']}% · سداد {_fl['paid_pct']}%")
+    check("وما سدّده يُقرأ من بند القبض في الجسر لا يُستنتج",
+          _fl["paid_count"] >= 0 and _fl["paid_weight"] >= 0,
+          f"{_fl['paid_count']} مستنداً · {_fl['paid_weight']}")
+
+    _html4 = _pm.build_body("dossier", _wc, date_from="2026-01-01",
+                            date_to="2026-12-31")
+    check("ورقة الملف تُبنى بأقسامها كلها",
+          "ملف الجهة" in _html4 and "جسر الرصيد" in _html4
+          and "أعمار دينه" in _html4 and "ما كان تحت يده" in _html4
+          and "ما سدّده" in _html4, f"{len(_html4)} حرفاً")
+    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
+          not _re.findall(r"-[\d,]+\.\d", _html4),
+          " · ".join(_re.findall(r"-[\d,]+\.\d", _html4)[:4]) or "لا شيء")
+
+    step("37) من عدّل ماذا بعد الترحيل")
+    # ══ الضمانة التي يقوم عليها السجلّ ══
+    # الفرق يُحفظ **رقمين** قبل وبعد لا نصّاً يُحلَّل. وتحليلُ نصٍّ
+    # عربيٍّ بتعبيرٍ نمطي يكسر بأول تغييرٍ في الصياغة — ويكسر صامتاً
+    # فيعطي صفراً بدل أن يعطي خطأ. وهذا ما يُفحص: التعديل يُسجَّل
+    # بقيمتيه، والفرق يُطابق ما تغيّر في الدفتر فعلاً.
+    from models import doc_edits as _de
+    from models import vouchers as _vo
+
+    with db() as conn:
+        _ec = add_entity(conn, "عميل تتبّع التعديل", "customer",
+                         username="admin")
+        _batch(conn, [{"wo_no": f"ED{i}", "gold": 100.0,
+                       "wage_per_gram": 20.0} for i in range(1, 4)],
+               "2026-05-01", "admin")
+        _ew = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no LIKE 'ED%'"
+            " ORDER BY id")]
+    with db() as conn:
+        _inv = create_sale(conn, _ec, [{"work_order_id": _ew[0]}],
+                           "2026-05-05", "admin", apply_vat=False)
+    with db(readonly=True) as conn:
+        _v0 = _de.totals(conn, _inv["entry_id"])
+    check("قيمة المستند = مجموع الطرف المدين من قيده",
+          _v0[0] > 0 and _v0[1] > 0, f"وزن {_v0[0]} · نقد {_v0[1]}")
+
+    # تعديلٌ في مكانه يُضيف طقماً ثانياً
+    with db() as conn:
+        invoices.update_invoice(conn, _inv["id"],
+                                [{"work_order_id": _ew[0]},
+                                 {"work_order_id": _ew[1]}], "admin")
+    with db(readonly=True) as conn:
+        _v1 = _de.totals(conn, _inv["entry_id"])
+        _ed = _de.report(conn)
+    _mine = [r for r in _ed if r["table"] == "invoices"
+             and r["source_id"] == _inv["id"]]
+    check("التعديل في مكانه يُسجَّل بقيمتيه قبل وبعد",
+          len(_mine) == 1 and _mine[0]["kind"] == "inplace",
+          f"{len(_mine)} سطراً")
+    check("والفرق المسجَّل = ما تغيّر في الدفتر فعلاً",
+          abs(_mine[0]["d_gold"] - (_v1[0] - _v0[0])) < 0.0011
+          and abs(_mine[0]["d_cash"] - (_v1[1] - _v0[1])) < 0.011,
+          f"مسجَّل ({_mine[0]['d_gold']}, {_mine[0]['d_cash']}) · "
+          f"دفتر ({round(_v1[0] - _v0[0], 3)}, "
+          f"{round(_v1[1] - _v0[1], 2)})")
+    check("ويُنسب لمن عدّله لا لمن أنشأه",
+          _mine[0]["user"] == "admin" and _mine[0]["changed"],
+          f"{_mine[0]['user']}")
+
+    # تعديلٌ بالإلغاء وإعادة الترحيل (سندٌ عبر `repost`)
+    with db() as conn:
+        _vch = create_voucher(conn, "receipt", "2026-05-10", "admin",
+                              entity_id=_ec, gold_weight=30.0,
+                              gold_karat=18)
+    with db(readonly=True) as conn:
+        _vb = _de.totals(conn, _vch["entry_id"])
+    with db() as conn:
+        _vo.update_voucher(conn, _vch["id"], "admin",
+                           entity_id=_ec, gold_weight=55.0,
+                           gold_karat=18)
+    with db(readonly=True) as conn:
+        _ed2 = _de.report(conn)
+    _mv2 = [r for r in _ed2 if r["table"] == "vouchers"
+            and r["source_id"] == _vch["id"]]
+    check("وتعديل السند يُسجَّل كذلك بفرقه",
+          len(_mv2) == 1 and abs(_mv2[0]["d_gold"] - 25.0) < 0.0011,
+          f"فرق {_mv2[0]['d_gold'] if _mv2 else '—'}")
+
+    _s = _de.summarize(conn, _ed2)
+    check("التجميع بالمستخدم وبنوع المستند يجمع الكل",
+          sum(x["count"] for x in _s["users"]) == len(_ed2)
+          and sum(x["count"] for x in _s["types"]) == len(_ed2),
+          f"{len(_ed2)} تعديلاً · {len(_s['users'])} مستخدماً · "
+          f"{len(_s['types'])} نوعاً")
+    check("والزيادة والنقص لا يُقاصّان في العرض",
+          abs(_s["total"]["up_gold"] + _s["total"]["dn_gold"]
+              - _s["total"]["d_gold"]) < 0.0011,
+          f"زيادة {_s['total']['up_gold']} · نقص "
+          f"{_s['total']['dn_gold']}")
+    check("والخلاصة تقول إن التعديل مشروعٌ ما دام مرئياً",
+          any("مرئياً" in v for v in _de.verdict(_s)),
+          " | ".join(_de.verdict(_s))[:110])
+
+    # تاريخ مستندٍ بعينه — يُفتح من الأرشيف
+    with db(readonly=True) as conn:
+        _h = _de.history(conn, "invoices", _inv["id"])
+    check("وتاريخ مستندٍ بعينه يُقرأ وحده",
+          len(_h) == 1 and _h[0]["source_id"] == _inv["id"])
+
+    # مُرشِّح «المتأخّر فقط» لا يُدرج تعديلاً وقع في يومه
+    with db(readonly=True) as conn:
+        _late = _de.report(conn, min_lag=_de.LATE_DAYS)
+    check("ومُرشِّح المتأخّر يستبعد ما عُدِّل في يومه",
+          all(r["lag"] >= _de.LATE_DAYS for r in _late),
+          f"{len(_late)} من {len(_ed2)}")
+
+    _html5 = _pm.build_body("doc_edits", 0, date_from="2026-01-01",
+                            date_to="2030-12-31")
+    check("ورقة التعديلات تُبنى بأبوابها",
+          "من عدّل ماذا" in _html5 and "بالمستخدم" in _html5
+          and "قيمة المستند" in _html5, f"{len(_html5)} حرفاً")
+    check("ولا تحمل سالباً خامّاً يزيغ في نصٍّ عربي",
+          not _re.findall(r"-[\d,]+\.\d", _html5),
+          " · ".join(_re.findall(r"-[\d,]+\.\d", _html5)[:4]) or "لا شيء")
+
+    step("38) رواتب عمال التصنيع — الصافي والمسحوبات والمستحق")
+    # ══ ثلاث ضمانات ══
+    # 1) الإضافي من **ساعات الإضافي** لا من ساعات الدوام كلها: كان
+    #    معاملُ الإضافي يُضرب في ساعات الشهر فيصير الإضافي راتباً
+    #    ثانياً — خطأٌ صامت لأن الرقم يبدو معقولاً.
+    # 2) السحب **لا يُطرح من الصافي**: قُيّد يوم وقوعه بسند صرف،
+    #    فطرحُه من الصافي المُرحَّل يخصمه مرتين ويظهر حساب العامل
+    #    مديناً بما لم يأخذه.
+    # 3) المستحق = الصافي − المسحوبات، للعرض لا للترحيل.
+    from models import mfg_costs as _mc2
+    from models import payroll as _pr
+
+    with db() as conn:
+        _wk = add_entity(conn, "عامل تصنيع للفحص", "worker",
+                         username="admin", basic_salary=3000.0)
+        _wacc = get_entity(conn, _wk)["account_id"]
+        _weid = conn.execute(
+            "SELECT employee_id FROM entities WHERE id=?",
+            (_wk,)).fetchone()["employee_id"]
+    _per = "2026-07"
+    with db() as conn:
+        _mc2.save_targets(conn, _per, [{
+            "employee_id": _weid, "month_days": 30, "hours": 8,
+            "overtime_hours": 20, "absence": 0, "actual_output": 0,
+            "target_amount": 0}], "admin")
+    # سندُ صرفٍ للعامل خلال الشهر — هذا هو «المسحوبات»
+    with db() as conn:
+        create_voucher(conn, "payment", "2026-07-10", "admin",
+                       entity_id=_wk, cash_amount=500.0)
+
+    with db(readonly=True) as conn:
+        _sal = {r["employee_id"]: r
+                for r in _mc2.list_salaries(conn, _per)}[_weid]
+
+    check("الإضافي = ساعات الإضافي × المعامل لا ساعات الدوام كلها",
+          abs(_sal["overtime_hours"] - 20.0) < 0.011
+          and abs(_sal["overtime"]
+                  - 20.0 * _sal["overtime_rate"]) < 0.011,
+          f"إضافية {_sal['overtime_hours']} × {_sal['overtime_rate']}"
+          f" = {_sal['overtime']}")
+    _want = round(3000.0 + _sal["overtime"], 2)
+    check("والصافي = الأساسي + الإضافي + التارجت + المكافأة − الخصوم",
+          abs(_sal["net_salary"] - _want) < 0.011,
+          f"{_sal['net_salary']} مقابل {_want}")
+    check("والمسحوبات تُقرأ من سندات الصرف",
+          abs(_sal["draws"] - 500.0) < 0.011, f"{_sal['draws']}")
+    check("والمستحق = الصافي − المسحوبات",
+          abs(_sal["due"] - (_sal["net_salary"] - 500.0)) < 0.011,
+          f"{_sal['due']}")
+    check("والسحب لا يُطرح من الصافي فلا يُخصم مرتين",
+          _sal["net_salary"] > _sal["due"] - 0.011
+          and abs(_sal["net_salary"] - _want) < 0.011)
+
+    # ══ الترحيل يُنزل الصافي، ورصيد العامل يطرح السحب من نفسه ══
+    with db() as conn:
+        _mc2.save_salaries(conn, _per, [_sal], "admin")
+        _res = _mc2.post_salaries(conn, _per, "admin",
+                                  entry_date="2026-07-31", rows=[_sal])
+    with db(readonly=True) as conn:
+        _wg, _wc2 = _bal(conn, _wacc)
+    check("الترحيل يُنزل الصافي في حساب العامل",
+          abs(_res["total"] - _sal["net_salary"]) < 0.011,
+          f"{_res['total']}")
+    check("ورصيدُ حسابه = المسحوبات − الصافي بلا خصمٍ مزدوج",
+          abs(_wc2 - (500.0 - _sal["net_salary"])) < 0.011,
+          f"رصيد {_wc2} · صافي {_sal['net_salary']} · سحب 500")
+
+    # ══ إضافة موظفٍ من خارج عمال التصنيع ══
+    with db() as conn:
+        _emp = add_entity(conn, "موظف إداري مع القسم", "employee",
+                          username="admin", basic_salary=2000.0)
+        _eeid = conn.execute(
+            "SELECT employee_id FROM entities WHERE id=?",
+            (_emp,)).fetchone()["employee_id"]
+    with db(readonly=True) as conn:
+        _before = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
+    check("الموظف الإداري ليس في جدول رواتب التصنيع افتراضاً",
+          _eeid not in _before)
+    _mc2.save_extra_staff(_mc2.load_extra_staff() + [_eeid])
+    with db(readonly=True) as conn:
+        _after = {r["employee_id"]: r
+                  for r in _mc2.list_salaries(conn, _per)}
+    check("وإضافتُه تُدرج صفَّه ويُعلَّم بأنه مضاف",
+          _eeid in _after and _after[_eeid]["is_extra"]
+          and not _after[_weid]["is_extra"],
+          f"{len(_after)} صفاً")
+    _mc2.save_extra_staff([])
+    with db(readonly=True) as conn:
+        _back = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
+    check("ورفعُه يُعيد الجدول لعمال القسم وحدهم",
+          _eeid not in _back and _weid in _back)
+
+    # ══ الاسم يُعدَّل في دليل الحسابات ══
+    from models import coa as _coa
+    with db() as conn:
+        _coa.rename_account(conn, _wacc, "عامل التصنيع بعد التسمية",
+                            "admin")
+    with db(readonly=True) as conn:
+        _nm = conn.execute("SELECT name FROM entities WHERE id=?",
+                           (_wk,)).fetchone()["name"]
+        _an = conn.execute("SELECT name FROM accounts WHERE id=?",
+                           (_wacc,)).fetchone()["name"]
+        _rn = {r["employee_id"]: r["name"]
+               for r in _mc2.list_salaries(conn, _per)}[_weid]
+    check("تعديل الاسم يتبعه دليل الحسابات والجهة وجدول الرواتب",
+          _an == "عامل التصنيع بعد التسمية"
+          and _nm == "عامل التصنيع بعد التسمية"
+          and _rn == "عامل التصنيع بعد التسمية",
+          f"حساب «{_an}» · جهة «{_nm}» · جدول «{_rn}»")
+
+    _html6 = _pm.build_body("mfg_salary", 0, period=_per,
+                            salaries=list(_after.values()))
+    check("وورقةُ الرواتب تحمل العمودين الجديدين",
+          "مسحوبات" in _html6 and "المستحق" in _html6
+          and "إضافية" in _html6, f"{len(_html6)} حرفاً")
+
+    # ══ السالب في جدول الرواتب: قوسان يُقرآن ويُكتبان ══
+    # الإشارة الأمامية تزيغ في السطر العربي فيُقرأ السالب موجباً؛
+    # والقوسان يُعرضان — فإن لم تُقرأ القوسان عند الحفظ صار السالب
+    # صفراً في أول حفظٍ بلا تعديل، وهذا أسوأ من العرض نفسه.
+    from ui.mfg_costs_screen import _num as _mnum, _val as _mval
+    check("سالبُ جدول الرواتب يُعرض بين قوسين لا بإشارةٍ زائغة",
+          _mnum(-571.66) == "(571.66)" and _mnum(1646.68) == "1,646.68",
+          f"{_mnum(-571.66)} · {_mnum(1646.68)}")
+    check("والقوسان يُقرآن سالباً عند الحفظ فلا يضيع الرقم",
+          abs(_mval("(571.66)") + 571.66) < 0.001
+          and abs(_mval("1,646.68") - 1646.68) < 0.001
+          and abs(_mval("-25") + 25.0) < 0.001
+          and _mval("") == 0.0,
+          f"{_mval('(571.66)')} · {_mval('1,646.68')}")
+
+    step("39) دليل الموديلات — الوارد بتاريخ ومع من كل قطعة")
+    # السؤال: «ماذا ورد من التصنيع يوم كذا، وأين هو الآن؟» — يُجاب
+    # من سطور الدفعات لا من بطاقات الأطقم، لأن الرقم التجميعي 0001
+    # بطاقةٌ واحدة تراكمية: قراءتُها تنسب رصيد الشهر كلِّه ليومٍ واحد.
+    from models import invoices as _inv9
+    from models import models_catalog as _mcat
+    from models.entities import add_entity as _add9
+    from models.inventory import create_work_orders_batch as _b9
+    _r1, _r2 = "R{}".format(901), "R{}".format(902)
+    with db() as conn:
+        _rc = _add9(conn, "مشترٍ من دفعة اليوم", "customer",
+                    username="admin")
+        _b9(conn, [
+            {"wo_no": _r1, "gold": 40.0, "wage_per_gram": 24.0,
+             "model_no": "موديل الوارد"},
+            {"wo_no": _r2, "gold": 25.0, "wage_per_gram": 24.0,
+             "model_no": "موديل الوارد"},
+            {"wo_no": "0001", "gold": 70.0, "wage_per_gram": 20.0,
+             "model_no": "موديل الوارد"}], "2026-08-03", "admin")
+    with db() as conn:
+        _b9(conn, [
+            {"wo_no": "R903", "gold": 30.0, "wage_per_gram": 24.0,
+             "model_no": "موديل الوارد"},
+            {"wo_no": "0001", "gold": 15.0, "wage_per_gram": 20.0,
+             "model_no": "موديل الوارد"}], "2026-08-11", "admin")
+    with db(readonly=True) as conn:
+        _w1 = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no=?"
+            " AND is_deleted=0", (_r1,)).fetchone()["id"]
+    with db() as conn:
+        _inv9.create_sale(conn, _rc, [{"work_order_id": _w1}],
+                          "2026-08-20", "admin", apply_vat=False)
+
+    with db(readonly=True) as conn:
+        _d3 = _mcat.received(conn, "2026-08-03", "2026-08-03")
+        _d11 = _mcat.received(conn, "2026-08-11", "2026-08-11")
+        _days = {d["date"]: d for d in _mcat.received_days(conn)}
+    _m3 = {m["model"]: m for m in _d3["models"]}["موديل الوارد"]
+    _by = {i["wo"]: i for i in _m3["items"]}
+    check("وارد اليوم يُفصَّل موديلاً موديلاً بأرقام تشغيله",
+          sorted(_by) == ["0001", _r1, _r2], f"{sorted(_by)}")
+    check("والمباعة تحمل اسم الجهة التي هي عندها الآن",
+          _by[_r1]["holder"] == "مشترٍ من دفعة اليوم"
+          and not _by[_r1]["safe"], _by[_r1]["holder"])
+    check("والباقية تحمل «الخزنة»",
+          _by[_r2]["holder"] == _mcat.SAFE and _by[_r2]["safe"],
+          _by[_r2]["holder"])
+    check("والرقم التجميعي يُنسب لكل يومٍ بحصته لا برصيده المتراكم",
+          abs(_by["0001"]["reg"] - 70.0) < 0.011
+          and abs({i["wo"]: i for i in
+                   {m["model"]: m for m in _d11["models"]}
+                   ["موديل الوارد"]["items"]}["0001"]["reg"] - 15.0) < 0.011,
+          f"{_by['0001']['reg']} ثم 15")
+    check("ووارد يومٍ لا يختلط بوارد غيره",
+          all(i["wo"] != "R903" for i in _m3["items"])
+          and "2026-08-03" in _days and "2026-08-11" in _days,
+          f"{_days.get('2026-08-03', {}).get('count')} قطعاً يوم 3")
+    check("والإجمالي يفصل ما بالخزنة عمّا خرج للجهات",
+          _d3["count"] == 3 and _d3["out_count"] == 1
+          and _d3["in_count"] == 2,
+          f"{_d3['count']} · خارج {_d3['out_count']}")
+    _html7 = _pm.build_body("models_received", 0, date_from="2026-08-03",
+                            date_to="2026-08-03")
+    check("وورقةُ الوارد تحمل أرقام التشغيل والجهة والخزنة",
+          _r1 in _html7 and "مشترٍ من دفعة اليوم" in _html7
+          and _mcat.SAFE in _html7, f"{len(_html7)} حرفاً")
+
+    # ══ ورقة الصور: أربعٌ في الصفحة، والزائد يُختصر لا يفيض ══
+    _html8 = _pm.build_body("models_received_photos", 0,
+                            date_from="2026-08-03", date_to="2026-08-03")
+    check("وورقةُ الصور تعرض الموديل ولو بلا صورة ومعه قطعُه وجهاتُها",
+          "لا صورة لهذا الموديل" in _html8 and _r1 in _html8
+          and "مشترٍ من دفعة اليوم" in _html8
+          and "pgrid" in _html8, f"{len(_html8)} حرفاً")
+    check("وخليةُ الصورة ثابتة الارتفاع فلا تُزيح أختها لصفحةٍ أخرى",
+          "height: 116mm" in _html8 and "height: 110mm" in _html8
+          and _pm.PHOTO_ROWS == 6)
+
+    step("40) لوحة أرقام التشغيل المتاحة للبيع")
+    # اللوحة عرضٌ محض: تقرأ بطاقات الأطقم المتاحة ولا تُنشئ قيداً.
+    from models import dash_panels as _dp9
+    from models.inventory import rename_work_order as _rn9
+    with db() as conn:
+        _b9(conn, [
+            {"wo_no": "T801", "gold": 40.0, "small_stones": 2.0,
+             "big_stones": 6.0, "discount_rate": 0.5,
+             "wage_per_gram": 24.0, "model_no": "لوحة 1"},
+            {"wo_no": "T802", "gold": 30.0, "wage_per_gram": 24.0,
+             "model_no": "لوحة 1"}], "2026-08-14", "admin")
+    with db(readonly=True) as conn:
+        _t2 = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no='T802'"
+            " AND is_deleted=0").fetchone()["id"]
+        _t1 = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no='T801'"
+            " AND is_deleted=0").fetchone()["id"]
+    with db() as conn:
+        _inv9.create_sale(conn, _rc, [{"work_order_id": _t2}],
+                          "2026-08-18", "admin", apply_vat=False)
+    with db(readonly=True) as conn:
+        _st = {r["wo"]: r for r in _dp9.stock_rows(conn)}
+        _sq = _dp9.stock_rows(conn, "T801")
+    check("اللوحة تعرض المتاح للبيع وحده",
+          "T801" in _st and "T802" not in _st, f"{len(_st)} طقماً")
+    check("وكل صفٍّ يحمل الذهب والفصوص والأحجار وبعد الخصم والمقيد"
+          " والقائم",
+          abs(_st["T801"]["gold"] - 40.0) < 0.011
+          and abs(_st["T801"]["small"] - 2.0) < 0.011
+          and abs(_st["T801"]["big"] - 6.0) < 0.011
+          and abs(_st["T801"]["after"] - 3.0) < 0.011
+          and abs(_st["T801"]["reg"] - 45.0) < 0.011
+          and abs(_st["T801"]["standing"] - 48.0) < 0.011,
+          f"مقيد {_st['T801']['reg']} · قائم {_st['T801']['standing']}")
+    check("والبحث يقصرها على ما طابق",
+          [r["wo"] for r in _sq] == ["T801"])
+    with db() as conn:
+        _mcat.assign_model(conn, _t1, "لوحة 2", "admin")
+        _rn9(conn, _t1, "T809", "admin")
+    with db(readonly=True) as conn:
+        _st2 = {r["wo"]: r for r in _dp9.stock_rows(conn)}
+        _ln = conn.execute(
+            "SELECT wo_no FROM wo_batch_lines WHERE work_order_id=?",
+            (_t1,)).fetchone()
+    check("وتعديلُ الطقم يغيّر موديله ورقمه ويتبعه سطر الدفعة",
+          "T809" in _st2 and _st2["T809"]["model"] == "لوحة 2"
+          and (_ln["wo_no"] if _ln else "") == "T809",
+          f"سطر الدفعة {_ln['wo_no'] if _ln else '—'}")
+    _html9 = _pm.build_body("dash_panel", 0, title="أرقام التشغيل",
+                            kind="stock", codes=[])
+    check("وورقةُ اللوحة تطابق جدولها",
+          "T809" in _html9 and "الفصوص" in _html9
+          and "الذهب القائم" in _html9 and "T802" not in _html9,
+          f"{len(_html9)} حرفاً")
+
+    step("41) ترتيب أسماء عمال التصنيع")
+    # الترتيب عرضٌ محض — لا يمسّ راتباً ولا قيداً، لكنه واحدٌ
+    # للتارجت وللرواتب: جدولان بترتيبين يُقارَن فيهما صفٌّ بغير صفّه.
+    _perO = "2026-09"
+    _wids = []
+    with db() as conn:
+        for _n in ("عامل ترتيب ب", "عامل ترتيب أ"):
+            _e = add_entity(conn, _n, "worker", username="admin",
+                            basic_salary=3000.0)
+            _wids.append(conn.execute(
+                "SELECT employee_id FROM entities WHERE id=?",
+                (_e,)).fetchone()["employee_id"])
+    with db(readonly=True) as conn:
+        _names0 = [r["name"] for r in _mc2.list_salaries(conn, _perO)]
+    _mc2.save_staff_order(list(reversed(_wids)))
+    with db(readonly=True) as conn:
+        _names1 = [r["name"] for r in _mc2.list_salaries(conn, _perO)]
+        _tg1 = [r["name"] for r in _mc2.list_targets(conn, _perO)]
+    check("الترتيب المحفوظ يقدّم من قدّمه صاحب النظام",
+          _names1[:2] == ["عامل ترتيب أ", "عامل ترتيب ب"]
+          and _names1 != _names0, f"{_names1[:2]}")
+    check("والتارجت والرواتب بترتيبٍ واحد",
+          _tg1[:2] == _names1[:2], f"{_tg1[:2]}")
+    _mc2.save_staff_order(_wids)
+    with db(readonly=True) as conn:
+        _names2 = [r["name"] for r in _mc2.list_salaries(conn, _perO)]
+    check("وتبديلُ الترتيب يظهر فوراً وبلا مساسٍ بالأرقام",
+          _names2[:2] == ["عامل ترتيب ب", "عامل ترتيب أ"], f"{_names2[:2]}")
+    _mc2.save_staff_order([])
+
+    step("42) بوابة الدخول — الترحيب والحركة ومسار الدخول")
+    # البوابة واجهة، لكن تحتها ثلاثة أشياء تُفحص بلا شاشة: نصُّ
+    # الترحيب، ومفاتيح إطفاء الحركة، ومسار الدخول المشترك.
+    import os as _os9
+    from services import login_flow as _lf9
+    from ui import gate_window as _gw9
+    from ui.widgets import gold_stage as _gs9
+    check("الترحيب يقول اسم النظام كما يُخاطَب به صاحبه",
+          _gw9.WELCOME == "مرحباً بك في نظام إدارة مصانع الذهب"
+          and _gw9.ASK_LOGIN == "يرجى تسجيل الدخول", _gw9.WELCOME)
+    _old_anim = _os9.environ.get("GOLD_ERP_NO_ANIM", "")
+    _os9.environ["GOLD_ERP_NO_ANIM"] = "1"
+    _off = _gs9.animations_on()
+    _os9.environ["GOLD_ERP_NO_ANIM"] = _old_anim
+    _old_cfg = getattr(config, "SPLASH_ANIMATION", True)
+    config.SPLASH_ANIMATION = False
+    _off2 = _gs9.animations_on()
+    config.SPLASH_ANIMATION = _old_cfg
+    check("والحركة تُطفأ بالإعداد أو بمتغيّر البيئة — للأجهزة الضعيفة",
+          _off is False and _off2 is False)
+    try:
+        _lf9.sign_in("", "x")
+        _empty = False
+    except _lf9.LoginError as _e9:
+        _empty = "اسم المستخدم" in str(_e9)
+    check("ومسارُ الدخول يرفض الفارغ برسالةٍ مفهومة لا بانهيار", _empty)
+    _lf9.save_last_user("مستخدم الاختبار")
+    check("ويُحفظ اسمُ آخر من دخل وحده — لا كلمة المرور",
+          _lf9.load_last_user() == "مستخدم الاختبار"
+          and _lf9._last_user_path().name == "last_user.txt")
+    _lf9.save_last_user("")
+    check("ورفعُ التذكّر يمحو الاسم", _lf9.load_last_user() == "")
+    import main as _main9
+    _steps9 = _main9.prepare_steps()
+    check("وخطوات الإقلاع مسمّاة تُعرض على البوابة وهي تُنفَّذ",
+          len(_steps9) >= 7
+          and all(isinstance(a, str) and callable(b) for a, b in _steps9)
+          and "قاعدة البيانات" in _steps9[0][0],
+          f"{len(_steps9)} خطوات")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

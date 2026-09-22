@@ -236,6 +236,44 @@ def check_negative_stock(conn):
     return bad
 
 
+def check_double_sold(conn):
+    """أطقمٌ مفردة بِيعت أكثر من مرة بلا مرتجعٍ بينها.
+
+    الطقم المفرد قطعةٌ واحدة: تخرج مرة، فإن عادت فبمرتجع. فظهورُه في
+    فاتورتَي بيعٍ ساريتين يعني أن الذهب خرج مرة وحُوسب عليه عميلان —
+    كلاهما مدينٌ بأجرته، ومخزونُ المصنع يعارض الواقع.
+
+    كان يقع بثغرةٍ في تعديل الفواتير: إضافة طقمٍ إلى فاتورةٍ قديمة لم
+    تكن تفحص حالته، فيُقبل وهو مباعٌ في فاتورةٍ أخرى. أُغلقت الثغرة،
+    ويبقى هذا الفحص ليكشف ما وقع **قبلها** — فالإصلاح يمنع الجديد ولا
+    يُصلح القديم.
+
+    الرقم التجميعي مستثنى: هو رصيدٌ وزني يُباع منه مراراً بطبيعته.
+    """
+    bad = []
+    for r in conn.execute(
+            "SELECT w.work_order_no wno, COUNT(*) n,"
+            "       GROUP_CONCAT(i.invoice_no, ' · ') invs"
+            "  FROM invoice_items it"
+            "  JOIN invoices i ON i.id=it.invoice_id"
+            "  JOIN work_orders w ON w.id=it.work_order_id"
+            " WHERE i.is_deleted=0 AND i.kind='sale'"
+            "   AND w.is_bulk=0 AND w.is_deleted=0"
+            " GROUP BY it.work_order_id HAVING COUNT(*) > 1"
+            " LIMIT 200"):
+        # مرتجعٌ بينهما يجعل تكرار البيع مشروعاً
+        rets = conn.execute(
+            "SELECT COUNT(*) c FROM invoice_items it"
+            "  JOIN invoices i ON i.id=it.invoice_id"
+            "  JOIN work_orders w ON w.id=it.work_order_id"
+            " WHERE i.is_deleted=0 AND i.kind='sale_return'"
+            "   AND w.work_order_no=?", (r["wno"],)).fetchone()["c"]
+        if r["n"] - rets > 1:
+            bad.append({"wo": r["wno"], "times": r["n"],
+                        "returns": rets, "invoices": r["invs"]})
+    return bad
+
+
 def full_health(conn):
     """تقرير صحة شامل — يُعرض في شاشة الصيانة."""
     unbalanced = check_double_entry(conn)
@@ -247,12 +285,18 @@ def full_health(conn):
         negatives = check_negative_stock(conn)
     except Exception:
         negatives = []
+    try:
+        dbl = check_double_sold(conn)
+    except Exception:
+        dbl = []
     # السالب **لا يُفشل** التقرير: حالةٌ تُراجَع لا خللٌ في الدفتر،
     # والدفتر قد يكون متوازناً تماماً ورصيدُه سالب.
-    ok = not (unbalanced or orphans or integrity or inv_bad)
+    # أما البيع المكرّر فخللٌ صريح: عميلان مدينان بطقمٍ خرج مرة.
+    ok = not (unbalanced or orphans or integrity or inv_bad or dbl)
     return {
         "invoice_totals": inv_bad,
         "negatives": negatives,
+        "double_sold": dbl,
         "ok": ok,
         "unbalanced": unbalanced,
         "orphans": orphans,

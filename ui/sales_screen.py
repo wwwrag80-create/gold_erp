@@ -409,6 +409,14 @@ class SalesScreen(QtWidgets.QWidget):
             "بالوزن فقط — بلا أجور ولا ضريبة.")
         self.internal_note.setObjectName("warn")
         self.internal_note.setVisible(False)
+        # ══ الأجرة المتفق عليها مع العميل ══
+        # كانت تُكتب من ذاكرة البائع في كل سطر، فينزل عميلٌ درجةً بلا
+        # أن يدري أحد. الآن تُستدعى من بطاقته وتظهر أمام عينه، ويُنبَّه
+        # فوراً إن خالفها — بلا منعٍ: للبائع أن يخالف عن قصد.
+        self._agreed_wage = 0.0          # بعيار العرض · صفر = بلا اتفاق
+        self.wage_note = QtWidgets.QLabel("")
+        self.wage_note.setObjectName("cardSub")
+        self.wage_note.setWordWrap(True)
 
         top = QtWidgets.QGridLayout()
         top.addWidget(QtWidgets.QLabel("نوع العملية:"), 0, 0)
@@ -424,6 +432,7 @@ class SalesScreen(QtWidgets.QWidget):
         top.addWidget(self.vat_check, 2, 0, 1, 6)
         top.addWidget(self.qr_check, 3, 0, 1, 6)
         top.addWidget(self.internal_note, 4, 0, 1, 6)
+        top.addWidget(self.wage_note, 6, 0, 1, 6)
         def _sub(t):
             l = QtWidgets.QLabel(t)
             l.setObjectName("cardSub")
@@ -698,7 +707,51 @@ class SalesScreen(QtWidgets.QWidget):
         self.internal_note.setVisible(internal)
         if internal:
             self.vat_check.setChecked(False)
+        self._load_agreed_wage(cid)
         self.recalc()
+
+    def _load_agreed_wage(self, cid):
+        """أجرة العميل المتفق عليها — تُقرأ مرةً عند اختياره.
+
+        **صفرٌ يعني بلا اتفاق** لا اتفاقاً بصفر، فلا يُفرض على من لم
+        يُكتب له اتفاق. والتحويل إلى عيار العرض هنا: المخزَّن مكافئ
+        عيار 18 وحقلُ الأجر في الشاشة بعيار المصنع.
+        """
+        self._agreed_wage = 0.0
+        if not cid:
+            self.wage_note.setText("")
+            return
+        try:
+            with db(readonly=True) as conn:
+                stored = entities.agreed_wage(conn, cid)
+        except Exception:
+            stored = 0.0
+        if stored > 0:
+            self._agreed_wage = round(kv.rate(stored), 2)
+            self.wage_note.setText(
+                f"💠 الأجرة المتفق عليها مع هذا العميل: "
+                f"{self._agreed_wage:,.2f} ريال لكل {kv.unit()} — "
+                "تُملأ تلقائياً، ولك أن تغيّرها في أي سطر.")
+        else:
+            self.wage_note.setText(
+                "لا أجرةَ متفق عليها مسجّلة لهذا العميل — تُكتب في "
+                "بطاقة الجهة، فيُقاس عليها ويُكشف أي انحراف.")
+
+    def _wage_hint(self, used):
+        """يوازن أجر السطر بالمتفق عليه ويقول الفرق — بلا منع."""
+        if self._agreed_wage <= 0:
+            return
+        d = round(used - self._agreed_wage, 2)
+        if abs(d) < 0.005:
+            self.wage_note.setText(
+                f"✔ أجر السطر {used:,.2f} — مطابقٌ للمتفق عليه.")
+        else:
+            self.wage_note.setText(
+                f"⚠ أجر السطر {used:,.2f} والمتفق عليه "
+                f"{self._agreed_wage:,.2f} — "
+                + ("أقلّ" if d < 0 else "أعلى") +
+                f" بـ {abs(d):,.2f} ريال لكل {kv.unit()}. "
+                "أُضيف كما أدخلتَه — راجعه إن لم يكن عن قصد.")
 
     def new_customer(self):
         dlg = NewCustomerDialog(self, self.user["username"])
@@ -824,9 +877,13 @@ class SalesScreen(QtWidgets.QWidget):
                     self.model_no.setCurrentText(str(mn))
             except Exception:
                 pass
-            # استدعاء أجر الطقم تلقائياً ليكون جاهزاً للتعديل أو التأكيد
+            # الأجر يُستدعى جاهزاً للتعديل أو التأكيد — والأولوية
+            # **لاتفاق العميل** على أجر بطاقة الطقم: الأول اتفاقٌ مع
+            # من يشتري، والثاني تقديرُ المصنع وقتَ الإنتاج.
             if self.line_wage.value() <= 0:
-                self.line_wage.setValue(kv.rate(wo["wage_per_gram"] or 0))
+                self.line_wage.setValue(
+                    self._agreed_wage if self._agreed_wage > 0
+                    else kv.rate(wo["wage_per_gram"] or 0))
             self.line_wage.setFocus()
             self.line_wage.selectAll()
         except Exception as e:
@@ -906,7 +963,9 @@ class SalesScreen(QtWidgets.QWidget):
             # كلاهما بعيار العرض — والتحويل عند الحفظ وحده.
             wage = self.line_wage.value()
             if wage <= 0:
-                wage = kv.rate(wo["wage_per_gram"] or 0.0)
+                wage = (self._agreed_wage if self._agreed_wage > 0
+                        else kv.rate(wo["wage_per_gram"] or 0.0))
+            self._wage_hint(wage)
             # ربط الطقم بالموديل المكتوب إن لم يكن له موديل
             self._apply_model(wo)
             with db() as conn:
@@ -990,12 +1049,16 @@ class SalesScreen(QtWidgets.QWidget):
             err(self, "اختر سطراً من جدول البنود أولاً")
             return
         cur = self.items[r]["wage"]
+        agreed = (f"\nالمتفق عليه مع هذا العميل: {self._agreed_wage:,.2f}"
+                  if self._agreed_wage > 0 else "")
         val, ok = QtWidgets.QInputDialog.getDouble(
             self, "تعديل الأجر",
-            f"أجر الجرام للطقم {self.items[r]['wo']['work_order_no']}:",
+            f"أجر الجرام للطقم {self.items[r]['wo']['work_order_no']}:"
+            + agreed,
             float(cur or 0), 0.0, 100000.0, 2)
         if ok:
             self.items[r]["wage"] = val
+            self._wage_hint(val)
             self.render_items()
 
     def _remember_model_change(self, wo, before):

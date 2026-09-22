@@ -17,15 +17,28 @@
 """
 
 
+# تاريخ الورود: تاريخُ **قيد** الدفعة لا لحظةُ كتابة السجل. القيد
+# يُؤرَّخ بيوم التوريد كما أدخله المستخدم في «الوارد من التصنيع»،
+# أما `created_at` فلحظةُ الكتابة — وقد تتأخّر يوماً أو شهراً عن
+# التوريد نفسه. والسؤال «ماذا ورد يوم كذا» يريد الأول لا الثاني.
+IN_DATE = ("COALESCE((SELECT e.entry_date FROM journal_entries e"
+           " WHERE e.id=w.entry_id AND e.is_deleted=0),"
+           " substr(w.created_at,1,10))")
+
+# مكانُ القطعة اليوم: الخزنة أو جهة. لا ثالث لهما — حالة الطقم
+# `in_stock` أو `sold`، والمرتجع يعيدها `in_stock` فتعود للخزنة.
+SAFE = "الخزنة"
+
+
 def list_models(conn, date_from=None, date_to=None):
     """كل الموديلات المسجّلة مع إجمالياتها."""
     p = []
     clause = ""
     if date_from:
-        clause += " AND COALESCE(substr(w.created_at,1,10),'') >= ?"
+        clause += f" AND {IN_DATE} >= ?"
         p.append(date_from)
     if date_to:
-        clause += " AND COALESCE(substr(w.created_at,1,10),'') <= ?"
+        clause += f" AND {IN_DATE} <= ?"
         p.append(date_to)
     rows = conn.execute(
         "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') mno,"
@@ -79,6 +92,155 @@ def model_items(conn, model_no, branch):
              "holder": r["holder"] or "—",
              "date": r["sold_date"] or r["created"] or ""}
             for r in rows]
+
+
+# ══════════════════════════════════════════════════════════════════
+# الوارد من التصنيع بتاريخ — ماذا دخل ذلك اليوم، وأين هو الآن
+# ══════════════════════════════════════════════════════════════════
+#
+# **لماذا لا يُقرأ الوارد من بطاقة الطقم**: الرقم التجميعي 0001 سجلٌّ
+# **تراكمي** واحد يزيد رصيده مع كل دفعة، وبطاقتُه تحمل تاريخ آخر
+# دفعة ورصيدَها الكلي. فمن سأل «ماذا ورد يوم الأحد» وقرأ البطاقات
+# رأى رصيد الشهر كلِّه منسوباً ليوم واحد. لذلك يُقرأ الوارد من
+# `wo_batch_lines` — وهو سجلُّ حصة كل طقم في دفعته كما أُدخلت.
+#
+# والدفعات القديمة (قبل وجود ذلك الجدول) لا سطور لها، فتُقرأ من
+# بطاقاتها مباشرةً — وإلا اختفى وارد سنةٍ كاملة من التقرير.
+
+_RECV_SQL = f"""
+SELECT e.entry_date d, w.id wid, w.work_order_no wo,
+       COALESCE(NULLIF(TRIM(l.model_no),''),
+                NULLIF(TRIM(w.model_no),'')) mno,
+       l.registered_weight reg, l.wage_per_gram wage,
+       w.status st, w.is_bulk bulk
+  FROM wo_batch_lines l
+  JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0
+  JOIN work_orders w ON w.id=l.work_order_id AND w.is_deleted=0
+ WHERE e.entry_date BETWEEN ? AND ?
+UNION ALL
+SELECT {IN_DATE} d, w.id wid, w.work_order_no wo,
+       NULLIF(TRIM(w.model_no),'') mno,
+       w.registered_weight reg, w.wage_per_gram wage,
+       w.status st, w.is_bulk bulk
+  FROM work_orders w
+ WHERE w.is_deleted=0
+   AND NOT EXISTS (SELECT 1 FROM wo_batch_lines l2
+                    WHERE l2.work_order_id=w.id)
+   AND {IN_DATE} BETWEEN ? AND ?
+"""
+
+
+def _holders(conn, ids):
+    """اسم آخر جهةٍ أخذت كل طقم — للمباع وحده."""
+    out = {}
+    ids = [int(i) for i in (ids or [])]
+    for i in range(0, len(ids), 400):        # دفعات: لا استعلام بألف مُعامل
+        chunk = ids[i:i + 400]
+        ph = ",".join("?" * len(chunk))
+        for r in conn.execute(
+                "SELECT it.work_order_id wid, en.name nm"
+                " FROM invoice_items it"
+                " JOIN invoices i ON i.id=it.invoice_id"
+                " JOIN entities en ON en.id=i.customer_id"
+                f" WHERE it.work_order_id IN ({ph}) AND i.is_deleted=0"
+                " AND i.kind='sale'"
+                " ORDER BY i.invoice_date, i.id", chunk):
+            out[r["wid"]] = r["nm"]          # الأحدث يغلب — الترتيب تصاعدي
+    return out
+
+
+def received(conn, date_from, date_to, models=None):
+    """الوارد من التصنيع في فترة — موديلاً موديلاً، ومع من كل قطعة.
+
+    `models`: قائمة أرقام موديلات للقصر عليها (أو لا شيء = الكل).
+
+    كل قطعة تحمل مكانها **اليوم** لا يوم ورودها: «الخزنة» إن كانت
+    متاحةً للبيع، واسمُ الجهة إن خرجت إليها. فالسؤال الذي يُسأل بعد
+    شهرٍ من التوريد ليس «أين وضعتُها» بل «أين هي الآن».
+    """
+    d1 = str(date_from or "")
+    d2 = str(date_to or d1)
+    if d2 < d1:
+        d1, d2 = d2, d1
+    rows = conn.execute(_RECV_SQL, (d1, d2, d1, d2)).fetchall()
+    want = {str(m).strip() for m in (models or []) if str(m).strip()}
+
+    groups, wids = {}, set()
+    for r in rows:
+        mno = (r["mno"] or "").strip() or "— بلا موديل —"
+        if want and mno not in want:
+            continue
+        if r["st"] == "sold":
+            wids.add(r["wid"])
+        groups.setdefault(mno, []).append(r)
+    names = _holders(conn, wids)
+
+    out, t_n, t_w, in_n, in_w = [], 0, 0.0, 0, 0.0
+    for mno in sorted(groups):
+        items, g_n, g_w, g_in, g_inw = [], 0, 0.0, 0, 0.0
+        for r in sorted(groups[mno], key=lambda x: (x["d"] or "",
+                                                    str(x["wo"]))):
+            reg = round(float(r["reg"] or 0), 2)
+            safe = r["st"] != "sold"
+            items.append({
+                "id": r["wid"], "wo": r["wo"], "reg": reg,
+                "wage": round(float(r["wage"] or 0), 2),
+                "date": r["d"] or "", "bulk": bool(r["bulk"]),
+                "safe": safe,
+                "holder": SAFE if safe else (names.get(r["wid"]) or "جهة"),
+            })
+            g_n += 1
+            g_w = round(g_w + reg, 2)
+            if safe:
+                g_in += 1
+                g_inw = round(g_inw + reg, 2)
+        out.append({"model": mno, "count": g_n, "weight": g_w,
+                    "in_count": g_in, "in_weight": g_inw,
+                    "out_count": g_n - g_in,
+                    "out_weight": round(g_w - g_inw, 2),
+                    "items": items})
+        t_n += g_n
+        t_w = round(t_w + g_w, 2)
+        in_n += g_in
+        in_w = round(in_w + g_inw, 2)
+
+    holders = sorted({i["holder"] for m in out for i in m["items"]
+                      if not i["safe"]})
+    return {"date_from": d1, "date_to": d2, "models": out,
+            "count": t_n, "weight": t_w,
+            "in_count": in_n, "in_weight": in_w,
+            "out_count": t_n - in_n, "out_weight": round(t_w - in_w, 2),
+            "model_count": len(out), "holders": holders,
+            "days": sorted({i["date"] for m in out for i in m["items"]
+                            if i["date"]})}
+
+
+def received_days(conn, limit=400):
+    """أيامُ التوريد الفعلية — ليختار المستخدم يوماً موجوداً.
+
+    قائمةُ أيامٍ فيها وارد أنفعُ من تقويمٍ يفتح على يومٍ فارغ: فمن
+    أراد «ماذا ورد آخر مرة» وجده في أول السطر.
+    """
+    rows = conn.execute(f"""
+        SELECT d, COUNT(*) n, ROUND(SUM(reg),2) w,
+               COUNT(DISTINCT COALESCE(mno,'')) k FROM (
+          SELECT e.entry_date d, l.registered_weight reg,
+                 COALESCE(NULLIF(TRIM(l.model_no),''),
+                          NULLIF(TRIM(w.model_no),'')) mno
+            FROM wo_batch_lines l
+            JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0
+            JOIN work_orders w ON w.id=l.work_order_id AND w.is_deleted=0
+          UNION ALL
+          SELECT {IN_DATE} d, w.registered_weight reg,
+                 NULLIF(TRIM(w.model_no),'') mno
+            FROM work_orders w
+           WHERE w.is_deleted=0
+             AND NOT EXISTS (SELECT 1 FROM wo_batch_lines l2
+                              WHERE l2.work_order_id=w.id))
+         WHERE d IS NOT NULL AND d<>''
+         GROUP BY d ORDER BY d DESC LIMIT ?""", (int(limit),)).fetchall()
+    return [{"date": r["d"], "count": r["n"], "weight": r["w"] or 0.0,
+             "models": r["k"]} for r in rows]
 
 
 def model_names(conn):

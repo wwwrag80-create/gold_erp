@@ -43,7 +43,8 @@ from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
 from ui.reports.aging_screen import AgingScreen
 from ui.reports.bank_recon_screen import BankReconScreen
-from ui.reports.model_profit_screen import ModelProfitScreen
+from ui.reports.analysis_hub_screen import AnalysisHubScreen
+from ui.reports.doc_edits_screen import DocEditsScreen
 from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
@@ -172,6 +173,21 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("مطابقة كشف البنك",
                      Lazy(lambda: BankReconScreen(user), "مطابقة كشف البنك")),
                     ("أرشيف المستندات والطباعة", self.archive_screen),
+                    # ══ أربعة تقارير في بندٍ واحد ══
+                    # حركةُ الرصيد وملفُ الجهة وأعمارُ الموديلات
+                    # وربحيةُ الموديل أسئلةٌ متجاورة — كانت أربعة
+                    # بنودٍ لكلٍّ عنوانه، فضاع نصفُ الارتفاع في
+                    # عناوين تتكرّر. صارت أقساماً أعلى شاشةٍ واحدة.
+                    ("التحليل والدراسات (٤ أقسام)",
+                     Lazy(lambda: AnalysisHubScreen(user),
+                          "التحليل والدراسات (٤ أقسام)")),
+                    # التعديل مشروع؛ المقصود أن يكون مرئياً —
+                    # فتعديلٌ يُرى يُسأل عنه، ولا يُرى لا يُسأل
+                    ("من عدّل ماذا بعد الترحيل",
+                     Lazy(lambda: DocEditsScreen(user),
+                          "من عدّل ماذا بعد الترحيل")),
+                    # الأصول الثابتة والإهلاك صارت تبويباً في شاشة
+                    # المشتريات: الأصل يُشترى هناك، فإهلاكُه بجانبه
                     ("الرواتب والموظفون", self.payroll_screen),
                     ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
                     ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
@@ -190,10 +206,6 @@ class MainWindow(QtWidgets.QMainWindow):
                      Lazy(lambda: StockReportScreen(user),
                           "أرصدة المخازن (جرد لحظي)")),
                     ("تحليل مبيعات العملاء", self.analytics_screen),
-                    # «أيّ موديلٍ يكسب» كان يُجاب بالانطباع: ما يُرى
-                    # يخرج كثيراً قد يكون كثيرَ الخروج قليلَ الأجرة
-                    ("ربحية الموديل",
-                     Lazy(lambda: ModelProfitScreen(user), "ربحية الموديل")),
                     ("إنتاج خزينة التصنيع (مطابقة)",
                      Lazy(lambda: KhazinaReportScreen(user),
                           "إنتاج خزينة التصنيع (مطابقة)")),
@@ -455,6 +467,57 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addWidget(subbar)
         v.addLayout(body, 1)
         self.setCentralWidget(central)
+
+    # ══════════ دخولُ الواجهة ══════════
+    def play_entrance(self):
+        """حركةُ وصولٍ قصيرة بعد البوابة — لا زينةَ دائمة.
+
+        القائمة الجانبية تنزلق من اليمين وشاشةُ الترحيب تصعد قليلاً
+        وهي تظهر، في أقل من ثلثَي ثانية. **ثم تُرفع المؤثّرات
+        كلُّها**: مؤثّرُ شفافيةٍ باقٍ على شجرةٍ أو جدول يُعيد رسمه في
+        كل تمريرة تمرير، فيصير الجمالُ بطئاً — والحركة تُفتتح بها
+        الجلسة لا تُلازمها.
+        """
+        try:
+            from ui.widgets.gold_stage import animations_on
+            if not animations_on():
+                return
+        except Exception:
+            return
+        self._entrance = []
+        for w, dx, dy, delay, ms in ((self.side_panel, 34, 0, 0, 480),
+                                     (self.stack, 0, 22, 110, 520)):
+            eff = QtWidgets.QGraphicsOpacityEffect(w)
+            eff.setOpacity(0.0)
+            w.setGraphicsEffect(eff)
+            base = w.pos()
+            anim = QtCore.QVariantAnimation(self)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setDuration(ms)
+            anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+
+            def _step(v, _w=w, _e=eff, _b=base, _dx=dx, _dy=dy):
+                f = float(v)
+                _e.setOpacity(f)
+                _w.move(_b.x() + int(_dx * (1 - f)),
+                        _b.y() + int(_dy * (1 - f)))
+
+            def _end(_w=w, _b=base):
+                try:
+                    _w.setGraphicsEffect(None)
+                    _w.move(_b)
+                except Exception:
+                    pass
+
+            anim.valueChanged.connect(_step)
+            anim.finished.connect(_end)
+            QtCore.QTimer.singleShot(delay, anim.start)
+            self._entrance.append(anim)
+        try:
+            self.welcome.play_entrance()
+        except Exception:
+            pass
 
     # ══════════ تخصيص القائمة الجانبية ══════════
     def _nav_layout_path(self):

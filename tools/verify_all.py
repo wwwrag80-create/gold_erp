@@ -66,6 +66,11 @@ QT_INHERITED = {
     "selectAll", "setDate", "date", "setCalendarPopup", "setDisplayFormat",
     "setWordWrap", "setAlignment", "setPixmap", "setReadOnly",
     "setPlainText", "setMaximumHeight", "setMinimumHeight",
+    # موروثات الرسم المباشر (بوابة الدخول والمسرح الذهبي)
+    "setLayoutDirection", "setAttribute", "setAutoFillBackground",
+    "palette", "setPalette", "wordWrap", "pixmap", "lower", "hideEvent",
+    "graphicsEffect", "setGraphicsEffect", "setFixedWidth", "isEnabled",
+    "setWindowOpacity", "showFullScreen",
 }
 OPTIONAL = {"on_edit_cancelled", "refresh", "load_document"}
 MIXIN = {"init_edit_mode", "edit_widgets", "begin_edit", "cancel_edit",
@@ -117,6 +122,12 @@ SCREENS = [
     ("ui.reports.diagnostics_screen", "DiagnosticsScreen"),
     ("ui.reports.bank_recon_screen", "BankReconScreen"),
     ("ui.reports.model_profit_screen", "ModelProfitScreen"),
+    ("ui.reports.assets_screen", "AssetsScreen"),
+    ("ui.reports.movement_screen", "MovementScreen"),
+    ("ui.reports.stock_aging_screen", "StockAgingScreen"),
+    ("ui.reports.dossier_screen", "DossierScreen"),
+    ("ui.reports.analysis_hub_screen", "AnalysisHubScreen"),
+    ("ui.reports.doc_edits_screen", "DocEditsScreen"),
     ("ui.super_admin_screen", "SuperAdminScreen"),
     ("ui.main_window", "MainWindow"),
 ]

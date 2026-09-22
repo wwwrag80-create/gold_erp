@@ -906,6 +906,22 @@ def rename_work_order(conn, wo_id, new_no, username, reason=""):
                                 wo["small_stones"], wo["big_stones"]),
                   wo_id))
 
+    # سطور الدفعة تحمل الرقم نصاً، والباركود مرسومٌ بالرقم القديم.
+    # تركُهما يجعل ورقة الدفعة وملصق الطقم يقولان رقماً والبطاقةُ
+    # رقماً آخر — وهو أسوأ من عدم التصحيح.
+    try:
+        conn.execute("UPDATE wo_batch_lines SET wo_no=?"
+                     " WHERE work_order_id=?", (new_no, wo_id))
+    except Exception:
+        pass
+    try:
+        path = generate_work_order_barcode(new_no)
+        if path:
+            conn.execute("UPDATE work_orders SET barcode_path=?"
+                         " WHERE id=?", (path, wo_id))
+    except Exception:
+        pass
+
     # تحديث البيانات النصية التي تذكر الرقم القديم
     changed = 0
     for tbl, col in (("journal_entries", "description"),
@@ -948,6 +964,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
         (entry_id,)).fetchone()
     if not entry:
         raise ValueError("القيد غير موجود أو محذوف")
+    # قيمة الدفعة **قبل** أن يُعدَّل قيدها
+    from models import doc_edits as _de
+    _before = _de.totals(conn, entry_id)
 
     # ══ الحالة الحالية: أطقم الدفعة كما هي الآن ══
     # الدفعات المُنشأة قبل وجود جدول السطور لا سطور لها؛ ولو اعتمدنا
@@ -1143,6 +1162,10 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username):
                f"تعديل دفعة توريد: +{len(added)} · ~{len(updated)} · "
                f"-{len(removed)} · مباع محفوظ {len(set(kept_sold))} · "
                f"صافي الوزن {delta:+.3f} جم")
+    _de.record(conn, "work_orders", entry_id, username, _before,
+               doc_no=entry["doc_no"] or "", entry_id=entry_id,
+               kind="inplace",
+               note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}")
     # ══ `total_registered` — مفتاحٌ كان ناقصاً ══
     # الشاشة تعرضه في رسالة «تم الترحيل» للمسارين معاً: الإنشاء
     # والتعديل. وكان الإنشاء وحده يعيده، فالتعديل يرفع

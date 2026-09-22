@@ -1275,6 +1275,17 @@ def build_body(doc_type, doc_id, **kw):
                                           kw.get("mode", "all"),
                                           kw.get("sort", "az"),
                                           kw.get("expanded")))
+        if doc_type == "models_received":
+            return en(_tpl_models_received(conn, doc_id,
+                                           kw.get("date_from"),
+                                           kw.get("date_to"),
+                                           kw.get("mode", "all"),
+                                           kw.get("sort", "az")))
+        if doc_type == "models_received_photos":
+            return en(_tpl_models_received_photos(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("mode", "all"), kw.get("sort", "az"),
+                kw.get("per_page", 4)))
         if doc_type == "model_photos":
             return en(_tpl_model_photos(conn, doc_id,
                                         kw.get("min_count", 3),
@@ -1285,7 +1296,7 @@ def build_body(doc_type, doc_id, **kw):
                 conn, doc_id, kw.get("title", ""),
                 kw.get("kind", "accounts"), kw.get("codes"),
                 kw.get("ratios"), kw.get("date_from"),
-                kw.get("date_to")))
+                kw.get("date_to"), kw.get("search", "")))
         if doc_type == "aging":
             return en(_tpl_aging(conn, doc_id,
                                  kw.get("entity_type", "customer"),
@@ -1293,6 +1304,18 @@ def build_body(doc_type, doc_id, **kw):
                                  kw.get("only")))
         if doc_type == "day_close":
             return en(_tpl_day_close(conn, doc_id, kw.get("date")))
+        if doc_type == "stock_aging":
+            return en(_tpl_stock_aging(conn, doc_id, kw.get("as_of"),
+                                       kw.get("model"),
+                                       kw.get("detail", False)))
+        if doc_type == "dossier":
+            return en(_tpl_dossier(conn, doc_id, kw.get("date_from"),
+                                   kw.get("date_to")))
+        if doc_type == "doc_edits":
+            return en(_tpl_doc_edits(conn, doc_id, kw.get("date_from"),
+                                     kw.get("date_to"),
+                                     kw.get("source_table"),
+                                     kw.get("min_lag", 0)))
         if doc_type == "balance_tree":
             return en(_tpl_balance_tree(conn, doc_id, kw.get("date_to"),
                                         kw.get("max_level", 3),
@@ -1668,10 +1691,266 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
             + meta + table)
 
 
+def _tpl_models_received(conn, _id=0, date_from=None, date_to=None,
+                         mode="all", sort="az"):
+    """قالب «الوارد من التصنيع بتاريخ» — موديلاً موديلاً ومع من هو.
+
+    الورقة تجيب سؤالاً واحداً: ما الذي ورد في ذلك اليوم، وأين كل
+    قطعةٍ منه **اليوم** — في الخزنة أم عند جهة.
+    """
+    from models import models_catalog as mc
+    res = mc.received(conn, date_from, date_to)
+    today = _qd(QtCore.QDate.currentDate())
+    labels = {"all": "الكل", "in_stock": "الباقي بالخزنة",
+              "sold": "الخارج للجهات"}
+
+    models = []
+    for m in res["models"]:
+        items = [i for i in m["items"]
+                 if mode == "all"
+                 or (mode == "in_stock" and i["safe"])
+                 or (mode == "sold" and not i["safe"])]
+        if not items:
+            continue
+        g = dict(m)
+        g["items"] = items
+        g["count"] = len(items)
+        g["weight"] = round(sum(i["reg"] for i in items), 2)
+        g["in_count"] = sum(1 for i in items if i["safe"])
+        g["out_count"] = g["count"] - g["in_count"]
+        models.append(g)
+
+    if sort == "za":
+        models.sort(key=lambda m: str(m["model"]), reverse=True)
+    elif sort == "most":
+        models.sort(key=lambda m: (-m["count"], str(m["model"])))
+    elif sort == "least":
+        models.sort(key=lambda m: (m["count"], str(m["model"])))
+    else:
+        models.sort(key=lambda m: str(m["model"]))
+
+    body = ""
+    for m in models:
+        where = []
+        if m["in_count"]:
+            where.append(f'بالخزنة {en(m["in_count"])}')
+        if m["out_count"]:
+            where.append(f'عند الجهات {en(m["out_count"])}')
+        body += ("<tr>" + cells(
+            f'<td class="r"><b>◄ الموديل {m["model"]}</b></td>',
+            f'<td><b>{en(m["count"])}</b></td>',
+            f'<td><b>{_gw(m["weight"])}</b></td>',
+            f'<td>{"  ·  ".join(where)}</td>') + "</tr>")
+        for i in m["items"]:
+            tail = f'{i["holder"]}  ·  {en(i["date"])}'
+            if i["bulk"]:
+                tail += "  ·  رصيد مجمّع"
+            body += ("<tr>" + cells(
+                f'<td class="r" style="padding-right:22px">'
+                f'{en(i["wo"])}</td>',
+                '<td></td>', f'<td>{_gw(i["reg"])}</td>',
+                f'<td>{tail}</td>') + "</tr>")
+    if not body:
+        body = (f'<tr><td {TD} colspan="4">'
+                f'لا وارد من التصنيع في هذه الفترة</td></tr>')
+
+    n = sum(m["count"] for m in models)
+    w = round(sum(m["weight"] for m in models), 2)
+    n_in = sum(m["in_count"] for m in models)
+    span = (res["date_from"] if res["date_from"] == res["date_to"]
+            else f'{en(res["date_from"])} ← {en(res["date_to"])}')
+    head = cells(thw("الموديل / رقم التشغيل", 38), thw("العدد", 10),
+                 thw("الوزن المقيد (جم)", 22),
+                 thw("مع من الآن · تاريخ الوارد", 30))
+    foot = cells(thw(f"الإجمالي — {en(len(models))} موديل"),
+                 thw(en(n)), thw(_gw(w)),
+                 thw(f"بالخزنة {en(n_in)} · عند الجهات {en(n - n_in)}"))
+    meta = (f'<div {WIDE}>الوارد من التصنيع في: <b>{en(span)}</b>'
+            f' &nbsp;·&nbsp; العرض: <b>{labels.get(mode, mode)}</b></div>')
+    table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
+    return (_header("الوارد من التصنيع بتاريخ", "—", today, show_meta=False)
+            + meta + table)
+
+
+def _img_uri(path):
+    """صورة الموديل كما هي — بلا تصغير، فتُطبع بدقّتها الأصلية."""
+    import base64
+    try:
+        ext = str(path).rsplit(".", 1)[-1].lower()
+        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png",
+                "webp": "webp", "bmp": "bmp"}.get(ext, "png")
+        raw = open(str(path), "rb").read()
+        return ("data:image/" + mime + ";base64,"
+                + base64.b64encode(raw).decode("ascii"))
+    except Exception:
+        return ""
+
+
+# شبكة صور الوارد: خليةٌ ثابتة الارتفاع، لا تتمدّد بعدد القطع.
+# **لماذا ثابتة**: لو تُرك الجدول يطول بطول قائمة أرقام التشغيل
+# لدفع الموديلَ التالي إلى نصف صفحة، فتخرج الورقة بثلاث صورٍ وربع
+# وينتقل الباقي بلا نظام. فالخلية تأخذ مساحتها كاملةً، والزائد عن
+# سعتها يُختصر بسطر «+ كذا قطعة» — فتبقى الأربع صور في كل صفحة.
+# الارتفاعات مقيسةٌ لا مقدَّرة: صفحةُ A4 بهوامش 8 مم تُعطي 281 مم،
+# وترويسةُ المستند تأكل ~44 مم من الصفحة الأولى — فيبقى للشبكة 237
+# مم، أي 118 مم لكل صفّ. أُخذ 116 مم احتياطاً لفروق الخطوط بين
+# الأجهزة، فتخرج الأربع صور في الصفحة الأولى كما في التي بعدها.
+PHOTO_ROWS = 6            # أسطر جدول القطع الظاهرة في كل خلية
+
+RECV_PHOTO_CSS = """
+<style>
+  table.pgrid { table-layout: fixed; width: 100%;
+                border-collapse: separate; }
+  table.pgrid td.cell {
+    width: 50%; height: 116mm; vertical-align: top; padding: 2mm;
+  }
+  /* البطاقة عمودٌ مرن: الجدول يأخذ ما يحتاجه، والصورةُ تبتلع ما
+     بقي. فالموديل ذو القطعتين تكبر صورتُه بدل أن يُترك أسفلَه
+     بياضٌ، والذو ستٍّ تصغر قليلاً — والارتفاع الخارجي واحدٌ في
+     الحالين فتبقى الشبكة منتظمة. */
+  .card { border: 1px solid #D8CDB4; border-radius: 5px;
+          padding: 2mm; background: #FFFFFF; height: 110mm;
+          display: flex; flex-direction: column; }
+  .imgbox { flex: 1 1 auto; min-height: 42mm; width: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: #FCFAF5; border-radius: 3px; overflow: hidden; }
+  .imgbox img { max-width: 97%; max-height: 100%; object-fit: contain; }
+  .noimg { color: #9A8C6E; font-size: 9pt; }
+  .cap { margin: 1.5mm 0 1mm; font-size: 10.5pt; font-weight: bold;
+         color: #4A3A1E; text-align: center; }
+  .sub { font-size: 8pt; color: #6B5B3A; text-align: center;
+         margin-bottom: 1mm; }
+  table.wos { width: 100%; border-collapse: collapse;
+              font-size: 7.6pt; table-layout: fixed; }
+  table.wos th { background: #EFE9DC; color: #4A3A1E; font-weight: bold;
+                 border: 1px solid #DCD3BE; padding: 0.6mm 1mm; }
+  table.wos td { border: 1px solid #E6DFCB; padding: 0.6mm 1mm;
+                 text-align: center; }
+  table.wos td.h { text-align: center; }
+  .more { font-size: 7.4pt; color: #6B5B3A; text-align: center;
+          padding-top: 0.8mm; }
+</style>
+"""
+
+
+def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
+                                mode="all", sort="az", per_page=4):
+    """صور الوارد من التصنيع — أربع في كل صفحة A4، وتحتها بياناتها.
+
+    تحت كل صورة: اسم الموديل وعددُ قطعه ووزنُها، ثم جدولٌ بأرقام
+    التشغيل ووزن كلٍّ ومَن هي عنده الآن.
+
+    **الموديل بلا صورة يُطبع أيضاً** بإطارٍ فارغ: الورقة تقرير وارد
+    قبل أن تكون ألبوم صور، وإسقاطُ موديلٍ لأن صورته ناقصة يجعل
+    الجمع لا يساوي الوارد.
+    """
+    from models import models_catalog as mc
+    res = mc.received(conn, date_from, date_to)
+    today = _qd(QtCore.QDate.currentDate())
+
+    picked = []
+    for m in res["models"]:
+        items = [i for i in m["items"]
+                 if mode == "all"
+                 or (mode == "in_stock" and i["safe"])
+                 or (mode == "sold" and not i["safe"])]
+        if not items:
+            continue
+        picked.append({
+            "model": m["model"], "items": items, "count": len(items),
+            "weight": round(sum(i["reg"] for i in items), 2),
+            "in_count": sum(1 for i in items if i["safe"]),
+        })
+    if sort == "za":
+        picked.sort(key=lambda m: str(m["model"]), reverse=True)
+    elif sort == "most":
+        picked.sort(key=lambda m: (-m["count"], str(m["model"])))
+    elif sort == "least":
+        picked.sort(key=lambda m: (m["count"], str(m["model"])))
+    else:
+        picked.sort(key=lambda m: str(m["model"]))
+
+    span = (en(res["date_from"]) if res["date_from"] == res["date_to"]
+            else f'{en(res["date_from"])} ← {en(res["date_to"])}')
+    if not picked:
+        return (_header("صور الوارد من التصنيع", "—", today,
+                        show_meta=False)
+                + f'<div style="text-align:center;padding:40px">'
+                  f'لا وارد من التصنيع في {span}</div>')
+
+    # يومٌ واحد؟ فلا داعي لعمود تاريخٍ يكرّر ما في العنوان — تُوسَّع
+    # به أعمدةُ رقم التشغيل والجهة، وهي ما جاء القارئ من أجله.
+    one_day = len({i["date"] for m in picked for i in m["items"]}) <= 1
+
+    cards = []
+    for m in picked:
+        uri = _img_uri(mc.image_path(m["model"]) or "")
+        img = (f'<img src="{uri}" />' if uri
+               else '<span class="noimg">لا صورة لهذا الموديل</span>')
+        shown = m["items"][:PHOTO_ROWS]
+        rows = "".join(
+            "<tr>" + f'<td class="h">{en(i["wo"])}</td>'
+            + f'<td>{_gw(i["reg"])}</td>'
+            + f'<td class="h">{i["holder"]}</td>'
+            + ("" if one_day else f'<td>{en(i["date"])}</td>') + "</tr>"
+            for i in shown)
+        extra = len(m["items"]) - len(shown)
+        more = (f'<div class="more">+ {en(extra)} قطعة أخرى — '
+                f'تفصيلُها في ورقة «الوارد»</div>' if extra > 0 else "")
+        out_n = m["count"] - m["in_count"]
+        where = []
+        if m["in_count"]:
+            where.append(f'بالخزنة {en(m["in_count"])}')
+        if out_n:
+            where.append(f'عند الجهات {en(out_n)}')
+        cards.append(
+            '<td class="cell"><div class="card">'
+            f'<div class="imgbox">{img}</div>'
+            f'<div class="cap">الموديل {m["model"]}  ·  '
+            f'{en(m["count"])} قطعة  ·  {_gw(m["weight"])} جم</div>'
+            f'<div class="sub">{"  ·  ".join(where)}</div>'
+            '<table class="wos"><tr>'
+            + ('<th style="width:32%">رقم التشغيل</th>'
+               '<th style="width:22%">الوزن</th>'
+               '<th style="width:46%">مع من</th>' if one_day else
+               '<th style="width:26%">رقم التشغيل</th>'
+               '<th style="width:20%">الوزن</th>'
+               '<th style="width:32%">مع من</th>'
+               '<th style="width:22%">الوارد</th>')
+            + "</tr>"
+            f'{rows}</table>{more}</div></td>')
+
+    per_page = max(2, int(per_page or 4))
+    cols = 2
+    pages = ""
+    total_pages = (len(cards) + per_page - 1) // per_page
+    for pg in range(total_pages):
+        chunk = cards[pg * per_page:(pg + 1) * per_page]
+        while len(chunk) % cols:
+            chunk.append('<td class="cell"></td>')
+        trs = "".join(
+            "<tr>" + "".join(chunk[i:i + cols]) + "</tr>"
+            for i in range(0, len(chunk), cols))
+        brk = ' style="page-break-before:always"' if pg else ""
+        pages += ('<table class="pgrid" width="100%" cellspacing="0"'
+                  ' cellpadding="0"' + brk + ">" + trs + "</table>")
+
+    n = sum(m["count"] for m in picked)
+    w = round(sum(m["weight"] for m in picked), 2)
+    meta = (f'<div {WIDE}>الوارد من التصنيع في: <b>{span}</b>'
+            f' &nbsp;·&nbsp; <b>{en(len(picked))}</b> موديل · '
+            f'<b>{en(n)}</b> قطعة · <b>{_gw(w)}</b> جم'
+            f' &nbsp;·&nbsp; الصفحات: <b>{en(total_pages)}</b></div>')
+    return (_header("صور الوارد من التصنيع", "—", today, show_meta=False)
+            + RECV_PHOTO_CSS + meta + pages)
+
+
 def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
-                    ratios=None, date_from=None, date_to=None):
+                    ratios=None, date_from=None, date_to=None,
+                    search=""):
     """قالب لوحة التحكم — مطابق لما يظهر على الشاشة."""
     from models import dash_panels as dp
+    from services import karat_view
     today = _qd(QtCore.QDate.currentDate())
 
     if kind == "scrap":
@@ -1689,6 +1968,42 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
         table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
         note = (f'<div {WIDE}>صندوق الكسر حساب واحد (1310) يضمّ '
                 f'الأعيرة الأربعة؛ الرصيد المحاسبي بمكافئ 18.</div>')
+        return (_header(f"لوحة التحكم — {title}", "—", today,
+                        show_meta=False) + note + table)
+
+    if kind == "stock":
+        rows = dp.stock_rows(conn, search or "")
+        t = dp.stock_totals(rows)
+        body = "".join(
+            "<tr>" + cells(
+                f'<td class="r">{en(r["wo"])}'
+                + ("  (مجمّع)" if r["bulk"] else "") + "</td>",
+                f'<td class="r">{r["model"]}</td>',
+                f'<td>{_gw(r["gold"])}</td>', f'<td>{_gw(r["small"])}</td>',
+                f'<td>{_gw(r["big"])}</td>', f'<td>{_gw(r["after"])}</td>',
+                f'<td>{_gw(r["reg"])}</td>',
+                f'<td>{_gw(r["standing"])}</td>') + "</tr>"
+            for r in rows)
+        if not body:
+            body = f'<tr><td {TD} colspan="8">لا أطقم متاحة للبيع</td></tr>'
+        u = karat_view.unit()
+        head = cells(thw("رقم التشغيل", 14), thw("الموديل", 16),
+                     thw(f"الذهب ({u})", 11), thw(f"الفصوص ({u})", 10),
+                     thw(f"الأحجار ({u})", 10),
+                     thw(f"بعد الخصم ({u})", 11),
+                     thw(f"الوزن المقيد ({u})", 14),
+                     thw(f"الذهب القائم ({u})", 14))
+        foot = cells(thw(f"الإجمالي — {en(t['count'])} طقم"),
+                     thw(f"{en(t['models'])} موديل"),
+                     thw(_gw(t["gold"])), thw(_gw(t["small"])),
+                     thw(_gw(t["big"])), thw(_gw(t["after"])),
+                     thw(_gw(t["reg"])), thw(_gw(t["standing"])))
+        table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
+        note = (f'<div {WIDE}>المتاح للبيع الآن — ما لم يخرج بفاتورة. '
+                f'الوزن المقيد هو الأثر المالي والمخزني، والذهب القائم '
+                f'للإحصاء وحده.'
+                + (f' &nbsp;·&nbsp; بحث: <b>{en(search)}</b>'
+                   if search else "") + '</div>')
         return (_header(f"لوحة التحكم — {title}", "—", today,
                         show_meta=False) + note + table)
 
@@ -2064,6 +2379,376 @@ def _tpl_day_close(conn, _id=0, date=None):
     return (_header("الإغلاق اليومي", d["date"], today, show_meta=False)
             + html)
 
+
+def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
+    """أعمار الموديلات — ورقةٌ تُرفق بالجرد أو تُسلَّم للإدارة.
+
+    جدولٌ واحد بالقطع، الأقدم أولاً، ورأسٌ يقول الخلاصة قبله. والفئات
+    والموديلات لا تُطبع جداولَ لأن السؤال عن **القطعة**، والتجميع
+    يخفي القطعةَ التي يُراد الوصول إليها.
+    """
+    from models import stock_aging
+    from services import karat_view
+    r = stock_aging.report(conn, as_of, model)
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+    t = r["total"]
+    _chosen = ("، ".join(r["filter_models"]) if r["filter_models"]
+               else "كل الموديلات")
+
+    def _g(v):
+        return _gw(v, 3)
+
+    body = ""
+    for x in r["items"]:
+        body += "<tr>" + cells(
+            tdw(en(x["wo_no"])), tdw(x["model"], align="right"),
+            tdw(x["item_type"] or "—"), tdw(en(x["in_date"])),
+            tdw(en(f"{x['days']:,}")),
+            tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
+            tdw(_g(x["weight"]))) + "</tr>"
+    if r["bulk"]["count"]:
+        body += "<tr>" + cells(
+            thw("٠٠٠١"), thw("رصيد تجميعي"), thw("—"), thw("—"), thw("—"),
+            thw("بلا عمر — خارج الفئات"),
+            thw(_g(r["bulk"]["weight"]))) + "</tr>"
+    if not body:
+        body = f'<tr><td {TD} colspan="7">لا مخزون</td></tr>'
+
+    # الفئات في سطرٍ واحد أعلى الورقة — خلاصةٌ لا جدول
+    bl = " · ".join(
+        f'{b["label"]}: {en(_g(b["weight"]))}' for b in r["buckets"])
+    lines = "".join(f"<li>{v}</li>"
+                    for v in stock_aging.verdict(r, _g, lambda v: _w(v, 2)))
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="25%">حتى تاريخ</td><td>{en(as_of or today)}</td>
+          <th>الموديل</th><td>{_chosen}</td></tr>
+      <tr><th>في المخزن</th>
+          <td>{en(f"{t['count']:,}")} قطعة · {en(_g(t["weight"]))} {u}</td>
+          <th>فوق ٩٠ يوماً</th>
+          <td>{en(_g(r["old_weight"]))} {u}
+              ({en(f"{r['old_pct']:,.1f}%")})</td></tr>
+      <tr><th>الفئات ({u})</th><td {TD} colspan="3">{bl}</td></tr>
+      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
+    </table>
+
+    {TBL}
+      <tr>{cells(thw("رقم التشغيل"), thw("الموديل"), thw("النوع"),
+                 thw("تاريخ الدخول"), thw("العمر (يوم)"), thw("الفئة"),
+                 thw(f"الوزن ({u})"))}</tr>
+      {body}
+    </table>
+
+    <div class="note">تاريخ الدخول من قيد التوريد لا من وقت كتابة
+      السجل، فالدفعة التي تُسجَّل اليوم وقد ورَدَت الشهر الماضي عمرها
+      من تاريخ قيدها. والرقم التجميعي ٠٠٠١ رصيدُ وزنٍ لا قطعة فلا عمر
+      له — يُعرض في ذيل الجدول خارج الفئات.</div>
+    <div class="note"><ul>{lines}</ul></div>
+    '''
+    return (_header("أعمار الموديلات — ما رقد في المخزن", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
+
+def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
+    """ملف الجهة في ورقةٍ واحدة — تُطبع وتُوضع في الملف أو تُرسل.
+
+    ترتيبها ترتيبُ السؤال لا ترتيبُ قاعدة البيانات: الخلاصة أولاً،
+    ثم الرصيد والسقف، ثم ما جرى في الفترة، ثم أعمار الدين، ثم
+    موديلاته وأجرته. فمن قرأ السطر الأول عرف الحال، ومن أراد التفصيل
+    وجده تحته.
+    """
+    from models import dossier
+    from models.aging import BUCKET_LABELS
+    from services import karat_view
+    d = dossier.build(conn, entity_id, date_from, date_to)
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+    e, b = d["entity"], d["balance"]
+
+    def _g(v):
+        s = _gw(abs(v or 0.0), 3)
+        return f"({s})" if (v or 0.0) < 0 else s
+
+    def _m(v):
+        s = _w(abs(v or 0.0), 2)
+        return f"({s})" if (v or 0.0) < 0 else s
+
+    # ── جسر الفترة ──
+    r = d["bridge"]
+    bridge = "<tr>" + cells(
+        thw("رصيد أول المدة"), thw(_g(r["opening"]["gold"])),
+        thw(_m(r["opening"]["cash"])), thw("—"), thw("—")) + "</tr>"
+    for x in r["buckets"]:
+        if abs(x["gold"]) < 0.0005 and abs(x["cash"]) < 0.005:
+            continue
+        bridge += "<tr>" + cells(
+            tdw(x["label"], align="right"), tdw(_g(x["gold"])),
+            tdw(_m(x["cash"])), tdw(en(f"{x['docs']:,}")),
+            tdw(en(x["days_label"]))) + "</tr>"
+    bridge += "<tr>" + cells(
+        thw("رصيد آخر المدة"), thw(_g(r["closing"]["gold"])),
+        thw(_m(r["closing"]["cash"])), thw("—"), thw("—")) + "</tr>"
+
+    # ── أعمار دينه ──
+    a = d["aging"]
+    if a:
+        age = "<tr>" + cells(
+            tdw("الوزن", align="right"),
+            *[tdw(_g(x)) for x in a["gold_buckets"]],
+            thw(_g(a["gold"]))) + "</tr><tr>" + cells(
+            tdw("النقد", align="right"),
+            *[tdw(_m(x)) for x in a["cash_buckets"]],
+            thw(_m(a["cash"]))) + "</tr>"
+        oldest = f'{en(str(a["days"]))} يوماً — منذ {en(a["oldest"])}'
+    else:
+        age = (f'<tr><td {TD} colspan="{len(BUCKET_LABELS) + 2}">'
+               'لا دينَ قائمٌ على هذه الجهة</td></tr>')
+        oldest = "—"
+
+    # ── موديلاته ──
+    mdl = ""
+    for x in (d["models_life"] or [])[:10]:
+        mdl += "<tr>" + cells(
+            tdw(x["model"], align="right"), tdw(en(f"{x['sold']:,}")),
+            tdw(en(f"{x['returned']:,}")), tdw(en(f"{x['net_count']:,}")),
+            tdw(_g(x["weight"])), tdw(_m(x["wages"]))) + "</tr>"
+    if not mdl:
+        mdl = f'<tr><td {TD} colspan="6">لا مبيعات مسجّلة</td></tr>'
+
+    fl, flife = d["flow"], d["flow_life"]
+
+    def _pct(v):
+        return en(f"{v:,.1f}%") if v is not None else "—"
+
+    _other_up = ""
+    if abs(fl["other_up"]) > 0.0005 or abs(flife["other_up"]) > 0.0005:
+        _other_up = "<tr>" + cells(
+            tdw("وما زاد ذمّته بغير البضاعة", align="right"),
+            tdw(_g(fl["other_up"])), tdw("—"),
+            tdw(_g(flife["other_up"])),
+            tdw("صرفٌ له · تسوياتٌ عليه")) + "</tr>"
+
+    lr, lp = d["last_receipt"], d["last_payment"]
+    lim_g, lim_c = d["limit"]["gold"], d["limit"]["cash"]
+
+    def _lim(st, f):
+        if not st["limit"]:
+            return "بلا سقف"
+        tag = " ⚠ تجاوز" if st["over"] else ""
+        pct = en("{:,.0f}%".format(st["pct"] or 0))
+        return f'{f(st["used"])} من {f(st["limit"])} ({pct}){tag}'
+
+    lines = "".join(f"<li>{v}</li>"
+                    for v in dossier.verdict(d, _g, _m))
+    html = f'''
+    <div class="note"><ul>{lines}</ul></div>
+
+    {TBL}
+      <tr><td {TH} width="22%">الجهة</td><td>{e["name"]}</td>
+          <th>الفترة</th>
+          <td>{en(d["date_from"])} إلى {en(d["as_of"])}</td></tr>
+      <tr><th>الهاتف</th><td>{en(e["phone"] or "—")}</td>
+          <th>الرقم الضريبي</th><td>{en(e["vat"] or "—")}</td></tr>
+      <tr><th>الرصيد</th>
+          <td>{en(_g(b["gold"]))} {u} · {en(_m(b["cash"]))} ريال</td>
+          <th>أقدم دين</th><td>{oldest}</td></tr>
+      <tr><th>سقف وزني</th><td>{_lim(lim_g, _g)}</td>
+          <th>سقف نقدي</th><td>{_lim(lim_c, _m)}</td></tr>
+      <tr><th>آخر تحصيل</th>
+          <td>{(en(lr["date"]) + " — " + en(_g(lr["gold"])) + " " + u
+                + " · " + en(_m(lr["cash"])) + " ريال") if lr
+               else "لم يُسدَّد منه شيءٌ قط"}</td>
+          <th>آخر صرفٍ له</th>
+          <td>{en(lp["date"]) if lp else "—"}</td></tr>
+      <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
+    </table>
+
+    <div class="party">ما جرى في الفترة — جسر الرصيد</div>
+    {TBL}
+      <tr>{cells(thw("البند"), thw(f"الوزن ({u})"), thw("النقد (ريال)"),
+                 thw("مستندات"), thw("أيام من الفترة"))}</tr>
+      {bridge}
+    </table>
+
+    <div class="party">أعمار دينه</div>
+    {TBL}
+      <tr>{cells(thw("البُعد"), *[thw(x) for x in BUCKET_LABELS],
+                 thw("الإجمالي"))}</tr>
+      {age}
+    </table>
+
+    <div class="party">حركته — وما كان تحت يده</div>
+    {TBL}
+      <tr>{cells(thw("البند"), thw(f"الفترة ({u})"), thw("الفترة (ريال)"),
+                 thw(f"من البداية ({u})"), thw("ملاحظة"))}</tr>
+      <tr>{cells(tdw("رصيد أول المدة", align="right"),
+                 tdw(_g(fl["opening_weight"])), tdw("—"),
+                 tdw(_g(flife["opening_weight"])),
+                 tdw("شاملاً الأرصدة الافتتاحية والقيود اليومية"))}</tr>
+      <tr>{cells(tdw("ما خرج إليه — بضاعة (مبيعات)", align="right"),
+                 tdw(_g(fl["out_weight"])), tdw(_m(fl["out_wages"])),
+                 tdw(_g(flife["out_weight"])),
+                 tdw(en(f"{fl['sold_lines']:,} / "
+                        f"{flife['sold_lines']:,} سطراً")))}</tr>
+      {_other_up}
+      <tr>{cells(thw("ما كان عنده (الأساس)"),
+                 thw(_g(fl["held_weight"])), thw("—"),
+                 thw(_g(flife["held_weight"])),
+                 thw("أول المدة + كل ما زاد ذمّته"))}</tr>
+      <tr>{cells(tdw("ما رجع منه", align="right"),
+                 tdw(_g(fl["back_weight"])), tdw(_m(fl["back_wages"])),
+                 tdw(_g(flife["back_weight"])),
+                 tdw(en(f"{fl['return_lines']:,} / "
+                        f"{flife['return_lines']:,} سطراً")))}</tr>
+      <tr>{cells(tdw("ما سدّده", align="right"),
+                 tdw(_g(fl["paid_weight"])), tdw(_m(fl["paid_cash"])),
+                 tdw(_g(flife["paid_weight"])),
+                 tdw(en(f"{fl['paid_count']:,} / "
+                        f"{flife['paid_count']:,} سند قبض")))}</tr>
+      <tr>{cells(thw("الباقي عليه (رصيد آخر المدة)"),
+                 thw(_g(fl["closing_weight"])),
+                 thw(_m(fl["closing_cash"])),
+                 thw(_g(flife["closing_weight"])),
+                 thw("من الدفتر لا من جمع الأسطر"))}</tr>
+      <tr>{cells(tdw("نسبة المرتجع (من الذي كان عنده)", align="right"),
+                 tdw(_pct(fl["return_pct"])), tdw("—"),
+                 tdw(_pct(flife["return_pct"])),
+                 tdw("بالوزن لا بالعدد"))}</tr>
+      <tr>{cells(tdw("نسبة السداد (من الذي كان عنده)", align="right"),
+                 tdw(_pct(fl["paid_pct"])), tdw("—"),
+                 tdw(_pct(flife["paid_pct"])),
+                 tdw("كم سدّد ممّا كان تحت يده"))}</tr>
+      <tr>{cells(thw("نسبة التصفية (مرتجع + سداد)"),
+                 thw(_pct(fl["settled_pct"])), thw("—"),
+                 thw(_pct(flife["settled_pct"])),
+                 thw("ما خرج من ذمّته بأي طريق"))}</tr>
+    </table>
+
+    <div class="party">أكثر ما يأخذ من الموديلات (من البداية)</div>
+    {TBL}
+      <tr>{cells(thw("الموديل"), thw("خرج"), thw("رجع"), thw("الصافي"),
+                 thw(f"الوزن الصافي ({u})"), thw("الأجور (ريال)"))}</tr>
+      {mdl}
+    </table>
+
+    <div class="note">لا رقمَ يُحسب في هذه الورقة: الأعمار من تقرير
+      أعمار الديون، والجسر من تحليل حركة الرصيد، والرصيد من الدفتر —
+      فلا تخالف الورقةُ كشفَ الحساب. والسالب بين قوسين كما يكتبه
+      المحاسبون.</div>
+    '''
+    return (_header(f"ملف الجهة — {e['name']}", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
+def _tpl_doc_edits(conn, _id=0, date_from=None, date_to=None,
+                   source_table=None, min_lag=0):
+    """من عدّل ماذا بعد الترحيل — ورقةٌ تُوضع أمام المدقّق.
+
+    المتأخّر أولاً في جدولٍ مستقل: هو ما يُسأل عنه، وإدراجه ضمن
+    المئة سطرٍ الأخرى يجعله لا يُرى.
+    """
+    from models import doc_edits
+    from services import karat_view
+    rows = doc_edits.report(conn, date_from, date_to,
+                            source_table=source_table, min_lag=min_lag)
+    s = doc_edits.summarize(conn, rows)
+    t = s["total"]
+    u = karat_view.unit()
+    today = _qd(QtCore.QDate.currentDate())
+
+    def _g(v):
+        x = _gw(abs(v or 0.0), 3)
+        return f"({x})" if (v or 0.0) < 0 else x
+
+    def _m(v):
+        x = _w(abs(v or 0.0), 2)
+        return f"({x})" if (v or 0.0) < 0 else x
+
+    def _row(r):
+        return "<tr>" + cells(
+            tdw(en(r["edited_at"])), tdw(r["user"], align="right"),
+            tdw(r["label"], align="right"), tdw(en(r["doc_no"])),
+            tdw(en(r["doc_date"])),
+            tdw(en(f"{r['lag']:,}") if r["lag"] is not None else "—"),
+            tdw(_g(r["old_gold"])), tdw(_g(r["new_gold"])),
+            tdw(_g(r["d_gold"])), tdw(_m(r["old_cash"])),
+            tdw(_m(r["new_cash"])), tdw(_m(r["d_cash"]))) + "</tr>"
+
+    late = [r for r in rows if r["lag"] is not None
+            and r["lag"] >= doc_edits.LATE_DAYS]
+    head = cells(thw("وقت التعديل"), thw("المستخدم"), thw("النوع"),
+                 thw("المستند"), thw("تاريخ المستند"), thw("التأخّر"),
+                 thw(f"قبل ({u})"), thw(f"بعد ({u})"), thw(f"الفرق ({u})"),
+                 thw("قبل (ريال)"), thw("بعد (ريال)"), thw("الفرق (ريال)"))
+    body = "".join(_row(r) for r in rows) \
+        or f'<tr><td {TD} colspan="12">لا تعديلات في هذه الفترة</td></tr>'
+    late_block = ""
+    if late:
+        late_block = (
+            f'<div class="party">المتأخّر — بعد {en(doc_edits.LATE_DAYS)} '
+            f'يوماً أو أكثر من الترحيل ({en(len(late))})</div>{TBL}'
+            + "<tr>" + head + "</tr>" + "".join(_row(r) for r in late)
+            + "</table>")
+
+    users = ""
+    for x in s["users"]:
+        users += "<tr>" + cells(
+            tdw(x["name"], align="right"), tdw(en(f"{x['count']:,}")),
+            tdw(en(f"{x['late']:,}")), tdw(_g(x["d_gold"])),
+            tdw(_m(x["d_cash"]))) + "</tr>"
+    if users:
+        users += "<tr>" + cells(
+            thw("الإجمالي"), thw(en(f"{t['count']:,}")),
+            thw(en(f"{t['late']:,}")), thw(_g(t["d_gold"])),
+            thw(_m(t["d_cash"]))) + "</tr>"
+    else:
+        users = f'<tr><td {TD} colspan="5">لا تعديلات</td></tr>'
+
+    lines = "".join(f"<li>{v}</li>"
+                    for v in doc_edits.verdict(s, _g, _m))
+    html = f'''
+    {TBL}
+      <tr><td {TH} width="22%">الفترة</td>
+          <td>{en(date_from or "—")} إلى {en(date_to or today)}</td>
+          <th>النوع</th>
+          <td>{doc_edits.LABELS.get(source_table, "كل المستندات")}</td></tr>
+      <tr><th>عدد التعديلات</th><td>{en(f"{t['count']:,}")}</td>
+          <th>منها غيّرت القيمة</th>
+          <td>{en(f"{t['changed']:,}")}</td></tr>
+      <tr><th>تعديلٌ متأخّر</th>
+          <td>{en(f"{t['late']:,}")} (أقصاه
+              {en(f"{t['max_lag']:,}")} يوماً)</td>
+          <th>تاريخ الطباعة</th><td>{en(today)}</td></tr>
+    </table>
+
+    <div class="note"><ul>{lines}</ul></div>
+    {late_block}
+
+    <div class="party">كل التعديلات — الأحدث أولاً</div>
+    {TBL}
+      <tr>{head}</tr>
+      {body}
+    </table>
+
+    <div class="party">بالمستخدم</div>
+    {TBL}
+      <tr>{cells(thw("المستخدم"), thw("تعديلات"), thw("منها متأخّر"),
+                 thw(f"صافي الوزن ({u})"), thw("صافي النقد (ريال)"))}</tr>
+      {users}
+    </table>
+
+    <div class="note">قيمة المستند = مجموع الطرف المدين من قيده —
+      مقياسٌ واحد يصلح لكل نوع لأن القيد متوازنٌ بالضرورة. والفرق رقمٌ
+      محفوظٌ لحظة التعديل لا نصٌّ يُحلَّل بعده. والتأخّر يُقاس من لحظة
+      الترحيل لا من تاريخ المستند. والتعديل مشروعٌ في هذا النظام؛
+      المقصود أن يكون مرئياً.</div>
+    '''
+    return (_header("من عدّل ماذا بعد الترحيل", "—", today,
+                    show_meta=False) + html + _footer(""))
+
+
 BUILDERS = {
     "invoice": _tpl_invoice, "invoices": _tpl_invoice,
     "voucher": _tpl_voucher, "vouchers": _tpl_voucher,
@@ -2079,10 +2764,15 @@ BUILDERS = {
     "balance_tree": _tpl_balance_tree,
     "trial_balance": _tpl_trial_balance,
     "models_catalog": _tpl_models_catalog,
+    "models_received": _tpl_models_received,
+    "models_received_photos": _tpl_models_received_photos,
     "dash_panel": _tpl_dash_panel,
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,
     "day_close": _tpl_day_close,
+    "stock_aging": _tpl_stock_aging,
+    "dossier": _tpl_dossier,
+    "doc_edits": _tpl_doc_edits,
 }
 
 DOC_LABELS = {

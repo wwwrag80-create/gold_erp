@@ -11,8 +11,11 @@
 فيظهر في كشف المصروف سطرٌ باسم كل عامل، وفي كشف حساب العامل راتبه
 دائناً مع سُلفه مدينةً والصافي آلياً.
 
-**السحوبات** (نقدي/بنكي) تُجلب من سندات الصرف المسجّلة على حساب العامل
-خلال الشهر، فتُخصم من الصافي ولا تُرحَّل مرتين.
+**السحوبات** (نقدي/بنكي) تُجلب من سندات الصرف المسجّلة على حساب
+العامل خلال الشهر، وتُعرض في عمودها ولا تُطرح من الصافي: السحب قُيّد
+يوم وقوعه بسند صرف، فطرحُه من الصافي المُرحَّل يخصمه مرتين. الصافي
+استحقاقُه كاملاً، ورصيدُ حسابه يطرح السحب من نفسه. وعمود «المستحق»
+= الصافي − المسحوبات، للعرض والطباعة لا للترحيل.
 """
 import calendar
 
@@ -160,7 +163,7 @@ def list_targets(conn, period):
     """صفوف التارجت لكل العمال النشطين — تُنشأ فارغة إن لم توجد."""
     from models import payroll
     rows = []
-    for e in payroll.list_workers(conn):
+    for e in sort_people(payroll.list_workers(conn)):
         r = conn.execute(
             "SELECT * FROM mfg_targets WHERE period=? AND employee_id=?",
             (period, e["id"])).fetchone()
@@ -257,8 +260,26 @@ def withdrawals(conn, employee_id, period):
 # ══════════════════════════════════════════════════════════════════
 
 def compute_salary_row(r):
-    """الصافي = (الأساسي + الإضافي + التارجت + المكافأة)
-                − (الخصم + خصم/ذهب + سحب نقدي + سحب بنكي)
+    """راتب العامل: الصافي المستحقّ له، ثم ما سحبه، ثم ما بقي.
+
+        الصافي   = الأساسي + الإضافي + التارجت + المكافأة
+                   − الخصم − خصم الذهب
+        المسحوبات = ما أخذه بسندات صرفٍ خلال الشهر
+        المستحق  = الصافي − المسحوبات
+
+    **ولماذا خرجت المسحوبات من الصافي**: السحب قُيّد يوم وقوعه بسند
+    صرف (مدين حساب العامل / دائن الصندوق). فلو طُرح من الصافي
+    المُرحَّل لخُصم مرتين: مرةً في السند ومرةً في قيد الراتب —
+    فيظهر حساب العامل مديناً بما لم يأخذه. الصافي هو استحقاقُه
+    كاملاً، ورصيدُ حسابه يطرح السحب من نفسه.
+
+    والمسحوبات والمستحق للعرض والطباعة وحدهما: **الصافي** هو ما
+    يُنزَل في حساب كل عامل عند الترحيل.
+
+    **والإضافي من الساعات الإضافية لا من كل الساعات**: كان يُضرب
+    معاملُ الإضافي في ساعات الدوام كلها، فيصير «الإضافي» راتباً
+    ثانياً. الصواب ساعاتُ الإضافي وحدها — وهي عمود «إضافية» في
+    شاشة التارجت.
 
     محمي بالكامل ضد القيم الفارغة وغير الرقمية.
     """
@@ -272,10 +293,10 @@ def compute_salary_row(r):
             return d
 
     basic = _f("basic_salary")
-    hours = _f("hours")
+    ot_hours = _f("overtime_hours")
     rate = _f("overtime_rate", DEFAULT_OVERTIME_RATE)
     absence = _f("absence")
-    overtime = round(hours * rate, 2)
+    overtime = round(ot_hours * rate, 2)
 
     # **خصم الغياب**: (الراتب الأساسي ÷ 30) × أيام الغياب.
     # يُحسب من الراتب نفسه لا يُجلب من التارجت — فالخصم المالي يخصّ
@@ -289,19 +310,151 @@ def compute_salary_row(r):
             if basic and absence else 0.0
 
     earn = basic + overtime + _f("target_amount") + _f("bonus")
-    ded = (deduction + _f("gold_deduction")
-           + _f("draw_cash") + _f("draw_bank"))
+    net = round(earn - deduction - _f("gold_deduction"), 2)
+    draws = round(_f("draw_cash") + _f("draw_bank"), 2)
     return {"overtime": overtime, "deduction": deduction,
-            "net_salary": round(earn - ded, 2)}
+            "net_salary": net, "draws": draws,
+            "due": round(net - draws, 2)}
+
+
+def _extra_cfg_path():
+    from pathlib import Path
+
+    import config
+    d = Path(str(config.DB_PATH)).parent
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "mfg_extra_staff.json"
+
+
+def load_extra_staff():
+    """معرّفات من أُضيف يدوياً لجدول رواتب التصنيع من غير عماله."""
+    import json
+    try:
+        p = _extra_cfg_path()
+        if p.exists():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            return [int(x) for x in (d or []) if str(x).isdigit()
+                    or isinstance(x, int)]
+    except Exception:
+        pass
+    return []
+
+
+def save_extra_staff(ids):
+    import json
+    try:
+        _extra_cfg_path().write_text(
+            json.dumps(sorted({int(x) for x in (ids or [])}),
+                       ensure_ascii=False), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _order_cfg_path():
+    from pathlib import Path
+
+    import config
+    d = Path(str(config.DB_PATH)).parent
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "mfg_staff_order.json"
+
+
+def load_staff_order():
+    """ترتيب أسماء العمال كما رتّبه صاحب النظام.
+
+    **لماذا يُحفظ**: الترتيب الأبجدي ترتيبُ الحاسوب لا ترتيبُ الورشة.
+    صاحب المصنع يقرأ الكشف بترتيب الخطوط أو الأقدمية، فإن أعاد
+    ترتيبه كل شهر لم ينتفع به. والترتيب عرضٌ محض — لا يمسّ راتباً
+    ولا قيداً.
+    """
+    import json
+    try:
+        p = _order_cfg_path()
+        if p.exists():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            out, seen = [], set()
+            for x in (d or []):
+                try:
+                    i = int(x)
+                except (TypeError, ValueError):
+                    continue
+                if i not in seen:
+                    seen.add(i)
+                    out.append(i)
+            return out
+    except Exception:
+        pass
+    return []
+
+
+def save_staff_order(ids):
+    import json
+    try:
+        out, seen = [], set()
+        for x in (ids or []):
+            i = int(x)
+            if i not in seen:
+                seen.add(i)
+                out.append(i)
+        _order_cfg_path().write_text(
+            json.dumps(out, ensure_ascii=False), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def sort_people(people):
+    """يرتّب الأشخاص بالترتيب المحفوظ، ومن لا ترتيب له فبالاسم آخراً."""
+    order = {}
+    for i, e in enumerate(load_staff_order()):
+        order[int(e)] = i
+    big = len(order) + 10 ** 6
+
+    def _key(p):
+        try:
+            pid = int(p["id"])
+        except Exception:
+            pid = -1
+        return (order.get(pid, big), str(p["name"] or ""))
+
+    return sorted(people, key=_key)
+
+
+def _salary_people(conn):
+    """عمال التصنيع، ومعهم من أُضيف يدوياً من الموظفين.
+
+    الجدول لعمال التصنيع أصلاً، لكنّ الشهر قد يعمل فيه موظفٌ إداري
+    مع القسم فيستحقّ تارجتاً أو مكافأةً معه. فبدل أن يُحوَّل نوعُه
+    في الدليل — وهو تغييرٌ دائم لأجل شهر — يُضاف صفُّه هنا، ويُرفع
+    متى شاء صاحب النظام.
+    """
+    from models import payroll
+    people = list(payroll.list_workers(conn))
+    have = {e["id"] for e in people}
+    extra = [i for i in load_extra_staff() if i not in have]
+    if extra:
+        ph = ",".join("?" * len(extra))
+        try:
+            people += list(conn.execute(
+                "SELECT e.*, en.job_title job_title, en.id entity_id,"
+                " en.account_id account_id FROM employees e"
+                " LEFT JOIN entities en ON en.employee_id=e.id"
+                "   AND en.is_deleted=0"
+                f" WHERE e.is_deleted=0 AND e.id IN ({ph})"
+                " ORDER BY e.name", extra))
+        except Exception:
+            pass
+    return sort_people(people)
 
 
 def list_salaries(conn, period):
     """صفوف الرواتب مرتبطة ديناميكياً بالتارجت وسندات الصرف."""
-    from models import payroll
     ensure_schema(conn)
+    _extra_set = set(load_extra_staff())
     targets = {t["employee_id"]: t for t in list_targets(conn, period)}
     rows = []
-    for e in payroll.list_workers(conn):
+    for e in _salary_people(conn):
         saved = conn.execute(
             "SELECT * FROM mfg_salaries WHERE period=? AND employee_id=?",
             (period, e["id"])).fetchone()
@@ -312,6 +465,8 @@ def list_salaries(conn, period):
             "basic_salary": (saved["basic_salary"] if saved
                              else (e["basic_salary"] or 0)),
             "hours": t.get("hours", 0),
+            # ساعات **الإضافي** من التارجت — لا ساعات الدوام كلها
+            "overtime_hours": t.get("overtime_hours", 0),
             "overtime_rate": (saved["overtime_rate"] if saved
                               else DEFAULT_OVERTIME_RATE),
             "absence": t.get("absence", 0),
@@ -330,6 +485,8 @@ def list_salaries(conn, period):
             "bonus": saved["bonus"] if saved else 0,
             "draw_cash": w["cash"], "draw_bank": w["bank"],
             "is_posted": bool(saved["is_posted"]) if saved else False,
+            # صفٌّ أُضيف يدوياً (موظفٌ من خارج عمال التصنيع)
+            "is_extra": bool(e["id"] in _extra_set),
         }
         r.update(compute_salary_row(r))
         rows.append(r)

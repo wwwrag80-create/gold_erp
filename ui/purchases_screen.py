@@ -6,9 +6,9 @@ from PyQt5 import QtWidgets
 import config
 from database.database import db
 from models import editing, entities, purchases
-from ui.widgets.common import (confirm_post, posted, date_edit, dstr, enter_chain, err, fill, info,
-                               make_table, mspin, reload_combo, search_combo,
-                               title_label)
+from ui.widgets.common import (confirm_post, date_edit, dstr, enter_chain,
+                               err, mspin, posted, reload_combo,
+                               search_combo, title_label)
 
 
 class NewSupplierDialog(QtWidgets.QDialog):
@@ -55,6 +55,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         tabs = QtWidgets.QTabWidget()
         tabs.addTab(self._build_purchase_tab(), "فاتورة مشتريات آجلة")
         tabs.addTab(self._build_assets_tab(), "الأصول الثابتة والإهلاك")
+        tabs.currentChanged.connect(self._ensure_assets)
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("المشتريات والقيود الرأسمالية"))
         lay.addWidget(tabs)
@@ -150,20 +151,37 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
 
     # ---------- تبويب الأصول والإهلاك ----------
     def _build_assets_tab(self):
-        w = QtWidgets.QWidget()
-        self.assets_table = make_table()
+        """شاشة الأصول والإهلاك كاملةً — لا جدولَ عرضٍ خاوياً.
 
-        lay = QtWidgets.QVBoxLayout(w)
-        abox = QtWidgets.QGroupBox("سجل الأصول الثابتة — بالقيمة الدفترية")
-        al = QtWidgets.QVBoxLayout(abox)
-        al.addWidget(self.assets_table)
-        lay.addWidget(abox, 1)
-        note = QtWidgets.QLabel(
-            "تُسجَّل الأصول الثابتة بقيمتها الدفترية فقط — لا يوجد إهلاك "
-            "تراكمي ولا مصروف إهلاك في النظام.")
-        note.setObjectName("cardSub")
-        lay.addWidget(note)
+        **ما كان هنا**: جدولُ قراءةٍ بأربعة أعمدة وسطرٌ يقول «لا يوجد
+        إهلاك تراكمي ولا مصروف إهلاك في النظام» — وهو نصٌّ صار غير
+        صحيح بعد أن بُني الإهلاك، وتبويبٌ لا يُفعل فيه شيء.
+
+        **ولماذا هنا**: الأصل يُشترى في هذه الشاشة نفسها، فإهلاكُه
+        بجانب شرائه لا في بندٍ آخر من القائمة.
+
+        والبناء كسول: لا تُبنى حتى يُفتح التبويب، فلا تتأخّر شاشة
+        المشتريات من أجل تبويبٍ قد لا يُفتح.
+        """
+        w = QtWidgets.QWidget()
+        QtWidgets.QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
+        self._assets_holder = w
+        self._assets_screen = None
         return w
+
+    def _ensure_assets(self, index):
+        """يبني تبويب الأصول عند أول فتحٍ له."""
+        if index != 1 or self._assets_screen is not None:
+            return
+        try:
+            from ui.reports.assets_screen import AssetsScreen
+            self._assets_screen = AssetsScreen(self.user, embedded=True)
+        except Exception as e:                       # noqa: BLE001
+            lbl = QtWidgets.QLabel(f"تعذّر فتح الأصول والإهلاك:\n{e}")
+            lbl.setObjectName("warn")
+            lbl.setWordWrap(True)
+            self._assets_screen = lbl
+        self._assets_holder.layout().addWidget(self._assets_screen)
 
     def load_document(self, source_id):
         try:
@@ -190,8 +208,11 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         with db() as conn:
             reload_combo(self.supplier, entities.list_entities(conn, ("supplier",)),
                          lambda r: r["name"])
-            assets = purchases.list_assets(conn)
-            arows = [(a["id"], a["name"], a["purchase_date"], a["cost"])
-                     for a in assets]
-        fill(self.assets_table,
-             ["م", "الأصل", "تاريخ الشراء", "القيمة الدفترية"], arows)
+        # تبويب الأصول يُحدِّث نفسه — ولا يُبنى قبل أن يُفتح
+        scr = getattr(self, "_assets_screen", None)
+        fn = getattr(scr, "refresh", None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                pass

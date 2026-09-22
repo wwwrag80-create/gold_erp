@@ -17,7 +17,8 @@ from database.database import db
 from models import model_profit as mp
 from services import karat_view as kv
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err,
-                               fill, make_table, run_bg, title_label)
+                               fill, make_table, run_bg, tab_widget,
+                               title_label)
 from ui.widgets.table_tools import enhance as _enhance
 
 
@@ -40,7 +41,7 @@ def _cols_unsold():
 
 
 class ModelProfitScreen(QtWidgets.QWidget):
-    def __init__(self, user):
+    def __init__(self, user, embedded=False):
         super().__init__()
         self.user = user
         self.rows = []
@@ -78,12 +79,13 @@ class ModelProfitScreen(QtWidgets.QWidget):
         _enhance(self.table_unsold, key="model_unsold")
         self.state = big_label("اختر الفترة ثم «إعداد التقرير».")
 
-        tabs = QtWidgets.QTabWidget()
+        tabs = tab_widget()
         tabs.addTab(self.table, "ما كسب (من الفواتير)")
         tabs.addTab(self.table_unsold, "ما لم يُبَع بعد (من المخزن)")
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label("ربحية الموديل — أين يكسب المصنع"))
+        if not embedded:
+            lay.addWidget(title_label("ربحية الموديل — أين يكسب المصنع"))
         intro = QtWidgets.QLabel(
             "مصدر الربح في مصنع ذهب هو **الأجرة** لا الذهب: الذهب يدخل "
             "ويخرج بوزنه (انتقال أصلٍ لا بيع)، والمكسب أجرةُ التصنيع على "

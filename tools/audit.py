@@ -197,10 +197,25 @@ def check_tenant_isolation():
     src = p.read_text(encoding="utf-8")
     if "tenant_db_path" not in src:
         return ["قاعدة البيانات ليست معزولة لكل مصنع"]
-    login = ROOT / "ui" / "login_window.py"
-    if login.exists() and "set_active_tenant" not in login.read_text(
-            encoding="utf-8"):
+    # المنطق في `services/login_flow.py` تستعمله البوابة وشاشة
+    # الدخول معاً؛ ويُقبل وجودُه في أيٍّ منها — فالمهمّ أن يُضبط
+    # المصنع قبل أي قراءة، لا في أي ملفٍ كُتب.
+    seen = False
+    for rel in (("services", "login_flow.py"), ("ui", "gate_window.py"),
+                ("ui", "login_window.py")):
+        p2 = ROOT.joinpath(*rel)
+        if p2.exists() and "set_active_tenant" in p2.read_text(
+                encoding="utf-8"):
+            seen = True
+            break
+    if not seen:
         return ["الدخول لا يضبط هوية المصنع قبل قراءة البيانات"]
+    # ولا يجوز أن تُكتب شاشةُ دخولٍ ثانية بمنطقٍ خاص بها
+    login = ROOT / "ui" / "login_window.py"
+    if login.exists():
+        src2 = login.read_text(encoding="utf-8")
+        if "cloud_auth.login" in src2 and "login_flow" not in src2:
+            return ["شاشة الدخول تتحقّق بنفسها بدل المسار المشترك"]
     return []
 
 

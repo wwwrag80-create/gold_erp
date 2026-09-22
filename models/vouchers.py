@@ -277,6 +277,9 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     entry_id = v["entry_id"]
     if not entry_id:
         raise ValueError("السند بلا قيد محاسبي — تعذّر التعديل")
+    # قيمة السند **قبل** أن يُستبدل محتوى قيده
+    from models import doc_edits as _de
+    _before = _de.totals(conn, entry_id)
 
     kind = kind or v["kind"]
     # صندوق النقد يُورَّث من السند الأصلي إن لم يُمرَّر صراحةً
@@ -364,6 +367,9 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
 
     log_action(conn, username, "update", "vouchers", voucher_id,
                f"تعديل {v['voucher_no']} في مكانه — الرقم والتاريخ ثابتان")
+    _de.record(conn, "vouchers", voucher_id, username, _before,
+               doc_no=v["voucher_no"] or "", entry_id=entry_id,
+               kind="inplace")
     return {"id": voucher_id, "voucher_no": v["voucher_no"],
             "entry_id": entry_id, "kind": kind,
             "target_label": tmp.get("target_label", ""),

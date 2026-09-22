@@ -51,6 +51,12 @@ LIGHT = {
     "hdrLine2": "#E6E0D2",
     "sideItem": "#FCFAF5", "scroll": "#D8D1C2", "scrollHi": "#C0B79F",
     "tipBg": "#2B2723", "tipFg": "#F3EEE2",
+    # ══ نبرة الإبراز: صفُّ الإجمالي ولوحتا الرصيد ══
+    # كهرمانٌ خافت — يميّز الخلاصة عن التفصيل بلا صراخ.
+    # أفتحُ من الذهب وأدفأُ من السطح، فتلتقطه العين أولاً
+    # ويبقى النصّ فوقه مقروءاً.
+    "sumBg": "#FDF3E2", "sumBg2": "#FAEBD2",
+    "sumEdge": "#E6C68A", "sumInk": "#7A4F10",
 }
 
 DARK = {
@@ -72,6 +78,9 @@ DARK = {
     "hdrLine2": "#322C21",
     "sideItem": "#1C1A15", "scroll": "#3A3429", "scrollHi": "#554D3C",
     "tipBg": "#3A342A", "tipFg": "#F6F1E6",
+    # النبرة نفسها في الداكن: كهرمانٌ معتم لا أصفرُ ساطع
+    "sumBg": "#302716", "sumBg2": "#3A2F1B",
+    "sumEdge": "#6E5626", "sumInk": "#F0C87A",
 }
 
 THEMES = (("light", "☀ فاتح", LIGHT), ("dark", "🌙 ليلي", DARK))
