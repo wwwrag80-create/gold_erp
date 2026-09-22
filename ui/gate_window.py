@@ -28,6 +28,12 @@ from ui.widgets.gold_stage import GoldStage, ShineLabel, animations_on
 WELCOME = "مرحباً بك في نظام إدارة مصانع الذهب"
 ASK_LOGIN = "يرجى تسجيل الدخول"
 
+# توقيتُ المشهد بالمللي ثانية — الترحيب يُقرأ قبل أن تُدعى اليد
+# للكتابة. أقلُّ من هذا يجعل اللوحة تزاحم الجملة، وأكثرُ منه يجعل
+# من يفتح النظام عشرين مرةً في اليوم ينتظر بلا طائل.
+HERO_DELAY = 260            # متى يبدأ الترحيب بالظهور
+CARD_DELAY = 1500           # متى تُبنى لوحة الدخول وتصعد
+
 GATE_QSS = """
 /* أولُ إطارٍ يُرسم قبل أن يبدأ المسرح: لو بقي على لون النظام
    الفاتح لرأى المستخدم ومضةً بيضاء قبل الليل. فيُصبغ هنا بلون
@@ -38,7 +44,7 @@ QWidget#gateCard {
     border: 1px solid rgba(201, 162, 39, 110);
     border-radius: 16px;
 }
-QWidget#gateForm { background: transparent; }
+QWidget#gateHero { background: transparent; }
 QLabel#gateWelcome { color: #F6E7B6; font-size: 30px; font-weight: bold; }
 QLabel#gateHello   { color: #C9A227; font-size: 15px; font-weight: bold; }
 QLabel#gateAsk     { color: #E8D9A8; font-size: 16px; }
@@ -150,6 +156,8 @@ class GateWindow(QtWidgets.QDialog):
         self._failed = []
         self._prep_running = False
         self._card_shown = False
+        self._card_k = 0.0          # نسبة ظهور اللوحة في الكتلة
+        self._pending_state = ""    # سطر حالةٍ قيل قبل بناء اللوحة
         # يُضبط من `main`: يُنادى بالجلسة بعد نجاح الدخول **والبوابة
         # ما زالت على الشاشة**، فيبني النظام تحتها ثم يطلب التسليم.
         self.on_signed_in = None
@@ -169,16 +177,20 @@ class GateWindow(QtWidgets.QDialog):
         self.stage = GoldStage(self)
         self.stage.lower()
 
-        self.card = QtWidgets.QWidget(self)
-        self.card.setObjectName("gateCard")
-        self.card.setFixedWidth(520)
-        self._build_card()
-        # ══ تُخفى **هنا** لا في `showEvent` ══
-        # `showEvent` يصل بعد أول رسمٍ للنافذة، فيُرسم إطارٌ واحد
-        # فيه البطاقة كاملةً ثم تختفي — وهي الومضة التي تُرى عند
-        # النقر على البرنامج. الإخفاء قبل العرض يمنع رسمها أصلاً.
-        if animations_on():
-            self.card.hide()
+        # ══ الترحيب أولاً، ولوحةُ الدخول **لا تُبنى** إلا في وقتها ══
+        # إخفاءُ اللوحة لم يكفِ: نوافذ ويندوز تُرسم أول إطارها قبل
+        # أن يصل أيُّ أمرٍ منا، فتُلمح اللوحة ثم تختفي. والعلاج
+        # الوحيد القاطع أن لا تكون موجودةً أصلاً في تلك اللحظة —
+        # فلا شيء يُرسم لِما لم يُخلق بعد.
+        #
+        # فالمشهد: مسرحٌ داكن، ثم «مرحباً بك…» وحدها، ثم — بعد أن
+        # تُقرأ — تُبنى لوحةُ الدخول وتصعد مع موجتها.
+        self.hero = QtWidgets.QWidget(self)
+        self.hero.setObjectName("gateHero")
+        self.hero.setFixedWidth(660)
+        self._build_hero()
+        self.hero.hide()
+        self.card = None            # تُبنى في `_begin_card`
 
         # ومقاس الشاشة يُؤخذ قبل العرض: نافذةٌ تُرسم بمقاسٍ صغير ثم
         # تتمدّد لملء الشاشة ومضةٌ أخرى — والصحيح أن تولد بمقاسها.
@@ -211,6 +223,15 @@ class GateWindow(QtWidgets.QDialog):
         self._ripple.finished.connect(
             lambda: setattr(self.stage, "ripple", -1.0))
 
+        # صعود اللوحة بعد الترحيب
+        self._card_in = QtCore.QVariantAnimation(self)
+        self._card_in.setStartValue(0.0)
+        self._card_in.setEndValue(1.0)
+        self._card_in.setDuration(760)
+        self._card_in.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+        self._card_in.valueChanged.connect(self._apply_card)
+        self._card_in.finished.connect(self._card_done)
+
         self._exit = QtCore.QVariantAnimation(self)
         self._exit.setStartValue(0.0)
         self._exit.setEndValue(1.0)
@@ -220,10 +241,11 @@ class GateWindow(QtWidgets.QDialog):
         self._exit.finished.connect(self._exit_done)
 
     # ─────────────────────────────── البناء
-    def _build_card(self):
-        lay = QtWidgets.QVBoxLayout(self.card)
-        lay.setContentsMargins(38, 30, 38, 26)
-        lay.setSpacing(10)
+    def _build_hero(self):
+        """الترحيب وحده: شعارٌ وتحيّةٌ وعنوانٌ وسطرُ دعوة."""
+        lay = QtWidgets.QVBoxLayout(self.hero)
+        lay.setContentsMargins(10, 0, 10, 0)
+        lay.setSpacing(8)
 
         self.logo = QtWidgets.QLabel()
         self.logo.setAlignment(QtCore.Qt.AlignCenter)
@@ -234,11 +256,11 @@ class GateWindow(QtWidgets.QDialog):
                 cand = QtGui.QPixmap(str(path))
                 if not cand.isNull():
                     pix = cand.scaledToWidth(
-                        150, QtCore.Qt.SmoothTransformation)
+                        168, QtCore.Qt.SmoothTransformation)
                     break
         # بلا ملف شعار يُرسم خاتمٌ بحجرٍ: البوابة لا تظهر ناقصةً
         # لأن أصلاً لم يُنسخ بجوار الملف التنفيذي.
-        self.logo.setPixmap(pix if pix is not None else _emblem(104))
+        self.logo.setPixmap(pix if pix is not None else _emblem(118))
         lay.addWidget(self.logo)
 
         self.hello = QtWidgets.QLabel(_greeting())
@@ -255,15 +277,14 @@ class GateWindow(QtWidgets.QDialog):
         self.ask.setObjectName("gateAsk")
         self.ask.setAlignment(QtCore.Qt.AlignCenter)
         lay.addWidget(self.ask)
-        lay.addSpacing(6)
 
-        # الحقولُ والزرّ في حاويةٍ واحدة: تظهر مجتمعةً بعد الترحيب،
-        # فالعين تقرأ أولاً ثم تُدعى للكتابة — لا الاثنان معاً.
-        self.form_box = QtWidgets.QWidget(self.card)
-        self.form_box.setObjectName("gateForm")
-        lay.addWidget(self.form_box)
-        lay = QtWidgets.QVBoxLayout(self.form_box)
-        lay.setContentsMargins(0, 0, 0, 0)
+    def _build_card(self):
+        """لوحة الدخول — تُبنى عند أوانها لا قبله."""
+        self.card = QtWidgets.QWidget(self)
+        self.card.setObjectName("gateCard")
+        self.card.setFixedWidth(520)
+        lay = QtWidgets.QVBoxLayout(self.card)
+        lay.setContentsMargins(38, 26, 38, 22)
         lay.setSpacing(8)
 
         self.username = QtWidgets.QLineEdit()
@@ -313,17 +334,18 @@ class GateWindow(QtWidgets.QDialog):
             self.remember.setChecked(True)
         lay.addWidget(self.remember)
 
-        self.state = QtWidgets.QLabel("")
+        self.state = QtWidgets.QLabel(self._pending_state)
         self.state.setObjectName("gateState")
         self.state.setAlignment(QtCore.Qt.AlignCenter)
         self.state.setWordWrap(True)
-        self.state.setMinimumHeight(34)
+        self.state.setMinimumHeight(30)
         lay.addWidget(self.state)
 
         self.btn = QtWidgets.QPushButton("دخول")
         self.btn.setObjectName("gateEnter")
         self.btn.setDefault(True)
         self.btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn.setEnabled(self._ready)
         self.btn.clicked.connect(self.try_login)
         lay.addWidget(self.btn)
 
@@ -342,34 +364,58 @@ class GateWindow(QtWidgets.QDialog):
 
     # ─────────────────────────────── العرض والحركة
     def showEvent(self, e):
-        """المشهد على مرحلتين: مسرحٌ يتنفّس، ثم موجةٌ تُخرج البطاقة.
+        """المشهد على ثلاث مراحل — ولوحةُ الدخول آخرُها.
 
-        **ما كان**: البطاقة تظهر في اللحظة نفسها التي تظهر فيها
-        الشاشة، فتبدو مقحمةً على مشهدٍ لم يبدأ بعد — وهو ما يجعل
-        الفتح يبدو «غير مرتّب». الآن تُترك الخلفية وحدها نصف ثانية
-        حتى تستقرّ العين، ثم ينبثق تموّجٌ من موضع البطاقة وترتفع
-        معه: كأن شيئاً لمس السطح فخرج منه ما بعده.
+        **ما كان يُشكى منه**: أول ما يُنقر البرنامج تُلمح لوحة
+        البيانات ثم تختفي ثم تعود. والسبب أن اللوحة كانت **موجودة**
+        منذ بناء النافذة، وويندوز يرسم أول إطارٍ قبل أن يصل أمرُ
+        الإخفاء.
+
+        **المشهد الآن**:
+          ١) مسرحٌ داكن وحده — لا شيء غيره.
+          ٢) «مرحباً بك في نظام إدارة مصانع الذهب» يظهر متدرّجاً.
+          ٣) بعد أن تُقرأ الجملة: تُبنى لوحة الدخول لأول مرة وتصعد
+             مع موجةٍ، والترحيبُ يرتفع قليلاً ليُفسح لها.
         """
         super().showEvent(e)
-        self._layout_card()
+        self.stage.setGeometry(self.rect())
         if not animations_on():
+            self.hero.show()
+            self._ensure_card()
             self.card.show()
             self.stage.intro = 1.0
-            self._apply_intro(1.0)
+            self._apply_hero(1.0)
+            self._apply_card(1.0)
+            self._layout_scene()
             self._start_prepare()
             return
-        self.card.hide()
+        self.hero.hide()
         self.stage.intro = 0.0
-        self.stage.setGeometry(self.rect())
         self.stage.start()
-        QtCore.QTimer.singleShot(460, self._begin_card)
+        QtCore.QTimer.singleShot(HERO_DELAY, self._begin_hero)
+        QtCore.QTimer.singleShot(CARD_DELAY, self._begin_card)
 
-    def _begin_card(self):
-        """تنبثق الموجة وتُرفع البطاقة معها."""
+    def _begin_hero(self):
+        """الترحيب يظهر وحده — والتجهيز يبدأ تحته بلا ضجيج."""
         if not self.isVisible():
             return
-        self._layout_card()
-        # مركز الموجة = مركز البطاقة، فالحلقات تخرج من تحتها لا من
+        self.hero.show()
+        self._layout_scene()
+        self._intro.start()
+        self._start_prepare()
+
+    def _ensure_card(self):
+        if self.card is None:
+            self._build_card()
+            self._layout_scene()
+
+    def _begin_card(self):
+        """تُبنى اللوحة وتصعد مع موجةٍ تنبثق من موضعها."""
+        if not self.isVisible():
+            return
+        self._ensure_card()
+        self._card_shown = True
+        # مركز الموجة = مركز اللوحة، فالحلقات تخرج من تحتها لا من
         # وسط الشاشة — والفرق يُرى وإن لم يُقَل.
         try:
             c = self.card
@@ -377,52 +423,86 @@ class GateWindow(QtWidgets.QDialog):
                 c.y() + c.height() / 2.0) / max(1.0, self.height())))
         except Exception:
             pass
-        self._card_shown = True
         self.card.show()
         self.stage.ripple = 0.0
         self._ripple.start()
-        self._intro.start()
+        self._card_in.start()
         self._start_prepare()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.stage.setGeometry(self.rect())
-        self._layout_card()
+        self._layout_scene()
 
-    def _layout_card(self):
-        """البطاقة في الوسط — وترتفع قليلاً عن المنتصف فتبدو أخفّ."""
-        c = self.card
-        c.adjustSize()
-        x = int((self.width() - c.width()) / 2)
-        y = int((self.height() - c.height()) / 2) - int(self.height() * 0.02)
-        c.move(max(0, x), max(0, y) + getattr(self, "_lift", 0))
-        c.raise_()
+    def _layout_scene(self):
+        """يرتّب الترحيب واللوحة كتلةً واحدة في وسط الشاشة.
+
+        قبل ظهور اللوحة يتوسّط الترحيبُ الشاشةَ وحده؛ وحين تظهر
+        تنزاح الكتلة فيرتفع الترحيب وتأخذ اللوحة مكانها تحته —
+        فالحركة انزياحُ مشهدٍ لا قفزةُ عنصرٍ جديد.
+        """
+        h = max(1, self.height())
+        gap = 18
+        self.hero.adjustSize()
+        hero_h = self.hero.height()
+        card_h = self.card.height() if self.card is not None else 0
+        if self.card is not None:
+            self.card.adjustSize()
+            card_h = self.card.height()
+        # نسبة ظهور اللوحة: 0 = الترحيب وحده، 1 = الكتلة كاملة
+        k = getattr(self, "_card_k", 0.0)
+        total = hero_h + (gap + card_h) * k
+        top = (h - total) / 2.0 - h * 0.015
+        self.hero.move(int((self.width() - self.hero.width()) / 2),
+                       int(max(0.0, top)))
+        self.hero.raise_()
+        if self.card is not None:
+            cy = top + hero_h + gap + (1.0 - k) * 26
+            self.card.move(int((self.width() - self.card.width()) / 2),
+                           int(max(0.0, cy)))
+            self.card.raise_()
 
     def _on_intro(self, v):
         self.stage.intro = float(v)
-        self._apply_intro(float(v))
+        self._apply_hero(float(v))
 
-    def _apply_intro(self, v):
-        """ظهورٌ متدرّج: الشعار أولاً، ثم الترحيب، ثم الحقول.
+    def _apply_hero(self, v):
+        """ظهور الترحيب: الشعار أولاً، فالتحية، فالعنوان، فالدعوة.
 
-        **التدرّج بالألوان لا بمؤثّر الشفافية**: مؤثّر Qt يرسم العنصر
-        في صورةٍ وسيطة ويُبقيها مخبّأة، فإن تغيّر حجم البطاقة بعد
-        تركيبه ظهر النصّ مشوّهاً أو مبتوراً — وهو ما وقع فعلاً في
-        أول تجربة. تلوينُ النصّ بشفافيةٍ متدرّجة يُعطي الأثر نفسه
-        بلا صورةٍ وسيطة ولا خبيئة تفسد.
+        **التدرّج بالألوان لا بمؤثّر الشفافية**: مؤثّر Qt يرسم
+        العنصر في صورةٍ وسيطة ويُبقيها مخبّأة، فإن تغيّر حجمه بعد
+        تركيبه ظهر النصّ مشوّهاً. تلوينُ النصّ بشفافيةٍ متدرّجة
+        يُعطي الأثر نفسه بلا صورةٍ وسيطة.
         """
         def seg(a, b):
             return max(0.0, min(1.0, (v - a) / max(1e-6, b - a)))
 
-        self._fade_text(self.hello, "#C9A227", seg(0.15, 0.55))
-        self._fade_text(self.welcome, "#F6E7B6", seg(0.22, 0.70))
-        self._fade_text(self.ask, "#E8D9A8", seg(0.40, 0.85))
         self._fade_pixmap(self.logo, seg(0.00, 0.45))
-        self.form_box.setVisible(seg(0.50, 1.00) > 0.01)
-        self._set_opacity(self.form_box, seg(0.50, 1.00))
-        self._lift = int(26 * (1.0 - seg(0.35, 1.0)))
-        self._layout_card()
+        self._fade_text(self.hello, "#C9A227", seg(0.18, 0.58))
+        self._fade_text(self.welcome, "#F6E7B6", seg(0.28, 0.78))
+        self._fade_text(self.ask, "#E8D9A8", seg(0.55, 1.00))
+        self._layout_scene()
         self.stage.update()
+
+    def _apply_card(self, v):
+        """صعودُ اللوحة: تنزاح الكتلة وتظهر اللوحة معها."""
+        self._card_k = max(0.0, min(1.0, float(v)))
+        if self.card is not None:
+            self._set_opacity(self.card, self._card_k)
+        self._layout_scene()
+
+    def _card_done(self):
+        """يُرفع مؤثّر الشفافية بعد استقرار اللوحة."""
+        self._card_k = 1.0
+        if self.card is not None:
+            try:
+                self.card.setGraphicsEffect(None)
+            except Exception:
+                pass
+            self.username.setFocus()
+            if self.username.text().strip():
+                self.password.setFocus()
+        self._layout_scene()
 
     @staticmethod
     def _fade_text(label, color, value):
@@ -466,18 +546,12 @@ class GateWindow(QtWidgets.QDialog):
         label.setPixmap(out)
 
     def _clear_effects(self):
-        for w in (self.form_box,):
-            try:
-                w.setGraphicsEffect(None)
-            except Exception:
-                pass
         for w in (self.hello, self.welcome, self.ask):
             try:
                 w.setStyleSheet("")      # تعود لورقة الأنماط
             except Exception:
                 pass
-        self._lift = 0
-        self._layout_card()
+        self._layout_scene()
 
     @staticmethod
     def _set_opacity(widget, value):
@@ -495,7 +569,11 @@ class GateWindow(QtWidgets.QDialog):
         بينها من تلقاء نفسها. ونداءُ `processEvents` داخل نداءِ
         مؤقّتٍ يفتح باب إعادة دخولٍ لا داعي له.
         """
-        self.state.setText(str(msg or ""))
+        msg = str(msg or "")
+        self._pending_state = msg
+        if self.card is None:
+            return          # اللوحة لم تُبنَ بعد — يُحفظ ليظهر معها
+        self.state.setText(msg)
         try:
             self.state.repaint()
         except Exception:
@@ -516,7 +594,8 @@ class GateWindow(QtWidgets.QDialog):
         self._queue = list(steps or [])
         self._failed = []
         self._ready = False
-        self.btn.setEnabled(False)
+        if self.card is not None:
+            self.btn.setEnabled(False)
         # إن كانت البطاقة قد ظهرت فعلاً (أو لا حركة أصلاً) يبدأ
         # الطابور فوراً؛ وإلا يبدأ مع ظهورها فلا يُزاحم موجتها.
         if self.isVisible() and (self._card_shown or not animations_on()):
@@ -554,6 +633,11 @@ class GateWindow(QtWidgets.QDialog):
         تومض ثم تختفي بلا سبب.
         """
         self._ready = True
+        if self.card is None:
+            # اللوحة تُبنى لاحقاً وتُولد بزرٍّ صالح — لا شيء يُلمس
+            if self._failed:
+                self.set_state("تنبيه أثناء التجهيز — " + self._failed[0])
+            return not self._failed
         if not self._busy:
             self.btn.setEnabled(True)
         cur = self.state.text()
@@ -605,8 +689,8 @@ class GateWindow(QtWidgets.QDialog):
         self.user = session
         name = (session.get("full_name") or session.get("username")
                 or self.username.text().strip())
-        self.state.setText(f"أهلاً {name} — جارٍ فتح النظام…")
-        self.form_box.setEnabled(False)
+        self.set_state(f"أهلاً {name} — جارٍ فتح النظام…")
+        self.card.setEnabled(False)
         QtWidgets.QApplication.processEvents()
 
         # ══ لا `accept()` هنا ══
@@ -628,8 +712,9 @@ class GateWindow(QtWidgets.QDialog):
         والبوابة أقرب مكانٍ يقرأ فيه الخبر.
         """
         self._busy = False
-        self.form_box.setEnabled(True)
-        self.btn.setEnabled(True)
+        if self.card is not None:
+            self.card.setEnabled(True)
+            self.btn.setEnabled(True)
         self._reject_shake(str(msg))
 
     def _reject_shake(self, msg):
@@ -638,7 +723,9 @@ class GateWindow(QtWidgets.QDialog):
         رسالةٌ حمراء تحت الحقول وهزّةٌ خفيفة للبطاقة: الإشارة تصل في
         أقل من ثانية، ولا تُغلق مربعَ حوارٍ لتعيد المحاولة.
         """
-        self.state.setText(str(msg or "تعذّر الدخول"))
+        self.set_state(str(msg or "تعذّر الدخول"))
+        if self.card is None:
+            return          # لم تُبنَ اللوحة بعد — الرسالة محفوظة
         self.state.setStyleSheet("color:#F0A0A0;")
         QtCore.QTimer.singleShot(
             4000, lambda: self.state.setStyleSheet(""))
@@ -674,8 +761,9 @@ class GateWindow(QtWidgets.QDialog):
         if not animations_on():
             self._exit_done()
             return
-        for w in (self.card,):
-            w.hide()
+        for w in (self.card, self.hero):
+            if w is not None:
+                w.hide()
         self._exit.start()
 
     def _on_exit(self, v):

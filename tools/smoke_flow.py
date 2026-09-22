@@ -3341,9 +3341,13 @@ def main():
           and all(isinstance(a, str) and callable(b) for a, b in _steps9)
           and "قاعدة البيانات" in _steps9[0][0],
           f"{len(_steps9)} خطوات")
-    check("والبطاقة مخفيّةٌ قبل أول عرضٍ فلا تومض ثم تختفي",
-          "self.card.hide()" in _insp9.getsource(_gw9.GateWindow.__init__)
-          and "QDialog#gateWindow { background:" in _gw9.GATE_QSS)
+    _init9 = _insp9.getsource(_gw9.GateWindow.__init__)
+    check("لوحة الدخول لا تُبنى أصلاً قبل أوانها فلا تومض",
+          "self.card = None" in _init9
+          and "self.hero.hide()" in _init9
+          and "QDialog#gateWindow { background:" in _gw9.GATE_QSS
+          and _gw9.CARD_DELAY > _gw9.HERO_DELAY + 800,
+          f"الترحيب {_gw9.HERO_DELAY}مث · اللوحة {_gw9.CARD_DELAY}مث")
 
     step("43) تعديل تاريخ العملية ينقلها وقيدَها معاً")
     # كشف الحساب يرتّب بالتاريخ. فلو عُدّل تاريخ مستندٍ ولم ينتقل
