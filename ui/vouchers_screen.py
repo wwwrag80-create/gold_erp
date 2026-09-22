@@ -372,17 +372,24 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                 with db() as conn:
                     if self.is_editing:
                         # تعديل **في مكانه**: نفس رقم السند وتاريخه وقيده
+                        # التاريخ يُمرَّر كما هو في الحقل: إن غيّره
+                        # المستخدم انتقل السند وقيده إليه.
                         res = vouchers.update_voucher(
                             conn, self.editing_source_id,
                             self.user["username"],
-                            kind=self.kind.currentData(), **kw)
+                            kind=self.kind.currentData(),
+                            voucher_date=dstr(self.date), **kw)
                     else:
                         res = vouchers.create_voucher(
                             conn, self.kind.currentData(), dstr(self.date),
                             self.user["username"], **kw)
             if res.get("in_place"):
                 info(self, f"عُدّل السند {res['voucher_no']} في مكانه.\n\n"
-                           f"رقم السند وتاريخه وقيده لم تتغيّر.")
+                           + (f"رقم السند ثابت، وتاريخه نُقل من "
+                              f"{res['moved_date'][0]} إلى "
+                              f"{res['moved_date'][1]} — وقيدُه معه."
+                              if res.get("moved_date")
+                              else "رقم السند وتاريخه وقيده لم تتغيّر."))
                 self.end_edit()
                 self.rows = []
                 self._drop_draft()

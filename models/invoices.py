@@ -520,7 +520,8 @@ def is_last_movement(conn, work_order_id, invoice_id):
 
 
 def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
-                   description=None, preserve_stock=True):
+                   description=None, preserve_stock=True,
+                   invoice_date=None):
     """يعدّل فاتورة مُرحَّلة **في مكانها** — بلا فاتورة جديدة.
 
     **لماذا لا نعكس ونُعيد**: العكس يُنشئ فاتورة برقم جديد ووقت جديد،
@@ -578,6 +579,30 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         raise ValueError("هذا النوع من الفواتير لا يُعدَّل في مكانه")
     if not cart:
         raise ValueError("أضف طقماً واحداً على الأقل")
+
+    # ══ تاريخُ العملية يتبع ما أدخله المستخدم ══
+    # كان التعديل يُبقي التاريخ الأصلي دائماً، فمن صحّح تاريخاً
+    # أُدخل خطأً رأى الفاتورة تتعدّل وتبقى في يومها القديم — وكشفُ
+    # الحساب يرتّب بالتاريخ، فتبقى العملية في غير موضعها للأبد.
+    # الآن: إن جاء تاريخٌ مختلف نُقلت الفاتورة **وقيدها معاً**، فلا
+    # يفترق المستند عن دفتره. والنقل يمرّ بحارس الفترة المقفلة في
+    # الطرفين: لا يُنقل من فترةٍ مقفلة ولا إليها.
+    _newd = str(invoice_date or "").strip()[:10]
+    _oldd = str(inv["invoice_date"] or "")[:10]
+    _moved = None
+    if _newd and _newd != _oldd:
+        from models import fiscal
+        fiscal.assert_open(conn, _oldd)
+        fiscal.assert_open(conn, _newd)
+        conn.execute("UPDATE invoices SET invoice_date=? WHERE id=?",
+                     (_newd, invoice_id))
+        if inv["entry_id"]:
+            conn.execute(
+                "UPDATE journal_entries SET entry_date=? WHERE id=?",
+                (_newd, inv["entry_id"]))
+        _moved = (_oldd, _newd)
+        inv = conn.execute("SELECT * FROM invoices WHERE id=?",
+                           (invoice_id,)).fetchone()
 
     entity_id = inv["customer_id"]
     ent = get_entity(conn, entity_id)
@@ -724,11 +749,24 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     dw = round(dw, 3)
     dg = round(dg, 2)
     if not (added or updated or removed):
+        # **تعديلُ التاريخ وحده تعديلٌ حقيقي**: هذا المخرج المبكر
+        # كان يُعيد «لا تغيير» ويبتلع النقل بلا أثرٍ في السجل، فمن
+        # صحّح تاريخاً فقط رأى رسالةً تقول إنه لم يغيّر شيئاً —
+        # والمستند قد انتقل فعلاً. فيُسجَّل هنا كما يُسجَّل هناك.
+        if _moved:
+            log_action(conn, username, "update", "invoices", invoice_id,
+                       f"نقل تاريخ {inv['invoice_no']}: "
+                       f"{_moved[0]} ← {_moved[1]}")
+            _de.record(conn, "invoices", invoice_id, username, _before,
+                       doc_no=inv["invoice_no"] or "",
+                       entry_id=inv["entry_id"], kind="inplace",
+                       note=f"التاريخ {_moved[0]} ← {_moved[1]}")
         return {"id": invoice_id, "invoice_no": inv["invoice_no"],
                 "added": [], "updated": [], "removed": [],
-                "stock_touched": [],
+                "stock_touched": [], "moved_date": _moved,
                 "delta_weight": 0.0, "delta_wages": 0.0,
-                "entry_id": inv["entry_id"], "unchanged": True}
+                "entry_id": inv["entry_id"],
+                "unchanged": not _moved}
 
     # ── إجماليات الفاتورة: تُحسب من بنودها بعد التعديل ──
     # **لماذا لا نجمع الفروق**: `القديم + الفرق` يفترض أن إجمالي
@@ -771,15 +809,18 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     except Exception:
         pass
 
+    _mv = f" · التاريخ {_moved[0]} ← {_moved[1]}" if _moved else ""
     log_action(conn, username, "update", "invoices", invoice_id,
                f"تعديل {inv['invoice_no']} في مكانه: +{len(added)} · "
                f"~{len(updated)} · -{len(removed)} · "
-               f"وزن {dw:+.3f} · أجور {dg:+.2f}")
+               f"وزن {dw:+.3f} · أجور {dg:+.2f}{_mv}")
     _de.record(conn, "invoices", invoice_id, username, _before,
                doc_no=inv["invoice_no"] or "", entry_id=inv["entry_id"],
                kind="inplace",
-               note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}")
+               note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}"
+                    + _mv)
     return {"id": invoice_id, "invoice_no": inv["invoice_no"],
+            "moved_date": _moved,
             "added": added, "updated": updated, "removed": removed,
             "stock_touched": sorted(set(touched)),
             "delta_weight": dw, "delta_wages": dg,

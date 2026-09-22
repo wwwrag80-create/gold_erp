@@ -1244,10 +1244,13 @@ class SalesScreen(QtWidgets.QWidget):
                         # تعديل **في مكانه**: نفس رقم الفاتورة وتاريخها،
                         # والفرق وحده يُرحَّل — لا فاتورة جديدة ولا قيد
                         # عكسي، فتبقى العملية عمليةً واحدة في السجل.
+                        # التاريخ يُمرَّر كما هو في الحقل: إن غيّره
+                        # المستخدم انتقلت الفاتورة وقيدها إليه.
                         res = invoices.update_invoice(
                             conn, self.editing_id, cart,
                             self.user["username"], apply_vat=apply_vat,
-                            description=desc)
+                            description=desc,
+                            invoice_date=dstr(self.date))
                     elif self.kind.currentData() == "sale":
                         res = invoices.create_sale(
                             conn, cid, cart, dstr(self.date),
@@ -1296,6 +1299,8 @@ class SalesScreen(QtWidgets.QWidget):
                          "\n\nلم يتأثر المخزون: للأطقم حركات أحدث "
                          "من هذه الفاتورة، فحالتها اليوم تتبع آخر "
                          "حركة لا هذه.")
+                if not parts and res.get("moved_date"):
+                    parts.append("نُقل تاريخها")
                 info(self,
                      f"عُدّلت الفاتورة {res['invoice_no']} في مكانها.\n"
                      + ("   ·   ".join(parts) or "لا تغيير")
@@ -1304,7 +1309,11 @@ class SalesScreen(QtWidgets.QWidget):
                        f"{kv.unit()}"
                        f"   ·   الأجور: {res.get('total_wages', 0):,.2f} ريال"
                      + stock
-                     + "\n\nرقم الفاتورة وتاريخها لم يتغيّرا.")
+                     + ("\n\nرقم الفاتورة ثابت، وتاريخها نُقل من "
+                        f"{res['moved_date'][0]} إلى "
+                        f"{res['moved_date'][1]} — وقيدُها معه."
+                        if res.get("moved_date")
+                        else "\n\nرقم الفاتورة وتاريخها لم يتغيّرا."))
             elif res["internal"]:
                 posted(self, f"تم ترحيل التحويل الداخلي {res['invoice_no']} — "
                            f"الوزن: {kv.g(res['total_weight']):.2f} "

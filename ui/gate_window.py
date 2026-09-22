@@ -29,6 +29,10 @@ WELCOME = "مرحباً بك في نظام إدارة مصانع الذهب"
 ASK_LOGIN = "يرجى تسجيل الدخول"
 
 GATE_QSS = """
+/* أولُ إطارٍ يُرسم قبل أن يبدأ المسرح: لو بقي على لون النظام
+   الفاتح لرأى المستخدم ومضةً بيضاء قبل الليل. فيُصبغ هنا بلون
+   المسرح نفسه — فما يُرى أولاً هو ما يبقى. */
+QDialog#gateWindow { background: #17120C; }
 QWidget#gateCard {
     background: rgba(28, 22, 14, 218);
     border: 1px solid rgba(201, 162, 39, 110);
@@ -169,6 +173,21 @@ class GateWindow(QtWidgets.QDialog):
         self.card.setObjectName("gateCard")
         self.card.setFixedWidth(520)
         self._build_card()
+        # ══ تُخفى **هنا** لا في `showEvent` ══
+        # `showEvent` يصل بعد أول رسمٍ للنافذة، فيُرسم إطارٌ واحد
+        # فيه البطاقة كاملةً ثم تختفي — وهي الومضة التي تُرى عند
+        # النقر على البرنامج. الإخفاء قبل العرض يمنع رسمها أصلاً.
+        if animations_on():
+            self.card.hide()
+
+        # ومقاس الشاشة يُؤخذ قبل العرض: نافذةٌ تُرسم بمقاسٍ صغير ثم
+        # تتمدّد لملء الشاشة ومضةٌ أخرى — والصحيح أن تولد بمقاسها.
+        try:
+            scr = QtWidgets.QApplication.primaryScreen()
+            if scr is not None:
+                self.setGeometry(scr.geometry())
+        except Exception:
+            pass
 
         # حركةُ الدخول: الشعار ثم الترحيب ثم البطاقة — بتتابعٍ لطيف
         self._anims = []
@@ -341,6 +360,7 @@ class GateWindow(QtWidgets.QDialog):
             return
         self.card.hide()
         self.stage.intro = 0.0
+        self.stage.setGeometry(self.rect())
         self.stage.start()
         QtCore.QTimer.singleShot(460, self._begin_card)
 

@@ -258,7 +258,8 @@ def voucher_lines(conn, voucher_id):
 def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
                    account_id=None, rows=None, gold_weight=0.0,
                    gold_karat=18, cash_amount=0.0, cash_account_code=None,
-                   net_diff=0.0, disc_cash=0.0, disc_gold=0.0, notes=""):
+                   net_diff=0.0, disc_cash=0.0, disc_gold=0.0, notes="",
+                   voucher_date=None):
     """يعدّل سنداً مُرحَّلاً **في مكانه** — بنفس رقمه وتاريخه.
 
     **لماذا لا نعكس ونُعيد**: العكس يُنشئ سنداً برقم ووقت جديدين،
@@ -282,6 +283,28 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     _before = _de.totals(conn, entry_id)
 
     kind = kind or v["kind"]
+
+    # ══ تاريخُ السند يتبع ما أدخله المستخدم ══
+    # الرقم يبقى — فهو هوية المستند — أما التاريخ فبيانٌ عن زمن
+    # العملية، وتصحيحُه تصحيحٌ للواقع لا تزويرٌ له. ويُنقل القيد معه
+    # في النَّفَس نفسه، وإلا افترق السند عن دفتره: ورقةٌ بتاريخٍ
+    # وكشفُ حسابٍ بتاريخٍ آخر. وحارسُ الفترة المقفلة يُسأل في
+    # الطرفين: لا نقلَ من مقفلةٍ ولا إليها.
+    _newd = str(voucher_date or "").strip()[:10]
+    _oldd = str(v["voucher_date"] or "")[:10]
+    _moved = None
+    if _newd and _newd != _oldd:
+        from models import fiscal
+        fiscal.assert_open(conn, _oldd)
+        fiscal.assert_open(conn, _newd)
+        conn.execute("UPDATE vouchers SET voucher_date=? WHERE id=?",
+                     (_newd, voucher_id))
+        conn.execute("UPDATE journal_entries SET entry_date=? WHERE id=?",
+                     (_newd, entry_id))
+        _moved = (_oldd, _newd)
+        v = conn.execute("SELECT * FROM vouchers WHERE id=?",
+                         (voucher_id,)).fetchone()
+
     # صندوق النقد يُورَّث من السند الأصلي إن لم يُمرَّر صراحةً
     if not cash_account_code:
         cash_account_code = (v["cash_account_code"]
@@ -365,12 +388,14 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
             f"اختلّ توازن القيد بعد التعديل "
             f"(ذهب {chk['g']} · نقد {chk['c']}) — أُلغيت العملية")
 
+    _mv = f" · التاريخ {_moved[0]} ← {_moved[1]}" if _moved else ""
     log_action(conn, username, "update", "vouchers", voucher_id,
-               f"تعديل {v['voucher_no']} في مكانه — الرقم والتاريخ ثابتان")
+               f"تعديل {v['voucher_no']} في مكانه — الرقم ثابت{_mv}")
     _de.record(conn, "vouchers", voucher_id, username, _before,
                doc_no=v["voucher_no"] or "", entry_id=entry_id,
-               kind="inplace")
+               kind="inplace", note=_mv.strip(" ·"))
     return {"id": voucher_id, "voucher_no": v["voucher_no"],
+            "moved_date": _moved,
             "entry_id": entry_id, "kind": kind,
             "target_label": tmp.get("target_label", ""),
             "in_place": True}

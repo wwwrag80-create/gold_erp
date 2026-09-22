@@ -3341,6 +3341,69 @@ def main():
           and all(isinstance(a, str) and callable(b) for a, b in _steps9)
           and "قاعدة البيانات" in _steps9[0][0],
           f"{len(_steps9)} خطوات")
+    check("والبطاقة مخفيّةٌ قبل أول عرضٍ فلا تومض ثم تختفي",
+          "self.card.hide()" in _insp9.getsource(_gw9.GateWindow.__init__)
+          and "QDialog#gateWindow { background:" in _gw9.GATE_QSS)
+
+    step("43) تعديل تاريخ العملية ينقلها وقيدَها معاً")
+    # كشف الحساب يرتّب بالتاريخ. فلو عُدّل تاريخ مستندٍ ولم ينتقل
+    # قيدُه بقيت العملية في موضعها القديم من الكشف إلى الأبد —
+    # ورقةٌ بتاريخٍ ودفترٌ بتاريخٍ آخر.
+    from models import journal as _jr9
+    from models import vouchers as _vo9
+    from models.entities import get_entity as _ge9
+    from models.invoices import update_invoice as _upd9
+    with db() as conn:
+        _dc = _add9(conn, "عميل نقل التاريخ", "customer", username="admin")
+        _dacc = _ge9(conn, _dc)["account_id"]
+        _b9(conn, [{"wo_no": "Z901", "gold": 30.0, "wage_per_gram": 24.0}],
+            "2026-11-01", "admin")
+        _zw = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no='Z901'"
+            " AND is_deleted=0").fetchone()["id"]
+    with db() as conn:
+        _zi = _inv9.create_sale(conn, _dc, [{"work_order_id": _zw}],
+                                "2026-11-05", "admin", apply_vat=False)
+    with db() as conn:
+        _zr = _upd9(conn, _zi["id"], [{"work_order_id": _zw}], "admin",
+                    apply_vat=False, invoice_date="2026-12-09")
+    with db(readonly=True) as conn:
+        _zd = conn.execute("SELECT invoice_date d FROM invoices WHERE id=?",
+                           (_zi["id"],)).fetchone()["d"]
+        _ze = conn.execute(
+            "SELECT entry_date d FROM journal_entries WHERE id=?",
+            (_zi["entry_id"],)).fetchone()["d"]
+        _nov = [x for x in _jr9.statement(conn, _dacc, "2026-11-01",
+                                          "2026-11-30")
+                if x["op"] == "مبيعات"]
+        _dec = [x for x in _jr9.statement(conn, _dacc, "2026-12-01",
+                                          "2026-12-31")
+                if x["op"] == "مبيعات"]
+    check("الفاتورة وقيدها ينتقلان إلى التاريخ الجديد",
+          _zd == _ze == "2026-12-09", f"فاتورة {_zd} · قيد {_ze}")
+    check("فتختفي من كشف الشهر القديم وتظهر في الجديد",
+          not _nov and len(_dec) == 1,
+          f"القديم {len(_nov)} · الجديد {len(_dec)}")
+    check("ويُبلَّغ النقل ليُعرض للمستخدم",
+          _zr.get("moved_date") == ("2026-11-05", "2026-12-09"),
+          str(_zr.get("moved_date")))
+    with db() as conn:
+        _zv = create_voucher(conn, "receipt", "2026-11-08", "admin",
+                             entity_id=_dc, cash_amount=300.0)
+    with db() as conn:
+        _zvr = _vo9.update_voucher(
+            conn, _zv["id"], "admin", kind="receipt", entity_id=_dc,
+            cash_amount=420.0, voucher_date="2026-12-11")
+    with db(readonly=True) as conn:
+        _zrow = conn.execute(
+            "SELECT v.voucher_date d, e.entry_date ed, v.voucher_no n"
+            " FROM vouchers v JOIN journal_entries e ON e.id=v.entry_id"
+            " WHERE v.id=?", (_zv["id"],)).fetchone()
+    check("والسند كذلك — ينتقل هو وقيده ويبقى رقمه",
+          _zrow["d"] == _zrow["ed"] == "2026-12-11"
+          and _zrow["n"] == _zv["voucher_no"]
+          and _zvr.get("moved_date") == ("2026-11-08", "2026-12-11"),
+          f"{_zrow['d']} · {_zrow['ed']} · {_zrow['n']}")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
