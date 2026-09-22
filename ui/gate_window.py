@@ -67,6 +67,11 @@ QPushButton#gateQuit {
     padding: 8px 14px; font-size: 13px; font-weight: normal;
 }
 QPushButton#gateQuit:hover { color: #E8D9A8; }
+QPushButton#gateEye {
+    background: transparent; color: #A2916A; border: none;
+    padding: 0 8px; font-size: 15px; font-weight: normal;
+}
+QPushButton#gateEye:hover { color: #F0D98A; }
 QCheckBox#gateRemember { color: #A2916A; font-size: 12px;
                          background: transparent; padding: 2px; }
 QCheckBox#gateRemember::indicator {
@@ -137,6 +142,10 @@ class GateWindow(QtWidgets.QDialog):
         self.user = None
         self._busy = False
         self._ready = False
+        self._queue = []            # طابور خطوات التجهيز
+        self._failed = []
+        self._prep_running = False
+        self._card_shown = False
         # يُضبط من `main`: يُنادى بالجلسة بعد نجاح الدخول **والبوابة
         # ما زالت على الشاشة**، فيبني النظام تحتها ثم يطلب التسليم.
         self.on_signed_in = None
@@ -172,6 +181,16 @@ class GateWindow(QtWidgets.QDialog):
         # المؤثّرات تُرفع عند اكتمال الظهور: مؤثّرُ شفافيةٍ باقٍ على
         # حقلٍ نشط يعيد رسمَه في كل نبضة مؤشّر بلا داعٍ.
         self._intro.finished.connect(self._clear_effects)
+
+        # الموجة: حلقاتٌ تتّسع من موضع البطاقة لحظةَ ظهورها
+        self._ripple = QtCore.QVariantAnimation(self)
+        self._ripple.setStartValue(0.0)
+        self._ripple.setEndValue(1.0)
+        self._ripple.setDuration(1250)
+        self._ripple.setEasingCurve(QtCore.QEasingCurve.OutQuad)
+        self._ripple.valueChanged.connect(self._on_ripple)
+        self._ripple.finished.connect(
+            lambda: setattr(self.stage, "ripple", -1.0))
 
         self._exit = QtCore.QVariantAnimation(self)
         self._exit.setStartValue(0.0)
@@ -243,7 +262,29 @@ class GateWindow(QtWidgets.QDialog):
             cap = QtWidgets.QLabel(label)
             cap.setObjectName("gateField")
             lay.addWidget(cap)
-            lay.addWidget(w)
+            if w is not self.password:
+                lay.addWidget(w)
+                continue
+            # عينٌ صغيرة تكشف كلمة المرور ما دامت مضغوطة: الخطأ
+            # المطبعي في حقلٍ مُقنَّع يُكتشف بعد الرفض لا قبله،
+            # ولوحةُ المفاتيح العربية تجعله أكثر وقوعاً.
+            row = QtWidgets.QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(4)
+            row.addWidget(w, 1)
+            self.eye = QtWidgets.QPushButton("👁")
+            self.eye.setObjectName("gateEye")
+            self.eye.setCursor(QtCore.Qt.PointingHandCursor)
+            self.eye.setToolTip("اضغط مطوّلاً لإظهار كلمة المرور")
+            self.eye.setFocusPolicy(QtCore.Qt.NoFocus)
+            self.eye.pressed.connect(
+                lambda: self.password.setEchoMode(
+                    QtWidgets.QLineEdit.Normal))
+            self.eye.released.connect(
+                lambda: self.password.setEchoMode(
+                    QtWidgets.QLineEdit.Password))
+            row.addWidget(self.eye, 0)
+            lay.addLayout(row)
 
         self.remember = QtWidgets.QCheckBox("تذكّر اسمي على هذا الجهاز")
         self.remember.setObjectName("gateRemember")
@@ -282,14 +323,46 @@ class GateWindow(QtWidgets.QDialog):
 
     # ─────────────────────────────── العرض والحركة
     def showEvent(self, e):
+        """المشهد على مرحلتين: مسرحٌ يتنفّس، ثم موجةٌ تُخرج البطاقة.
+
+        **ما كان**: البطاقة تظهر في اللحظة نفسها التي تظهر فيها
+        الشاشة، فتبدو مقحمةً على مشهدٍ لم يبدأ بعد — وهو ما يجعل
+        الفتح يبدو «غير مرتّب». الآن تُترك الخلفية وحدها نصف ثانية
+        حتى تستقرّ العين، ثم ينبثق تموّجٌ من موضع البطاقة وترتفع
+        معه: كأن شيئاً لمس السطح فخرج منه ما بعده.
+        """
         super().showEvent(e)
         self._layout_card()
-        if animations_on():
-            self.stage.start()
-            self._intro.start()
-        else:
+        if not animations_on():
+            self.card.show()
             self.stage.intro = 1.0
             self._apply_intro(1.0)
+            self._start_prepare()
+            return
+        self.card.hide()
+        self.stage.intro = 0.0
+        self.stage.start()
+        QtCore.QTimer.singleShot(460, self._begin_card)
+
+    def _begin_card(self):
+        """تنبثق الموجة وتُرفع البطاقة معها."""
+        if not self.isVisible():
+            return
+        self._layout_card()
+        # مركز الموجة = مركز البطاقة، فالحلقات تخرج من تحتها لا من
+        # وسط الشاشة — والفرق يُرى وإن لم يُقَل.
+        try:
+            c = self.card
+            self.stage.focus_y = max(0.15, min(0.85, (
+                c.y() + c.height() / 2.0) / max(1.0, self.height())))
+        except Exception:
+            pass
+        self._card_shown = True
+        self.card.show()
+        self.stage.ripple = 0.0
+        self._ripple.start()
+        self._intro.start()
+        self._start_prepare()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -396,33 +469,92 @@ class GateWindow(QtWidgets.QDialog):
 
     # ─────────────────────────────── التجهيز قبل الدخول
     def set_state(self, msg):
+        """سطر الحالة — يُرسم بلا `processEvents`.
+
+        الخطوات صارت تُنفَّذ خطوةً في كل نبضة، فالأحداث تُعالَج
+        بينها من تلقاء نفسها. ونداءُ `processEvents` داخل نداءِ
+        مؤقّتٍ يفتح باب إعادة دخولٍ لا داعي له.
+        """
         self.state.setText(str(msg or ""))
-        QtWidgets.QApplication.processEvents()
+        try:
+            self.state.repaint()
+        except Exception:
+            pass
 
     def prepare(self, steps):
-        """ينفّذ خطوات التجهيز ويُبقي البوابة حيّة أثناءها.
+        """يُجدول خطوات التجهيز — خطوةً في كل نبضة، لا حلقةً خانقة.
 
-        `steps`: [(العنوان، الدالة), …]. فشلُ خطوةٍ لا يُسقط البوابة —
-        يُعرض ويُكمل، فالمستخدم يرى ما جرى بدل نافذةٍ تُغلق وحدها.
+        **العلة التي كانت**: الخطوات كانت تُنفَّذ في حلقةٍ واحدة مع
+        `processEvents` بينها. والحلقة تحتكر خيط الواجهة، فتُبتر
+        حركةُ الظهور وتصل البطاقة إلى مكانها قبل أن تُرى وهي
+        تتحرّك — فيبدو الفتح قفزةً لا مشهداً.
+
+        الآن تُوضع الخطوات في طابور، وتُنفَّذ **واحدةً في كل نبضة**
+        عبر مؤقّت: بين كل خطوتين تعود الأحداث فتُرسم الموجة والغبار
+        ويُقرأ سطرُ الحالة. والنتيجة نفسها، والمشهد سليم.
         """
+        self._queue = list(steps or [])
+        self._failed = []
+        self._ready = False
         self.btn.setEnabled(False)
-        failed = []
-        for label, fn in steps:
-            self.set_state(label)
-            try:
-                fn()
-            except Exception as e:               # noqa: BLE001
-                failed.append(f"{label}: {e}")
+        # إن كانت البطاقة قد ظهرت فعلاً (أو لا حركة أصلاً) يبدأ
+        # الطابور فوراً؛ وإلا يبدأ مع ظهورها فلا يُزاحم موجتها.
+        if self.isVisible() and (self._card_shown or not animations_on()):
+            self._start_prepare()
+        return None
+
+    def _start_prepare(self):
+        if getattr(self, "_prep_running", False) or not self._queue:
+            if not self._queue:
+                self._finish_prepare()
+            return
+        self._prep_running = True
+        QtCore.QTimer.singleShot(0, self._next_step)
+
+    def _next_step(self):
+        if not self._queue:
+            self._prep_running = False
+            self._finish_prepare()
+            return
+        label, fn = self._queue.pop(0)
+        self._prep_msg = label
+        self.set_state(label)
+        try:
+            fn()
+        except Exception as e:                   # noqa: BLE001
+            self._failed.append(f"{label}: {e}")
+        QtCore.QTimer.singleShot(0, self._next_step)
+
+    def _finish_prepare(self):
+        """ينهي التجهيز — بلا أن يمسح كلاماً ليس كلامَه.
+
+        التجهيز قد ينتهي بعد أن يكون المستخدم قد ضغط «دخول» (فالقاعدة
+        جاهزةٌ أصلاً والخطوات سريعة). فلو مسح السطر على عواهنه لمحا
+        رسالة خطأٍ أو ترحيبٍ كُتبت بعده — ولا شيء أسوأ من رسالةٍ
+        تومض ثم تختفي بلا سبب.
+        """
         self._ready = True
-        self.btn.setEnabled(True)
-        if failed:
-            self.set_state("تنبيه أثناء التجهيز — " + failed[0])
-        else:
+        if not self._busy:
+            self.btn.setEnabled(True)
+        cur = self.state.text()
+        mine = cur == getattr(self, "_prep_msg", None)
+        if self._failed:
+            self.set_state("تنبيه أثناء التجهيز — " + self._failed[0])
+        elif mine or not cur:
             self.set_state("")
+        if self._busy or self.user:
+            return          # الدخول جارٍ — لا يُسرق منه التركيز
         self.username.setFocus()
         if self.username.text().strip():
             self.password.setFocus()
-        return not failed
+        cb = getattr(self, "on_ready", None)
+        if callable(cb):
+            cb(not self._failed)
+        return not self._failed
+
+    def _on_ripple(self, v):
+        self.stage.ripple = float(v)
+        self.stage.update()
 
     # ─────────────────────────────── الدخول
     def try_login(self):

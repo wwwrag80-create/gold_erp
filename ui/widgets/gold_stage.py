@@ -68,6 +68,8 @@ class GoldStage(QtWidgets.QWidget):
         self.t = 0.0                    # الزمن بالثواني
         self.intro = 0.0                # 0←1 مع دخول الشاشة
         self.exit = 0.0                 # 0←1 عند التسليم للنظام
+        self.ripple = -1.0              # <0 = ساكن، 0←1 = موجةٌ تنتشر
+        self.focus_y = 0.44             # مركز الموجة نسبةً من الارتفاع
         self._dust = []
         self._seed(90)
         self._timer = QtCore.QTimer(self)
@@ -120,6 +122,7 @@ class GoldStage(QtWidgets.QWidget):
             return
         self._bg(p, w, h)
         self._rings(p, w, h)
+        self._ripple(p, w, h)
         self._dust_layer(p, w, h)
         self._vignette(p, w, h)
         if self.exit > 0.001:
@@ -185,6 +188,32 @@ class GoldStage(QtWidgets.QWidget):
                 p.drawEllipse(QtCore.QRectF(x - s, y - s, 2 * s, 2 * s))
             p.restore()
         p.restore()
+
+    def _ripple(self, p, w, h):
+        """تموّجٌ ينبثق من موضع البطاقة قبل أن ترتفع.
+
+        **لماذا موجة**: البطاقة كانت تظهر دفعةً واحدة فتبدو مقحمة.
+        والموجة تصنع سبباً بصرياً لظهورها: شيءٌ لمس سطح المشهد من
+        هنا، فما يخرج من موضع اللمسة يبدو نابعاً لا مُقحماً. ثلاث
+        حلقاتٍ متتابعة تتّسع وتخفت، كالحجر يُلقى في ماء ساكن.
+        """
+        r0 = self.ripple
+        if r0 < 0:
+            return
+        cx, cy = w * 0.5, h * self.focus_y
+        base = min(w, h)
+        p.setBrush(QtCore.Qt.NoBrush)
+        for k in range(3):
+            v = r0 - k * 0.16              # الحلقات تتأخّر عن بعضها
+            if v <= 0 or v >= 1:
+                continue
+            rad = base * (0.06 + 0.62 * v)
+            fade = (1.0 - v) ** 1.6 * (1.0 - 0.28 * k)
+            pen = QtGui.QPen(self._ink(GOLD_HI, 0.55 * fade))
+            pen.setWidthF(max(1.0, base * 0.0042 * (1.0 - v) + 0.6))
+            p.setPen(pen)
+            p.drawEllipse(QtCore.QRectF(cx - rad, cy - rad,
+                                        2 * rad, 2 * rad))
 
     def _dust_layer(self, p, w, h):
         """غبار الذهب: ذرّاتٌ ترتفع وتتمايل — أثرُ الورشة لا زينةَ شاشة."""

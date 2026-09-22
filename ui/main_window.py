@@ -41,7 +41,6 @@ from ui.reports.income_statement import IncomeStatementScreen
 from ui.reports.khazina_report_screen import KhazinaReportScreen
 from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
-from ui.reports.aging_screen import AgingScreen
 from ui.reports.bank_recon_screen import BankReconScreen
 from ui.reports.analysis_hub_screen import AnalysisHubScreen
 from ui.reports.doc_edits_screen import DocEditsScreen
@@ -75,7 +74,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 3
+NAV_VERSION = 4
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -146,8 +145,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("المشتريات", self.purchases_screen),
                     ("القيود اليومية", self.journal_screen),
                     ("تقارير مبيعات وإنتاج المصنع", Lazy(lambda: FactoryReportsScreen(user), "تقارير مبيعات وإنتاج المصنع")),
-                    ("أعمار الديون (30/60/90)",
-                     Lazy(lambda: AgingScreen(user), "أعمار الديون")),
                 ]),
                 ("الإدارة والتقارير", [
                     ("الإغلاق اليومي", Lazy(lambda: DayCloseScreen(user),
@@ -178,9 +175,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     # وربحيةُ الموديل أسئلةٌ متجاورة — كانت أربعة
                     # بنودٍ لكلٍّ عنوانه، فضاع نصفُ الارتفاع في
                     # عناوين تتكرّر. صارت أقساماً أعلى شاشةٍ واحدة.
-                    ("التحليل والدراسات (٤ أقسام)",
+                    ("التحليل والدراسات (٥ أقسام)",
                      Lazy(lambda: AnalysisHubScreen(user),
-                          "التحليل والدراسات (٤ أقسام)")),
+                          "التحليل والدراسات (٥ أقسام)")),
                     # التعديل مشروع؛ المقصود أن يكون مرئياً —
                     # فتعديلٌ يُرى يُسأل عنه، ولا يُرى لا يُسأل
                     ("من عدّل ماذا بعد الترحيل",

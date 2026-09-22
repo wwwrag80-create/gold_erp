@@ -1098,14 +1098,22 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
             keys = [c[0] for c in SALARY_COLS]
             hdr = [c[1] for c in SALARY_COLS]
         else:
-            hdr = ["اسم العامل", "الأساسي", "ساعات", "معامل", "الإضافي",
+            hdr = ["اسم العامل", "الأساسي", "إضافية", "معامل", "الإضافي",
                    "الغياب", "الخصم", "الفاقد/ذهب", "خصم/ذهب", "التارجت",
-                   "المكافأة", "سحب/نقدي", "سحب/بنك", "الصافي"]
-            keys = ["name", "basic_salary", "hours", "overtime_rate",
-                    "overtime", "absence", "deduction", "gold_loss",
-                    "gold_deduction", "target_amount", "bonus",
-                    "draw_cash", "draw_bank", "net_salary"]
-        rows = [[r.get("name")] + [_w(r.get(k, 0), 2) for k in keys[1:]]
+                   "المكافأة", "الصافي", "عليه (مدين)", "المستحق"]
+            keys = ["name", "basic_salary", "overtime_hours",
+                    "overtime_rate", "overtime", "absence", "deduction",
+                    "gold_loss", "gold_deduction", "target_amount",
+                    "bonus", "net_salary", "owed", "due"]
+        # عمود «عليه (مدين)» يُترك فارغاً عند الصفر كما على الشاشة:
+        # الورقة تطابق ما يراه المستخدم، والصفر فيه يُقرأ خطأً.
+        def _cell(r, k):
+            v = r.get(k, 0)
+            if k == "owed" and not float(v or 0):
+                return ""
+            return _w(v, 2)
+
+        rows = [[r.get("name")] + [_cell(r, k) for k in keys[1:]]
                 for r in (salaries or [])]
         tot = ["الإجمالي"] + [
             _w(sum(float(r.get(k) or 0) for r in (salaries or [])), 2)

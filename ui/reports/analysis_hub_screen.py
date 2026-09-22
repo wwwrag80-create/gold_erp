@@ -27,6 +27,7 @@ SECTIONS = [
      "StockAgingScreen"),
     ("ربحية الموديل", "ui.reports.model_profit_screen",
      "ModelProfitScreen"),
+    ("أعمار الديون", "ui.reports.aging_screen", "AgingScreen"),
 ]
 
 

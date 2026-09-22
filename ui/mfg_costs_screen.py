@@ -51,11 +51,18 @@ SALARY_COLS = [
     ("target_amount", "التارجت", False),
     ("bonus", "المكافأة", False),
     ("net_salary", "الصافي", True),
-    # المسحوبات والمستحق للعرض والطباعة وحدهما: **الصافي** هو ما
-    # يُنزَل في حساب كل عامل عند الترحيل.
-    ("draws", "مسحوبات", True),
+    # **عليه (مدين)**: رصيدُ العامل في كشف حسابه إلى هذه اللحظة —
+    # يُعرض إن كان مديناً (أخذ أكثر مما استحقّ)، ويُترك فارغاً إن
+    # كان دائناً. وهو أصدق من «مسحوبات الشهر» لأنه يحمل باقي
+    # الشهور السابقة أيضاً. والمستحق = الصافي − عليه.
+    # الاثنان للعرض والطباعة وحدهما: **الصافي** هو ما يُنزَل في
+    # حساب كل عامل عند الترحيل.
+    ("owed", "عليه (مدين)", True),
     ("due", "المستحق", True),
 ]
+
+# أعمدةٌ يُترك فيها الصفر فراغاً لا «0.00»
+BLANK_IF_ZERO = {"owed"}
 
 # أوزان أعمدة الجدولين — تُوزَّع على العرض المتاح بلا تمرير أفقي
 # ولا سحبٍ باليد. الاسم أعرضها لأنه نصٌّ، والباقي أرقام.
@@ -262,25 +269,16 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self.s_table = VerticalEnterTable()
         self._setup_table(self.s_table, SALARY_W)
         self.s_table.cellChanged.connect(self.on_salary_edit)
+        # نقرٌ مزدوج على «عليه» أو «المستحق» يفتح كشف حساب العامل
+        self.s_table.cellDoubleClicked.connect(self.peek_ledger)
 
-        note = QtWidgets.QLabel(
-            "الإضافية والغياب تُجلبان من شاشة التارجت، والمسحوبات من "
-            "سندات الصرف المسجّلة على حساب العامل خلال الشهر.\n"
-            "الصافي = الأساسي + الإضافي + التارجت + المكافأة − الخصم − "
-            "خصم/ذهب.   والمستحق = الصافي − المسحوبات.\n"
-            "المُرحَّل في حساب كل عامل هو **الصافي**: السحب قُيّد يوم "
-            "وقوعه بسند صرف، فطرحُه هنا يخصمه مرتين. والمسحوبات "
-            "والمستحق للعرض والطباعة. واسم العامل يُعدَّل من خانته "
-            "فيتبعه دليل الحسابات."
-            .replace("**", "«").replace("«الصافي«", "«الصافي»"))
-        note.setObjectName("cardSub")
-        note.setWordWrap(True)
-
+        # لا شرحَ تحت الجدول: الأعمدة تقول نفسها، والشرح يأكل سطراً
+        # من ارتفاعٍ الجدولُ أحوجُ إليه. وما يحتاج بياناً فتلميحةٌ
+        # على رأس عموده تكفيه.
         self.s_total = big_label("")
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(0, 2, 0, 0)
         lay.setSpacing(3)
-        lay.addWidget(note)
         lay.addWidget(self.s_table, 1)
         lay.addWidget(self.s_total)
         return w
@@ -420,9 +418,20 @@ class MfgCostsScreen(QtWidgets.QWidget):
             for i, r in enumerate(rows):
                 for j, (key, _, ro) in enumerate(cols):
                     v = r.get(key, "")
-                    txt = v if key == "name" else _num(v)
+                    if key == "name":
+                        txt = v
+                    elif key in BLANK_IF_ZERO and not float(v or 0):
+                        # صفرٌ في خانةٍ معناها «عليه» يُقرأ رقماً
+                        # محسوباً؛ والفراغ يقول «لا شيء عليه» بصدق.
+                        txt = ""
+                    else:
+                        txt = _num(v)
                     it = QtWidgets.QTableWidgetItem(str(txt))
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    if key == "owed":
+                        it.setToolTip(
+                            "رصيده في كشف حسابه الآن — يظهر إن كان "
+                            "مديناً، ويبقى فارغاً إن كان دائناً")
                     if not ro:
                         it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
                     if ro:
@@ -597,6 +606,75 @@ class MfgCostsScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    # ══════════ كشف حساب العامل ══════════
+    def peek_ledger(self, row=None, col=None):
+        """نقرٌ مزدوج على «عليه (مدين)» يفتح كشف حساب العامل.
+
+        العمود يقول رقماً، وهذه النافذة تقول **من أين جاء**: راتبٌ
+        مُرحَّل هنا وسندُ صرفٍ هناك. فمن رأى رقماً استغربه وجد جوابه
+        في نقرةٍ واحدة بدل أن يخرج إلى شاشة كشف الحساب ويبحث.
+        """
+        try:
+            keys = [c[0] for c in SALARY_COLS]
+            if col is not None and keys[col] not in ("owed", "due", "name"):
+                return
+            r = row if row is not None else self.s_table.currentRow()
+            if not (0 <= r < len(self.salary_rows)):
+                raise ValueError("اختر عاملاً من الجدول أولاً")
+            person = self.salary_rows[r]
+            from models import journal
+            with db(readonly=True) as conn:
+                ent = conn.execute(
+                    "SELECT account_id, name FROM entities"
+                    " WHERE employee_id=? AND is_deleted=0",
+                    (person.get("employee_id"),)).fetchone()
+                if not ent or not ent["account_id"]:
+                    raise ValueError("لا حساب لهذا العامل في الدليل")
+                rows = journal.statement(conn, ent["account_id"],
+                                         "1900-01-01", dstr(self.s_date))
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle(f"كشف حساب: {ent['name']}")
+            dlg.resize(820, 480)
+            t = make_table()
+            cols = ["التاريخ", "العملية", "الجهة/البيان", "مدين",
+                    "دائن", "الرصيد"]
+            t.setColumnCount(len(cols))
+            t.setHorizontalHeaderLabels(cols)
+            t.setRowCount(len(rows))
+            for i, x in enumerate(rows):
+                d = float(x.get("cd") or 0)
+                c = float(x.get("cc") or 0)
+                vals = (x.get("date", ""), x.get("op", ""),
+                        (x.get("desc") or x.get("name") or ""),
+                        _num(d) if d else "", _num(c) if c else "",
+                        _num(x.get("cbal") or 0))
+                for j, v in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it.setTextAlignment(
+                        QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
+                        if j == 2 else QtCore.Qt.AlignCenter)
+                    t.setItem(i, j, it)
+            bal = float(rows[-1].get("cbal") or 0) if rows else 0.0
+            lbl = big_label(
+                f"الرصيد الآن: {_num(abs(bal))} ريال  "
+                + ("عليه (مدين)" if bal > 0.004 else
+                   "له (دائن)" if bal < -0.004 else "صفر"))
+            lay = QtWidgets.QVBoxLayout(dlg)
+            lay.addWidget(lbl)
+            lay.addWidget(t, 1)
+            box = QtWidgets.QDialogButtonBox(
+                QtWidgets.QDialogButtonBox.Close)
+            box.rejected.connect(dlg.reject)
+            lay.addWidget(box)
+            try:
+                from ui.widgets.table_fit import fit_columns
+                fit_columns(t, [13, 15, 33, 13, 13, 13])
+            except Exception:
+                pass
+            dlg.exec_()
+        except Exception as e:
+            err(self, e)
+
     # ══════════ ترتيب الأسماء ══════════
     def move_staff(self, delta):
         """يحرّك العامل المحدَّد في ترتيب الجدولين معاً.
@@ -633,12 +711,12 @@ class MfgCostsScreen(QtWidgets.QWidget):
 
     def _update_total(self):
         tot = sum(float(r.get("net_salary") or 0) for r in self.salary_rows)
-        dr = sum(float(r.get("draws") or 0) for r in self.salary_rows)
+        ow = sum(float(r.get("owed") or 0) for r in self.salary_rows)
         n = len([r for r in self.salary_rows
                  if float(r.get("net_salary") or 0)])
         self.s_total.setText(
-            f"{n} عامل   |   الصافي: {tot:,.2f}   |   المسحوبات: "
-            f"{dr:,.2f}   |   المستحق: {tot - dr:,.2f} ريال")
+            f"{n} عامل   |   الصافي: {tot:,.2f}   |   عليهم (مدين): "
+            f"{ow:,.2f}   |   المستحق: {tot - ow:,.2f} ريال")
 
     # ══════════ الإجراءات ══════════
     def reload(self):

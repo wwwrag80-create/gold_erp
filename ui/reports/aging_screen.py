@@ -20,7 +20,7 @@ TYPES = [("العملاء", "customer"), ("الموردون", "supplier"),
 
 
 class AgingScreen(QtWidgets.QWidget):
-    def __init__(self, user):
+    def __init__(self, user, embedded=False):
         super().__init__()
         self.user = user
         self.rows = []
@@ -91,9 +91,12 @@ class AgingScreen(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
-        lay.addWidget(title_label(
-            "أعمار الديون — توزيع الأرصدة على فئات عمرية بطريقة "
-            "«الأقدم فالأقدم»"))
+        # داخل «التحليل والدراسات» للشاشة عنوانٌ واحد فوق الأقسام،
+        # فلا يُكرَّر هنا ويُؤكل من ارتفاع الجدول.
+        if not embedded:
+            lay.addWidget(title_label(
+                "أعمار الديون — توزيع الأرصدة على فئات عمرية بطريقة "
+                "«الأقدم فالأقدم»"))
         lay.addLayout(head)
         lay.addWidget(self.lbl_sel)
         lay.addWidget(self.table, 1)

@@ -985,7 +985,7 @@ def main():
                 "كشف حساب", "الوارد من التصنيع", "مبيعات/مرتجعات",
                 "سندات قبض/صرف", "التسكيرات", "المشتريات",
                 "القيود اليومية", "تقارير مبيعات وإنتاج المصنع",
-                "أعمار الديون (30/60/90)", "الإدارة والتقارير"]
+                "الإدارة والتقارير"]
         check("ترتيب القائمة هو المعتمد حرفياً",
               top[:len(want)] == want, str(top[:len(want)]))
         grp = next((w1.sidebar.topLevelItem(i)
@@ -993,7 +993,7 @@ def main():
                     if w1.sidebar.topLevelItem(i).text(0)
                     == "الإدارة والتقارير"), None)
         check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
-              grp is not None and grp.childCount() == len(base) - 12,
+              grp is not None and grp.childCount() == len(base) - 11,
               f"{grp.childCount() if grp else 0} بنداً")
         check("لا شاشة خارج الترتيب المعتمد",
               len(top) == len(want), str(top[len(want):]))
@@ -3081,8 +3081,24 @@ def main():
     _html6 = _pm.build_body("mfg_salary", 0, period=_per,
                             salaries=list(_after.values()))
     check("وورقةُ الرواتب تحمل العمودين الجديدين",
-          "مسحوبات" in _html6 and "المستحق" in _html6
+          "عليه (مدين)" in _html6 and "المستحق" in _html6
           and "إضافية" in _html6, f"{len(_html6)} حرفاً")
+
+    # ══ «عليه (مدين)»: رصيدُ كشف الحساب لا مسحوبات الشهر ══
+    # قبل ترحيل الراتب: سندُ صرفه 500 يجعله مديناً بـ500 فيظهر.
+    # وبعد الترحيل يصير دائناً بـ2700 فلا يظهر شيء — فالعمود يقول
+    # «ما عليه» لا «ما أخذه».
+    with db(readonly=True) as conn:
+        _owed_after = _mc2.owed_now(conn, _weid)
+        _sal_after = {r["employee_id"]: r
+                      for r in _mc2.list_salaries(conn, _per)}[_weid]
+    check("وبعد الترحيل يصير العامل دائناً فلا يظهر عليه شيء",
+          _owed_after == 0.0 and _sal_after["owed"] == 0.0,
+          f"رصيده {_wc2}")
+    check("والمستحق = الصافي − ما عليه",
+          abs(_sal_after["due"]
+              - (_sal_after["net_salary"] - _sal_after["owed"])) < 0.011,
+          f"{_sal_after['due']}")
 
     # ══ السالب في جدول الرواتب: قوسان يُقرآن ويُكتبان ══
     # الإشارة الأمامية تزيغ في السطر العربي فيُقرأ السالب موجباً؛
