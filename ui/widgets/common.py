@@ -631,10 +631,19 @@ class _EnterNav(QtCore.QObject):
             if le is not None and hasattr(le, "cursorPosition"):
                 pos = le.cursorPosition()
                 length = len(le.text() or "")
-                if key == QtCore.Qt.Key_Left and pos < length:
-                    return False          # ما زال داخل النص
-                if key == QtCore.Qt.Key_Right and pos > 0:
-                    return False
+                # ══ النصّ كلّه محدَّد ⇒ المؤشر على الطرف ══
+                # الانتقال إلى خانةٍ يحدّد محتواها كلّه (ليُكتب فوقه
+                # مباشرة)، وموضع المؤشر حينها يختلف بين حقلٍ وآخر —
+                # فكان السهم يبدو معطَّلاً في أول ضغطةٍ بعد الانتقال
+                # ويعمل بعد الثانية. والتحديد الكامل يعني أن لا نصّ
+                # يُتنقَّل داخله أصلاً، فالسهم للانتقال بين الخانات.
+                sel = (le.selectedText() or "") if hasattr(
+                    le, "selectedText") else ""
+                if not (length and sel == (le.text() or "")):
+                    if key == QtCore.Qt.Key_Left and pos < length:
+                        return False      # ما زال داخل النص
+                    if key == QtCore.Qt.Key_Right and pos > 0:
+                        return False
             nxt = i + (1 if key == QtCore.Qt.Key_Left else -1)
             if 0 <= nxt < len(self.chain):
                 self._focus(self.chain[nxt])

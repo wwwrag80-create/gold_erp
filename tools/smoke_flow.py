@@ -3409,6 +3409,164 @@ def main():
           and _zvr.get("moved_date") == ("2026-11-08", "2026-12-11"),
           f"{_zrow['d']} · {_zrow['ed']} · {_zrow['n']}")
 
+    step("44) من أي حساب يخرج ذهب الفاتورة")
+    # ══ لماذا هذا الفحص ══
+    # الفاتورة كانت تُخرج الذهب من حسابٍ واحدٍ مكتوبٍ في الكود (1200).
+    # ومن باع من صندوق الكسر اضطُرّ لقيدٍ يدويٍّ بعدها يُصحّح المخزن —
+    # قيدٌ يُنسى فيختلّ الصندوقان معاً بلا أن يظهر شيءٌ في الميزان.
+    # فصار الحساب اختياراً يُحفظ مع الفاتورة. وما يُحرَس هنا ثلاثة:
+    # أن الذهب يخرج من المختار فعلاً، وأن صندوق الكسر يُنقَص **بعياره**
+    # لا بمكافئه وحده، وأن تعديل الفاتورة ينقل السطر ولا يكتب قيداً
+    # ثانياً لعمليةٍ واحدة.
+    from models import invoices as _iv44
+    from models.inventory import (add_scrap_move as _asm44,
+                                  scrap_actuals as _sa44)
+    from services import gold_math as _gm44
+    with db() as conn:
+        _c44 = add_entity(conn, "عميل حساب المصدر", "customer",
+                          username="admin")
+        create_work_orders_batch(conn, [
+            {"wo_no": "SRC-1", "gold": 40.0, "small_stones": 0.0,
+             "big_stones": 0.0, "wage_per_gram": 20.0},
+            {"wo_no": "SRC-2", "gold": 30.0, "small_stones": 0.0,
+             "big_stones": 0.0, "wage_per_gram": 20.0},
+        ], "2026-12-20", "admin")
+        _scrap44 = acc_id(conn, "1310")
+        _worked44 = acc_id(conn, "1200")
+        post_entry(conn, "2026-12-20", "رصيد كسر للاختبار", [
+            {"account_id": _scrap44, "gold_debit": 120.0},
+            {"account_id": acc_id(conn, "3900"), "gold_credit": 120.0}],
+            username="admin")
+        _asm44(conn, 21, _gm44.from_base_karat(120.0, 21), "opening", 0)
+    with db(readonly=True) as conn:
+        _codes44 = [r["code"] for r in _iv44.source_accounts(conn)]
+    check("قائمة الحسابات المسموحة من شجرة الذهب لا من الكود",
+          {"1100", "1200", "1310"} <= set(_codes44)
+          and "1400" not in _codes44 and "5150" not in _codes44,
+          " · ".join(_codes44))
+
+    def _bal44(code):
+        with db(readonly=True) as conn:
+            return account_balance(conn, acc_id(conn, code))[0]
+
+    _b_scrap = _bal44("1310")
+    _b_worked = _bal44("1200")
+    with db() as conn:
+        _w44 = conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no='SRC-1'"
+        ).fetchone()["id"]
+        _inv44 = create_sale(conn, _c44,
+                             [{"work_order_id": _w44, "karat": 21}],
+                             "2026-12-21", "admin", apply_vat=False,
+                             source_account_id=_scrap44, scrap_karat=21)
+    check("البيع من صندوق الكسر يُنقصه هو لا الذهب المشغول",
+          abs((_b_scrap - _bal44("1310")) - 40.0) < 0.011
+          and abs(_bal44("1200") - _b_worked) < 0.011,
+          f"الكسر {_b_scrap:.2f} ← {_bal44('1310'):.2f} · "
+          f"المشغول {_bal44('1200'):.2f}")
+    with db(readonly=True) as conn:
+        _mv44 = conn.execute(
+            "SELECT karat, actual_delta d FROM scrap_moves"
+            " WHERE ref_table='invoices' AND ref_id=? AND is_deleted=0",
+            (_inv44["id"],)).fetchall()
+        _kar44 = conn.execute(
+            "SELECT COALESCE(karat,0) k FROM invoice_items"
+            " WHERE invoice_id=?", (_inv44["id"],)).fetchone()["k"]
+    check("والصندوق يُنقص بوزنه الفعلي بعياره لا بمكافئ 18",
+          len(_mv44) == 1 and _mv44[0]["karat"] == 21
+          and abs(_mv44[0]["d"] + _gm44.from_base_karat(40.0, 21)) < 0.011,
+          f"{_mv44[0]['karat'] if _mv44 else '—'} · "
+          f"{_mv44[0]['d'] if _mv44 else 0:.3f}")
+    check("وعيار كتابة السطر يُحفظ معه ليُعاد كما كُتب",
+          _kar44 == 21, str(_kar44))
+    _g44, _c44b, _gv44, _cv44 = None, None, None, None
+    with db(readonly=True) as conn:
+        _g44, _c44b, _gv44, _cv44 = ledger_balanced(conn)
+    check("والدفتر متوازن بعد البيع من الكسر", _g44 and _c44b,
+          f"ذهب {_gv44} · نقد {_cv44}")
+
+    _b_scrap2, _b_worked2 = _bal44("1310"), _bal44("1200")
+    with db(readonly=True) as conn:
+        _it44 = conn.execute(
+            "SELECT id FROM invoice_items WHERE invoice_id=?",
+            (_inv44["id"],)).fetchone()["id"]
+        _entries_before = conn.execute(
+            "SELECT COUNT(*) c FROM journal_entries"
+            " WHERE source_table='invoices' AND source_id=?",
+            (_inv44["id"],)).fetchone()["c"]
+    with db() as conn:
+        _up44 = _iv44.update_invoice(
+            conn, _inv44["id"],
+            [{"work_order_id": _w44, "item_id": _it44, "karat": 21,
+              "weight": 40.0, "wage_override": 20.0}],
+            "admin", source_account_id=_worked44)
+    with db(readonly=True) as conn:
+        _entries_after = conn.execute(
+            "SELECT COUNT(*) c FROM journal_entries"
+            " WHERE source_table='invoices' AND source_id=?",
+            (_inv44["id"],)).fetchone()["c"]
+        _left44 = conn.execute(
+            "SELECT COUNT(*) c FROM scrap_moves WHERE ref_table='invoices'"
+            " AND ref_id=? AND is_deleted=0",
+            (_inv44["id"],)).fetchone()["c"]
+        _g44, _c44b, _gv44, _cv44 = ledger_balanced(conn)
+    check("وتصحيح الحساب ينقل سطر القيد نفسه — بلا قيدٍ ثانٍ",
+          _entries_after == _entries_before
+          and abs((_bal44("1310") - _b_scrap2) - 40.0) < 0.011
+          and abs((_b_worked2 - _bal44("1200")) - 40.0) < 0.011
+          and bool(_up44.get("moved_source")),
+          f"قيود {_entries_before} ← {_entries_after}")
+    check("وحركةُ الكسر تُمحى حين لم تعد الفاتورة منه",
+          _left44 == 0 and _g44 and _c44b, f"{_left44} حركة")
+
+    def _bad_source():
+        with db() as conn:
+            _w2 = conn.execute(
+                "SELECT id FROM work_orders WHERE work_order_no='SRC-2'"
+            ).fetchone()["id"]
+            create_sale(conn, _c44, [{"work_order_id": _w2}],
+                        "2026-12-22", "admin",
+                        source_account_id=acc_id(conn, "1400"))
+    expect_error("ويُرفض إخراج ذهبٍ من حسابٍ ليس مخزن ذهب",
+                 _bad_source, "لا يصلح")
+
+    # ══ الشاشة: الترتيب الذي طلبه صاحب النظام ══
+    # الترتيب نفسه في سطر الإدخال وفي الجدول وفي الفاتورة المطبوعة —
+    # فمن حفظ موضع خانةٍ وجدها في موضعها في الورقة كذلك.
+    try:
+        from PyQt5 import QtWidgets as _QW44
+        _QW44.QApplication.instance() or _QW44.QApplication([])
+        from ui.sales_screen import SalesScreen as _SS44
+        _scr44 = _SS44({"id": 1, "username": "admin", "full_name": "م",
+                        "role": "admin", "role_local": "accountant"})
+        _scr44.refresh()
+        _order44 = [_scr44.model_no, _scr44.barcode, _scr44.line_reg,
+                    _scr44.line_standing, _scr44.line_wage,
+                    _scr44.line_karat, _scr44.line_gold, _scr44.line_small,
+                    _scr44.line_big, _scr44.line_after]
+        check("سطر الإدخال بالترتيب المطلوب وEnter يمشي عليه",
+              _scr44._chain == _order44 and len(_scr44._enter_navs) >= 1)
+        check("وأعمدة الجدول بالترتيب نفسه",
+              _scr44.COLS == ["الموديل", "رقم التشغيل", "العيار",
+                              "الوزن المقيد", "الوزن القائم", "الذهب",
+                              "الفصوص", "الأحجار", "الأحجار بعد الخصم",
+                              "الأجر/جم", "الأجرة (ريال)"],
+              " · ".join(_scr44.COLS))
+        # `isHidden` لا `isVisible`: الشاشة هنا لا تُعرض أصلاً، فكل ما
+        # فيها «غير مرئي» — والمقصود الخانة المُخفاة صراحةً.
+        check("وحساب المصدر في رأس الشاشة بافتراضه المعروف",
+              _scr44._source_code() == "1200"
+              and _scr44.scrap_karat.isHidden(),
+              _scr44._source_code())
+        _codes_ui = [r["code"] for r in _scr44.sources]
+        _scr44.source.setCurrentIndex(_codes_ui.index("1310"))
+        check("وخانة العيار لا تظهر إلا لصندوق الكسر",
+              not _scr44.scrap_karat.isHidden()
+              and load_pref("sales_source_account", "") == "1310")
+        _scr44.source.setCurrentIndex(_codes_ui.index("1200"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

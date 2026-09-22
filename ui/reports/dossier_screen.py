@@ -266,49 +266,43 @@ class DossierScreen(QtWidgets.QWidget):
         def _pct(v):
             return f"{v:,.1f}%" if v is not None else "—"
 
+        # عمود «الملاحظة» حُذف بطلب صاحب النظام: كل سطرٍ هنا معناه في
+        # اسمه، والشرح المكرّر كان يأكل ثلث عرض الجدول ويزاحم الأرقام.
         rows = [
             ("رصيد أول المدة", w(f["opening_weight"]), "",
-             w(fl["opening_weight"]),
-             "شاملاً الأرصدة الافتتاحية والقيود اليومية"),
+             w(fl["opening_weight"])),
             ("ما خرج إليه — بضاعة (مبيعات)", w(f["out_weight"]),
-             m(f["out_wages"]), w(fl["out_weight"]),
-             f"{f['sold_lines']:,} / {fl['sold_lines']:,} سطراً"),
+             m(f["out_wages"]), w(fl["out_weight"])),
         ]
         if abs(f["other_up"]) > 0.0005 or abs(fl["other_up"]) > 0.0005:
             rows.append(("وما زاد ذمّته بغير البضاعة", w(f["other_up"]),
-                         "", w(fl["other_up"]),
-                         "صرفٌ له · تسوياتٌ عليه"))
+                         "", w(fl["other_up"])))
         marks = [len(rows)]
         rows.append(("ما كان عنده (الأساس)", w(f["held_weight"]),
-                     "", w(fl["held_weight"]),
-                     "أول المدة + كل ما زاد ذمّته"))
+                     "", w(fl["held_weight"])))
         rows += [
             ("ما رجع منه", w(f["back_weight"]), m(f["back_wages"]),
-             w(fl["back_weight"]),
-             f"{f['return_lines']:,} / {fl['return_lines']:,} سطراً"),
+             w(fl["back_weight"])),
             ("ما سدّده", w(f["paid_weight"]), m(f["paid_cash"]),
-             w(fl["paid_weight"]),
-             f"{f['paid_count']:,} / {fl['paid_count']:,} سند قبض"),
+             w(fl["paid_weight"])),
         ]
         marks.append(len(rows))
         rows.append(("الباقي عليه (رصيد آخر المدة)", w(f["closing_weight"]),
-                     m(f["closing_cash"]), w(fl["closing_weight"]),
-                     "من الدفتر لا من جمع الأسطر"))
+                     m(f["closing_cash"]), w(fl["closing_weight"])))
         rows += [
             ("نسبة المرتجع (من الذي كان عنده)", _pct(f["return_pct"]), "",
-             _pct(fl["return_pct"]), "بالوزن لا بالعدد"),
+             _pct(fl["return_pct"])),
             ("نسبة السداد (من الذي كان عنده)", _pct(f["paid_pct"]), "",
-             _pct(fl["paid_pct"]), "كم سدّد ممّا كان تحت يده"),
+             _pct(fl["paid_pct"])),
         ]
         marks.append(len(rows))
         rows.append(("نسبة التصفية (مرتجع + سداد)",
-                     _pct(f["settled_pct"]), "", _pct(fl["settled_pct"]),
-                     "ما خرج من ذمّته بأي طريق"))
+                     _pct(f["settled_pct"]), "", _pct(fl["settled_pct"])))
         fill(self.t_wage,
              ["البند", f"الفترة ({u})", "الفترة (ريال)",
-              f"من البداية ({u})", "ملاحظة"], rows)
-        fit_columns(self.t_wage, [28, 15, 15, 15, 27])
-        ledger_rows(self.t_wage, wrap_cols=(0, 4))
+              f"من البداية ({u})"], rows)
+        fit_columns(self.t_wage, [40, 20, 20, 20])
+        ledger_rows(self.t_wage, wrap_cols=(0,))
         self._mark(self.t_wage, marks)
 
     def _mark(self, table, rows):

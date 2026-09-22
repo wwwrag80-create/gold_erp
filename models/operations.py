@@ -21,12 +21,28 @@ from services.audit import log_action
 def _invoice_cart(conn, invoice_id):
     """يعيد بنود الفاتورة بصيغة سلة قابلة لإعادة الترحيل."""
     rows = conn.execute(
-        "SELECT work_order_id, registered_weight, wage_per_gram"
+        "SELECT work_order_id, registered_weight, wage_per_gram,"
+        " COALESCE(karat,0) karat"
         " FROM invoice_items WHERE invoice_id=? ORDER BY id",
         (invoice_id,)).fetchall()
     return [{"work_order_id": r["work_order_id"],
              "weight": r["registered_weight"],
+             "karat": r["karat"],
              "wage_override": r["wage_per_gram"]} for r in rows]
+
+
+def _invoice_source(conn, inv):
+    """حساب مصدر الذهب وعياره — ليُعاد ترحيل الفاتورة من حيث خرجت.
+
+    إعادةُ الترحيل من الحساب الافتراضي كانت ستُخرج الذهب من الذهب
+    المشغول وقد خرج أصلاً من صندوق الكسر، فيختلّ المخزنان معاً بلا
+    أن يظهر شيء في الميزان.
+    """
+    try:
+        return {"source_account_id": inv["source_account_id"],
+                "scrap_karat": inv["scrap_karat"] or 0}
+    except (KeyError, IndexError):
+        return {"source_account_id": None, "scrap_karat": 0}
 
 
 def _entity_name(conn, entity_id):
@@ -86,7 +102,8 @@ def transfer_invoice(conn, invoice_id, new_entity_id, username, notes=""):
     res = fn(conn, new_entity_id, cart, inv["invoice_date"], username,
              bool(inv["vat_applied"]),
              (inv["description"] or "")
-             + f" [محوَّلة من {old_name} — {inv['invoice_no']}]")
+             + f" [محوَّلة من {old_name} — {inv['invoice_no']}]",
+             **_invoice_source(conn, inv))
 
     log_action(conn, username, "transfer", "invoices", invoice_id,
                f"{inv['invoice_no']} : {old_name} → {new_name}"
@@ -137,7 +154,7 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
     res = fn(conn, entity_id or inv["customer_id"], new_cart,
              invoice_date or inv["invoice_date"], username,
              bool(inv["vat_applied"] if apply_vat is None else apply_vat),
-             inv["description"] or "")
+             inv["description"] or "", **_invoice_source(conn, inv))
 
     log_action(conn, username, "edit_items", "invoices", invoice_id,
                f"{inv['invoice_no']} → {res['invoice_no']}"
@@ -331,7 +348,8 @@ def flip_invoice_kind(conn, invoice_id, username, notes=""):
     res = fn(conn, inv["customer_id"], cart, inv["invoice_date"], username,
              bool(inv["vat_applied"]),
              (inv["description"] or "")
-             + f" [عُكس نوعها من {lbl[old_kind]}]")
+             + f" [عُكس نوعها من {lbl[old_kind]}]",
+             **_invoice_source(conn, inv))
 
     log_action(conn, username, "flip_kind", "invoices", invoice_id,
                f"{inv['invoice_no']} : {lbl[old_kind]} → {lbl[new_kind]}"

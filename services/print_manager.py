@@ -484,6 +484,22 @@ def _tpl_invoice(conn, invoice_id):
           <td>{_w(inv['grand_total'], 2)}</td></tr>
     </table>'''
 
+    # الحساب الذي خرج منه ذهب الفاتورة — يُطبع على الورقة لأن الفاتورة
+    # نفسها هي مستند الخصم: من قرأها بعد سنة يعرف من أي مخزنٍ خرجت
+    # البضاعة بلا أن يفتح القيد.
+    _src = conn.execute(
+        "SELECT a.code, a.name FROM accounts a WHERE a.id="
+        " COALESCE((SELECT source_account_id FROM invoices WHERE id=?),"
+        "          (SELECT id FROM accounts WHERE code='1200'))",
+        (invoice_id,)).fetchone()
+    src_label = f"{_src['name']} ({en(_src['code'])})" if _src else "—"
+    try:
+        _k = int(inv["scrap_karat"] or 0)
+    except (KeyError, IndexError, TypeError, ValueError):
+        _k = 0
+    if _k:
+        src_label += f" — عيار {en(str(_k))}"
+
     time_str = (inv["created_at"] or "")[11:19] or "—"
     # رمز QR لصور موديلات الفاتورة — يمين الورقة تحت عنوان المستند.
     # تحسين بصري بحت: تعذّره يعيد "" فتُطبع الفاتورة كما هي.
@@ -507,6 +523,9 @@ def _tpl_invoice(conn, invoice_id):
           <td style="text-align:right; border:1px solid #999; padding:6px;
                      font-weight:bold; font-size:12pt;">
             {cust['name'] if cust else '—'}</td></tr>
+      <tr><td {TH}>من حساب</td>
+          <td style="text-align:right; border:1px solid #999;
+                     padding:6px;">{src_label}</td></tr>
     </table>'''
 
     body = f'''{info}
@@ -2411,17 +2430,17 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
     for x in r["items"]:
         body += "<tr>" + cells(
             tdw(en(x["wo_no"])), tdw(x["model"], align="right"),
-            tdw(x["item_type"] or "—"), tdw(en(x["in_date"])),
+            tdw(en(x["in_date"])),
             tdw(en(f"{x['days']:,}")),
             tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
             tdw(_g(x["weight"]))) + "</tr>"
     if r["bulk"]["count"]:
         body += "<tr>" + cells(
-            thw("٠٠٠١"), thw("رصيد تجميعي"), thw("—"), thw("—"), thw("—"),
+            thw("٠٠٠١"), thw("رصيد تجميعي"), thw("—"), thw("—"),
             thw("بلا عمر — خارج الفئات"),
             thw(_g(r["bulk"]["weight"]))) + "</tr>"
     if not body:
-        body = f'<tr><td {TD} colspan="7">لا مخزون</td></tr>'
+        body = f'<tr><td {TD} colspan="6">لا مخزون</td></tr>'
 
     # الفئات في سطرٍ واحد أعلى الورقة — خلاصةٌ لا جدول
     bl = " · ".join(
@@ -2442,7 +2461,7 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
     </table>
 
     {TBL}
-      <tr>{cells(thw("رقم التشغيل"), thw("الموديل"), thw("النوع"),
+      <tr>{cells(thw("رقم التشغيل"), thw("الموديل"),
                  thw("تاريخ الدخول"), thw("العمر (يوم)"), thw("الفئة"),
                  thw(f"الوزن ({u})"))}</tr>
       {body}
@@ -2535,8 +2554,7 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
         _other_up = "<tr>" + cells(
             tdw("وما زاد ذمّته بغير البضاعة", align="right"),
             tdw(_g(fl["other_up"])), tdw("—"),
-            tdw(_g(flife["other_up"])),
-            tdw("صرفٌ له · تسوياتٌ عليه")) + "</tr>"
+            tdw(_g(flife["other_up"]))) + "</tr>"
 
     lr, lp = d["last_receipt"], d["last_payment"]
     lim_g, lim_c = d["limit"]["gold"], d["limit"]["cash"]
@@ -2590,48 +2608,36 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
     <div class="party">حركته — وما كان تحت يده</div>
     {TBL}
       <tr>{cells(thw("البند"), thw(f"الفترة ({u})"), thw("الفترة (ريال)"),
-                 thw(f"من البداية ({u})"), thw("ملاحظة"))}</tr>
+                 thw(f"من البداية ({u})"))}</tr>
       <tr>{cells(tdw("رصيد أول المدة", align="right"),
                  tdw(_g(fl["opening_weight"])), tdw("—"),
-                 tdw(_g(flife["opening_weight"])),
-                 tdw("شاملاً الأرصدة الافتتاحية والقيود اليومية"))}</tr>
+                 tdw(_g(flife["opening_weight"])))}</tr>
       <tr>{cells(tdw("ما خرج إليه — بضاعة (مبيعات)", align="right"),
                  tdw(_g(fl["out_weight"])), tdw(_m(fl["out_wages"])),
-                 tdw(_g(flife["out_weight"])),
-                 tdw(en(f"{fl['sold_lines']:,} / "
-                        f"{flife['sold_lines']:,} سطراً")))}</tr>
+                 tdw(_g(flife["out_weight"])))}</tr>
       {_other_up}
       <tr>{cells(thw("ما كان عنده (الأساس)"),
                  thw(_g(fl["held_weight"])), thw("—"),
-                 thw(_g(flife["held_weight"])),
-                 thw("أول المدة + كل ما زاد ذمّته"))}</tr>
+                 thw(_g(flife["held_weight"])))}</tr>
       <tr>{cells(tdw("ما رجع منه", align="right"),
                  tdw(_g(fl["back_weight"])), tdw(_m(fl["back_wages"])),
-                 tdw(_g(flife["back_weight"])),
-                 tdw(en(f"{fl['return_lines']:,} / "
-                        f"{flife['return_lines']:,} سطراً")))}</tr>
+                 tdw(_g(flife["back_weight"])))}</tr>
       <tr>{cells(tdw("ما سدّده", align="right"),
                  tdw(_g(fl["paid_weight"])), tdw(_m(fl["paid_cash"])),
-                 tdw(_g(flife["paid_weight"])),
-                 tdw(en(f"{fl['paid_count']:,} / "
-                        f"{flife['paid_count']:,} سند قبض")))}</tr>
+                 tdw(_g(flife["paid_weight"])))}</tr>
       <tr>{cells(thw("الباقي عليه (رصيد آخر المدة)"),
                  thw(_g(fl["closing_weight"])),
                  thw(_m(fl["closing_cash"])),
-                 thw(_g(flife["closing_weight"])),
-                 thw("من الدفتر لا من جمع الأسطر"))}</tr>
+                 thw(_g(flife["closing_weight"])))}</tr>
       <tr>{cells(tdw("نسبة المرتجع (من الذي كان عنده)", align="right"),
                  tdw(_pct(fl["return_pct"])), tdw("—"),
-                 tdw(_pct(flife["return_pct"])),
-                 tdw("بالوزن لا بالعدد"))}</tr>
+                 tdw(_pct(flife["return_pct"])))}</tr>
       <tr>{cells(tdw("نسبة السداد (من الذي كان عنده)", align="right"),
                  tdw(_pct(fl["paid_pct"])), tdw("—"),
-                 tdw(_pct(flife["paid_pct"])),
-                 tdw("كم سدّد ممّا كان تحت يده"))}</tr>
+                 tdw(_pct(flife["paid_pct"])))}</tr>
       <tr>{cells(thw("نسبة التصفية (مرتجع + سداد)"),
                  thw(_pct(fl["settled_pct"])), thw("—"),
-                 thw(_pct(flife["settled_pct"])),
-                 thw("ما خرج من ذمّته بأي طريق"))}</tr>
+                 thw(_pct(flife["settled_pct"])))}</tr>
     </table>
 
     <div class="party">أكثر ما يأخذ من الموديلات (من البداية)</div>

@@ -80,6 +80,11 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                     else:
                         conn.execute("UPDATE work_orders SET status=? WHERE id=?",
                                      (new_status, it["work_order_id"]))
+                # فاتورةٌ بيعت من صندوق الكسر: حذفها يُعيد وزنها لعياره،
+                # وإلا بقي الصندوق ناقصاً بعيارٍ بلا مستندٍ يفسّره.
+                conn.execute("UPDATE scrap_moves SET is_deleted=1"
+                             " WHERE ref_table='invoices' AND ref_id=?",
+                             (sid,))
                 _mark(conn, "invoices", sid, username)
         elif src == "tax_debit_notes":
             _mark(conn, "tax_debit_notes", sid, username)

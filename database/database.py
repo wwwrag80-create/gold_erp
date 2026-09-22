@@ -149,6 +149,12 @@ CREATE TABLE IF NOT EXISTS invoices(
   -- المبيعات: لا يُنشأ رمز ولا يُرفع شيء لفاتورة لم تُفعَّل.
   share_token TEXT, share_url TEXT,
   qr_enabled INTEGER NOT NULL DEFAULT 0,
+  -- الحساب الذي **خرج منه** ذهب الفاتورة: الذهب المشغول افتراضاً،
+  -- أو صندوق الكسر (وعندها `scrap_karat` يقول من أي عيارٍ خُصم)،
+  -- أو أي حساب ذهبٍ آخر يختاره المستخدم. فارغاً = الذهب المشغول،
+  -- وهو ما كانت عليه كل فاتورة قبل هذا الخيار.
+  source_account_id INTEGER REFERENCES accounts(id),
+  scrap_karat INTEGER NOT NULL DEFAULT 0,
   vat_applied INTEGER NOT NULL DEFAULT 1,
   description TEXT DEFAULT '',
   entry_id INTEGER REFERENCES journal_entries(id),
@@ -162,7 +168,11 @@ CREATE TABLE IF NOT EXISTS invoice_items(
   work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
   registered_weight REAL NOT NULL,
   wage_per_gram REAL NOT NULL DEFAULT 0,
-  wages REAL NOT NULL
+  wages REAL NOT NULL,
+  -- عيار الإدخال لهذا السطر: الوزن والأجر يُخزَّنان بمكافئ 18 دائماً،
+  -- وهذا يقول بأي عيارٍ كُتبا على الورق ليُعادا كما كُتبا. صفر =
+  -- عيار المصنع وقت العرض (وهو حال كل سطرٍ سابق لهذا العمود).
+  karat INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tax_debit_notes(
@@ -1299,6 +1309,24 @@ def migrate_schema() -> None:
             if "qr_enabled" not in inv_cols:
                 conn.execute("ALTER TABLE invoices ADD COLUMN qr_enabled"
                              " INTEGER NOT NULL DEFAULT 0")
+
+        # 20) حساب مصدر الذهب في الفاتورة وعيار كل سطر.
+        #     الفواتير السابقة تبقى بلا حساب مصدر — وتُقرأ على أنها من
+        #     الذهب المشغول، وهو ما كانت عليه فعلاً قبل وجود الخيار.
+        #     و`karat=0` في السطر يعني «عيار المصنع» لا عياراً مجهولاً.
+        if inv_cols:
+            if "source_account_id" not in inv_cols:
+                conn.execute("ALTER TABLE invoices ADD COLUMN"
+                             " source_account_id INTEGER"
+                             " REFERENCES accounts(id)")
+            if "scrap_karat" not in inv_cols:
+                conn.execute("ALTER TABLE invoices ADD COLUMN scrap_karat"
+                             " INTEGER NOT NULL DEFAULT 0")
+        it_cols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(invoice_items)")]
+        if it_cols and "karat" not in it_cols:
+            conn.execute("ALTER TABLE invoice_items ADD COLUMN karat"
+                         " INTEGER NOT NULL DEFAULT 0")
 
         # 18) سلسلة بصمات القيود — سجل تدقيق محصَّن (`models.integrity`).
         #     العمودان يبقيان فارغين للقيود السابقة حتى تُختم دفعةً

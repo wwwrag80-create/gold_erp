@@ -265,8 +265,11 @@ class StockAgingScreen(QtWidgets.QWidget):
         # ── برقم التشغيل ──
         # الوزن هو ما يُقرأ هنا؛ والأجرة حُذفت بطلب صاحب النظام —
         # السؤال «ما الذي رقد» لا «كم كان سيكسب لو بِيع».
-        rows = [(x["wo_no"], x["model"], x["item_type"] or "—",
-                 x["in_date"], f"{x['days']:,}",
+        # عمود «النوع» حُذف بطلب صاحب النظام: التصنيف الآلي
+        # (ألماس/زركون/أحجار) وصفٌ مشتقٌّ من المكوّنات لا يضيف شيئاً
+        # إلى سؤال «ما الذي رقد ومنذ متى» — وإزاحته تُوسّع الموديل
+        # والفئة، وهما ما يُقرأ فعلاً.
+        rows = [(x["wo_no"], x["model"], x["in_date"], f"{x['days']:,}",
                  BUCKET_LABELS[x["bucket"]], w(x["weight"]))
                 for x in r["items"]]
         marks = []
@@ -274,14 +277,14 @@ class StockAgingScreen(QtWidgets.QWidget):
             # الرقم التجميعي رصيدُ وزنٍ لا قطعة، فلا عمر له — يُعرض
             # في ذيل الجدول معلَّماً بأنه خارج الفئات لا ضمنها
             marks.append(len(rows))
-            rows.append(("٠٠٠١", "رصيد تجميعي", "—", "—", "—",
+            rows.append(("٠٠٠١", "رصيد تجميعي", "—", "—",
                          "بلا عمر — خارج الفئات",
                          w(r["bulk"]["weight"])))
         fill(self.t_items,
-             ["رقم التشغيل", "الموديل", "النوع", "تاريخ الدخول",
+             ["رقم التشغيل", "الموديل", "تاريخ الدخول",
               "العمر (يوم)", "الفئة", f"الوزن ({u})"], rows)
-        fit_columns(self.t_items, [15, 21, 12, 15, 11, 15, 14])
-        ledger_rows(self.t_items, wrap_cols=(1, 5))
+        fit_columns(self.t_items, [17, 25, 16, 12, 16, 14])
+        ledger_rows(self.t_items, wrap_cols=(1, 4))
         self._mark(self.t_items, marks)
         self.tabs.setTabText(0, f"برقم التشغيل ({len(r['items']):,})")
 
