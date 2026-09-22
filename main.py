@@ -5,13 +5,12 @@ import sys
 
 def main():
     try:
-        from PyQt5 import QtCore, QtWidgets
+        from PyQt5 import QtWidgets
     except ImportError:
         print("يلزم تثبيت PyQt5 أولاً:  pip install PyQt5")
         return
     from ui import styles
     from ui.gate_window import GateWindow
-    from ui.main_window import MainWindow
 
     app = QtWidgets.QApplication(sys.argv)
     # تناسب تلقائي مع حجم شاشة المستخدم: الخطوط والحشو تصغر على
@@ -48,24 +47,53 @@ def main():
         pass
     gate.prepare(prepare_steps())
 
-    if gate.exec_() != QtWidgets.QDialog.Accepted:
-        return
-    win = MainWindow(gate.user)
+    wire_gate(app, gate)
+    sys.exit(app.exec_())
 
-    # ══ التسليم ══
-    # لا تُفتح الواجهة فجأة: تتّسع موجةٌ ذهبية في البوابة، وتحتها
-    # يُبنى النظام ويظهر متدرّجاً. المستخدم يرى انتقالاً لا وميضاً.
-    win.setWindowOpacity(0.0 if fade_ok() else 1.0)
-    win.showMaximized()
 
-    def _reveal():
+def fade_ok():
+    """هل يُسمح بالتلاشي؟ — يتبع مفتاح الحركة نفسه."""
+    try:
+        from ui.widgets.gold_stage import animations_on
+        return animations_on()
+    except Exception:
+        return False
+
+
+def wire_gate(app, gate, main_window_factory=None):
+    """يربط البوابة بالنظام — ويُعيد قاموساً يحمل النافذة حين تُبنى.
+
+    مفصولةٌ عن `main` لتُختبر: الاختبار يمرّر بوابةً ومصنعَ نافذةٍ
+    ويتحقّق أن البوابة لا تختفي قبل أن يظهر النظام. وتسلسلُ الفتح
+    عُطلٌ إن انكسر، فيستحقّ فحصاً دائماً كغيره.
+    """
+    from PyQt5 import QtCore
+
+    if main_window_factory is None:
+        from ui.main_window import MainWindow
+        main_window_factory = MainWindow
+
+    # ══ مشهدٌ متّصل: البوابة لا تختفي حتى يصير النظام على الشاشة ══
+    #
+    # **العلة التي كانت**: البوابة كانت تُعرض بـ`exec_`، و`accept`
+    # يُخفي النافذة في لحظته. فيرى صاحب النظام: شاشةً كاملة تختفي،
+    # ثم سطحَ المكتب ثوانيَ بينما تُبنى الواجهة، ثم تظهر فجأة —
+    # أي «خرج البرنامج ثم دخل». والموجة الذهبية كانت تُشغَّل على
+    # نافذةٍ مخفيّة فلا يراها أحد أصلاً.
+    #
+    # **الترتيب الصحيح**: نجاحُ الدخول لا يُخفي شيئاً؛ البوابة تبقى
+    # وتقول «جارٍ تجهيز الشاشات…»، ويُبنى النظام **تحتها**، ثم
+    # تنطلق الموجة، ثم يتمازج الاثنان وتُغلق البوابة أخيراً. فلا
+    # تظهر لحظةُ فراغٍ واحدة من النقرة إلى أول جدول.
+    holder = {}
+
+    def _reveal(win):
         if not fade_ok():
-            gate.close()
             win.setWindowOpacity(1.0)
+            win.raise_()
+            win.activateWindow()
+            gate.close()
             return
-        # تمازجٌ لا تعاقب: لو أُخفيت البوابة أولاً لظهر سطحُ المكتب
-        # لحظةً بين الشاشتين — وتلك اللحظة هي ما يجعل الفتح يبدو
-        # «مباشراً». هنا تصعد الواجهة وتذوب البوابة معاً.
         up = QtCore.QPropertyAnimation(win, b"windowOpacity", win)
         up.setStartValue(0.0)
         up.setEndValue(1.0)
@@ -87,26 +115,49 @@ def main():
         except Exception:
             pass
 
-    gate.hand_off(_reveal)
-    # ══ حارس التجمّد ══
-    # يرصد توقّف خيط الواجهة عن معالجة أحداثه — وهو ما يراه المستخدم
-    # «شاشة سوداء ولا يستجيب» — ويكتب في السجل **موضعه** بالملف
-    # والسطر والدالة. لا يُعالج شيئاً؛ يجعل الشكوى دليلاً يُقرأ.
-    try:
-        from services import ui_watchdog
-        ui_watchdog.start(win)
-    except Exception:
-        pass
-    sys.exit(app.exec_())
+    def _build_system(session):
+        """يبني النظام والبوابةُ ما زالت ظاهرة، ثم يُسلّم."""
+        gate.set_state("جارٍ تجهيز الشاشات…")
+        try:
+            win = main_window_factory(session)
+        except Exception as e:                   # noqa: BLE001
+            # فشلُ البناء يُقال على البوابة — لا يُغلق كل شيء صامتاً
+            gate.fail(f"تعذّر فتح النظام: {e}")
+            return
+        holder["win"] = win
+        # تُعرض مخفيّةَ الشفافية قبل الموجة: جاهزةٌ خلف البوابة،
+        # فحين تنتهي الموجة لا يبقى إلا أن تظهر.
+        win.setWindowOpacity(0.0 if fade_ok() else 1.0)
+        win.showMaximized()
+        # ويندوز يمنح النافذة الجديدة الواجهة فور عرضها، فتنزل
+        # البوابة خلفها — والبوابة هي التي تُغطّي المشهد الآن
+        # (النظام شفافٌ تماماً بعد). رفعُها يُبقي الشاشة مشغولة
+        # حتى تبدأ الموجة، فلا يظهر سطح المكتب لحظةً واحدة.
+        try:
+            gate.raise_()
+            gate.activateWindow()
+        except Exception:
+            pass
+        # ══ حارس التجمّد ══
+        # يرصد توقّف خيط الواجهة عن معالجة أحداثه — وهو ما يراه
+        # المستخدم «شاشة سوداء ولا يستجيب» — ويكتب في السجل موضعه
+        # بالملف والسطر والدالة. لا يُعالج شيئاً؛ يجعل الشكوى دليلاً.
+        try:
+            from services import ui_watchdog
+            ui_watchdog.start(win)
+        except Exception:
+            pass
+        gate.hand_off(lambda: _reveal(win))
 
+    def _on_signed_in(session):
+        # مهلةٌ قصيرة: تُرسم رسالة الترحيب قبل أن يشغل البناءُ الخيط
+        QtCore.QTimer.singleShot(80, lambda: _build_system(session))
 
-def fade_ok():
-    """هل يُسمح بالتلاشي؟ — يتبع مفتاح الحركة نفسه."""
-    try:
-        from ui.widgets.gold_stage import animations_on
-        return animations_on()
-    except Exception:
-        return False
+    gate.on_signed_in = _on_signed_in
+    # إغلاق البوابة قبل الدخول = إنهاء البرنامج، لا نافذةٌ معلّقة
+    gate.rejected.connect(
+        lambda: (None if holder.get("win") else app.quit()))
+    return holder
 
 
 def prepare_steps():
