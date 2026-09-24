@@ -578,7 +578,7 @@ class SalesScreen(QtWidgets.QWidget):
         self._head_chain = [self.kind, self.customer, self.source,
                             self.scrap_karat, self.date, self.description]
         enter_chain(self, self._head_chain,
-                    on_last=lambda: self.model_no)
+                    on_last=lambda: self.barcode)
         return box
 
     # ══════════════════════════════════════════════════════════════
@@ -654,17 +654,20 @@ class SalesScreen(QtWidgets.QWidget):
             lbl.setAlignment(QtCore.Qt.AlignCenter)
             return lbl
 
+        # الترتيب كما طلبه صاحب النظام: الموديل والرقم ثم المكوّنات،
+        # وفي الآخر المقيد والقائم والعيار والأجر — ما يُراجَع قبل
+        # الإضافة مباشرةً، والأجرُ آخرها لأن Enter عليه يضيف السطر.
         fields = [
             ("رقم الموديل", self.model_no, 2),
             ("رقم التشغيل", self.barcode, 3),
-            ("الوزن المقيد", self.line_reg, 2),
-            ("الوزن القائم", self.line_standing, 2),
-            ("الأجر/جم", self.line_wage, 2),
-            ("العيار", self.line_karat, 2),
             ("الذهب", self.line_gold, 2),
             ("الفصوص", self.line_small, 2),
             ("الأحجار", self.line_big, 2),
             ("الأحجار بعد الخصم", self.line_after, 2),
+            ("الوزن المقيد", self.line_reg, 2),
+            ("الوزن القائم", self.line_standing, 2),
+            ("العيار", self.line_karat, 2),
+            ("الأجر/جم", self.line_wage, 2),
         ]
         g = QtWidgets.QGridLayout(box)
         g.setHorizontalSpacing(6)
@@ -676,11 +679,22 @@ class SalesScreen(QtWidgets.QWidget):
         g.addWidget(self.btn_add_line, 1, len(fields))
 
         # ترتيب التنقّل هو ترتيب الخانات نفسه، وEnter على آخر خانة
-        # يضيف السطر ويعيد المؤشر لأوله — فالفاتورة كلها بلوحة
-        # المفاتيح وحدها.
+        # يضيف السطر. ورقم التشغيل **إلزامي**: Enter لا يتجاوزه وهو
+        # فارغ. وبعد الإضافة يعود المؤشر إليه لا إلى الموديل — فالموديل
+        # يُملأ من بطاقة الطقم، والرقم هو ما يُكتب في كل سطر.
         self._chain = [w for _, w, _ in fields]
-        enter_chain(self, self._chain, on_last=self.add_item)
+        enter_chain(self, self._chain, on_last=self._add_from_enter,
+                    require={self.barcode:
+                             lambda: bool(self.barcode.text().strip())})
         return box
+
+    def _add_from_enter(self):
+        """Enter على آخر خانة: يُضاف السطر ويعود المؤشر لرقم التشغيل.
+
+        وإن رُفض السطر يبقى المؤشر حيث هو ليُصحَّح — لا يقفز إلى أول
+        السطر فيضيع موضع الخطأ.
+        """
+        return self.barcode if self.add_item() else False
 
     # ══════════════════════════════════════════════════════════════
     #  ③ البنود والخلاصة
@@ -1186,8 +1200,11 @@ class SalesScreen(QtWidgets.QWidget):
             return
         self._wo = wo
         self._fill_from_wo(wo)
-        if self.line_reg.hasFocus():
-            self.line_reg.selectAll()
+        # الخانة التي انتقل إليها المؤشر تُحدَّد كاملة، فيُكتب فوقها
+        # مباشرةً إن أراد المستخدم تصحيح ما جاء من البطاقة.
+        fw = QtWidgets.QApplication.focusWidget()
+        if fw is not None and hasattr(fw, "selectAll"):
+            fw.selectAll()
 
     def _w_fields(self):
         """خانات الوزن الست بترتيبها — مرجعٌ واحد لكل ما يمسّها."""
@@ -1253,15 +1270,24 @@ class SalesScreen(QtWidgets.QWidget):
         self._snap_w18()
 
     def _karat_changed(self, *_):
-        """تبديل العيار يعيد كتابة أوزان السطر بعياره الجديد.
+        """العيار في آخر السطر — ومعناه يتبع مصدر الأوزان.
 
-        الذهب الفعلي واحدٌ لا يتغيّر: ما كان 100 جم عيار 18 هو 85.71
-        جم عيار 21. والأجر يتحرّك عكسياً فيبقى حاصلُ الضرب — وهو
-        مبلغٌ نقدي — كما هو تماماً.
+        • **أوزانٌ من بطاقة الطقم** (رقم تشغيلٍ مسجّل): هي ذهبٌ فعليٌّ
+          معروف، فتبديل العيار يعيد كتابتها بعياره — ما كان 100 جم
+          عيار 18 هو 85.71 جم عيار 21 — والأجر يتحرّك عكسياً فيبقى
+          حاصلُ الضرب (مبلغاً نقدياً) كما هو.
+        • **أوزانٌ كُتبت باليد** (طقمٌ جديد في مرتجع): العيار بعدها
+          **يصفها** ولا يحوّلها — من كتب 40 ثم اختار 21 يعني أربعين
+          جراماً عيار 21. فالأرقام تبقى، والظلُّ يُعاد أخذه بالعيار
+          الجديد.
         """
         old, new = self._karat_now, self._k()
         self._karat_now = new
         if old == new or self._calc:
+            return
+        if self._wo is None:
+            self._snap_w18()
+            self._wage18 = kv.rate_store(self.line_wage.value(), new)
             return
         self._calc = True
         try:
@@ -1529,8 +1555,10 @@ class SalesScreen(QtWidgets.QWidget):
             self._clear_entry()
             self.barcode.setFocus()      # العودة لرقم التشغيل مباشرة
             self.render_items()
+            return True
         except Exception as e:
             err(self, e)
+            return False
 
     def remove_item(self, row=None):
         """يحذف السطر — ويفكّ ربط الموديل الذي سُجّل في هذه الجلسة.

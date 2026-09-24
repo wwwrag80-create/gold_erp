@@ -651,10 +651,13 @@ class _EnterNav(QtCore.QObject):
     لسطر الإدخال، وسطرُ الإدخال يضيف السطر ويعود لأوله.
     """
 
-    def __init__(self, chain, on_last=None, parent=None):
+    def __init__(self, chain, on_last=None, parent=None, require=None):
         super().__init__(parent)
         self.chain = list(chain)
         self.on_last = on_last
+        # خاناتٌ لا يُتجاوَز عنها بـEnter قبل أن تُملأ (رقم التشغيل):
+        # {الخانة: دالةٌ تقول هل امتلأت}
+        self.require = dict(require or {})
         self._owner = {}
         for i, w in enumerate(self.chain):
             w.installEventFilter(self)
@@ -751,6 +754,18 @@ class _EnterNav(QtCore.QObject):
             i = self._index(obj)
             if i is None:
                 return False
+            # ══ خانةٌ إلزامية تُمسك المؤشر حتى تُملأ ══
+            # Enter على رقم تشغيلٍ فارغ كان ينقل للخانة التالية، فيكتب
+            # المستخدم أوزاناً لسطرٍ بلا رقم ثم يُرفض عند الإضافة. الآن
+            # يبقى المؤشر في مكانه حتى يُكتب الرقم — والضغطة تُبتلع
+            # فلا تصل لما تحتها.
+            gate = self.require.get(self.chain[i])
+            if gate is not None:
+                try:
+                    if not gate():
+                        return True
+                except Exception:
+                    pass
             nxt = self._step(i, 1)
             if nxt is not None:
                 self._focus(self.chain[nxt])
@@ -764,14 +779,16 @@ class _EnterNav(QtCore.QObject):
         return False
 
 
-def enter_chain(widget_owner, widgets, on_last=None):
+def enter_chain(widget_owner, widgets, on_last=None, require=None):
     """يفعّل تسلسل Enter على قائمة حقول. يُحفظ المرجع على الشاشة نفسها
     حتى لا يُلتقط بواسطة جامع المهملات.
 
     `on_last` يُعيد widget ⇒ ينتقل إليه المؤشر (تسليمٌ بين السلاسل)،
     أو `False` ⇒ يبقى مكانه، أو لا شيء ⇒ يعود لأول خانة.
+    `require` = {خانة: دالة} — لا يتقدّم Enter من الخانة ما لم تُعِد
+    دالتها صدقاً (خانةٌ إلزامية كرقم التشغيل).
     """
-    nav = _EnterNav(widgets, on_last, widget_owner)
+    nav = _EnterNav(widgets, on_last, widget_owner, require=require)
     if not hasattr(widget_owner, "_enter_navs"):
         widget_owner._enter_navs = []
     widget_owner._enter_navs.append(nav)

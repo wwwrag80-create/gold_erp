@@ -3540,10 +3540,11 @@ def main():
         _scr44 = _SS44({"id": 1, "username": "admin", "full_name": "م",
                         "role": "admin", "role_local": "accountant"})
         _scr44.refresh()
-        _order44 = [_scr44.model_no, _scr44.barcode, _scr44.line_reg,
-                    _scr44.line_standing, _scr44.line_wage,
-                    _scr44.line_karat, _scr44.line_gold, _scr44.line_small,
-                    _scr44.line_big, _scr44.line_after]
+        # الترتيب الأحدث: المقيد والقائم والعيار والأجر في آخر السطر
+        _order44 = [_scr44.model_no, _scr44.barcode, _scr44.line_gold,
+                    _scr44.line_small, _scr44.line_big, _scr44.line_after,
+                    _scr44.line_reg, _scr44.line_standing,
+                    _scr44.line_karat, _scr44.line_wage]
         check("سطر الإدخال بالترتيب المطلوب وEnter يمشي عليه",
               _scr44._chain == _order44 and len(_scr44._enter_navs) >= 1)
         check("وأعمدة الجدول بالترتيب نفسه بعد عمود الأزرار",
@@ -3826,8 +3827,9 @@ def main():
               type(_app46.focusWidget()).__name__)
         _s46.description.setFocus()
         _enter(_s46.description)
+        # يُسلّم لرقم التشغيل (الخطوة ٤٧): الموديل يُملأ من البطاقة
         check("وEnter من آخر خانةٍ في الرأس يسلّم لسطر الإدخال",
-              _s46.model_no.hasFocus() or _s46.model_no.lineEdit().hasFocus(),
+              _s46.barcode.hasFocus(),
               type(_app46.focusWidget()).__name__)
         _s46.close()
 
@@ -3874,6 +3876,91 @@ def main():
         check("وأول رسمٍ للبوابة يُعلَن ليُغلق شعار البدء في لحظته",
               hasattr(_g46, "painted") and _g46._painted)
         _g46.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("47) ترتيب خانات الإدخال · ورقم التشغيل يُمسك Enter")
+    # ══ ما طلبه صاحب النظام حرفياً ══
+    # • التوريد: المقيد والقائم والعيار آخرُ الخانات، ولا خانة أجر.
+    # • المبيعات: المقيد والقائم والعيار والأجر آخرُها.
+    # • في الشاشتين: Enter لا يتجاوز رقم التشغيل وهو فارغ، وبعد إضافة
+    #   السطر يعود المؤشر إلى رقم التشغيل لا إلى أول السطر.
+    try:
+        from PyQt5 import QtCore as _QC47
+        from PyQt5 import QtGui as _QG47
+        from PyQt5 import QtWidgets as _QW47
+        _app47 = _QW47.QApplication.instance() or _QW47.QApplication([])
+        _u47 = {"id": 1, "username": "admin", "full_name": "م",
+                "role": "admin", "role_local": "accountant"}
+
+        def _enter47(w):
+            _QW47.QApplication.sendEvent(
+                w, _QG47.QKeyEvent(_QC47.QEvent.KeyPress,
+                                   _QC47.Qt.Key_Return,
+                                   _QC47.Qt.NoModifier))
+            _app47.processEvents()
+
+        from ui.production_screen import ProductionScreen as _PS47
+        _p47 = _PS47(_u47)
+        _p47.refresh()
+        _p47.show()
+        _app47.processEvents()
+        check("التوريد: لا خانة أجرٍ ولا عمود أجرٍ في الجدول",
+              not hasattr(_p47, "wage") and "الأجر/جم" not in _p47.COLS)
+        check("والتنقّل: الموديل ← الرقم ← المكوّنات ← الملاحظة ← العيار",
+              _p47._chain == [_p47.model_no, _p47.wo_no, _p47.gold,
+                              _p47.small, _p47.big, _p47.notes,
+                              _p47.karat])
+        _p47.wo_no.clear()
+        _p47.wo_no.setFocus()
+        _enter47(_p47.wo_no)
+        check("وEnter على رقم تشغيلٍ فارغ لا ينتقل",
+              _p47.wo_no.hasFocus())
+        _p47.wo_no.setText("ENT-1")
+        _enter47(_p47.wo_no)
+        check("ويتقدّم بعد كتابة الرقم", _p47.gold.hasFocus()
+              or _p47.gold.lineEdit().hasFocus())
+        _p47.gold.setValue(40.0)
+        _p47.karat.setCurrentIndex(_p47.karat.findData(21))
+        _app47.processEvents()
+        check("والعيار في آخر السطر يصف المكتوب ولا يحوّله",
+              abs(_p47.gold.value() - 40.0) < 0.001,
+              f"{_p47.gold.value()}")
+        _p47.karat.setFocus()
+        _enter47(_p47.karat)
+        check("وEnter على آخر خانة يضيف السطر ويعود لرقم التشغيل",
+              len(_p47.batch) == 1 and _p47.wo_no.hasFocus()
+              and _p47.batch[0]["karat"] == 21
+              and abs(_p47.batch[0]["gold"] - 40.0) < 0.001,
+              str(_p47.batch[:1]))
+        from ui.production_screen import _wage18 as _w18_47
+        _wv47 = _w18_47(_p47.batch[0])
+        check("والطقم يُحفظ بأجر النظام الافتراضي بمكافئ 18 تماماً",
+              abs(_wv47 - float(config.DEFAULT_WAGE_PER_GRAM)) < 1e-9,
+              f"{_wv47}")
+        _p47.batch = []
+        _p47.render_batch()
+        _p47.close()
+
+        from ui.sales_screen import SalesScreen as _SS47
+        _s47 = _SS47(_u47)
+        _s47.refresh()
+        _s47.show()
+        _app47.processEvents()
+        check("المبيعات: المقيد والقائم والعيار والأجر آخرُ السطر",
+              _s47._chain[-4:] == [_s47.line_reg, _s47.line_standing,
+                                   _s47.line_karat, _s47.line_wage]
+              and _s47._chain[:2] == [_s47.model_no, _s47.barcode])
+        _s47.barcode.clear()
+        _s47.barcode.setFocus()
+        _enter47(_s47.barcode)
+        check("وEnter على رقم تشغيلٍ فارغ لا ينتقل",
+              _s47.barcode.hasFocus())
+        _s47.description.setFocus()
+        _enter47(_s47.description)
+        check("ورأس الفاتورة يُسلّم لرقم التشغيل مباشرةً",
+              _s47.barcode.hasFocus())
+        _s47.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

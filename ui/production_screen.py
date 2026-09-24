@@ -34,6 +34,20 @@ def _bk(b):
     return int(b.get("karat") or kv.active())
 
 
+def _wage18(b):
+    """أجر البطاقة بمكافئ 18 — كما هو، بلا تقريبٍ ذهاباً وإياباً.
+
+    لا خانة أجرٍ في الشاشة: الأجر المحفوظ في السطر يمرّ إلى القاعدة
+    كما جاء. وأسطرُ المسوّدات القديمة (وقد كُتب فيها الأجر بعيار
+    العرض) تُحوَّل مرةً واحدة.
+    """
+    if b.get("wage18") is not None:
+        return round(float(b["wage18"]), 6)
+    if b.get("wage_per_gram") is not None:
+        return kv.rate_store(b.get("wage_per_gram") or 0, _bk(b))
+    return float(config.DEFAULT_WAGE_PER_GRAM)
+
+
 def _to_store(b):
     """سطر دفعة كما يراه المستخدم ← كما يُخزَّن (مكافئ 18)."""
     k = _bk(b)
@@ -41,17 +55,24 @@ def _to_store(b):
             "gold": kv.store(b.get("gold"), k),
             "small_stones": kv.store(b.get("small_stones"), k),
             "big_stones": kv.store(b.get("big_stones"), k),
-            "wage_per_gram": kv.rate_store(b.get("wage_per_gram", 0), k)}
+            "wage_per_gram": _wage18(b)}
 
 
 def _to_view(b):
-    """سطر دفعة كما هو مخزَّن ← كما يُعرض بعيار كتابته."""
+    """سطر دفعة كما هو مخزَّن ← كما يُعرض بعيار كتابته.
+
+    الأجر يُحمل كما خُزِّن (`wage18`): تعديلُ دفعةٍ لا يمسّ أجر
+    أطقمها وليس في الشاشة ما يغيّره.
+    """
     k = _bk(b)
-    return {**b, "karat": k,
+    w = dict(b)
+    stored = w.pop("wage_per_gram", None)
+    return {**w, "karat": k,
             "gold": kv.g(b.get("gold"), k),
             "small_stones": kv.g(b.get("small_stones"), k),
             "big_stones": kv.g(b.get("big_stones"), k),
-            "wage_per_gram": kv.rate(b.get("wage_per_gram", 0), k)}
+            "wage18": (float(stored) if stored is not None
+                       else float(config.DEFAULT_WAGE_PER_GRAM))}
 
 
 class DiscountDialog(QtWidgets.QDialog):
@@ -135,10 +156,10 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         ثم **إلى أي حساب** تدخل البضاعة (الذهب المشغول افتراضاً،
         ويُضاف حسابٌ جديد من الشاشة)، والعيار إن كانت الوجهة صندوق
         الكسر.
-      ② **سطر الإدخال** — يتكرّر مع كل طقم بترتيب الورقة نفسه:
-        الموديل ← رقم التشغيل ← المقيد ← القائم ← الأجر ← العيار ←
-        الذهب ← الفصوص ← الأحجار ← بعد الخصم ← ملاحظات. وEnter
-        والأسهم تتنقّل بين الخانات.
+      ② **سطر الإدخال** — يتكرّر مع كل طقم: الموديل ← رقم التشغيل
+        ← الذهب ← الفصوص ← الأحجار ← بعد الخصم ← ملاحظات ← المقيد ←
+        القائم ← العيار. وEnter والأسهم تتنقّل بين الخانات، ولا
+        يتجاوز Enter رقم التشغيل وهو فارغ، وبعد الإضافة يعود إليه.
       ③ **الدفعة** — جدولٌ أول عمودٍ فيه زرّا تعديل السطر وحذفه،
         والإجمالي تحته، ثم الترحيل بقيدٍ مجمّعٍ واحد.
 
@@ -147,10 +168,11 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
     """
 
     # العمود الأول بلا عنوان: فيه زرّا تعديل السطر وحذفه.
+    # عمود الأجر حُذف مع خانته: التوريد لا يُسأل فيه عن أجر.
     COLS = ["", "رقم الموديل", "رقم التشغيل", "العيار", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
-            "الأحجار بعد الخصم", "نسبة الخصم", "الأجر/جم", "ملاحظات"]
-    COL_W = [6, 10, 10, 6, 9, 9, 8, 7, 7, 9, 6, 7, 6]
+            "الأحجار بعد الخصم", "نسبة الخصم", "ملاحظات"]
+    COL_W = [6, 10, 10, 6, 9, 9, 8, 8, 8, 9, 7, 10]
 
     def __init__(self, user):
         super().__init__()
@@ -260,15 +282,19 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.standing.setToolTip(
             "الذهب القائم = الذهب + الفصوص + الأحجار قبل الخصم — "
             "للمعرفة والإحصاء، بلا أثرٍ محاسبي.")
-        self.wage = mspin()
-        self.wage.setValue(config.DEFAULT_WAGE_PER_GRAM)
+        # ══ لا خانة أجرٍ في التوريد ══
+        # الأجر يُتّفق عليه عند **البيع** مع العميل، لا عند الاستلام
+        # من الورشة. فخانته هنا كانت تُملأ برقمٍ افتراضيٍّ لا يعني
+        # شيئاً ويقف عندها المؤشر في كل سطر. يُحفظ للطقم الأجر
+        # الافتراضي للنظام كما كان يُحفظ، وشاشة المبيعات تقدّم عليه
+        # اتفاق العميل.
         self.karat = QtWidgets.QComboBox()
         for k in config.KARATS:
             self.karat.addItem(f"عيار {k}", k)
         self.karat.setToolTip(
-            "عيار أوزان هذا السطر. القيد يُخزَّن بمكافئ 18 دائماً، "
-            "وتبديل العيار هنا يعيد كتابة الأوزان بعياره — فالذهب "
-            "الفعلي واحدٌ لا يتغيّر.")
+            "عيار الأوزان المكتوبة في هذا السطر. القيد يُخزَّن بمكافئ 18 "
+            "دائماً — والأرقام تبقى كما كُتبت، والعيار يقول بأي "
+            "عيارٍ كُتبت.")
         self._karat_now = kv.active()
         i = self.karat.findData(self._karat_now)
         if i >= 0:
@@ -292,13 +318,6 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         for w in (self.reg, self.standing, self.gold, self.small,
                   self.big, self.after):
             w.setDecimals(3)
-        # ══ الأجر يُحفظ بمكافئ 18 في الظلّ ══
-        # خانة الأجر بمنزلتين، وتبديل العيار يضرب ويقسم: 23 بعيار 18
-        # تصير 26.83 بعيار 21، والعودة تُرجع 22.99 — فينقص من أجر كل
-        # جرامٍ هللةٌ من لا شيء. فالمرجع قيمةٌ ظلّيةٌ لا تُقرَّب.
-        self._wage18 = kv.rate_store(config.DEFAULT_WAGE_PER_GRAM,
-                                     self._karat_now)
-        self.wage.valueChanged.connect(self._wage_typed)
         for w in (self.gold, self.small, self.big):
             w.valueChanged.connect(self._parts_typed)
         btn_add = QtWidgets.QPushButton("+ إضافة")
@@ -317,18 +336,20 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         ab.addWidget(self.after, 1)
         ab.addWidget(self.btn_rate)
 
+        # الترتيب كما طلبه صاحب النظام: ما يُكتب أولاً (الموديل
+        # والرقم والمكوّنات والملاحظة)، ثم ما يُقرأ في الآخر: المقيد
+        # والقائم المحسوبان، والعيار الذي يصف ما كُتب.
         fields = [
             ("رقم الموديل", self.model_no, 2),
             ("رقم التشغيل", self.wo_no, 2),
-            ("الوزن المقيد", self.reg, 2),
-            ("الوزن القائم", self.standing, 2),
-            ("الأجر/جم", self.wage, 2),
-            ("العيار", self.karat, 2),
             ("الذهب", self.gold, 2),
             ("الفصوص", self.small, 2),
             ("الأحجار", self.big, 2),
             ("الأحجار بعد الخصم", after_box, 3),
             ("ملاحظات", self.notes, 2),
+            ("الوزن المقيد", self.reg, 2),
+            ("الوزن القائم", self.standing, 2),
+            ("العيار", self.karat, 2),
         ]
         g = QtWidgets.QGridLayout(box)
         g.setHorizontalSpacing(6)
@@ -341,10 +362,23 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
 
         # ترتيب التنقّل هو ترتيب الخانات القابلة للكتابة: المشتقّات
         # (المقيد والقائم وبعد الخصم) تُتخطّى فلا يقف المؤشر عندها.
-        self._chain = [self.model_no, self.wo_no, self.wage, self.karat,
-                       self.gold, self.small, self.big, self.notes]
-        enter_chain(self, self._chain, self.add_row)
+        # ورقم التشغيل **إلزامي**: Enter لا يتجاوزه وهو فارغ. وبعد
+        # إضافة السطر يعود المؤشر إليه لا إلى الموديل — الموديل ثابتٌ
+        # لأطقم الدفعة، والرقم هو ما يتغيّر في كل سطر.
+        self._chain = [self.model_no, self.wo_no, self.gold, self.small,
+                       self.big, self.notes, self.karat]
+        enter_chain(self, self._chain, on_last=self._add_from_enter,
+                    require={self.wo_no:
+                             lambda: bool(self.wo_no.text().strip())})
         return box
+
+    def _add_from_enter(self):
+        """Enter على آخر خانة: يُضاف السطر ويعود المؤشر لرقم التشغيل.
+
+        وإن رُفض السطر (وزنٌ ناقص مثلاً) يبقى المؤشر حيث هو ليُصحَّح
+        — لا يقفز إلى أول السطر فيضيع موضع الخطأ.
+        """
+        return self.wo_no if self.add_row() else False
 
     # ══════════════════════════════════════════════════════════════
     #  ③ الدفعة
@@ -521,33 +555,15 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self._snap_w18()
 
     def _karat_changed(self, *_):
-        """تبديل العيار يعيد كتابة أوزان السطر بعياره الجديد.
+        """العيار في آخر السطر **يصف** ما كُتب قبله — لا يحوّله.
 
-        الذهب الفعلي واحدٌ لا يتغيّر: ما كان 100 جم عيار 18 هو 85.71
-        جم عيار 21. والأجر يتحرّك عكسياً فيبقى حاصل الضرب — وهو مبلغ
-        نقدي — كما هو.
+        الأوزان في التوريد تُكتب باليد من ورقة الورشة. فمن كتب 40 ثم
+        اختار عيار 21 يعني «أربعون جراماً عيار 21» — لا أن تتحوّل
+        الأربعون إلى 34.29. الأرقام تبقى كما كُتبت، والعيار يقول
+        بأي عيارٍ تُقرأ، والتحويل إلى مكافئ 18 عند الترحيل وحده.
         """
-        old, new = self._karat_now, self._k()
-        self._karat_now = new
-        if old == new or self._calc:
-            return
-        self._calc = True
-        try:
-            # المكوّنات من ظلّها بمكافئ 18 لا من الخانات المقرَّبة
-            for w, base in zip((self.gold, self.small, self.big),
-                               self._w18):
-                w.setValue(kv.g(base, new))
-            # والأجر كذلك — من قيمته الظلّية غير المقرَّبة
-            self.wage.setValue(kv.rate(self._wage18, new))
-        finally:
-            self._calc = False
-        self.recalc()
-
-    def _wage_typed(self, *_):
-        """كلّ أجرٍ يكتبه المستخدم يُحفظ بمكافئ 18 في الظلّ."""
-        if self._calc:
-            return
-        self._wage18 = kv.rate_store(self.wage.value(), self._karat_now)
+        self._karat_now = self._k()
+        self._snap_w18()
 
     def _clear_entry(self):
         """يُفرغ سطر الإدخال — والعيار والموديل يبقيان.
@@ -562,9 +578,6 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             for w in (self.gold, self.small, self.big, self.after,
                       self.reg, self.standing):
                 w.setValue(0)
-            self.wage.setValue(kv.rate(
-                kv.rate_store(config.DEFAULT_WAGE_PER_GRAM), self._k()))
-            self._wage18 = kv.rate_store(config.DEFAULT_WAGE_PER_GRAM)
             self.notes.clear()
         finally:
             self._calc = False
@@ -584,14 +597,18 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 "wo_no": wo_no, "gold": self.gold.value(),
                 "small_stones": self.small.value(),
                 "big_stones": self.big.value(), "discount_rate": self.rate,
-                "wage_per_gram": self.wage.value(),
+                # أجر البطاقة الافتراضي بمكافئ 18 مباشرةً — لا خانة له
+                # في الشاشة، فلا يمرّ بتحويل عيارٍ يقرّبه.
+                "wage18": float(config.DEFAULT_WAGE_PER_GRAM),
                 "karat": self._k(),
                 "notes": self.notes.text().strip()})
             self._clear_entry()
             self.wo_no.setFocus()
             self.render_batch()
+            return True
         except Exception as e:
             err(self, e)
+            return False
 
     def edit_row(self, row=None):
         """يفتح السطر كاملاً للتصحيح — بخانات سطر الإدخال نفسها.
@@ -621,8 +638,6 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         w_big.setValue(b["big_stones"])
         w_rate = mspin()
         w_rate.setValue(b["discount_rate"] * 100)
-        w_wage = mspin()
-        w_wage.setValue(b.get("wage_per_gram", 0))
         w_notes = QtWidgets.QLineEdit(str(b.get("notes") or ""))
         prev = QtWidgets.QLabel("")
         prev.setObjectName("cardSub")
@@ -644,13 +659,13 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         f = QtWidgets.QFormLayout()
         f.addRow("رقم الموديل:", w_model)
         f.addRow("رقم التشغيل:", w_no)
-        f.addRow("العيار:", w_karat)
-        f.addRow("الأجر/جم:", w_wage)
+        # بترتيب سطر الإدخال نفسه: المكوّنات ثم الملاحظة ثم العيار
         f.addRow("الذهب:", w_gold)
         f.addRow("الفصوص:", w_small)
         f.addRow("الأحجار:", w_big)
         f.addRow("نسبة الخصم %:", w_rate)
         f.addRow("ملاحظات:", w_notes)
+        f.addRow("العيار:", w_karat)
         f.addRow(prev)
         box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Save
@@ -677,7 +692,6 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             "wo_no": no, "gold": w_gold.value(),
             "small_stones": w_small.value(), "big_stones": w_big.value(),
             "discount_rate": w_rate.value() / 100.0,
-            "wage_per_gram": w_wage.value(),
             "karat": int(w_karat.currentData() or k0),
             "notes": w_notes.text().strip()})
         self.render_batch()
@@ -704,8 +718,6 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                          f"عيار {k}", reg, standing, b["gold"],
                          b["small_stones"], b["big_stones"], after,
                          f"{b['discount_rate']*100:.0f}%",
-                         b.get("wage_per_gram",
-                               config.DEFAULT_WAGE_PER_GRAM),
                          b["notes"] or "—"))
             # الإجمالي يُجمع بمكافئ 18: أسطرٌ بأعيرةٍ مختلفة لا يصحّ
             # جمعها كما تُعرض.
@@ -714,7 +726,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             u = kv.active()
             rows.append(("", "الإجمالي", f"{len(self.batch)} طقم",
                          f"عيار {u}", round(kv.g(total18), 3),
-                         "", "", "", "", "", "", "", ""))
+                         "", "", "", "", "", "", ""))
         fill(self.grid, self._headers(), rows)
         fit_columns(self.grid, self.COL_W)
         if rows:
