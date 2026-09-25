@@ -190,6 +190,35 @@ def check_invoice_totals(conn):
             bad.append({"invoice": r["invoice_no"], "id": r["id"],
                         "weight_diff": round(dw, 3),
                         "wages_diff": round(dg, 2)})
+    # ══ والفاتورة وقيدها ══
+    # سطر الجهة في القيد هو ما يقرؤه كشف الحساب ولوحة العملاء؛ فإن
+    # خالف إجمالي الفاتورة رأى العميل في ورقته رقماً وفي كشفه آخر.
+    # (تعديلٌ قديم كان يضرب القيد في نسبةٍ خاطئة إن سبقه انحراف.)
+    seen = {b["id"] for b in bad}
+    try:
+        for r in conn.execute(
+                "SELECT i.id, i.invoice_no,"
+                " ROUND(i.total_weight,3) tw, ROUND(i.grand_total,2) gt,"
+                " ROUND(COALESCE(SUM(l.gold_debit+l.gold_credit),0),3) jw,"
+                " ROUND(COALESCE(SUM(l.cash_debit+l.cash_credit),0),2) jc"
+                " FROM invoices i"
+                " JOIN entities en ON en.id=i.customer_id"
+                " JOIN journal_entries e ON e.id=i.entry_id"
+                "  AND e.is_deleted=0"
+                " LEFT JOIN journal_lines l ON l.entry_id=i.entry_id"
+                "  AND l.account_id=en.account_id"
+                " WHERE i.is_deleted=0 GROUP BY i.id"
+                " HAVING ABS(i.total_weight - jw) > 0.011"
+                "     OR ABS(i.grand_total - jc) > 0.011"
+                " LIMIT 500"):
+            if r["id"] in seen:
+                continue
+            bad.append({"invoice": r["invoice_no"], "id": r["id"],
+                        "weight_diff": round(abs(r["tw"] - r["jw"]), 3),
+                        "wages_diff": round(abs(r["gt"] - r["jc"]), 2),
+                        "journal": True})
+    except Exception:
+        pass
     return bad
 
 

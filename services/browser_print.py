@@ -141,7 +141,7 @@ def _page_setup(doc_type):
     """اتجاه الصفحة والهوامش بحسب نوع المستند."""
     wide = doc_type in ("statement", "journal", "manual", "balances",
                         "customer_analytics", "turnover", "balance_tree",
-                        "dash_panel", "aging", "day_close",
+                        "dash_panel", "aging", "day_close", "customer_board",
                         "mfg_target", "mfg_salary")
     if wide:
         # تقارير التصنيع عريضة الأعمدة — هوامش أضيق لتتسع الصفحة

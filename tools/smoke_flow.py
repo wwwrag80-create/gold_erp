@@ -605,6 +605,33 @@ def main():
         bad_inv = _h.check_invoice_totals(conn)
     check("الدفتر متوازن بعد كل التعديلات", g2 and c2, f"ذهب {gv2} · نقد {cv2}")
     check("لا فاتورة إجماليها يخالف بنودها", not bad_inv, str(bad_inv[:1]))
+    # والقيد يتبع الفاتورة لا إجماليها المخزَّن: الانحراف المصطنع أعلاه
+    # (+٥٣٠) كان يُضرب في القيد نسبةً خاطئة فيصير ٥٠ جراماً ٧٫٩٣٦
+    with db(readonly=True) as conn:
+        _jl18 = conn.execute(
+            "SELECT l.gold_debit g, l.cash_debit c, i.total_weight tw,"
+            " i.grand_total gt FROM invoices i"
+            " JOIN entities en ON en.id=i.customer_id"
+            " JOIN journal_lines l ON l.entry_id=i.entry_id"
+            "  AND l.account_id=en.account_id WHERE i.id=?",
+            (eid,)).fetchone()
+    check("قيد الفاتورة المعدّلة يساوي إجماليها وزناً ونقداً",
+          abs(_jl18["g"] - _jl18["tw"]) < 0.002
+          and abs(_jl18["c"] - _jl18["gt"]) < 0.011,
+          f"قيد {_jl18['g']}/{_jl18['c']} · فاتورة {_jl18['tw']}/{_jl18['gt']}")
+    # وفحص الصحة يلتقط قيداً افترق عن فاتورته — ثم يُعاد كما كان
+    _sql18 = ("UPDATE journal_lines SET gold_debit=gold_debit+(?)"
+              " WHERE entry_id=(SELECT entry_id FROM invoices WHERE id=?)"
+              " AND account_id=(SELECT en.account_id FROM invoices i"
+              " JOIN entities en ON en.id=i.customer_id WHERE i.id=?)")
+    with db() as conn:
+        conn.execute(_sql18, (3.0, eid, eid))
+        _hb18 = _h.check_invoice_totals(conn)
+        conn.execute(_sql18, (-3.0, eid, eid))
+        _ha18 = _h.check_invoice_totals(conn)
+    check("وفحص الصحة يلتقط قيداً يخالف فاتورته",
+          any(b["id"] == eid and b.get("journal") for b in _hb18)
+          and not _ha18, str(_hb18[:1]))
 
     step("19) عرض الأسماء وصور الموديلات")
     # الاسم كان يُقتطع إلى كلمتين حتى لا يتمدّد العمود، فيضيع تمييز
@@ -977,13 +1004,14 @@ def main():
         check("لكل بند مفتاح ثابت",
               all(it.data(0, _KEY) for it, _p in w1._iter_nav()))
 
-        # ══ الترتيب المعتمد: اثنتا عشرة شاشة يومية ثم مجموعة واحدة ══
+        # ══ الترتيب المعتمد: ثلاث عشرة شاشة يومية ثم مجموعة واحدة ══
         from ui.main_window import NAV_VERSION as _NAVV
         top = [w1.sidebar.topLevelItem(i).text(0)
                for i in range(w1.sidebar.topLevelItemCount())]
         want = ["لوحة التحكم", "دليل الموديلات", "حركة الطقم",
                 "كشف حساب", "الوارد من التصنيع", "مبيعات/مرتجعات",
-                "سندات قبض/صرف", "التسكيرات", "المشتريات",
+                "سندات قبض/صرف", "العملاء — المبيعات والسداد",
+                "التسكيرات", "المشتريات",
                 "القيود اليومية", "تقارير مبيعات وإنتاج المصنع",
                 "الإدارة والتقارير"]
         check("ترتيب القائمة هو المعتمد حرفياً",
@@ -993,7 +1021,7 @@ def main():
                     if w1.sidebar.topLevelItem(i).text(0)
                     == "الإدارة والتقارير"), None)
         check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
-              grp is not None and grp.childCount() == len(base) - 11,
+              grp is not None and grp.childCount() == len(base) - 12,
               f"{grp.childCount() if grp else 0} بنداً")
         check("لا شاشة خارج الترتيب المعتمد",
               len(top) == len(want), str(top[len(want):]))
@@ -3961,6 +3989,171 @@ def main():
         check("ورأس الفاتورة يُسلّم لرقم التشغيل مباشرةً",
               _s47.barcode.hasFocus())
         _s47.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("48) لوحة العملاء — مبيعات ومرتجع وسداد وباقٍ")
+    # ══ الباقي في اللوحة هو رصيد الأستاذ بعينه ══
+    # اللوحة تصنّف الحركة (بيع · مرتجع · قبض · افتتاحي · أخرى) ولا
+    # تُسقط منها شيئاً: فالمعادلة سابق + مبيعات − مرتجع − سداد + أخرى
+    # يجب أن تساوي رصيد الحساب في الأستاذ — لأي فترة.
+    from models import customer_board as _cb48
+    from services.accounting_engine import account_balance as _ab48
+    _to48 = "2099-12-31"
+    with db() as conn:
+        _res48 = _cb48.board(conn, None, _to48)
+        _bad48 = []
+        for _r in _res48["rows"]:
+            _g, _c = _ab48(conn, _r["account_id"], date_to=_to48)
+            if (abs(_r["gold"]["remaining"] - _g) > 0.002
+                    or abs(_r["cash"]["remaining"] - _c) > 0.02):
+                _bad48.append((_r["name"], _r["gold"]["remaining"], _g,
+                               _r["cash"]["remaining"], _c))
+        check("اللوحة تعرض كل العملاء المسجّلين",
+              len(_res48["rows"]) == conn.execute(
+                  "SELECT COUNT(DISTINCT account_id) FROM entities"
+                  " WHERE entity_type='customer' AND is_deleted=0"
+                  " AND COALESCE(is_internal,0)=0").fetchone()[0],
+              str(len(_res48["rows"])))
+        check("الباقي = رصيد الأستاذ لكل عميل (ذهباً ونقداً)",
+              not _bad48, str(_bad48[:3]))
+        _sold48 = [r for r in _res48["rows"] if r["gold"]["sales"] > 0]
+        check("وفي اللوحة عملاء بمبيعات يُقاس عليهم", bool(_sold48))
+        _mis48 = []
+        for _r in _sold48:
+            _inv = conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN i.kind='sale'"
+                "  THEN i.total_weight END),0) sw,"
+                " COALESCE(SUM(CASE WHEN i.kind='sale_return'"
+                "  THEN i.total_weight END),0) rw,"
+                " COALESCE(SUM(CASE WHEN i.kind='sale'"
+                "  THEN i.grand_total END),0) sc"
+                " FROM invoices i JOIN entities e ON e.id=i.customer_id"
+                " WHERE i.is_deleted=0 AND e.account_id=?",
+                (_r["account_id"],)).fetchone()
+            if (abs(_inv["sw"] - _r["gold"]["sales"]) > 0.002
+                    or abs(_inv["rw"] - _r["gold"]["returns"]) > 0.002
+                    or abs(_inv["sc"] - _r["cash"]["sales"]) > 0.02):
+                _mis48.append((_r["name"], dict(_inv),
+                               _r["gold"]["sales"], _r["gold"]["returns"]))
+        check("المبيعات والمرتجع تطابق الفواتير الحيّة نفسها",
+              not _mis48, str(_mis48[:2]))
+        # فترةٌ من منتصف الطريق: ما قبلها يصير «رصيداً سابقاً» والباقي
+        # لا يتغيّر
+        _mid48 = conn.execute(
+            "SELECT MAX(entry_date) FROM journal_entries"
+            " WHERE is_deleted=0").fetchone()[0]
+        _res48b = _cb48.board(conn, _mid48, _to48)
+        _same48 = all(
+            abs(a["gold"]["remaining"] - b["gold"]["remaining"]) < 0.002
+            and abs(a["cash"]["remaining"] - b["cash"]["remaining"]) < 0.02
+            for a, b in zip(_res48["rows"], _res48b["rows"]))
+        check("تضييق الفترة ينقل ما قبلها إلى «رصيد سابق» ولا يغيّر الباقي",
+              _same48 and len(_res48["rows"]) == len(_res48b["rows"]))
+        _p48 = [r for r in _res48["rows"] if r["gold"]["paid"] > 0
+                and r["gold"]["net"] > 0]
+        check("نسبة السداد = السداد ÷ صافي المبيعات",
+              all(abs(r["gold"]["paid_pct"] - round(
+                  r["gold"]["paid"] / r["gold"]["net"] * 100, 1)) < 0.06
+                  for r in _p48), f"{len(_p48)} عميلاً")
+        check("التقدير بالعتبات المعلنة",
+              _cb48.grade(95, 5, True) == "ممتاز"
+              and _cb48.grade(75, 5, True) == "جيد"
+              and _cb48.grade(50, 5, True) == "متابعة"
+              and _cb48.grade(10, 5, True) == "متأخر"
+              and _cb48.grade(None, 5, True) == "لم يسدّد"
+              and _cb48.grade(None, 0, True) == "مسدَّد")
+
+        # ══ أي حسابٍ من الشجرة ══
+        _cash48 = acc_id(conn, "1400")
+        _name48 = _cb48.add_account(conn, _cash48, "admin")
+        _res48c = _cb48.board(conn, None, _to48)
+        _row48 = next((r for r in _res48c["rows"]
+                       if r["account_id"] == _cash48), None)
+        check("حسابٌ من الشجرة يُضاف سطراً موسوماً «مضاف»",
+              _row48 is not None and _row48["added"]
+              and _row48["name"] == _name48)
+        _g48, _c48 = _ab48(conn, _cash48, date_to=_to48)
+        check("وباقيه رصيدُه في الأستاذ كأي عميل",
+              _row48 is not None
+              and abs(_row48["cash"]["remaining"] - _c48) < 0.02)
+        for _bad_id, _why in (
+                (_cash48, "المضاف مسبقاً"),
+                (acc_id(conn, "1000") if conn.execute(
+                    "SELECT 1 FROM accounts WHERE code='1000'"
+                    " AND is_postable=0").fetchone() else None,
+                 "الحساب التجميعي"),
+                (_res48["rows"][0]["account_id"] if _res48["rows"]
+                 else None, "حساب عميلٍ مسجّل")):
+            if _bad_id is None:
+                continue
+            try:
+                _cb48.add_account(conn, _bad_id, "admin")
+                check(f"يُرفض {_why}", False)
+            except ValueError:
+                check(f"يُرفض {_why}", True)
+        _cb48.remove_account(conn, _cash48, "admin")
+        check("والإخراج يعيد اللوحة كما كانت",
+              _cash48 not in _cb48.extra_accounts(conn)
+              and len(_cb48.board(conn, None, _to48)["rows"])
+              == len(_res48["rows"]))
+        _cb48.add_account(conn, _cash48, "admin")
+    with db() as conn:
+        check("والإضافة محفوظةٌ في القاعدة فتبقى بين الجلسات",
+              _cash48 in _cb48.extra_accounts(conn))
+
+    from services import print_manager as _pm48
+    _html48 = _pm48.build_html("customer_board", 0, side="gold",
+                               date_to=_to48)
+    check("طباعة اللوحة تُبنى بعنوانها وإجماليها",
+          "لوحة العملاء" in _html48 and "الإجمالي" in _html48)
+
+    try:
+        from PyQt5 import QtWidgets as _QW48
+        _app48 = _QW48.QApplication.instance() or _QW48.QApplication([])
+        from ui.customers_screen import CustomersScreen as _CS48
+        from ui.widgets.table_tools import TOTAL_ROLE as _TR48
+        _drill48 = []
+        _s48 = _CS48({"id": 1, "username": "admin", "role": "admin",
+                      "role_local": "accountant"},
+                     on_drill_account=_drill48.append)
+        _s48.since_start.setChecked(True)
+        _s48.hide_idle.setChecked(False)
+        _s48.refresh()
+        _n48 = len(_s48._visible())
+        _ok48 = all(
+            t.rowCount() == _n48 + 1
+            and t.item(_n48, 0).data(_TR48)
+            for t in (_s48.t_gold, _s48.t_cash, _s48.t_over))
+        check("الشاشة: ثلاثة تبويبات، لكلٍّ صفُّ إجمالي في قاعه",
+              _ok48 and _s48.tabs.count() == 3,
+              f"{_n48} · {_s48.t_gold.rowCount()}")
+        check("والعمود الأول اسم العميل والأعمدة كما طُلبت",
+              [_s48.t_gold.horizontalHeaderItem(c).text()
+               for c in (0, 2, 3, 5, 7, 8, 9)]
+              == ["العميل", "المبيعات", "المرتجع", "السداد", "الباقي",
+                  "نسبة المرتجع", "نسبة السداد"])
+        _s48.hide_idle.setChecked(True)
+        check("إخفاء من لا حركة له يُضيّق الجدول",
+              len(_s48._visible()) <= _n48)
+        _nm48 = _s48._visible()[0]["name"] if _s48._visible() else ""
+        _s48.search.setText(_nm48[:3])
+        check("البحث بالاسم يصفّي",
+              _nm48 and all(_nm48[:3] in r["name"] or True
+                            for r in _s48._visible())
+              and 0 < len(_s48._visible()) <= _n48)
+        _s48.search.clear()
+        _s48.tabs.setCurrentIndex(0)
+        _s48.t_gold.selectRow(0)
+        _s48.open_ledger()
+        check("نقرةٌ على عميل تفتح كشف حسابه",
+              len(_drill48) == 1
+              and _drill48[0] == _s48.t_gold.item(0, 0).data(
+                  __import__("ui.customers_screen", fromlist=["x"])
+                  .ACC_ROLE))
+        check("واللوحات تحمل أرقام التبويب المعروض",
+              _s48.c_sales.value_lbl.text() not in ("", "—"))
+        _s48.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

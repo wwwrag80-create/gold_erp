@@ -96,9 +96,16 @@ class DiagnosticsScreen(QtWidgets.QWidget):
         add(not h["integrity"], "سلامة ملف قاعدة البيانات",
             "الملف سليم" if not h["integrity"]
             else " · ".join(str(x) for x in h["integrity"][:5]))
-        add(not h["invoice_totals"], "إجماليات الفواتير = مجموع بنودها",
-            "متطابقة" if not h["invoice_totals"]
-            else f"{len(h['invoice_totals'])} فاتورة إجماليها يخالف بنودها")
+        _ib = h["invoice_totals"]
+        _ij = [b for b in _ib if b.get("journal")]
+        add(not _ib, "إجماليات الفواتير = بنودها وقيدها",
+            "متطابقة" if not _ib
+            else " · ".join(x for x in (
+                f"{len(_ib) - len(_ij)} فاتورة إجماليها يخالف بنودها"
+                if len(_ib) > len(_ij) else "",
+                ("قيد " + "، ".join(b["invoice"] or str(b["id"])
+                                    for b in _ij[:5])
+                 + " لا يطابق إجمالي فاتورته") if _ij else "") if x))
 
         # ══ طقمٌ مفردٌ بِيع مرتين ══
         # خللٌ صريح لا مراجعةٌ: الذهب خرج مرة وحُوسب عليه عميلان.

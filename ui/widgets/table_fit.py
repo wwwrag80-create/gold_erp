@@ -114,13 +114,19 @@ class ColumnFitter(QtCore.QObject):
             if avail == self._last_w and n == self._last_n:
                 return
             self._last_w, self._last_n = avail, n
-            total = float(sum(w)) or 1.0
+            # **العمود المخفيّ لا يأخذ حصّة**: كان يُحجز له الحدّ الأدنى
+            # ويُحسب في المجموع، فيضيق آخرُ عمودٍ ظاهر بقدره ويبقى في
+            # طرف الجدول فراغٌ أبيض لا يملؤه شيء.
+            shown = [i for i in range(n) if not t.isColumnHidden(i)]
+            if not shown:
+                return
+            total = float(sum(w[i] for i in shown)) or 1.0
             used = 0
-            for i in range(n - 1):
+            for i in shown[:-1]:
                 px = max(self.min_px, int(avail * w[i] / total))
                 t.setColumnWidth(i, px)
                 used += px
-            t.setColumnWidth(n - 1, max(self.min_px, avail - used - 2))
+            t.setColumnWidth(shown[-1], max(self.min_px, avail - used - 2))
             # ملاحظة: كان هنا `resizeRowsToContents()` للجداول الصغيرة،
             # فيصير ارتفاع كل صفٍّ بقدر محتواه: صفٌّ بيانه سطرٌ يبقى
             # قصيراً وصفٌّ بيانه طويل يعلو ثلاثة أضعاف — وهو ما شُكي

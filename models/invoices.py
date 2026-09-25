@@ -1007,17 +1007,48 @@ def _adjust_invoice_entry(conn, inv, kind, internal, dw, dg, dvat):
     old_g = round(float(inv["total_wages"] or 0), 2)
     old_v = round(float(inv["vat_amount"] or 0), 2)
     old_cash = round(old_g + old_v, 2)
+    new_w = round(old_w + dw, 3)
     new_cash = round(old_cash + dg + dvat, 2)
 
-    # معامل التغيّر: نسبة الجديد للقديم في كل بُعد
-    kw = ((old_w + dw) / old_w) if abs(old_w) > 1e-9 else None
-    kc = (new_cash / old_cash) if abs(old_cash) > 1e-9 else None
+    # ══ النسبة من القيد نفسه لا من إجمالي الفاتورة المخزَّن ══
+    # **الخلل الذي كان**: المعامل كان «الجديد ÷ إجمالي الفاتورة
+    # المخزَّن»، فيفترض أن القيد يساوي ذلك الإجمالي. فإن افترقا لأي
+    # سببٍ سابق (فاتورةٌ إجماليها ٦٣٠ وقيدها ١٠٠) ضُرب القيد الصحيح
+    # في نسبةٍ خاطئة: ١٠٠ × ١٠٠÷٦٣٠ = ١٥٫٨٧ — ثم تتراكم مع كل تعديل
+    # حتى صار قيدُ فاتورةٍ وزنها ٥٠ جراماً ٧٫٩٣٦ في مديونية العميل.
+    # الآن: المعامل = الهدف ÷ ما في سطر الجهة فعلاً، فيخرج القيد
+    # مساوياً للفاتورة تماماً أياً كان ما سبق — ويُصحَّح الانحراف.
+    cur_w, cur_cash = old_w, old_cash
+    try:
+        ent_acc = conn.execute(
+            "SELECT account_id FROM entities WHERE id=?",
+            (inv["customer_id"],)).fetchone()
+        if ent_acc:
+            j = conn.execute(
+                "SELECT COALESCE(SUM(gold_debit+gold_credit),0) g,"
+                " COALESCE(SUM(cash_debit+cash_credit),0) c"
+                " FROM journal_lines WHERE entry_id=? AND account_id=?",
+                (entry_id, ent_acc["account_id"])).fetchone()
+            if j and abs(float(j["g"] or 0)) > 1e-9:
+                cur_w = round(float(j["g"]), 3)
+            if j and abs(float(j["c"] or 0)) > 1e-9:
+                cur_cash = round(float(j["c"]), 2)
+    except Exception:
+        pass
 
-    if kw is None and abs(dw) > 0.001:
+    # معامل التغيّر: نسبة الهدف لما في القيد في كل بُعد
+    kw = (new_w / cur_w) if abs(cur_w) > 1e-9 else None
+    kc = (new_cash / cur_cash) if abs(cur_cash) > 1e-9 else None
+    if kw is not None and abs(kw - 1.0) < 1e-12:
+        kw = None
+    if kc is not None and abs(kc - 1.0) < 1e-12:
+        kc = None
+
+    if kw is None and abs(cur_w) <= 1e-9 and abs(new_w) > 0.001:
         raise ValueError(
             "تعذّر تعديل وزن فاتورة رصيدها الأصلي صفر — "
             "احذف الفاتورة وأعد إدخالها")
-    if kc is None and abs(dg + dvat) > 0.01:
+    if kc is None and abs(cur_cash) <= 1e-9 and abs(new_cash) > 0.01:
         raise ValueError(
             "تعذّر تعديل أجور فاتورة أجورها الأصلية صفر — "
             "احذف الفاتورة وأعد إدخالها")

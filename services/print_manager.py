@@ -2478,6 +2478,84 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
 
 
 
+def _tpl_customer_board(conn, _id=0, date_from=None, date_to=None,
+                        side="gold", account_ids=None):
+    """لوحة العملاء — جانبٌ واحد (ذهب أو نقد) بالعملاء الظاهرين.
+
+    `account_ids` ترتيب الشاشة وتصفيتها كما هي: ما يراه المستخدم مفروزاً
+    ومصفّى هو ما يُطبع، لا القائمة كلّها.
+    """
+    from models import customer_board as cb
+    from services import karat_view
+    res = cb.board(conn, date_from or None, date_to or None)
+    by_id = {r["account_id"]: r for r in res["rows"]}
+    if account_ids is None:
+        rows = [r for r in res["rows"] if r["active"]]
+    else:
+        rows = [by_id[a] for a in account_ids if a in by_id]
+    gold = side != "cash"
+    unit = karat_view.unit() if gold else "ريال"
+    today = _qd(QtCore.QDate.currentDate())
+
+    def _v(v):
+        return _gw(v, 3) if gold else _w(v, 2)
+
+    def _p(v):
+        return "—" if v is None else en(f"{v:,.1f}%")
+
+    tot = {k: 0.0 for k in cb.KINDS}
+    for r in rows:
+        for k in cb.KINDS:
+            tot[k] += r[side][k]
+    t = cb._side(tot, side)
+    # كما في الشاشة: «رصيد سابق» و«حركات أخرى» لا يُطبعان إن خلَوا
+    show_open = any(abs(r[side]["open"]) > 0.0005 for r in rows)
+    show_other = any(abs(r[side]["other"]) > 0.0005 for r in rows)
+
+    def _row(name, x, grade_txt, last, cell):
+        out = [cell(name)]
+        if show_open:
+            out.append(cell(_v(x["open"])))
+        out += [cell(_v(x["sales"])), cell(_v(x["returns"])),
+                cell(_v(x["net"])), cell(_v(x["paid"]))]
+        if show_other:
+            out.append(cell(_v(x["other"])))
+        out += [cell(f"<b>{_v(x['remaining'])}</b>"
+                     if cell is tdw else _v(x["remaining"])),
+                cell(_p(x["ret_pct"])), cell(_p(x["paid_pct"])),
+                cell(last), cell(grade_txt)]
+        return out
+
+    body = ""
+    for r in rows:
+        x = r[side]
+        c = _row(r["name"], x, x["grade"], en(r["last_paid"] or "—"), tdw)
+        c[0] = tdw(r["name"], align="right")
+        body += "<tr>" + cells(*c) + "</tr>"
+    ncol = 10 + show_open + show_other
+    if not body:
+        body = (f'<tr><td {TD} colspan="{ncol}">'
+                'لا عملاء بحركة في الفترة</td></tr>')
+    foot = cells(*_row("الإجمالي", t, "", "", thw))
+    hdr = ["العميل"] + (["رصيد سابق"] if show_open else []) + [
+        "المبيعات", "المرتجع", "صافي المبيعات", "السداد"] + (
+        ["حركات أخرى"] if show_other else []) + [
+        "الباقي", "نسبة المرتجع", "نسبة السداد", "آخر سداد", "التقدير"]
+    head = cells(*[thw(h) for h in hdr])
+    period = (f'{en(date_from)} إلى {en(date_to or today)}' if date_from
+              else f'منذ البداية حتى {en(date_to or today)}')
+    meta = (f'<div {WIDE}>الفترة: <b>{period}</b> · الوحدة: <b>{unit}</b>'
+            f' · عدد العملاء: <b>{en(len(rows))}</b></div>')
+    note = ('<div class="note">الباقي = رصيدٌ سابق + المبيعات − المرتجع −'
+            ' السداد + حركاتٌ أخرى (تثبيت، سند صرف، تسوية)، وهو رصيد'
+            ' الحساب في دفتر الأستاذ. ونسبة السداد من صافي المبيعات بعد'
+            ' المرتجع، ونسبة المرتجع من إجمالي المبيعات.</div>')
+    title = "لوحة العملاء — " + ("الذهب" if gold else "النقد")
+    return (_header(title, "—", today, show_meta=False) + meta
+            + f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
+            + note + _footer(""))
+
+
 def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
     """ملف الجهة في ورقةٍ واحدة — تُطبع وتُوضع في الملف أو تُرسل.
 
@@ -2787,6 +2865,7 @@ BUILDERS = {
     "stock_aging": _tpl_stock_aging,
     "dossier": _tpl_dossier,
     "doc_edits": _tpl_doc_edits,
+    "customer_board": _tpl_customer_board,
 }
 
 DOC_LABELS = {
@@ -2824,6 +2903,11 @@ def build_html(doc_type, doc_id, **kw):
                               kw.get("only"))
         elif doc_type == "day_close":
             html = _tpl_day_close(conn, doc_id, kw.get("date"))
+        elif doc_type == "customer_board":
+            html = _tpl_customer_board(conn, doc_id, kw.get("date_from"),
+                                       kw.get("date_to"),
+                                       kw.get("side", "gold"),
+                                       kw.get("account_ids"))
         else:
             fn = BUILDERS.get(doc_type)
             if not fn:
@@ -2904,7 +2988,8 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     html = build_html(doc_type, doc_id, **kw)
     wide = doc_type in ("statement", "journal", "manual", "balances",
                         "customer_analytics", "turnover", "aging",
-                        "day_close", "mfg_target", "mfg_salary")
+                        "day_close", "mfg_target", "mfg_salary",
+                        "customer_board")
     printer = _printer(wide if landscape is None else landscape)
     dlg = QtPrintSupport.QPrintPreviewDialog(printer, parent)
     dlg.setWindowTitle("معاينة قبل الطباعة")

@@ -59,6 +59,7 @@ from ui.stocktake_screen import StocktakeScreen
 from ui.subledger_screen import SubLedgerScreen
 from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
+from ui.customers_screen import CustomersScreen
 from services import karat_view as kv
 from ui import theme
 from ui.widgets.common import (ElidedLabel, ask, busy, err, info, run_bg,
@@ -74,7 +75,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 4
+NAV_VERSION = 5
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -123,7 +124,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 user, on_open_ledger=self.open_ledger), "archive_screen")
 
             # ══════════════════════════════════════════════════════
-            #  ترتيب القائمة — اثنتا عشرة شاشة يومية ظاهرة، وما عداها
+            #  ترتيب القائمة — ثلاث عشرة شاشة يومية ظاهرة، وما عداها
             #  تحت «الإدارة والتقارير» يُفتح بالسهم.
             # ------------------------------------------------------
             #  الترتيب هنا هو ترتيب العمل نفسه: تُفتح لوحة التحكم،
@@ -141,6 +142,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("الوارد من التصنيع", self.production_screen),
                     ("مبيعات/مرتجعات", self.sales_screen),
                     ("سندات قبض/صرف", self.vouchers_screen),
+                    # من يسدّد ومن يتأخّر — بعد البيع والقبض مباشرةً
+                    ("العملاء — المبيعات والسداد", Lazy(
+                        lambda: CustomersScreen(
+                            user,
+                            on_drill_account=self.open_ledger_by_account),
+                        "العملاء — المبيعات والسداد")),
                     ("التسكيرات", self.fixing_screen),
                     ("المشتريات", self.purchases_screen),
                     ("القيود اليومية", self.journal_screen),
