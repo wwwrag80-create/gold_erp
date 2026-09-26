@@ -4047,7 +4047,9 @@ def main():
         _same48 = all(
             abs(a["gold"]["remaining"] - b["gold"]["remaining"]) < 0.002
             and abs(a["cash"]["remaining"] - b["cash"]["remaining"]) < 0.02
-            for a, b in zip(_res48["rows"], _res48b["rows"]))
+            for a, b in zip(
+                sorted(_res48["rows"], key=lambda r: r["account_id"]),
+                sorted(_res48b["rows"], key=lambda r: r["account_id"])))
         check("تضييق الفترة ينقل ما قبلها إلى «رصيد سابق» ولا يغيّر الباقي",
               _same48 and len(_res48["rows"]) == len(_res48b["rows"]))
         _p48 = [r for r in _res48["rows"] if r["gold"]["paid"] > 0
@@ -4056,6 +4058,18 @@ def main():
               all(abs(r["gold"]["paid_pct"] - round(
                   r["gold"]["paid"] / r["gold"]["net"] * 100, 1)) < 0.06
                   for r in _p48), f"{len(_p48)} عميلاً")
+        check("صافي المبيعات = رصيد سابق + المبيعات − المرتجع",
+              all(abs(r[sd]["net"] - (r[sd]["open"] + r[sd]["sales"]
+                                     - r[sd]["returns"])) < 0.002
+                  for r in _res48b["rows"] for sd in ("gold", "cash"))
+              and any(r["gold"]["open"] > 0 for r in _res48b["rows"]))
+        check("والباقي = الصافي − السداد + الحركات الأخرى",
+              all(abs(r[sd]["remaining"] - (r[sd]["net"] - r[sd]["paid"]
+                                           + r[sd]["other"])) < 0.002
+                  for r in _res48b["rows"] for sd in ("gold", "cash")))
+        _pd48 = [r["gold"]["paid"] for r in _res48["rows"]]
+        check("اللوحة مرتّبة بالأعلى سداداً (بالمبلغ لا بالنسبة)",
+              _pd48 == sorted(_pd48, reverse=True), str(_pd48[:5]))
         check("التقدير بالعتبات المعلنة",
               _cb48.grade(95, 5, True) == "ممتاز"
               and _cb48.grade(75, 5, True) == "جيد"
@@ -4134,6 +4148,11 @@ def main():
               == ["العميل", "المبيعات", "المرتجع", "السداد", "الباقي",
                   "نسبة المرتجع", "نسبة السداد"])
         _s48.hide_idle.setChecked(True)
+        from ui.widgets.table_tools import as_number as _an48
+        _col48 = [_an48(_s48.t_cash.item(i, 5).text())
+                  for i in range(_s48.t_cash.rowCount() - 1)]
+        check("وتبويب النقد يبدأ بالأعلى سداداً نقداً",
+              _col48 == sorted(_col48, reverse=True), str(_col48[:4]))
         check("إخفاء من لا حركة له يُضيّق الجدول",
               len(_s48._visible()) <= _n48)
         _nm48 = _s48._visible()[0]["name"] if _s48._visible() else ""

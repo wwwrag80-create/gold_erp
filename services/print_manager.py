@@ -2490,7 +2490,7 @@ def _tpl_customer_board(conn, _id=0, date_from=None, date_to=None,
     res = cb.board(conn, date_from or None, date_to or None)
     by_id = {r["account_id"]: r for r in res["rows"]}
     if account_ids is None:
-        rows = [r for r in res["rows"] if r["active"]]
+        rows = cb.by_paid([r for r in res["rows"] if r["active"]], side)
     else:
         rows = [by_id[a] for a in account_ids if a in by_id]
     gold = side != "cash"
@@ -2546,10 +2546,11 @@ def _tpl_customer_board(conn, _id=0, date_from=None, date_to=None,
               else f'منذ البداية حتى {en(date_to or today)}')
     meta = (f'<div {WIDE}>الفترة: <b>{period}</b> · الوحدة: <b>{unit}</b>'
             f' · عدد العملاء: <b>{en(len(rows))}</b></div>')
-    note = ('<div class="note">الباقي = رصيدٌ سابق + المبيعات − المرتجع −'
-            ' السداد + حركاتٌ أخرى (تثبيت، سند صرف، تسوية)، وهو رصيد'
-            ' الحساب في دفتر الأستاذ. ونسبة السداد من صافي المبيعات بعد'
-            ' المرتجع، ونسبة المرتجع من إجمالي المبيعات.</div>')
+    note = ('<div class="note">صافي المبيعات = رصيدٌ سابق + المبيعات −'
+            ' المرتجع · الباقي = صافي المبيعات − السداد + حركاتٌ أخرى'
+            ' (تثبيت، سند صرف، تسوية)، وهو رصيد الحساب في دفتر الأستاذ.'
+            ' ونسبة السداد من صافي المبيعات، ونسبة المرتجع من المبيعات.'
+            ' الترتيب: الأعلى سداداً أولاً.</div>')
     title = "لوحة العملاء — " + ("الذهب" if gold else "النقد")
     return (_header(title, "—", today, show_meta=False) + meta
             + f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"

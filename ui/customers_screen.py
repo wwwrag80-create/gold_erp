@@ -45,14 +45,16 @@ HINTS = {
     "رصيد سابق": "الرصيد قبل بداية الفترة، ومعه الرصيد الافتتاحي للعميل",
     "المبيعات": "كل ما قُيّد على العميل من فواتير البيع في الفترة",
     "المرتجع": "ما رجع من العميل بفواتير المرتجع",
-    "صافي المبيعات": "المبيعات بعد طرح المرتجع",
-    "السداد": "ما قبضه المصنع من العميل بسندات القبض (ومعه خصم السند)",
+    "صافي المبيعات": "رصيدٌ سابق + المبيعات − المرتجع: كل ما يُطالَب به "
+                     "العميل",
+    "السداد": "ما قبضه المصنع من العميل بسندات القبض (ومعه خصم السند)"
+              " — والجدول مرتّبٌ بالأعلى سداداً",
     "حركات أخرى": "تثبيت، سند صرف، تسوية أو قيد يدوي — (+) تزيد ما "
                   "على العميل و(−) تنقصه",
     "الباقي": "رصيد الحساب في دفتر الأستاذ: موجبٌ على العميل، "
               "وسالبٌ له",
     "نسبة المرتجع": "المرتجع ÷ المبيعات",
-    "نسبة السداد": "السداد ÷ صافي المبيعات (بعد المرتجع)",
+    "نسبة السداد": "السداد ÷ صافي المبيعات (رصيد سابق + مبيعات − مرتجع)",
     "آخر سداد": "تاريخ آخر سند قبض حتى نهاية الفترة",
     "التقدير": "ممتاز ≥ ٩٠٪ · جيد ≥ ٧٠٪ · متابعة ≥ ٤٠٪ · متأخر أقل من ذلك",
 }
@@ -71,6 +73,7 @@ class CustomersScreen(QtWidgets.QWidget):
         self.user = user
         self.on_drill_account = on_drill_account
         self.res = None
+        self._sorters = {}
 
         # ── الشريط ──
         self.since_start = QtWidgets.QCheckBox("منذ البداية")
@@ -183,9 +186,11 @@ class CustomersScreen(QtWidgets.QWidget):
         lay.addWidget(self.detail)
         lay.addLayout(tools)
         note = QtWidgets.QLabel(
-            "الباقي = رصيدٌ سابق + المبيعات − المرتجع − السداد + حركاتٌ "
-            "أخرى، وهو رصيد الحساب في دفتر الأستاذ نفسه. ونسبة السداد من "
-            "صافي المبيعات بعد المرتجع؛ ونسبة المرتجع من إجمالي المبيعات.")
+            "صافي المبيعات = رصيدٌ سابق + المبيعات − المرتجع · الباقي = "
+            "صافي المبيعات − السداد + حركاتٌ أخرى، وهو رصيد الحساب في دفتر "
+            "الأستاذ نفسه. ونسبة السداد من صافي المبيعات؛ ونسبة المرتجع من "
+            "المبيعات. الترتيب: الأعلى سداداً أولاً، ويتغيّر بالنقر على "
+            "أي عمود.")
         note.setObjectName("cardSub")
         note.setWordWrap(True)
         lay.addWidget(note)
@@ -200,9 +205,22 @@ class CustomersScreen(QtWidgets.QWidget):
         t.itemSelectionChanged.connect(self._selection_changed)
         t.currentCellChanged.connect(
             lambda *_: self._selection_changed())
-        enhance(t, key=key, username=self.user.get("username"))
+        bundle = enhance(t, key=key, username=self.user.get("username"))
+        self._sorters[id(t)] = bundle.get("sorter")
         t.setProperty("_weights", weights)
         return t
+
+    def _mark_sorted(self, t, col):
+        """سهم الفرز على عمود «السداد» — والنقرة التالية عليه تعكسه."""
+        srt = self._sorters.get(id(t))
+        if srt is not None:
+            srt.col, srt.desc = col, True
+        try:
+            hh = t.horizontalHeader()
+            hh.setSortIndicator(col, QtCore.Qt.DescendingOrder)
+            hh.setSortIndicatorShown(col >= 0)
+        except Exception:
+            pass
 
     def _current_table(self):
         return self.tabs.currentWidget()
@@ -289,6 +307,8 @@ class CustomersScreen(QtWidgets.QWidget):
             it.setForeground(QtGui.QBrush(QtGui.QColor(col)))
 
     def _fill_side(self, t, rows, side):
+        # الأعلى سداداً أولاً — بمبلغ عمود «السداد» لا بنسبته
+        rows = cb.by_paid(rows, side)
         data = []
         for r in rows:
             x = r[side]
@@ -337,8 +357,10 @@ class CustomersScreen(QtWidgets.QWidget):
         t.setColumnHidden(C_OTHER, not any(
             abs(r[side]["other"]) > 0.0005 for r in rows))
         self._fit(t)
+        self._mark_sorted(t, 5)
 
     def _fill_over(self, t, rows):
+        rows = cb.by_paid(rows, "gold")
         data = []
         for r in rows:
             d = r["days_since_paid"]
@@ -373,6 +395,7 @@ class CustomersScreen(QtWidgets.QWidget):
                            6: self._fmt("gold", g), 8: self._fmt("cash", c)})
         self._paint_total(t, fr)
         self._fit(t)
+        self._mark_sorted(t, -1)
 
     def _paint_total(self, t, r):
         p = _pal()

@@ -154,14 +154,29 @@ def _pct(part, whole):
 def _side(d, kind):
     """أرقام جانبٍ واحد (ذهب أو نقد) ونسبتاه."""
     x = {k: round(d.get(k, 0.0), 3 if kind == "gold" else 2) for k in KINDS}
-    x["net"] = round(x["sales"] - x["returns"], 3)
-    x["remaining"] = round(x["open"] + x["sales"] - x["returns"]
-                           - x["paid"] + x["other"], 3)
+    # **صافي المبيعات = رصيدٌ سابق + المبيعات − المرتجع**: الرصيد
+    # السابق مبيعاتٌ عند العميل لم تُسدَّد بعد، فهو مما يُطالَب به
+    # ويُقاس عليه سداده. ولو أُسقط لظهر من سدّد رصيده القديم كاملاً
+    # بنسبةٍ فوق المئة، ومن لم يسدّد منه شيئاً بنسبةٍ لا تُنذر.
+    x["net"] = round(x["open"] + x["sales"] - x["returns"], 3)
+    x["remaining"] = round(x["net"] - x["paid"] + x["other"], 3)
     x["ret_pct"] = _pct(x["returns"], x["sales"])
-    # السداد من **صافي** المبيعات: عميلٌ باع مئةً ورجع أربعين وسدّد
-    # ستين قد سدّد كل ما عليه — ونسبته من الإجمالي (٦٠٪) تظلمه.
+    # والسداد من هذا الصافي: عميلٌ باع مئةً ورجع أربعين وسدّد ستين
+    # قد سدّد كل ما عليه — ونسبته من الإجمالي (٦٠٪) تظلمه.
     x["paid_pct"] = _pct(x["paid"], x["net"])
     return x
+
+
+def by_paid(rows, side="gold"):
+    """الأعلى سداداً أولاً — بمبلغ السداد نفسه لا بنسبته.
+
+    النسبة تُنصف الصغير: عميلٌ سدّد عشرة جرامات من عشرة نسبته ١٠٠٪،
+    ومن سدّد خمسمئةٍ من ستمئة نسبته ٨٣٪ — والإدارة تريد الثاني أولاً،
+    فهو من يُدخل الذهب والمال. والتعادل يُحسم بالجانب الآخر ثم بالاسم.
+    """
+    other = "cash" if side == "gold" else "gold"
+    return sorted(rows, key=lambda r: (-r[side]["paid"], -r[other]["paid"],
+                                       r["name"]))
 
 
 def grade(paid_pct, remaining, has_sales, paid=0.0):
@@ -274,7 +289,7 @@ def board(conn, date_from=None, date_to=None):
             days = None
         for side, x in (("gold", gold), ("cash", cash)):
             x["grade"] = grade(x["paid_pct"], x["remaining"],
-                               x["sales"] > 0.005, x["paid"])
+                               x["net"] > 0.005, x["paid"])
             for k in KINDS:
                 tot[side][k] += x[k]
         active = any(abs(x[k]) > 0.0005 for x in (gold, cash) for k in KINDS)
@@ -285,7 +300,7 @@ def board(conn, date_from=None, date_to=None):
                                         if a["n_sales"] else 0.0),
                          avg_sale_cash=(round(cash["sales"] / a["n_sales"], 2)
                                         if a["n_sales"] else 0.0)))
-    return {"rows": rows,
+    return {"rows": by_paid(rows, "gold"),
             "totals": {"gold": _side(tot["gold"], "gold"),
                        "cash": _side(tot["cash"], "cash")},
             "date_from": date_from, "date_to": date_to}
