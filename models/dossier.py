@@ -148,15 +148,19 @@ def _ratios(flow, bridge):
     sales = round(by.get("مبيعات", {}).get("gold_up", 0.0), 3)
     rets = round(by.get("مرتجع", {}).get("gold_dn", 0.0), 3)
     paid = by.get("قبض", {})
+    # **التسكير سداد**: ذهبٌ سُوّي بسعره فانطفأ دينه الذهبي — يُضمّ
+    # إلى المسدَّد وزناً (وشقّه النقدي زيادةٌ في الذمة كأي مبيعات)
+    fix = by.get("تسكير", {})
 
     flow["opening_weight"] = round(op, 3)
     flow["out_weight"] = sales            # البضاعة: مبيعات
     flow["other_up"] = round(up - sales, 3)
     flow["held_weight"] = round(op + up, 3)
     flow["back_weight"] = rets
-    flow["paid_weight"] = round(paid.get("gold_dn", 0.0), 3)
+    flow["paid_weight"] = round(paid.get("gold_dn", 0.0)
+                                + fix.get("gold_dn", 0.0), 3)
     flow["paid_cash"] = round(paid.get("cash_dn", 0.0), 2)
-    flow["paid_count"] = int(paid.get("docs", 0))
+    flow["paid_count"] = int(paid.get("docs", 0)) + int(fix.get("docs", 0))
     flow["closing_weight"] = round(bridge["closing"]["gold"], 3)
     flow["closing_cash"] = round(bridge["closing"]["cash"], 2)
     base = flow["held_weight"]

@@ -4436,6 +4436,8 @@ def main():
                                    ("مرتجع", "returns", -1),
                                    ("قبض", "paid", -1)):
                 _v = _sgn * _by50.get(_lbl, {}).get("gold", 0.0)
+                if _k == "paid":        # التسكير سدادٌ بذهبه
+                    _v -= _by50.get("تسكير", {}).get("gold", 0.0)
                 if abs(_v - _rr["gold"][_k]) > 0.002:
                     _diff50.append((_rr["name"], _lbl, _rr["gold"][_k], _v))
         check("كل العملاء: لوحة العملاء وتحليل الحركة يتفقان "
@@ -4588,6 +4590,60 @@ def main():
         _s51.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("52) التسكير سداد")
+    from models import customer_board as _cb52, dossier as _ds52
+    from models.fixing import create_fixing as _fx52
+    with db() as conn:
+        _c52 = add_entity(conn, "عميل التسكير", "customer",
+                          username="admin")
+        _a52 = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                            (_c52,)).fetchone()[0]
+        _inv52 = _inv49.create_work_orders_batch(conn, [
+            {"wo_no": "FX-1", "gold": 100.0, "wage_per_gram": 10.0}],
+            "2026-07-01", "admin")
+        _w52 = _inv52["items"][0]["id"]
+        create_sale(conn, _c52, [{"work_order_id": _w52}], "2026-07-02",
+                    "admin", apply_vat=False)
+        _fx52(conn, _c52, 40.0, 200.0, "2026-07-10", "admin")
+        _fx52(conn, _c52, 10.0, 0, "2026-07-11", "admin")    # ذهب فقط
+        _r52 = next(r for r in _cb52.board(conn, "2026-01-01",
+                                           "2026-12-31")["rows"]
+                    if r["account_id"] == _a52)
+        check("التسكير يُضمّ إلى السداد بذهبه (40 + 10)",
+              abs(_r52["gold"]["paid"] - 50.0) < 0.001
+              and abs(_r52["gold"]["other"]) < 0.001,
+              f"سداد {_r52['gold']['paid']} · أخرى {_r52['gold']['other']}")
+        check("ونسبة سداد الذهب تحسبه: 50 من 100",
+              abs((_r52["gold"]["paid_pct"] or 0) - 50.0) < 0.05,
+              str(_r52["gold"]["paid_pct"]))
+        check("وقيمته النقدية (40×200) مبيعاتٌ بالنقد لا «أخرى»",
+              abs(_r52["cash"]["sales"] - (1000.0 + 8000.0)) < 0.01
+              and abs(_r52["cash"]["other"]) < 0.01,
+              f"{_r52['cash']['sales']} · {_r52['cash']['other']}")
+        check("ومتوسط الفاتورة من الفواتير وحدها",
+              abs(_r52["avg_sale_cash"] - 1000.0) < 0.01,
+              str(_r52["avg_sale_cash"]))
+        check("وآخر سدادٍ تاريخ آخر تسكير",
+              _r52["last_paid"] == "2026-07-11", _r52["last_paid"])
+        _g52, _cc52 = __import__(
+            "services.accounting_engine",
+            fromlist=["x"]).account_balance(conn, _a52,
+                                            date_to="2026-12-31")
+        check("والباقي رصيد الأستاذ بعينه",
+              abs(_r52["gold"]["remaining"] - _g52) < 0.001
+              and abs(_r52["cash"]["remaining"] - _cc52) < 0.01)
+        _d52 = _cb52.detail(conn, _a52, "2026-01-01", "2026-12-31")
+        check("وتفصيل الحركة يُظهر التسكير سداداً بذهبه ومبيعاتٍ بنقده",
+              all(abs(_d52["totals"][k]["gold"] - _r52["gold"][k]) < 0.002
+                  and abs(_d52["totals"][k]["cash"] - _r52["cash"][k])
+                  < 0.02 for k in _cb52.KINDS)
+              and any(r["cat"] == "paid" and "تسكير" in r["why"]
+                      for r in _d52["rows"]), str(_d52["totals"]))
+        _f52 = _ds52.build(conn, _c52, "2026-07-01", "2026-12-31")["flow"]
+        check("وملف الجهة يعدّه سداداً كذلك",
+              abs(_f52["paid_weight"] - 50.0) < 0.001,
+              str(_f52["paid_weight"]))
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

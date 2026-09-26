@@ -14,13 +14,14 @@
     فاتورة مرتجع       → المرتجع
     سند قبض            → السداد (صافي ما قيّده السند على الحساب،
                           ومعه ما منحه من خصم — فكلاهما يُطفئ الدين)
+    تسكير              → السداد بذهبه، وقيمته النقدية مبيعاتٌ بالنقد
     رصيد افتتاحي       → رصيدٌ سابق (بطاقة الجهة، أرصدة أول المدة…)
     قيد يومي           → **يُقرأ بحسابه المقابل** (models.entry_kind):
                           مدينٌ مقابل جهةٍ أو بضاعة = مبيعات، دائنٌ
                           مقابلها = مرتجع، دائنٌ مقابل صندوقٍ أو خزينة
                           أو خصم = سداد، مقابل «الأرصدة الافتتاحية» =
                           رصيدٌ سابق — والمقسوم يُقسم بحصصه
-    كل ما عدا ذلك      → حركات أخرى (تسكير، سند صرف، تسوية…) — مسمّاةً
+    كل ما عدا ذلك      → حركات أخرى (سند صرف، تسوية…) — مسمّاةً
 فالمعادلة تُغلق دائماً:
     سابق + مبيعات − مرتجع − سداد + أخرى = الباقي
 والباقي هو رصيد الحساب في دفتر الأستاذ بعينه — لا رقمٌ موازٍ له.
@@ -254,6 +255,7 @@ def board(conn, date_from=None, date_to=None):
                         THEN 'returns'
                    WHEN e.source_table='vouchers' AND v.kind='receipt'
                         THEN 'paid'
+                   WHEN e.source_table='fixing_ops' THEN 'fixing'
                    WHEN COALESCE(e.source_table,'') IN ('', {read_src})
                         THEN 'read'
                    ELSE 'other'
@@ -272,7 +274,7 @@ def board(conn, date_from=None, date_to=None):
           WHERE e.is_deleted=0 AND l.account_id IN ({marks})
             AND e.entry_date <= ?)
         GROUP BY aid, cat, before, sub, reid"""
-    agg = {aid: {"gold": {}, "cash": {}, "n_sales": 0,
+    agg = {aid: {"gold": {}, "cash": {}, "n_sales": 0, "fix_cash": 0.0,
                  "other_parts": {"gold": {}, "cash": {}},
                  "ls": "", "lp": ""} for aid in ids}
     kinds = _ek.Kinds(conn)
@@ -311,6 +313,17 @@ def board(conn, date_from=None, date_to=None):
             if "paid" in cats:
                 a["lp"] = max(a["lp"], r["d"] or "")
             continue
+        if cat == "fixing":
+            # **التسكير سداد**: ذهبُ العميل سُوّي بسعره فانطفأ دينُه
+            # الذهبي — فشقُّه الذهبي في «السداد». وشقُّه النقدي قيمةُ
+            # ذلك الذهب صارت عليه نقداً: مبيعاتٌ بالنقد، فيُقاس عليها
+            # سدادُه النقدي حين يدفعها (ولولا ذلك لظهرت نسبة سداد
+            # النقد فوق المئة لمن دفع قيمة تسكيره).
+            _add(a, "paid", g, 0.0)
+            _add(a, "sales", 0.0, c)
+            a["fix_cash"] += c
+            a["lp"] = max(a["lp"], r["d"] or "")
+            continue
         _add(a, cat, g, c, r["sub"] or "")
         if cat == "sales":
             a["n_sales"] += int(r["n"] or 0)
@@ -324,7 +337,9 @@ def board(conn, date_from=None, date_to=None):
             f"""SELECT l.account_id aid,
                    MAX(CASE WHEN e.source_table='invoices' AND i.kind='sale'
                             THEN e.entry_date END) ls,
-                   MAX(CASE WHEN e.source_table='vouchers' AND v.kind='receipt'
+                   MAX(CASE WHEN (e.source_table='vouchers'
+                                  AND v.kind='receipt')
+                              OR e.source_table='fixing_ops'
                             THEN e.entry_date END) lp
             FROM journal_lines l
             JOIN journal_entries e ON e.id = l.entry_id
@@ -371,7 +386,10 @@ def board(conn, date_from=None, date_to=None):
                          active=active,
                          avg_sale_gold=(round(gold["sales"] / a["n_sales"], 3)
                                         if a["n_sales"] else 0.0),
-                         avg_sale_cash=(round(cash["sales"] / a["n_sales"], 2)
+                         # متوسط الفاتورة من الفواتير: قيمة التسكير
+                         # ليست فاتورة فلا تُضخّم متوسطها
+                         avg_sale_cash=(round((cash["sales"] - a["fix_cash"])
+                                              / a["n_sales"], 2)
                                         if a["n_sales"] else 0.0)))
     return {"rows": by_paid(rows, "gold"),
             "totals": {"gold": _side(tot["gold"], "gold"),
@@ -446,6 +464,10 @@ def detail(conn, account_id, date_from=None, date_to=None):
             why = "فاتورة " + ("مرتجع" if cat == "returns" else "بيع")
         elif src == "vouchers" and r["op"] == "قبض":
             cat, why = "paid", "سند قبض"
+        elif src == "fixing_ops":
+            _put(r, "paid", g, 0.0, "تسكير: ذهبٌ سُوّي بسعره — سداد")
+            _put(r, "sales", 0.0, c, "تسكير: قيمة الذهب المسكَّر نقداً")
+            continue
         else:
             cat = "other"
             why = r["op"] or "حركة"
