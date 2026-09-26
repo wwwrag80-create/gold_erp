@@ -2428,12 +2428,15 @@ def main():
             create_voucher(conn, "receipt", f"2026-03-{i + 20:02d}",
                            "admin", entity_id=_mc, gold_weight=25.0,
                            gold_karat=18)
-    # قيدٌ يدوي على الحساب — رصيدُ بدايةٍ لا حركة، فمكانه «أول المدة»
+    # قيدٌ يدوي طرفُه المقابل «الأرصدة الافتتاحية» (3900) — رصيدُ بدايةٍ
+    # لا حركة، فمكانه «أول المدة». (القيد اليدوي على حسابٍ آخر حركةٌ:
+    # القاعدة في `models.opening` ومفحوصةٌ في الخطوة ٥٠.)
     with db() as conn:
-        post_entry(conn, "2026-03-25", "رصيدٌ افتتاحي بقيدٍ يدوي",
+        post_entry(conn, "2026-03-25", "قيد يومي",
                    [{"account_id": _macc, "gold_debit": 7.0},
-                    {"account_id": acc_id(conn, "5300"),
-                     "gold_credit": 7.0}], username="admin")
+                    {"account_id": acc_id(conn, "3900"),
+                     "gold_credit": 7.0}], source_table="manual",
+                   username="admin")
     # وحركةٌ **لا اسم لها** في قائمة الأنواع — نوعٌ يعرفه الدفتر ولا
     # يعرفه الجسر، وهو ما يجب ألّا يسقط منه
     with db() as conn:
@@ -4339,6 +4342,90 @@ def main():
         g, c, gv, cv = ledger_balanced(conn)
     check("الدفتر متوازن بعد كل حركات الرقمين", g and c,
           f"ذهب {gv} · نقد {cv}")
+
+    step("50) الرصيد الافتتاحي بقاعدةٍ واحدة في كل الشاشات")
+    # القيد اليومي الذي طرفه المقابل «الأرصدة الافتتاحية» (3900) رصيدٌ
+    # سابق — مبيعاتٌ سبقت النظام بقيت عند العميل. وقيدٌ يدويٌّ على
+    # حسابٍ آخر حركةٌ جرت. وكانت الشاشات تختلف: لوحة العملاء تضع الأول
+    # في «أخرى»، وتحليل الحركة يضع الثاني في «أول المدة».
+    from models import customer_board as _cb50, movement as _mv50
+    from models import opening as _op50, sales_analytics as _sa50
+    from services.accounting_engine import post_entry as _pe50
+    with db() as conn:
+        _c50 = add_entity(conn, "عميل الرصيد باليومية", "customer",
+                          username="admin")
+        _a50 = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                            (_c50,)).fetchone()[0]
+        _open50 = _pe50(conn, "2026-03-01", "قيد يومي", [
+            {"account_id": _a50, "gold_debit": 120.0, "cash_debit": 900.0},
+            {"account_id": acc_id(conn, "3900"), "gold_credit": 120.0,
+             "cash_credit": 900.0}], source_table="manual", username="admin",
+            note="رصيد العميل قبل النظام")
+        _adj50 = _pe50(conn, "2026-03-05", "قيد يومي", [
+            {"account_id": acc_id(conn, "5200"), "cash_debit": 40.0},
+            {"account_id": _a50, "cash_credit": 40.0}],
+            source_table="manual", username="admin", note="خصم مسموح")
+        _ids50 = _op50.entry_ids(conn, [_open50, _adj50])
+        check("القاعدة: اليومي مقابل 3900 افتتاحي، واليومي على غيره لا",
+              _open50 in _ids50 and _adj50 not in _ids50, str(_ids50))
+
+        _r50 = next(r for r in _cb50.board(conn, "2026-01-01",
+                                           "2026-12-31")["rows"]
+                    if r["account_id"] == _a50)
+        check("لوحة العملاء: القيد اليومي الافتتاحي في «رصيد سابق»",
+              abs(_r50["gold"]["open"] - 120.0) < 0.001
+              and abs(_r50["cash"]["open"] - 900.0) < 0.01,
+              f"{_r50['gold']['open']} · {_r50['cash']['open']}")
+        check("وصافي المبيعات يشمله فتُقاس عليه النسبة",
+              abs(_r50["gold"]["net"] - 120.0) < 0.001)
+        check("والقيد اليومي على المصروفات في «حركات أخرى» لا في السابق",
+              abs(_r50["cash"]["other"] + 40.0) < 0.01
+              and abs(_r50["cash"]["remaining"] - 860.0) < 0.01,
+              f"{_r50['cash']['other']} · {_r50['cash']['remaining']}")
+        _b50 = _mv50.analyze(conn, _a50, "2026-01-01", "2026-12-31")
+        check("وتحليل الحركة يطابقها: أول المدة هو الافتتاحي وحده",
+              abs(_b50["opening"]["gold"] - _r50["gold"]["open"]) < 0.001
+              and abs(_b50["opening"]["cash"] - _r50["cash"]["open"]) < 0.01,
+              str(_b50["opening"]))
+        check("والإقفال في الاثنين رصيد الأستاذ",
+              abs(_b50["closing"]["cash"] - _r50["cash"]["remaining"]) < 0.01
+              and abs(_b50["closing"]["gold"]
+                      - _r50["gold"]["remaining"]) < 0.001)
+        _o50 = _sa50.opening_balance_row(conn, _c50, "2026-01-01",
+                                         "2026-12-31")
+        check("وتحليل المبيعات يقرأ الرصيد الافتتاحي نفسه",
+              _o50 is not None and abs(_o50["weight"] - 120.0) < 0.001
+              and abs(_o50["cash"] - 900.0) < 0.01, str(_o50))
+        # فترةٌ بعد القيد: يُحمل إلى «رصيد سابق» في كل الشاشات بالرقم نفسه
+        _r50b = next(r for r in _cb50.board(conn, "2026-04-01",
+                                            "2026-12-31")["rows"]
+                     if r["account_id"] == _a50)
+        _b50b = _mv50.analyze(conn, _a50, "2026-04-01", "2026-12-31")
+        # ══ مسحٌ على كل العملاء: الشاشتان تتفقان على كل رقم ══
+        _diff50 = []
+        for _rr in _cb50.board(conn, None, "2099-12-31")["rows"]:
+            _bb = _mv50.analyze(conn, _rr["account_id"], "1900-01-01",
+                                "2099-12-31")
+            for _sd, _tol in (("gold", 0.002), ("cash", 0.02)):
+                if (abs(_bb["opening"][_sd] - _rr[_sd]["open"]) > _tol
+                        or abs(_bb["closing"][_sd]
+                               - _rr[_sd]["remaining"]) > _tol):
+                    _diff50.append((_rr["name"], _sd, _rr[_sd]["open"],
+                                    _bb["opening"][_sd]))
+            _by50 = {b["label"]: b for b in _bb["buckets"]}
+            for _lbl, _k, _sgn in (("مبيعات", "sales", 1),
+                                   ("مرتجع", "returns", -1),
+                                   ("قبض", "paid", -1)):
+                _v = _sgn * _by50.get(_lbl, {}).get("gold", 0.0)
+                if abs(_v - _rr["gold"][_k]) > 0.002:
+                    _diff50.append((_rr["name"], _lbl, _rr["gold"][_k], _v))
+        check("كل العملاء: لوحة العملاء وتحليل الحركة يتفقان "
+              "(سابق · مبيعات · مرتجع · قبض · باقٍ)",
+              not _diff50, str(_diff50[:4]))
+        check("وفي فترةٍ لاحقة يُحمل رصيداً سابقاً بالرقم نفسه",
+              abs(_r50b["cash"]["open"] - 860.0) < 0.01
+              and abs(_b50b["opening"]["cash"] - 860.0) < 0.01,
+              f"{_r50b['cash']['open']} · {_b50b['opening']['cash']}")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

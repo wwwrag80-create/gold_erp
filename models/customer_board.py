@@ -14,7 +14,8 @@
     فاتورة مرتجع       → المرتجع
     سند قبض            → السداد (صافي ما قيّده السند على الحساب،
                           ومعه ما منحه من خصم — فكلاهما يُطفئ الدين)
-    رصيد افتتاحي       → رصيدٌ سابق
+    رصيد افتتاحي       → رصيدٌ سابق — ومنه القيد اليومي الذي طرفه
+                          المقابل «الأرصدة الافتتاحية» (models.opening)
     كل ما عدا ذلك      → حركات أخرى (تثبيت، سند صرف، تسوية…)
 فالمعادلة تُغلق دائماً:
     سابق + مبيعات − مرتجع − سداد + أخرى = الباقي
@@ -30,11 +31,12 @@ import json
 from datetime import date
 
 from models import fiscal
+from models import opening as _opening
 
 EXTRA_KEY = "customer_board.accounts"
 
-# مصادر الرصيد الافتتاحي — قيدٌ ينشأ مع الجهة أو مع فتح السنة
-OPENING_SOURCES = ("entities", "opening", "opening_entry", "year_open")
+# مصادر الرصيد الافتتاحي وحسابه المقابل — القاعدة في `models.opening`
+OPENING_SOURCES = _opening.OPENING_SOURCES
 
 KINDS = ("open", "sales", "returns", "paid", "other")
 
@@ -213,13 +215,16 @@ def board(conn, date_from=None, date_to=None):
     ids = [m["account_id"] for m in members]
     marks = ",".join("?" * len(ids))
 
+    # **القيد الافتتاحي** بالقاعدة الموحّدة: مصدرٌ افتتاحي، أو طرفٌ مقابلٌ
+    # هو «الأرصدة الافتتاحية» (3900) — فالقيد اليومي الذي أدخل به
+    # المصنع رصيد عميله يقع في «رصيد سابق» لا في «حركات أخرى».
+    open_cond, open_params = _opening.sql(conn, "e")
     # تجميعٌ واحد: الحساب × الفئة × (قبل الفترة؟). والفئة من مصدر
     # القيد: الفاتورة بنوعها، والسند بنوعه، والافتتاحي، وما سواها.
     q = f"""
         SELECT l.account_id aid,
                CASE
-                 WHEN e.source_table IN ({",".join("?" * len(OPENING_SOURCES))})
-                      THEN 'open'
+                 WHEN {open_cond} THEN 'open'
                  WHEN e.source_table='invoices' AND i.kind='sale'
                       THEN 'sales'
                  WHEN e.source_table='invoices' AND i.kind='sale_return'
@@ -240,7 +245,7 @@ def board(conn, date_from=None, date_to=None):
           AND e.entry_date <= ?
         GROUP BY aid, cat, before"""
     agg = {aid: {"gold": {}, "cash": {}, "n_sales": 0} for aid in ids}
-    for r in conn.execute(q, (*OPENING_SOURCES, date_from, *ids,
+    for r in conn.execute(q, (*open_params, date_from, *ids,
                               date_to)).fetchall():
         a = agg[r["aid"]]
         g, c = float(r["g"] or 0), float(r["c"] or 0)

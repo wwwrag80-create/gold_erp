@@ -63,8 +63,12 @@ OTHER = "أخرى"
 #
 # والجسر يبقى مقفلاً على أي حال: ما يُضاف إلى الافتتاحي يُطرح من
 # الحركة بالقدر نفسه، فالمجموع لا يتغيّر.
-OPENING_OPS = ("رصيد افتتاحي", "قيد يومي", "قيد يومية",
-               "قيد يومية يدوي")
+#
+# **وليس كلُّ قيدٍ يومي افتتاحياً**: القيد اليومي افتتاحيٌّ حين يكون طرفه
+# المقابل «الأرصدة الافتتاحية» (3900) — وهذا ما يقرّره `models.opening`
+# للشاشات كلها. وتسويةٌ يدوية على المصروفات حركةٌ جرت، مكانها «أخرى».
+# (الاسم باقٍ لمن يستورده؛ لم يعد يُصنَّف به.)
+OPENING_OPS = ("رصيد افتتاحي",)
 
 
 def _d(s):
@@ -107,11 +111,18 @@ def analyze(conn, account_id, date_from, date_to):
     in_period_g = in_period_c = 0.0
     in_period_n = 0
     moves = []
+    # القيد الافتتاحي بالقاعدة الموحّدة (`models.opening`): مصدرٌ افتتاحي
+    # أو طرفٌ مقابلٌ هو «الأرصدة الافتتاحية». كان **كلُّ** قيدٍ يدويٍّ
+    # يُعدّ افتتاحياً — فتسويةٌ جرت أمس على المصروفات تُقرأ رصيدَ بداية،
+    # ولوحة العملاء تقرؤها حركة: رقمان مختلفان للعميل نفسه.
+    from models import opening as _opening
+    open_ids = _opening.entry_ids(conn, [r["eid"] for r in rows
+                                         if r["op"] != "رصيد سابق"])
     for r in rows:
         if r["op"] == "رصيد سابق":
             opening_g, opening_c = r["gbal"], r["cbal"]
             continue
-        if r["op"] in OPENING_OPS:
+        if r["eid"] in open_ids or r["op"] == "رصيد افتتاحي":
             g = float(r["gd"] or 0) - float(r["gc"] or 0)
             c = float(r["cd"] or 0) - float(r["cc"] or 0)
             opening_g = round(opening_g + g, 3)
