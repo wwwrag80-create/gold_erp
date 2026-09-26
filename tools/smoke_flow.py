@@ -4096,10 +4096,21 @@ def main():
         check("التقدير بالعتبات المعلنة",
               _cb48.grade(95, 5, True) == "ممتاز"
               and _cb48.grade(75, 5, True) == "جيد"
-              and _cb48.grade(50, 5, True) == "متابعة"
-              and _cb48.grade(10, 5, True) == "متأخر"
-              and _cb48.grade(None, 5, True) == "لم يسدّد"
+              and _cb48.grade(50, 5, True) == "سيء"
+              and _cb48.grade(10, 5, True) == "سيء"
+              and _cb48.grade(None, 5, True) == "سيء"
               and _cb48.grade(None, 0, True) == "مسدَّد")
+        check("والتقدير أربع كلماتٍ لا غير: مسدَّد · ممتاز · جيد · سيء",
+              {r[sd]["grade"] for r in _res48["rows"]
+               for sd in ("gold", "cash")} <= set(_cb48.GRADES) | {"—"},
+              str({r["gold"]["grade"] for r in _res48["rows"]}))
+        _rp48 = [r for r in _res48b["rows"] + _res48["rows"]
+                 if r["gold"]["returns"] > 0]
+        check("نسبة المرتجع = المرتجع ÷ (رصيد سابق + المبيعات)",
+              _rp48 and all(abs(r["gold"]["ret_pct"] - round(
+                  r["gold"]["returns"] / (r["gold"]["open"]
+                                          + r["gold"]["sales"]) * 100, 1))
+                  < 0.06 for r in _rp48), f"{len(_rp48)} عميلاً")
 
         # ══ أي حسابٍ من الشجرة ══
         _cash48 = acc_id(conn, "1400")
@@ -4520,6 +4531,9 @@ def main():
         check("والقيد المقسوم يُقسم بحصصه: نصفه مبيعات ونصفه رصيدٌ سابق",
               abs(_M["gold"]["open"] - 20.0) < 0.001,
               str(_M["gold"]["open"]))
+        check("ونسبة المرتجع من السابق والمبيعات: 5 ÷ (20 + 90)",
+              abs(_M["gold"]["ret_pct"] - 4.5) < 0.05,
+              str(_M["gold"]["ret_pct"]))
         check("ولا شيء من الذهب في «حركات أخرى»",
               abs(_M["gold"]["other"]) < 0.001, str(_M["gold"]["other"]))
         _g51, _c51 = __import__(
@@ -4644,6 +4658,55 @@ def main():
         check("وملف الجهة يعدّه سداداً كذلك",
               abs(_f52["paid_weight"] - 50.0) < 0.001,
               str(_f52["paid_weight"]))
+
+    step("53) طباعة صور الموديلات بعددٍ يختاره المستخدم")
+    from services.print_manager import photo_grid as _pg53, \
+        _tpl_model_photos as _tp53
+    def _side53(n, c):
+        r = -(-n // c)
+        return min(190.0 / c, 232.0 / r - 14.0)
+    _best53 = all(
+        abs(min(_pg53(n)[2], _pg53(n)[3] - 14.0)
+            - max(_side53(n, c) for c in range(1, n + 1))) < 0.01
+        and _pg53(n)[0] * _pg53(n)[1] >= n
+        and _pg53(n)[0] * _pg53(n)[1] - n < _pg53(n)[0]
+        for n in range(1, 31))
+    check("الشبكة لأيّ عددٍ (١–٣٠) تعطي أكبر صورةٍ ممكنة بلا صفٍّ فارغ",
+          _best53, f"8→{_pg53(8)[:2]} · 12→{_pg53(12)[:2]}")
+    check("وأربع: ٢×٢ · وواحدة: صفحةٌ كاملة",
+          _pg53(4)[:2] == (2, 2) and _pg53(1)[:2] == (1, 1))
+    check("والصورة تكبر كلما قلّ العدد",
+          min(_pg53(4)[2], _pg53(4)[3]) > min(_pg53(8)[2], _pg53(8)[3])
+          > min(_pg53(20)[2], _pg53(20)[3]))
+    # موديلٌ بصورة: يُطبع بالخزنة وعند المناديب
+    from models import models_catalog as _mc53
+    _img53 = pathlib.Path(_TMP) / "m53.png"
+    _img53.write_bytes(base64.b64decode(
+        __import__("services.photo_qr", fromlist=["x"])
+        .qr_png_data_uri("m53").split(",", 1)[1]))
+    with db() as conn:
+        _inv49.create_work_orders_batch(conn, [
+            {"wo_no": f"PH-{i}", "gold": 10.0, "model_no": "موديل الصور"}
+            for i in range(3)], "2026-08-01", "admin")
+        _wph = conn.execute("SELECT id FROM work_orders"
+                            " WHERE work_order_no='PH-0'").fetchone()[0]
+        create_sale(conn, _c52, [{"work_order_id": _wph}], "2026-08-02",
+                    "admin", apply_vat=False)
+        try:
+            _mc53.set_image("موديل الصور", str(_img53), "admin")
+            _ok53 = True
+        except Exception as _e53:
+            _ok53 = False
+            print("   (تعذّر حفظ صورة الاختبار:", _e53, ")")
+        _h53 = _tp53(conn, 0, min_count=1, per_page=8)
+    check("الورقة تحمل عدد الصفحة والشبكة المختارة",
+          "صور في الصفحة: <b>8</b>" in _h53
+          and f"({_pg53(8)[0]}×{_pg53(8)[1]})" in _h53,
+          _h53[_h53.find("صور في الصفحة"):][:60])
+    if _ok53:
+        check("وتحت الصورة اسم الموديل وكم بالخزنة وكم عند المناديب",
+              "موديل الصور" in _h53 and "بالخزنة: <b>2</b>" in _h53
+              and "عند المناديب: <b>1</b>" in _h53)
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

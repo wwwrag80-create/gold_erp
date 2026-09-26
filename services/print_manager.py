@@ -1301,7 +1301,8 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_model_photos(conn, doc_id,
                                         kw.get("min_count", 3),
                                         kw.get("mode", "all"),
-                                        kw.get("sort", "az")))
+                                        kw.get("sort", "az"),
+                                        kw.get("per_page", 4)))
         if doc_type == "dash_panel":
             return en(_tpl_dash_panel(
                 conn, doc_id, kw.get("title", ""),
@@ -2080,14 +2081,38 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
                     show_meta=False) + span + table + extra)
 
 
-def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az"):
-    """ورقة صور الموديلات — أربع صور في كل صفحة A4.
+def photo_grid(n, width_mm=190.0, height_mm=232.0, caption_mm=14.0):
+    """أنسب شبكةٍ لـ`n` صورة في صفحة: (أعمدة، صفوف، عرض الخلية، ارتفاعها).
 
-    تُطبع صور الموديلات التي بلغ عددها الحدّ المطلوب فقط (ثلاثة
-    فأكثر افتراضياً)، فلا تُهدر أوراق على موديلات نادرة.
+    **الأنسب = أكبر صورة**: لكل عددِ أعمدةٍ ممكن تُحسب مساحة الصورة
+    (الأصغر من عرض الخلية وارتفاعها بعد التعليق)، ويُختار ما يُكبّرها.
+    فثمانٍ في صفحةٍ طولية تخرج ٢×٤ لا ٣×٣ بخانةٍ فارغة، واثنتا عشرة
+    ٣×٤ — والصورة في كلٍّ بأكبر مقاسٍ يسمح به الورق.
+    """
+    n = max(1, int(n or 1))
+    best = None
+    for cols in range(1, n + 1):
+        rows = -(-n // cols)
+        cw, ch = width_mm / cols, height_mm / rows
+        side = min(cw, ch - caption_mm)
+        # التعادل يُحسم بالأقلّ فراغاً
+        key = (round(side, 2), -(cols * rows - n))
+        if best is None or key > best[0]:
+            best = (key, cols, rows, cw, ch)
+    _, cols, rows, cw, ch = best
+    return cols, rows, cw, ch
 
-    كل صفحة أربع صور في شبكة 2×2 بأبعاد تناسب A4، وتحت كل صورة اسم
-    موديلها. وما زاد ينتقل للصفحة التالية تلقائياً.
+
+def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
+                      per_page=4):
+    """ورقة صور الموديلات — بالعدد الذي يختاره المستخدم في كل صفحة.
+
+    تُطبع صور الموديلات التي بلغ عددها الحدّ المطلوب، و**عدد الصور في
+    الصفحة يختاره المستخدم** (٤ افتراضاً): فتُحسب له أنسب شبكةٍ تملأ
+    صفحة A4 (`photo_grid`) وتُصغَّر الصور معها بتناسبها — ثمانٍ في
+    الصفحة تخرج ٢×٤ بصورٍ كبيرةٍ واضحة لا مضغوطة.
+
+    وتحت كل صورة: اسم الموديل، وكم منه **بالخزنة**، وكم **عند المناديب**.
     """
     import base64
     from models import models_catalog as mc
@@ -2140,7 +2165,13 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az"):
         except Exception:
             return ""
 
-    # شبكة 2×2 لكل صفحة — الأبعاد بالنسبة المئوية من عرض A4
+    per_page = max(1, min(int(per_page or 4), 60))
+    cols, rows, cw, ch = photo_grid(per_page)
+    # الخط يصغر مع الخلية فلا يزاحم الصورة — ولا ينزل عن المقروء
+    fs = max(8.5, min(13.0, cw / 6.0))
+    cap_mm = max(10.0, fs * 1.1)
+    img_h = max(15.0, ch - cap_mm - 4)
+
     cells_html = []
     for m, p_img, n in picked:
         uri = _data_uri(p_img)
@@ -2149,45 +2180,53 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az"):
         cells_html.append(
             '<td class="ph">'
             '<div class="phbox"><img src="' + uri + '" /></div>'
-            '<div class="phcap">الموديل ' + str(m["model"])
-            + '  ·  ' + str(n) + ' قطعة</div></td>')
+            '<div class="phcap"><b class="mn">' + str(m["model"])
+            + '</b><br/>'
+            'بالخزنة: <b>' + en(m["in_count"]) + '</b>'
+            ' &nbsp;·&nbsp; عند المناديب: <b>' + en(m["out_count"])
+            + '</b></div></td>')
 
     pages = ""
-    per_page = 4
     total_pages = (len(cells_html) + per_page - 1) // per_page
     for pg in range(total_pages):
         chunk = cells_html[pg * per_page:(pg + 1) * per_page]
-        while len(chunk) < per_page:
+        while len(chunk) < rows * cols:
             chunk.append('<td class="ph"></td>')
         brk = ' style="page-break-before:always"' if pg else ""
+        trs = "".join(
+            "<tr>" + "".join(chunk[r * cols:(r + 1) * cols]) + "</tr>"
+            for r in range(rows)
+            if any("phbox" in c for c in chunk[r * cols:(r + 1) * cols])
+            or r == 0)
         pages += (
             '<table class="photos" width="100%" cellspacing="0"'
-            ' cellpadding="0"' + brk + ">"
-            "<tr>" + chunk[0] + chunk[1] + "</tr>"
-            "<tr>" + chunk[2] + chunk[3] + "</tr>"
-            "</table>")
+            ' cellpadding="0"' + brk + ">" + trs + "</table>")
 
-    css = """
+    css = f"""
     <style>
-      table.photos { table-layout: fixed; width: 100%; }
-      table.photos td.ph {
-        width: 50%; height: 128mm; vertical-align: top;
-        padding: 3mm; text-align: center;
-      }
-      .phbox {
-        height: 108mm; border: 1px solid #D8CDB4; border-radius: 4px;
-        display: table-cell; vertical-align: middle; width: 100%;
-        text-align: center; background: #FFFFFF;
-      }
-      .phbox img { max-width: 96%; max-height: 104mm; }
-      .phcap {
-        margin-top: 2mm; font-size: 11pt; font-weight: bold;
+      table.photos {{ table-layout: fixed; width: 100%; }}
+      table.photos td.ph {{
+        width: {100.0 / cols:.3f}%; height: {ch:.1f}mm; vertical-align: top;
+        padding: 1.5mm; text-align: center;
+      }}
+      .phbox {{
+        height: {img_h:.1f}mm; border: 1px solid #D8CDB4; border-radius: 4px;
+        display: flex; align-items: center; justify-content: center;
+        background: #FFFFFF; overflow: hidden;
+      }}
+      .phbox img {{ max-width: 96%; max-height: {img_h - 2:.1f}mm;
+                   object-fit: contain; }}
+      .phcap {{
+        margin-top: 1mm; font-size: {fs:.1f}pt; line-height: 1.25;
         color: #4A3A1E;
-      }
+      }}
+      .phcap b.mn {{ font-size: {fs * 1.12:.1f}pt; }}
     </style>
     """
     meta = ('<div ' + WIDE + '>الحدّ الأدنى للعدد: <b>'
-            + en(min_count) + '</b> &nbsp;·&nbsp; موديلات مطبوعة: <b>'
+            + en(min_count) + '</b> &nbsp;·&nbsp; صور في الصفحة: <b>'
+            + en(per_page) + '</b> (' + en(cols) + '×' + en(rows)
+            + ') &nbsp;·&nbsp; موديلات مطبوعة: <b>'
             + en(len(cells_html)) + '</b> &nbsp;·&nbsp; الصفحات: <b>'
             + en(total_pages) + "</b></div>")
     return (_header("صور الموديلات", "—", today, show_meta=False)
@@ -2535,7 +2574,8 @@ def _tpl_customer_board(conn, _id=0, date_from=None, date_to=None,
             ' المرتجع · الباقي = صافي المبيعات − السداد + حركاتٌ أخرى'
             ' (سند صرف، تسوية)، وهو رصيد الحساب في دفتر الأستاذ. والسداد'
             ' يشمل سندات القبض والتسكير وما سُدّد بقيدٍ يومي.'
-            ' ونسبة السداد من صافي المبيعات، ونسبة المرتجع من المبيعات.'
+            ' ونسبة السداد من صافي المبيعات، ونسبة المرتجع من (رصيد سابق +'
+            ' المبيعات).'
             ' الترتيب: الأعلى سداداً أولاً.</div>')
     title = "لوحة العملاء — " + ("الذهب" if gold else "النقد")
     return (_header(title, "—", today, show_meta=False) + meta

@@ -72,7 +72,8 @@ class ModelsScreen(QtWidgets.QWidget):
         btn_print.clicked.connect(self.print_catalog)
         btn_photos = self.btn_photos = QtWidgets.QPushButton("🖼 طباعة الصور")
         btn_photos.setToolTip(
-            "أربع صور في كل صفحة A4 — للموديلات التي بلغت حدّاً معيناً")
+            "صور الموديلات بالعدد الذي تختاره في كل صفحة A4 — تحت كل\n"
+            "صورة اسم الموديل وكم بالخزنة وكم عند المناديب")
         btn_photos.clicked.connect(self.print_photos)
 
         # ── الوارد بتاريخ: ماذا دخل ذلك اليوم وأين هو الآن ──
@@ -236,7 +237,8 @@ class ModelsScreen(QtWidgets.QWidget):
             "صورة كل موديلٍ ورد في الفترة، أربع صور في صفحة A4،\n"
             "وتحت كل صورة عددُ قطعه وأرقام تشغيلها ومع من هي."
             if on else
-            "أربع صور في كل صفحة A4 — للموديلات التي بلغت حدّاً معيناً")
+            "صور الموديلات بالعدد الذي تختاره في كل صفحة A4 — تحت كل\n"
+            "صورة اسم الموديل وكم بالخزنة وكم عند المناديب")
         if on:
             self._load_days()
         self.refresh(force=True)
@@ -695,7 +697,7 @@ class ModelsScreen(QtWidgets.QWidget):
         return out
 
     def print_photos(self):
-        """يطبع صور الموديلات — أربع في كل صفحة A4."""
+        """يطبع صور الموديلات — بالعدد الذي يختاره المستخدم في الصفحة."""
         try:
             from services import print_manager
             if self.by_date.isChecked():
@@ -708,19 +710,70 @@ class ModelsScreen(QtWidgets.QWidget):
                     mode=self.view_mode.currentData() or "all",
                     sort=self.sort_mode.currentData() or "az")
                 return
-            n, ok = QtWidgets.QInputDialog.getInt(
-                self, "طباعة صور الموديلات",
-                "اطبع صور الموديلات التي عددها:\n"
-                "(القطع فأكثر — تُطبع أربع صور في كل صفحة A4)",
-                3, 1, 999, 1)
-            if not ok:
+            opts = self._ask_photo_options()
+            if not opts:
                 return
+            n, per_page = opts
             print_manager.preview_document(
                 self, "model_photos", 0, min_count=int(n),
                 mode=self.view_mode.currentData() or "all",
-                sort=self.sort_mode.currentData() or "az")
+                sort=self.sort_mode.currentData() or "az",
+                per_page=int(per_page))
         except Exception as e:
             err(self, e)
+
+    def _ask_photo_options(self):
+        """الحدّ الأدنى للعدد + **عدد الصور في الصفحة** — يختاره المستخدم.
+
+        العدد يُحفظ فيعود كما تركه: من يطبع ثمانياً في الصفحة لا يعيد
+        كتابتها كل مرة. والشبكة تُعرض قبل الطباعة («٢×٤») فيعرف كيف
+        ستخرج الصفحة.
+        """
+        from services.print_manager import photo_grid
+        from ui.widgets.common import load_pref, save_pref
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("طباعة صور الموديلات")
+        dlg.setMinimumWidth(380)
+        mn = QtWidgets.QSpinBox()
+        mn.setRange(1, 999)
+        per = QtWidgets.QSpinBox()
+        per.setRange(1, 60)
+        try:
+            mn.setValue(int(load_pref("models.photos_min", "3") or 3))
+            per.setValue(int(load_pref("models.photos_per_page", "4") or 4))
+        except Exception:
+            mn.setValue(3)
+            per.setValue(4)
+        grid = QtWidgets.QLabel()
+        grid.setObjectName("cardSub")
+
+        def _grid(v):
+            c, r, cw, ch = photo_grid(v)
+            grid.setText(f"الصفحة: {c} × {r} — كل صورة نحو "
+                         f"{min(cw, ch - 14):.0f} ملم، وتحتها اسم الموديل "
+                         "وكم بالخزنة وكم عند المناديب")
+        per.valueChanged.connect(_grid)
+        _grid(per.value())
+        box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok
+            | QtWidgets.QDialogButtonBox.Cancel)
+        box.button(QtWidgets.QDialogButtonBox.Ok).setText("معاينة وطباعة")
+        box.button(QtWidgets.QDialogButtonBox.Cancel).setText("إلغاء")
+        box.accepted.connect(dlg.accept)
+        box.rejected.connect(dlg.reject)
+        f = QtWidgets.QFormLayout(dlg)
+        f.addRow("الموديلات التي عددها (قطعة فأكثر):", mn)
+        f.addRow("عدد الصور في الصفحة:", per)
+        f.addRow(grid)
+        f.addRow(box)
+        self._photo_dlg = dlg
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return None
+        user = getattr(self, "user", {}) or {}
+        save_pref("models.photos_min", str(mn.value()), user.get("username"))
+        save_pref("models.photos_per_page", str(per.value()),
+                  user.get("username"))
+        return mn.value(), per.value()
 
     def print_catalog(self):
         """يطبع الدليل **كما يظهر على الشاشة**.

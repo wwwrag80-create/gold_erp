@@ -168,7 +168,9 @@ def _side(d, kind):
     # بنسبةٍ فوق المئة، ومن لم يسدّد منه شيئاً بنسبةٍ لا تُنذر.
     x["net"] = round(x["open"] + x["sales"] - x["returns"], 3)
     x["remaining"] = round(x["net"] - x["paid"] + x["other"], 3)
-    x["ret_pct"] = _pct(x["returns"], x["sales"])
+    # نسبة المرتجع من **كل ما خرج إليه**: رصيدٌ سابق + مبيعات. فالرصيد
+    # السابق بضاعةٌ عنده كالمبيعات، ويُرجَع منها كما يُرجَع من المبيعات
+    x["ret_pct"] = _pct(x["returns"], x["open"] + x["sales"])
     # والسداد من هذا الصافي: عميلٌ باع مئةً ورجع أربعين وسدّد ستين
     # قد سدّد كل ما عليه — ونسبته من الإجمالي (٦٠٪) تظلمه.
     x["paid_pct"] = _pct(x["paid"], x["net"])
@@ -187,21 +189,23 @@ def by_paid(rows, side="gold"):
                                        r["name"]))
 
 
+GRADES = ("مسدَّد", "ممتاز", "جيد", "سيء")
+
+
 def grade(paid_pct, remaining, has_sales, paid=0.0):
-    """تقديرٌ هادئ بكلمةٍ واحدة — للإدارة لا للمحاسب."""
+    """تقديرٌ بكلمةٍ واحدة من أربع لا غير: مسدَّد · ممتاز · جيد · سيء.
+
+    مسدَّد: لا شيء عليه. ممتاز: سدّد ٩٠٪ فأكثر من صافي مبيعاته. جيد:
+    ٧٠٪ فأكثر. وما دون ذلك — أو عليه رصيدٌ ولم يسدّد منه شيئاً — سيء.
+    ومن لا حركة له ولا رصيد لا يُقدَّر («—»).
+    """
     if remaining <= 0.005:
-        return "مسدَّد" if has_sales else "—"
-    if paid_pct is None:
-        # بلا مبيعاتٍ في الفترة لا نسبة: من سدّد شيئاً لا يُقال عنه
-        # «لم يسدّد»، ودينُه من رصيدٍ سابق لا من بيعٍ يُقاس عليه
-        return "لم يسدّد" if paid <= 0.005 else "—"
-    if paid_pct >= 90:
+        return "مسدَّد" if has_sales or paid > 0.005 else "—"
+    if paid_pct is not None and paid_pct >= 90:
         return "ممتاز"
-    if paid_pct >= 70:
+    if paid_pct is not None and paid_pct >= 70:
         return "جيد"
-    if paid_pct >= 40:
-        return "متابعة"
-    return "متأخر"
+    return "سيء"
 
 
 def _other_label(sub):

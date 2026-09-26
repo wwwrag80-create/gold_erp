@@ -57,10 +57,11 @@ HINTS = {
                   "على العميل و(−) تنقصه",
     "الباقي": "رصيد الحساب في دفتر الأستاذ: موجبٌ على العميل، "
               "وسالبٌ له",
-    "نسبة المرتجع": "المرتجع ÷ المبيعات",
+    "نسبة المرتجع": "المرتجع ÷ (رصيد سابق + المبيعات)",
     "نسبة السداد": "السداد ÷ صافي المبيعات (رصيد سابق + مبيعات − مرتجع)",
     "آخر سداد": "تاريخ آخر سداد حتى نهاية الفترة: سند قبض أو تسكير أو قيدٌ يومي",
-    "التقدير": "ممتاز ≥ ٩٠٪ · جيد ≥ ٧٠٪ · متابعة ≥ ٤٠٪ · متأخر أقل من ذلك",
+    "التقدير": "مسدَّد: لا شيء عليه · ممتاز: سدّد ٩٠٪ فأكثر · جيد: ٧٠٪ فأكثر"
+               " · سيء: أقل من ذلك",
 }
 
 
@@ -201,7 +202,7 @@ class CustomersScreen(QtWidgets.QWidget):
             "صافي المبيعات = رصيدٌ سابق + المبيعات − المرتجع · الباقي = "
             "صافي المبيعات − السداد + حركاتٌ أخرى، وهو رصيد الحساب في دفتر "
             "الأستاذ نفسه. ونسبة السداد من صافي المبيعات؛ ونسبة المرتجع من "
-            "المبيعات. الترتيب: الأعلى سداداً أولاً، ويتغيّر بالنقر على "
+            "(رصيد سابق + المبيعات). الترتيب: الأعلى سداداً أولاً، ويتغيّر بالنقر على "
             "أي عمود.")
         note.setObjectName("cardSub")
         note.setWordWrap(True)
@@ -313,8 +314,7 @@ class CustomersScreen(QtWidgets.QWidget):
     def _paint_grade(self, it, grade):
         p = _pal()
         col = {"ممتاز": p["green"], "مسدَّد": p["green"],
-               "جيد": p["goldDim"], "متابعة": p["goldHi"],
-               "متأخر": p["redText"], "لم يسدّد": p["redText"]}.get(grade)
+               "جيد": p["goldDim"], "سيء": p["redText"]}.get(grade)
         if col:
             it.setForeground(QtGui.QBrush(QtGui.QColor(col)))
 
@@ -455,7 +455,7 @@ class CustomersScreen(QtWidgets.QWidget):
         self.c_sales.set_value(self._fmt(side, s["sales"]),
                                f"{u} · صافيها {self._fmt(side, s['net'])}")
         self.c_ret.set_value(self._fmt(side, s["returns"]),
-                             f"{u} · {self._pct(s['ret_pct'])} من المبيعات")
+                             f"{u} · {self._pct(s['ret_pct'])} من السابق والمبيعات")
         self.c_paid.set_value(self._fmt(side, s["paid"]),
                               f"{u} · {self._pct(s['paid_pct'])} من الصافي")
         owing = sum(1 for r in rows if r[side]["remaining"] > 0.0005)
