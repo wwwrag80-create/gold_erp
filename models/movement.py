@@ -111,25 +111,64 @@ def analyze(conn, account_id, date_from, date_to):
     in_period_g = in_period_c = 0.0
     in_period_n = 0
     moves = []
-    # القيد الافتتاحي بالقاعدة الموحّدة (`models.opening`): مصدرٌ افتتاحي
-    # أو طرفٌ مقابلٌ هو «الأرصدة الافتتاحية». كان **كلُّ** قيدٍ يدويٍّ
-    # يُعدّ افتتاحياً — فتسويةٌ جرت أمس على المصروفات تُقرأ رصيدَ بداية،
-    # ولوحة العملاء تقرؤها حركة: رقمان مختلفان للعميل نفسه.
+    # القيد الافتتاحي بمصدره (بطاقة الجهة، أرصدة أول المدة، فتح السنة)
+    # يُضمّ كلُّه إلى أول المدة. والقيد اليومي يُقرأ بحساباته المقابلة
+    # (`models.entry_kind`) كما تقرؤه لوحة العملاء: ما قابل «الأرصدة
+    # الافتتاحية» أول مدة، وما قابل جهةً أو بضاعةً مبيعاتٌ أو مرتجع،
+    # وما قابل الصندوق قبض. كان **كلُّ** قيدٍ يدويٍّ رصيدَ بداية، ثم
+    # صار «أخرى» كلُّه — وكلاهما لا يقول ما جرى.
     from models import opening as _opening
+    from models import entry_kind as _ek
+    acc_ids = account_ids(conn, account_id)
     open_ids = _opening.entry_ids(conn, [r["eid"] for r in rows
-                                         if r["op"] != "رصيد سابق"])
+                                         if r["op"] != "رصيد سابق"],
+                                  by_counter=False)
+    kinds = _ek.Kinds(conn)
+    # «مبيعات/مرتجع» بمنظور **الجهة**: للصندوق أو المخزون معنى القيد
+    # معكوس، فيبقى هناك كما كان — حركةً باسمها.
+    party = bool(acc_ids) and all(a in kinds.party for a in acc_ids)
+    cat_bucket = {"sales": "مبيعات", "returns": "مرتجع", "paid": "قبض",
+                  "other": None}
+
+    def _to_open(g, c):
+        nonlocal opening_g, opening_c, in_period_g, in_period_c
+        opening_g = round(opening_g + g, 3)
+        opening_c = round(opening_c + c, 2)
+        in_period_g = round(in_period_g + g, 3)
+        in_period_c = round(in_period_c + c, 2)
+
     for r in rows:
         if r["op"] == "رصيد سابق":
             opening_g, opening_c = r["gbal"], r["cbal"]
             continue
+        g = float(r["gd"] or 0) - float(r["gc"] or 0)
+        c = float(r["cd"] or 0) - float(r["cc"] or 0)
         if r["eid"] in open_ids or r["op"] == "رصيد افتتاحي":
-            g = float(r["gd"] or 0) - float(r["gc"] or 0)
-            c = float(r["cd"] or 0) - float(r["cc"] or 0)
-            opening_g = round(opening_g + g, 3)
-            opening_c = round(opening_c + c, 2)
-            in_period_g = round(in_period_g + g, 3)
-            in_period_c = round(in_period_c + c, 2)
+            _to_open(g, c)
             in_period_n += 1
+            continue
+        if party and _ek.is_read_source(r.get("src")):
+            # حصص القيد على الحساب، بنسبة هذا السطر من صافيه
+            sp = kinds.split(r["eid"], acc_ids)
+            parts = {}
+            for dim, v in (("gold", g), ("cash", c)):
+                tot = sum(sp[dim].values())
+                if abs(tot) < 1e-12 or not v:
+                    continue
+                for cat, amt in sp[dim].items():
+                    parts.setdefault(cat, {"gold": 0.0, "cash": 0.0})
+                    parts[cat][dim] += amt * v / tot
+            if "open" in parts:
+                _to_open(parts["open"]["gold"], parts["open"]["cash"])
+                in_period_n += 1
+            for cat, pv in parts.items():
+                if cat == "open":
+                    continue
+                pg, pc = pv["gold"], pv["cash"]
+                moves.append(dict(
+                    r, op=cat_bucket.get(cat) or r["op"],
+                    gd=max(pg, 0.0), gc=max(-pg, 0.0),
+                    cd=max(pc, 0.0), cc=max(-pc, 0.0)))
             continue
         moves.append(r)
 

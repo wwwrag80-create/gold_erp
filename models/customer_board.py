@@ -14,9 +14,13 @@
     فاتورة مرتجع       → المرتجع
     سند قبض            → السداد (صافي ما قيّده السند على الحساب،
                           ومعه ما منحه من خصم — فكلاهما يُطفئ الدين)
-    رصيد افتتاحي       → رصيدٌ سابق — ومنه القيد اليومي الذي طرفه
-                          المقابل «الأرصدة الافتتاحية» (models.opening)
-    كل ما عدا ذلك      → حركات أخرى (تثبيت، سند صرف، تسوية…)
+    رصيد افتتاحي       → رصيدٌ سابق (بطاقة الجهة، أرصدة أول المدة…)
+    قيد يومي           → **يُقرأ بحسابه المقابل** (models.entry_kind):
+                          مدينٌ مقابل جهةٍ أو بضاعة = مبيعات، دائنٌ
+                          مقابلها = مرتجع، دائنٌ مقابل صندوقٍ أو خزينة
+                          أو خصم = سداد، مقابل «الأرصدة الافتتاحية» =
+                          رصيدٌ سابق — والمقسوم يُقسم بحصصه
+    كل ما عدا ذلك      → حركات أخرى (تسكير، سند صرف، تسوية…) — مسمّاةً
 فالمعادلة تُغلق دائماً:
     سابق + مبيعات − مرتجع − سداد + أخرى = الباقي
 والباقي هو رصيد الحساب في دفتر الأستاذ بعينه — لا رقمٌ موازٍ له.
@@ -31,6 +35,7 @@ import json
 from datetime import date
 
 from models import fiscal
+from models import entry_kind as _ek
 from models import opening as _opening
 
 EXTRA_KEY = "customer_board.accounts"
@@ -198,6 +203,17 @@ def grade(paid_pct, remaining, has_sales, paid=0.0):
     return "متأخر"
 
 
+def _other_label(sub):
+    """اسم ما وقع في «حركات أخرى» — ليُفصَّل ولا يبقى مجهولاً."""
+    src, _, kind = (sub or ":").partition(":")
+    if src == "vouchers":
+        return "صرف" if kind == "payment" else "سند"
+    if src in ("", "manual"):
+        return "قيد يومي"
+    from models.journal import OP_LABELS
+    return OP_LABELS.get(src, src)
+
+
 def board(conn, date_from=None, date_to=None):
     """لوحة العملاء خلال الفترة. `date_from` فارغاً = منذ البداية.
 
@@ -215,51 +231,95 @@ def board(conn, date_from=None, date_to=None):
     ids = [m["account_id"] for m in members]
     marks = ",".join("?" * len(ids))
 
-    # **القيد الافتتاحي** بالقاعدة الموحّدة: مصدرٌ افتتاحي، أو طرفٌ مقابلٌ
-    # هو «الأرصدة الافتتاحية» (3900) — فالقيد اليومي الذي أدخل به
-    # المصنع رصيد عميله يقع في «رصيد سابق» لا في «حركات أخرى».
-    open_cond, open_params = _opening.sql(conn, "e")
-    # تجميعٌ واحد: الحساب × الفئة × (قبل الفترة؟). والفئة من مصدر
-    # القيد: الفاتورة بنوعها، والسند بنوعه، والافتتاحي، وما سواها.
+    # **القيد الافتتاحي** بمصدره (بطاقة الجهة، أرصدة أول المدة، فتح
+    # السنة…). والقيد اليومي لا يُحكم عليه جملةً: يُقرأ بحساباته
+    # المقابلة (`models.entry_kind`) — فما قابل «الأرصدة الافتتاحية»
+    # رصيدٌ سابق، وما قابل جهةً أخرى مبيعاتٌ أو مرتجع، وما قابل
+    # الصندوق سداد.
+    open_cond, open_params = _opening.sql(conn, "e", by_counter=False)
+    read_src = ",".join("?" * 2)
+    # تجميعٌ واحد: الحساب × الفئة × (قبل الفترة؟) × المصدر. والقيد
+    # المقروء بحساباته يبقى قيداً قيداً (`reid`) ليُقسَّم بحصصه.
     q = f"""
-        SELECT l.account_id aid,
-               CASE
-                 WHEN {open_cond} THEN 'open'
-                 WHEN e.source_table='invoices' AND i.kind='sale'
-                      THEN 'sales'
-                 WHEN e.source_table='invoices' AND i.kind='sale_return'
-                      THEN 'returns'
-                 WHEN e.source_table='vouchers' AND v.kind='receipt'
-                      THEN 'paid'
-                 ELSE 'other'
-               END cat,
-               CASE WHEN e.entry_date < ? THEN 1 ELSE 0 END before,
-               SUM(l.gold_debit - l.gold_credit) g,
-               SUM(l.cash_debit - l.cash_credit) c,
-               COUNT(DISTINCT e.id) n
-        FROM journal_lines l
-        JOIN journal_entries e ON e.id = l.entry_id
-        LEFT JOIN invoices i ON e.source_table='invoices' AND i.id=e.source_id
-        LEFT JOIN vouchers v ON e.source_table='vouchers' AND v.id=e.source_id
-        WHERE e.is_deleted=0 AND l.account_id IN ({marks})
-          AND e.entry_date <= ?
-        GROUP BY aid, cat, before"""
-    agg = {aid: {"gold": {}, "cash": {}, "n_sales": 0} for aid in ids}
-    for r in conn.execute(q, (*open_params, date_from, *ids,
-                              date_to)).fetchall():
-        a = agg[r["aid"]]
-        g, c = float(r["g"] or 0), float(r["c"] or 0)
-        cat = "open" if r["before"] else r["cat"]
+        SELECT aid, cat, before, sub,
+               CASE WHEN cat='read' AND before=0 THEN eid ELSE 0 END reid,
+               SUM(g) g, SUM(c) c, COUNT(DISTINCT eid) n, MAX(d) d
+        FROM (
+          SELECT l.account_id aid, e.id eid, e.entry_date d,
+                 CASE
+                   WHEN {open_cond} THEN 'open'
+                   WHEN e.source_table='invoices' AND i.kind='sale'
+                        THEN 'sales'
+                   WHEN e.source_table='invoices' AND i.kind='sale_return'
+                        THEN 'returns'
+                   WHEN e.source_table='vouchers' AND v.kind='receipt'
+                        THEN 'paid'
+                   WHEN COALESCE(e.source_table,'') IN ('', {read_src})
+                        THEN 'read'
+                   ELSE 'other'
+                 END cat,
+                 COALESCE(e.source_table,'') || ':' || COALESCE(v.kind,'')
+                   sub,
+                 CASE WHEN e.entry_date < ? THEN 1 ELSE 0 END before,
+                 l.gold_debit - l.gold_credit g,
+                 l.cash_debit - l.cash_credit c
+          FROM journal_lines l
+          JOIN journal_entries e ON e.id = l.entry_id
+          LEFT JOIN invoices i ON e.source_table='invoices'
+                              AND i.id=e.source_id
+          LEFT JOIN vouchers v ON e.source_table='vouchers'
+                              AND v.id=e.source_id
+          WHERE e.is_deleted=0 AND l.account_id IN ({marks})
+            AND e.entry_date <= ?)
+        GROUP BY aid, cat, before, sub, reid"""
+    agg = {aid: {"gold": {}, "cash": {}, "n_sales": 0,
+                 "other_parts": {"gold": {}, "cash": {}},
+                 "ls": "", "lp": ""} for aid in ids}
+    kinds = _ek.Kinds(conn)
+
+    def _add(a, cat, g, c, sub=""):
         # المبيعات والرصيد مدينان بطبعهما، والمرتجع والسداد دائنان:
         # يُقلب الإشارة للدائنَين فيُعرض كلُّ رقمٍ موجباً كما يُقرأ.
         sign = -1.0 if cat in ("returns", "paid") else 1.0
         for side, v in (("gold", g), ("cash", c)):
+            if not v:
+                continue
             a[side][cat] = a[side].get(cat, 0.0) + sign * v
+            if cat == "other":
+                lbl = _other_label(sub)
+                parts = a["other_parts"][side]
+                parts[lbl] = parts.get(lbl, 0.0) + v
+
+    for r in conn.execute(q, (*open_params, *_ek.READ_SOURCES[2:],
+                              date_from, *ids, date_to)).fetchall():
+        a = agg[r["aid"]]
+        g, c = float(r["g"] or 0), float(r["c"] or 0)
+        if r["before"]:
+            _add(a, "open", g, c)
+            continue
+        cat = r["cat"]
+        if cat == "read":
+            # القيد يُقسَّم بحساباته المقابلة — والمجموع كما هو
+            sp = kinds.split(r["reid"], [r["aid"]])
+            cats = set(sp["gold"]) | set(sp["cash"])
+            for k in cats:
+                _add(a, k, sp["gold"].get(k, 0.0), sp["cash"].get(k, 0.0),
+                     "manual:")
+            if "sales" in cats:
+                a["n_sales"] += 1
+                a["ls"] = max(a["ls"], r["d"] or "")
+            if "paid" in cats:
+                a["lp"] = max(a["lp"], r["d"] or "")
+            continue
+        _add(a, cat, g, c, r["sub"] or "")
         if cat == "sales":
             a["n_sales"] += int(r["n"] or 0)
+            a["ls"] = max(a["ls"], r["d"] or "")
+        elif cat == "paid":
+            a["lp"] = max(a["lp"], r["d"] or "")
 
-    # آخر بيعٍ وآخر سدادٍ حتى نهاية الفترة — من أي تاريخ
-    last = {}
+    # آخر بيعٍ وآخر سدادٍ حتى نهاية الفترة — من أي تاريخ (وما قبل
+    # الفترة يُحمل رصيداً، فتاريخه يُقرأ هنا من المستندات)
     for r in conn.execute(
             f"""SELECT l.account_id aid,
                    MAX(CASE WHEN e.source_table='invoices' AND i.kind='sale'
@@ -275,7 +335,10 @@ def board(conn, date_from=None, date_to=None):
             WHERE e.is_deleted=0 AND l.account_id IN ({marks})
               AND e.entry_date <= ?
             GROUP BY aid""", (*ids, date_to)).fetchall():
-        last[r["aid"]] = (r["ls"] or "", r["lp"] or "")
+        a = agg[r["aid"]]
+        a["ls"] = max(a["ls"], r["ls"] or "")
+        a["lp"] = max(a["lp"], r["lp"] or "")
+    last = {aid: (a["ls"], a["lp"]) for aid, a in agg.items()}
 
     try:
         end = date.fromisoformat(date_to)
@@ -298,6 +361,11 @@ def board(conn, date_from=None, date_to=None):
             for k in KINDS:
                 tot[side][k] += x[k]
         active = any(abs(x[k]) > 0.0005 for x in (gold, cash) for k in KINDS)
+        for side, x in (("gold", gold), ("cash", cash)):
+            x["other_parts"] = {
+                k: round(v, 3 if side == "gold" else 2)
+                for k, v in a["other_parts"][side].items()
+                if abs(v) > 0.0005}
         rows.append(dict(m, gold=gold, cash=cash, n_sales=a["n_sales"],
                          last_sale=ls, last_paid=lp, days_since_paid=days,
                          active=active,
@@ -309,3 +377,97 @@ def board(conn, date_from=None, date_to=None):
             "totals": {"gold": _side(tot["gold"], "gold"),
                        "cash": _side(tot["cash"], "cash")},
             "date_from": date_from, "date_to": date_to}
+
+
+# ══════════════════════════════════════════════════════════════════
+#  تفصيل الحركة — لماذا وقع كل قيدٍ في عموده؟
+# ══════════════════════════════════════════════════════════════════
+
+def detail(conn, account_id, date_from=None, date_to=None):
+    """حركة الحساب قيداً قيداً، ومع كل قيدٍ العمودُ الذي حُسب فيه.
+
+    **لماذا**: اللوحة أرقامٌ مجمّعة، ومن رأى «مرتجع ٥ جم» لعميلٍ لم
+    يُرجع فاتورةً يحتاج أن يرى القيد الذي صُنّف كذلك — وبأي حسابٍ قابله.
+    فتُعرض كل حركة بعمودها، والقيد اليومي المقسوم بين عمودين سطرين،
+    والمجاميع تساوي أرقام اللوحة بالضبط (مفحوصٌ في smoke_flow).
+
+    يُرجع {"rows": [...], "totals": {cat: {"gold", "cash"}}}.
+    """
+    from models import journal
+    date_to = date_to or date.today().isoformat()
+    rows = journal.statement(conn, [int(account_id)], date_from or None,
+                             date_to)
+    kinds = _ek.Kinds(conn)
+    open_ids = _opening.entry_ids(conn, [r["eid"] for r in rows
+                                         if r["op"] != "رصيد سابق"],
+                                  by_counter=False)
+    out = []
+    totals = {k: {"gold": 0.0, "cash": 0.0} for k in KINDS}
+
+    def _put(r, cat, g, c, why):
+        if abs(g) < 0.0005 and abs(c) < 0.005:
+            return
+        totals[cat]["gold"] += g
+        totals[cat]["cash"] += c
+        out.append({"date": str(r["date"])[:10], "op": r["op"],
+                    "doc_no": r.get("doc_no") or "",
+                    "name": r.get("name") or "—",
+                    "desc": r.get("desc") or "", "eid": r["eid"],
+                    "cat": cat, "cat_label": _ek.LABELS[cat],
+                    "gold": round(g, 3), "cash": round(c, 2), "why": why})
+
+    for r in rows:
+        g = float(r["gd"] or 0) - float(r["gc"] or 0)
+        c = float(r["cd"] or 0) - float(r["cc"] or 0)
+        if r["op"] == "رصيد سابق":
+            _put(r, "open", float(r["gbal"] or 0), float(r["cbal"] or 0),
+                 "رصيد الحساب قبل بداية الفترة")
+            continue
+        src = r.get("src") or ""
+        if r["eid"] in open_ids:
+            _put(r, "open", g, c, "قيدٌ افتتاحي بمصدره")
+            continue
+        if _ek.is_read_source(src):
+            sp = kinds.split(r["eid"], [int(account_id)])
+            for cat in KINDS:
+                pg = pc = 0.0
+                for dim, v in (("gold", g), ("cash", c)):
+                    tot = sum(sp[dim].values())
+                    if abs(tot) > 1e-12 and v:
+                        amt = sp[dim].get(cat, 0.0) * v / tot
+                        if dim == "gold":
+                            pg = amt
+                        else:
+                            pc = amt
+                _put(r, cat, pg, pc, _why(cat, pg or pc))
+            continue
+        if src == "invoices":
+            cat = "returns" if "مرتجع" in (r["op"] or "") else "sales"
+            why = "فاتورة " + ("مرتجع" if cat == "returns" else "بيع")
+        elif src == "vouchers" and r["op"] == "قبض":
+            cat, why = "paid", "سند قبض"
+        else:
+            cat = "other"
+            why = r["op"] or "حركة"
+        _put(r, cat, g, c, why)
+
+    # المرتجع والسداد يُعرضان موجبَين في اللوحة — وكذا مجموعهما هنا
+    for k in ("returns", "paid"):
+        totals[k] = {d: -v for d, v in totals[k].items()}
+    for k in totals:
+        totals[k] = {"gold": round(totals[k]["gold"], 3),
+                     "cash": round(totals[k]["cash"], 2)}
+    return {"rows": out, "totals": totals}
+
+
+def _why(cat, v):
+    """سبب تصنيف القيد اليومي — بلغة المحاسب."""
+    debit = v > 0
+    return {
+        "open": "قيدٌ يومي مقابل «الأرصدة الافتتاحية»",
+        "sales": "قيدٌ يومي: صار مديناً مقابل جهةٍ أو بضاعةٍ أو إيراد",
+        "returns": "قيدٌ يومي: صار دائناً مقابل جهةٍ أو بضاعةٍ",
+        "paid": "قيدٌ يومي: صار دائناً مقابل صندوقٍ أو خزينةٍ أو خصم",
+        "other": ("قيدٌ يومي: صُرف له من الصندوق" if debit
+                  else "قيدٌ يومي مقابل حسابٍ لا يُصنَّف"),
+    }.get(cat, "")

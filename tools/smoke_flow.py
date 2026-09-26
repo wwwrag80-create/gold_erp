@@ -4036,12 +4036,30 @@ def main():
                 " FROM invoices i JOIN entities e ON e.id=i.customer_id"
                 " WHERE i.is_deleted=0 AND e.account_id=?",
                 (_r["account_id"],)).fetchone()
-            if (abs(_inv["sw"] - _r["gold"]["sales"]) > 0.002
-                    or abs(_inv["rw"] - _r["gold"]["returns"]) > 0.002
-                    or abs(_inv["sc"] - _r["cash"]["sales"]) > 0.02):
+            # والقيد اليومي يُقرأ بحسابه المقابل: ما جعل العميل مديناً
+            # مقابل جهةٍ أو بضاعةٍ مبيعات، وما جعله دائناً مرتجع
+            _jr = {"sales": [0.0, 0.0], "returns": [0.0, 0.0]}
+            from models.entry_kind import Kinds as _K48
+            _k48 = _K48(conn)
+            for (_e48,) in conn.execute(
+                    "SELECT DISTINCT e.id FROM journal_lines l"
+                    " JOIN journal_entries e ON e.id=l.entry_id"
+                    " WHERE e.is_deleted=0 AND l.account_id=?"
+                    " AND COALESCE(e.source_table,'') IN"
+                    " ('','manual','tax_debit_notes')",
+                    (_r["account_id"],)).fetchall():
+                _sp = _k48.split(_e48, [_r["account_id"]])
+                _jr["sales"][0] += _sp["gold"].get("sales", 0.0)
+                _jr["sales"][1] += _sp["cash"].get("sales", 0.0)
+                _jr["returns"][0] -= _sp["gold"].get("returns", 0.0)
+            if (abs(_inv["sw"] + _jr["sales"][0] - _r["gold"]["sales"]) > 0.002
+                    or abs(_inv["rw"] + _jr["returns"][0]
+                           - _r["gold"]["returns"]) > 0.002
+                    or abs(_inv["sc"] + _jr["sales"][1]
+                           - _r["cash"]["sales"]) > 0.02):
                 _mis48.append((_r["name"], dict(_inv),
                                _r["gold"]["sales"], _r["gold"]["returns"]))
-        check("المبيعات والمرتجع تطابق الفواتير الحيّة نفسها",
+        check("المبيعات والمرتجع = الفواتير الحيّة + ما فُهم من القيود",
               not _mis48, str(_mis48[:2]))
         # فترةٌ من منتصف الطريق: ما قبلها يصير «رصيداً سابقاً» والباقي
         # لا يتغيّر
@@ -4378,10 +4396,11 @@ def main():
               f"{_r50['gold']['open']} · {_r50['cash']['open']}")
         check("وصافي المبيعات يشمله فتُقاس عليه النسبة",
               abs(_r50["gold"]["net"] - 120.0) < 0.001)
-        check("والقيد اليومي على المصروفات في «حركات أخرى» لا في السابق",
-              abs(_r50["cash"]["other"] + 40.0) < 0.01
+        check("والقيد اليومي بخصمٍ مسموح (مصروفات) سدادٌ لا رصيدٌ سابق",
+              abs(_r50["cash"]["paid"] - 40.0) < 0.01
+              and abs(_r50["cash"]["open"] - 900.0) < 0.01
               and abs(_r50["cash"]["remaining"] - 860.0) < 0.01,
-              f"{_r50['cash']['other']} · {_r50['cash']['remaining']}")
+              f"{_r50['cash']['paid']} · {_r50['cash']['remaining']}")
         _b50 = _mv50.analyze(conn, _a50, "2026-01-01", "2026-12-31")
         check("وتحليل الحركة يطابقها: أول المدة هو الافتتاحي وحده",
               abs(_b50["opening"]["gold"] - _r50["gold"]["open"]) < 0.001
@@ -4426,6 +4445,149 @@ def main():
               abs(_r50b["cash"]["open"] - 860.0) < 0.01
               and abs(_b50b["opening"]["cash"] - 860.0) < 0.01,
               f"{_r50b['cash']['open']} · {_b50b['opening']['cash']}")
+
+    step("51) القيد اليومي يُفهم محاسبياً: مبيعات · مرتجع · سداد · افتتاحي")
+    # الحالة التي شُكي منها: قيدٌ يومي جعل «محمد» مديناً بذهبٍ أخذه من
+    # جهةٍ أخرى، والجهة صارت دائنةً به. كان الاثنان في «حركات أخرى»؛
+    # والصحيح: مبيعاتٌ عند محمد، ومرتجعٌ من الجهة.
+    from models import customer_board as _cb51, movement as _mv51
+    from models import journal as _j51, entry_kind as _ek51
+    from services.accounting_engine import post_entry as _pe51
+    with db() as conn:
+        _m51 = add_entity(conn, "محمد القيد اليومي", "customer",
+                          username="admin")
+        _x51 = add_entity(conn, "جهة مُسلِّمة", "customer",
+                          username="admin")
+        _ma = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                           (_m51,)).fetchone()[0]
+        _xa = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                           (_x51,)).fetchone()[0]
+        _J = lambda d, ls, n="": _pe51(conn, d, "قيد يومي", ls,
+                                        source_table="manual",
+                                        username="admin", note=n)
+        # 1) محمد مدينٌ بذهبٍ من الجهة ↔ الجهة دائنة
+        _e1 = _J("2026-06-01", [
+            {"account_id": _ma, "gold_debit": 50.0},
+            {"account_id": _xa, "gold_credit": 50.0}], "بضاعة من الجهة")
+        # 2) محمد مدينٌ ببضاعةٍ من الذهب المشغول مباشرة
+        _e2 = _J("2026-06-02", [
+            {"account_id": _ma, "gold_debit": 20.0},
+            {"account_id": acc_id(conn, "1200"), "gold_credit": 20.0}])
+        # 3) محمد يسلّم ذهباً كسراً (خزينة) — سداد
+        _e3 = _J("2026-06-03", [
+            {"account_id": acc_id(conn, "1310"), "gold_debit": 15.0},
+            {"account_id": _ma, "gold_credit": 15.0}])
+        # 4) محمد يرجع بضاعةً إلى الذهب المشغول — مرتجع
+        _e4 = _J("2026-06-04", [
+            {"account_id": acc_id(conn, "1200"), "gold_debit": 5.0},
+            {"account_id": _ma, "gold_credit": 5.0}])
+        # 5) محمد يدفع نقداً للصندوق — سداد · ونقدٌ صُرف له — أخرى
+        _e5 = _J("2026-06-05", [
+            {"account_id": acc_id(conn, "1400"), "cash_debit": 300.0},
+            {"account_id": _ma, "cash_credit": 300.0}])
+        _e6 = _J("2026-06-06", [
+            {"account_id": _ma, "cash_debit": 50.0},
+            {"account_id": acc_id(conn, "1400"), "cash_credit": 50.0}])
+        # 6) قيدٌ مقسوم: مدينٌ بـ40 — نصفه من الجهة ونصفه رصيدٌ سابق
+        _e7 = _J("2026-06-07", [
+            {"account_id": _ma, "gold_debit": 40.0},
+            {"account_id": _xa, "gold_credit": 20.0},
+            {"account_id": acc_id(conn, "3900"), "gold_credit": 20.0}])
+
+        _res51 = {r["account_id"]: r for r in _cb51.board(
+            conn, "2026-01-01", "2026-12-31")["rows"]}
+        _M, _X = _res51[_ma], _res51[_xa]
+        check("محمد: المدين مقابل جهةٍ أو بضاعة مبيعات (50+20+20)",
+              abs(_M["gold"]["sales"] - 90.0) < 0.001,
+              str(_M["gold"]["sales"]))
+        check("والجهة الدائنة له مرتجعٌ منها (50+20)",
+              abs(_X["gold"]["returns"] - 70.0) < 0.001
+              and abs(_X["gold"]["sales"]) < 0.001,
+              str(_X["gold"]["returns"]))
+        check("وذهبٌ سلّمه إلى خزينة الكسر سداد",
+              abs(_M["gold"]["paid"] - 15.0) < 0.001,
+              str(_M["gold"]["paid"]))
+        check("وبضاعةٌ أعادها إلى الذهب المشغول مرتجع",
+              abs(_M["gold"]["returns"] - 5.0) < 0.001,
+              str(_M["gold"]["returns"]))
+        check("ونقدٌ دفعه للصندوق سداد، ونقدٌ صُرف له «أخرى» باسم القيد",
+              abs(_M["cash"]["paid"] - 300.0) < 0.01
+              and abs(_M["cash"]["other"] - 50.0) < 0.01
+              and "قيد يومي" in _M["cash"]["other_parts"],
+              f"{_M['cash']['paid']} · {_M['cash']['other_parts']}")
+        check("والقيد المقسوم يُقسم بحصصه: نصفه مبيعات ونصفه رصيدٌ سابق",
+              abs(_M["gold"]["open"] - 20.0) < 0.001,
+              str(_M["gold"]["open"]))
+        check("ولا شيء من الذهب في «حركات أخرى»",
+              abs(_M["gold"]["other"]) < 0.001, str(_M["gold"]["other"]))
+        _g51, _c51 = __import__(
+            "services.accounting_engine",
+            fromlist=["x"]).account_balance(conn, _ma, date_to="2026-12-31")
+        check("والباقي رصيد الأستاذ بعينه",
+              abs(_M["gold"]["remaining"] - _g51) < 0.001
+              and abs(_M["cash"]["remaining"] - _c51) < 0.01,
+              f"{_M['gold']['remaining']} / {_g51}")
+
+        # ══ كشف الحساب يسمّي القيد بمعناه ══
+        _st51 = {r["eid"]: r["op"] for r in _j51.statement(
+            conn, _ma, "2026-01-01", "2026-12-31")}
+        _stx = {r["eid"]: r["op"] for r in _j51.statement(
+            conn, _xa, "2026-01-01", "2026-12-31")}
+        check("كشف الحساب: «قيد يومي · مبيعات» عند محمد و«· مرتجع» عند الجهة",
+              _st51[_e1] == "قيد يومي · مبيعات"
+              and _stx[_e1] == "قيد يومي · مرتجع",
+              f"{_st51[_e1]} | {_stx[_e1]}")
+        check("و«· سداد» للنقد والذهب المسلَّم",
+              _st51[_e5] == "قيد يومي · سداد"
+              and _st51[_e3] == "قيد يومي · سداد", str(_st51[_e5]))
+        _cash51 = {r["eid"]: r["op"] for r in _j51.statement(
+            conn, acc_id(conn, "1400"), "2026-06-01", "2026-06-30")}
+        check("وكشف الصندوق لا يُوسَم بمنظور الجهة",
+              _cash51.get(_e5) == "قيد يومي", str(_cash51.get(_e5)))
+
+        # ══ تحليل الحركة وتفصيل اللوحة يقرآن الشيء نفسه ══
+        _b51 = _mv51.analyze(conn, _ma, "2026-01-01", "2026-12-31")
+        _bb = {b["label"]: b for b in _b51["buckets"]}
+        check("تحليل الحركة: المبيعات والمرتجع والقبض كاللوحة",
+              abs(_bb["مبيعات"]["gold"] - 90.0) < 0.001
+              and abs(_bb["مرتجع"]["gold"] + 5.0) < 0.001
+              and abs(_bb["قبض"]["gold"] + 15.0) < 0.001
+              and abs(_b51["opening"]["gold"] - 20.0) < 0.001,
+              " · ".join(f"{k}={v['gold']}" for k, v in _bb.items()))
+        _d51 = _cb51.detail(conn, _ma, "2026-01-01", "2026-12-31")
+        check("وتفصيل الحركة مجاميعه أرقام اللوحة نفسها",
+              all(abs(_d51["totals"][k]["gold"] - _M["gold"][k]) < 0.002
+                  and abs(_d51["totals"][k]["cash"] - _M["cash"][k]) < 0.02
+                  for k in _cb51.KINDS), str(_d51["totals"]))
+        check("والقيد المقسوم سطران بعمودين",
+              sorted(r["cat"] for r in _d51["rows"] if r["eid"] == _e7)
+              == ["open", "sales"])
+
+    try:
+        from PyQt5 import QtWidgets as _QW51
+        _app51 = _QW51.QApplication.instance() or _QW51.QApplication([])
+        from ui.customers_screen import (CustomersScreen as _CS51,
+                                         MovementDetailDialog as _MD51)
+        _s51 = _CS51({"id": 1, "username": "admin", "role": "admin",
+                      "role_local": "accountant"})
+        _s51.since_start.setChecked(True)
+        _s51.hide_idle.setChecked(False)
+        _s51.refresh()
+        _s51.search.setText("محمد القيد")
+        _s51.tabs.setCurrentIndex(1)
+        _s51.t_cash.setCurrentCell(0, 0)
+        check("تلميح «حركات أخرى» يسمّي ما فيها",
+              "قيد يومي" in (_s51.t_cash.item(0, 6).toolTip() or ""),
+              _s51.t_cash.item(0, 6).toolTip()[:40])
+        with db(readonly=True) as conn:
+            _dd = _MD51(_s51, "محمد", _cb51.detail(conn, _ma))
+        check("نافذة التفصيل تُبنى بأعمدتها وسبب كل قيد",
+              _dd.table.rowCount() >= 7
+              and _dd.table.horizontalHeaderItem(7).text() == "لماذا")
+        _dd.close()
+        _s51.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

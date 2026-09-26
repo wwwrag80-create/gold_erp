@@ -154,6 +154,13 @@ class CustomersScreen(QtWidgets.QWidget):
         btn_ledger = QtWidgets.QPushButton("📄 كشف حساب العميل")
         btn_ledger.setObjectName("ghost")
         btn_ledger.clicked.connect(self.open_ledger)
+        btn_detail = QtWidgets.QPushButton("🔍 تفصيل الحركة")
+        btn_detail.setObjectName("ghost")
+        btn_detail.setToolTip(
+            "كل قيدٍ للعميل المحدد، والعمود الذي حُسب فيه ولماذا —\n"
+            "فالقيد اليومي يُقرأ بحسابه المقابل: مبيعات أو مرتجع أو "
+            "سداد أو رصيد سابق")
+        btn_detail.clicked.connect(self.show_detail)
         btn_print = QtWidgets.QPushButton("🖨 معاينة وطباعة")
         btn_print.clicked.connect(self.print_report)
         btn_export = QtWidgets.QPushButton("⬇ تصدير Excel")
@@ -164,6 +171,7 @@ class CustomersScreen(QtWidgets.QWidget):
         tools.addWidget(btn_add)
         tools.addWidget(self.btn_remove)
         tools.addStretch(1)
+        tools.addWidget(btn_detail)
         tools.addWidget(btn_ledger)
         tools.addWidget(btn_export)
         tools.addWidget(btn_print)
@@ -341,6 +349,13 @@ class CustomersScreen(QtWidgets.QWidget):
                     QtGui.QBrush(QtGui.QColor(p["redText"])))
             self._paint_grade(t.item(i, 11), x["grade"])
             self._paint_grade(t.item(i, 9), x["grade"])
+            # «حركات أخرى» لا تبقى مجهولة: التلميح يسمّي ما فيها
+            parts = x.get("other_parts") or {}
+            if parts:
+                t.item(i, 6).setToolTip("\n".join(
+                    f"{k}: {self._fmt(side, v)}" for k, v in
+                    sorted(parts.items(), key=lambda kv: -abs(kv[1])))
+                    + "\n\n(«🔍 تفصيل الحركة» يعرضها قيداً قيداً)")
         # صف الإجمالي من المعروض لا من الكل: يطابق ما أمام المستخدم
         tot = {k: sum(r[side][k] for r in rows) for k in cb.KINDS}
         s = cb._side(tot, side)
@@ -492,6 +507,28 @@ class CustomersScreen(QtWidgets.QWidget):
         self.detail.setText("  ·  ".join(parts))
 
     # ══════════ الإجراءات ══════════
+    def show_detail(self):
+        """نافذةٌ بحركة العميل قيداً قيداً وعمود كل قيد — لماذا هنا؟"""
+        r = self._selected()
+        if not r:
+            err(self, "اختر عميلاً من الجدول أولاً")
+            return
+        try:
+            d_from = (None if self.since_start.isChecked()
+                      else dstr(self.d_from))
+            with db(readonly=True) as conn:
+                res = cb.detail(conn, r["account_id"], d_from,
+                                dstr(self.d_to))
+        except Exception as e:
+            err(self, e)
+            return
+        dlg = MovementDetailDialog(self, r["name"], res,
+                                   self.on_drill_account and
+                                   (lambda: self.on_drill_account(
+                                       r["account_id"])))
+        self._detail_dlg = dlg
+        dlg.exec_()
+
     def open_ledger(self, *_):
         r = self._selected()
         if r and self.on_drill_account:
@@ -597,3 +634,86 @@ class CustomersScreen(QtWidgets.QWidget):
                 account_ids=self._shown_ids(t))
         except Exception as e:
             err(self, e)
+
+
+class MovementDetailDialog(QtWidgets.QDialog):
+    """حركة عميلٍ قيداً قيداً — ومع كل قيدٍ عمودُه في اللوحة وسببه.
+
+    المجاميع أسفلها تساوي أرقام اللوحة بالضبط: فمن رأى رقماً لا يفهمه
+    يجد هنا القيود التي صنعته.
+    """
+    COLS = ["التاريخ", "العملية", "رقم المستند", "الحساب المقابل",
+            "يُحسب في", "ذهب", "نقد", "لماذا", "البيان"]
+
+    def __init__(self, parent, name, res, on_ledger=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"تفصيل الحركة — {name}")
+        self.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.resize(1180, 640)
+        self.res = res
+        self.filter = QtWidgets.QComboBox()
+        self.filter.addItem("كل الأعمدة", "")
+        for k in cb.KINDS:
+            self.filter.addItem(_ek_label(k), k)
+        self.filter.currentIndexChanged.connect(self._render)
+        self.table = make_table()
+        enhance(self.table, key="customers_detail")
+        self.totals = QtWidgets.QLabel()
+        self.totals.setObjectName("cardSub")
+        self.totals.setWordWrap(True)
+        head = QtWidgets.QHBoxLayout()
+        head.addWidget(QtWidgets.QLabel("العمود:"))
+        head.addWidget(self.filter)
+        head.addStretch(1)
+        if on_ledger:
+            b = QtWidgets.QPushButton("📄 كشف الحساب")
+            b.setObjectName("ghost")
+            b.clicked.connect(lambda: (self.accept(), on_ledger()))
+            head.addWidget(b)
+        note = QtWidgets.QLabel(
+            "القيد اليومي يُقرأ بحسابه المقابل: مدينٌ مقابل جهةٍ أو بضاعةٍ = "
+            "مبيعات · دائنٌ مقابل جهةٍ أو بضاعة = مرتجع · دائنٌ مقابل صندوقٍ "
+            "أو خزينةٍ أو خصم = سداد · مقابل «الأرصدة الافتتاحية» = رصيد "
+            "سابق. والقيد المقسوم بين حسابين يظهر سطرين.")
+        note.setObjectName("cardSub")
+        note.setWordWrap(True)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addLayout(head)
+        lay.addWidget(note)
+        lay.addWidget(self.table, 1)
+        lay.addWidget(self.totals)
+        self._render()
+
+    def _render(self):
+        k = self.filter.currentData()
+        rows = [r for r in self.res["rows"] if not k or r["cat"] == k]
+        # المرتجع والسداد موجبان كما في اللوحة — العمود يقول اتجاههما
+        def _s(r):
+            return -1.0 if r["cat"] in ("returns", "paid") else 1.0
+        fill(self.table, self.COLS, [
+            (r["date"], r["op"], r["doc_no"] or "—", r["name"],
+             r["cat_label"],
+             f"{kv.g(r['gold'] * _s(r)):,.3f}" if r["gold"] else "",
+             f"{r['cash'] * _s(r):,.2f}" if r["cash"] else "",
+             r["why"], r["desc"]) for r in rows])
+        p = _pal()
+        colors = {"sales": p["goldDim"], "returns": p["redText"],
+                  "paid": p["green"], "open": p["muted"]}
+        for i, r in enumerate(rows):
+            col = colors.get(r["cat"])
+            if col:
+                self.table.item(i, 4).setForeground(
+                    QtGui.QBrush(QtGui.QColor(col)))
+        fit_columns(self.table, [8, 11, 8, 11, 7, 7, 7, 27, 14])
+        t = self.res["totals"]
+        u = kv.unit()
+        self.totals.setText("   ·   ".join(
+            f"{_ek_label(c)}: {kv.g(t[c]['gold']):,.3f} {u}"
+            f" / {t[c]['cash']:,.2f} ريال"
+            for c in cb.KINDS if abs(t[c]["gold"]) > 0.0005
+            or abs(t[c]["cash"]) > 0.005))
+
+
+def _ek_label(cat):
+    from models.entry_kind import LABELS
+    return LABELS.get(cat, cat)

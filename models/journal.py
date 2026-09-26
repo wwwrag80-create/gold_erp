@@ -301,10 +301,34 @@ def statement(conn, account_id, date_from=None, date_to=None):
     # سطر واحد متكامل لكل مستند يجمع الوزن والنقد معاً
     split = merged
 
+    # ══ القيد اليومي يُقرأ بحسابه المقابل ══
+    # «قيد يومي» وحده لا يقول ما جرى. فيُضاف إليه معناه من الطرف
+    # المقابل (`models.entry_kind`): «قيد يومي · مبيعات» حين يصير
+    # الحساب مديناً مقابل جهةٍ أو بضاعة، «· مرتجع» حين يصير دائناً،
+    # «· سداد» مقابل الصندوق، «· افتتاحي» مقابل الأرصدة الافتتاحية.
+    # فيفهم قارئ الكشف القيد كما يفهمه المحاسب — والمرشّح بنوع العملية
+    # يلتقطه مع جنسه («مبيعات» يُظهر فواتير البيع وقيودها معاً).
+    _kinds = None
+
     for r in split:
         gb = round(gb + r["gd"] - r["gc"], 3)
         cb = round(cb + r["cd"] - r["cc"], 2)
         doc_no, label = _doc_info(conn, r["st"], r["sid"], dcache)
+        cat = None
+        if (r["st"] or "") in ("", "manual", "tax_debit_notes"):
+            try:
+                if _kinds is None:
+                    from models.entry_kind import Kinds
+                    _kinds = Kinds(conn)
+                # بمنظور الجهة وحدها: كشف الصندوق أو المخزون يُقرأ
+                # فيه القيد بمعنى معكوس، فلا يُوسَم هناك
+                if not all(i in _kinds.party for i in ids):
+                    raise LookupError
+                cat = _kinds.main_cat(r["eid"], ids)
+                from models.entry_kind import journal_label
+                label = journal_label(label, cat)
+            except Exception:
+                cat = None
         # قيود التسوية تُميَّز عن التوريد بوصف القيد نفسه
         if r["st"] == "work_orders" and (r["un"] or "").startswith(
                 ("حذف رقم التشغيل", "زيادة في رقم التشغيل",
@@ -318,7 +342,7 @@ def statement(conn, account_id, date_from=None, date_to=None):
                          ("cash" if (r["cd"] or r["cc"]) else None),
                          ldesc=(r.get("_ld") or None))),
                      "desc": r["un"] or "",
-                     "src": r["st"], "sid": r["sid"],
+                     "src": r["st"], "sid": r["sid"], "cat": cat,
                      "gd": r["gd"], "gc": r["gc"], "gbal": gb,
                      "cd": r["cd"], "cc": r["cc"], "cbal": cb})
     return rows

@@ -50,9 +50,15 @@ def opening_account_ids(conn):
     return sorted(ids)
 
 
-def sql(conn, alias="e"):
-    """شرط SQL «القيد افتتاحي» على قيدٍ اسمه `alias`، ومعاملاته."""
-    acc = opening_account_ids(conn)
+def sql(conn, alias="e", by_counter=True):
+    """شرط SQL «القيد افتتاحي» على قيدٍ اسمه `alias`، ومعاملاته.
+
+    `by_counter=False` يُسقط شرط «الطرف المقابل»: لمن يقرأ القيد اليومي
+    سطراً سطراً بحصص مقابلاته (`models.entry_kind`) — فقيدٌ نصفه مقابل
+    الأرصدة الافتتاحية ونصفه مقابل جهةٍ يُقرأ نصفه رصيداً سابقاً ونصفه
+    مبيعات، لا كلّه رصيداً سابقاً.
+    """
+    acc = opening_account_ids(conn) if by_counter else []
     parts = [f"{alias}.source_table IN ({','.join('?' * len(OPENING_SOURCES))})",
              f"{alias}.description LIKE ?"]
     params = list(OPENING_SOURCES) + [f"%{OPENING_TEXT}%"]
@@ -64,12 +70,12 @@ def sql(conn, alias="e"):
     return "(" + " OR ".join(parts) + ")", params
 
 
-def entry_ids(conn, ids):
+def entry_ids(conn, ids, by_counter=True):
     """أيُّ القيود المعطاة افتتاحي — لمن يقرأ كشفاً سطراً سطراً."""
     ids = sorted({int(i) for i in ids if i})
     if not ids:
         return set()
-    cond, params = sql(conn, "e")
+    cond, params = sql(conn, "e", by_counter)
     out = set()
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]

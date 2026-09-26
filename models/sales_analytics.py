@@ -131,26 +131,10 @@ def opening_balance_row(conn, customer_id, date_from=None, date_to=None):
         (customer_id,)).fetchone()
     if not r or not r["account_id"]:
         return None
-    p = [r["account_id"]]
-    clause = ""
-    if date_from:
-        clause += " AND e.entry_date>=?"
-        p.append(date_from)
-    if date_to:
-        clause += " AND e.entry_date<=?"
-        p.append(date_to)
-    # القاعدة الموحّدة (`models.opening`): كان يُقرأ من البيان وحده،
+    # القاعدة الموحّدة (`models.entry_kind`): كان يُقرأ من البيان وحده،
     # فيسقط القيد اليومي المقابل للأرصدة الافتتاحية وقيدُ فتح السنة
-    from models import opening as _opening
-    cond, cp = _opening.sql(conn, "e")
-    row = conn.execute(
-        "SELECT COALESCE(SUM(l.gold_debit-l.gold_credit),0) g,"
-        " COALESCE(SUM(l.cash_debit-l.cash_credit),0) c"
-        " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-        " WHERE e.is_deleted=0 AND l.account_id=?"
-        f" AND {cond}" + clause, [p[0]] + cp + p[1:]).fetchone()
-    g = round(row["g"] or 0, 3)
-    c = round(row["c"] or 0, 2)
+    from models import entry_kind as _ek
+    g, c = _ek.opening_part(conn, r["account_id"], date_from, date_to)
     if abs(g) < 0.001 and abs(c) < 0.01:
         return None
     return {"wo": "رصيد افتتاحي", "weight": g, "cash": c, "ref": "—"}
