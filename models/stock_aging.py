@@ -18,7 +18,7 @@
 يُدخَل اليوم لدفعةٍ ورَدَت الشهر الماضي، فعمرها من تاريخ قيدها لا من
 لحظة كتابتها. و`created_at` احتياطٌ لا أصل.
 
-**والرقم التجميعي ٠٠٠١ لا عمر له**: هو رصيد وزنٍ لا قطعة — يزيد
+**والرقم التجميعي (00010 · 0010) لا عمر له**: هو رصيد وزنٍ لا قطعة — يزيد
 وينقص بلا هوية، فلو عُومل كقطعةٍ عمرها عمر سجلّه لأظهر التقرير عشرات
 الكيلوات «راكدة منذ سنتين» وهي تدور كل يوم. فيُفصل في سطرٍ مستقلّ
 يُعلَن فيه أنه بلا عمر، ولا يدخل الفئات.
@@ -136,7 +136,9 @@ def report(conn, as_of=None, model=None):
     as_of = as_of or _today()
     rows = items(conn, as_of, model)
     aged = [x for x in rows if not x["is_bulk"]]
-    bulk = [x for x in rows if x["is_bulk"]]
+    # الأرقام التجميعية بترتيبها المعلن (00010 ثم 0010) لا بعمر سجلّها
+    bulk = sorted((x for x in rows if x["is_bulk"]),
+                  key=lambda x: (len(x["wo_no"] or "") * -1, x["wo_no"]))
 
     buckets = [dict(_blank(), label=BUCKET_LABELS[i], index=i)
                for i in range(len(BUCKETS))]

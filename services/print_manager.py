@@ -21,7 +21,7 @@ from pathlib import Path
 from PyQt5 import QtCore, QtGui, QtPrintSupport, QtWidgets
 
 import config
-from models.inventory import BULK_WO_NO
+from models.inventory import is_bulk_no
 from database.database import db
 from models import melting
 
@@ -428,10 +428,10 @@ def _tpl_invoice(conn, invoice_id):
         after = (wo["stones_after_discount"] if wo else 0) or 0
         standing = (wo["standing_gold"] if wo else 0) or 0
         reg = it["registered_weight"]
-        # الرقم التجميعي 0001 سجل واحد يحمل **الرصيد الكلي**، فطباعة
+        # الرقم التجميعي سجلٌّ واحد يحمل **الرصيد الكلي**، فطباعة
         # أعمدته كما هي تُظهر كل الرصيد بدل الوزن المُدخل في السطر.
         # لذلك نعرض وزن السطر نفسه: القائم = المقيد والذهب = المقيد.
-        if wo and (wo["work_order_no"] or "").strip() == BULK_WO_NO:
+        if wo and (wo["is_bulk"] or is_bulk_no(wo["work_order_no"])):
             standing = reg
             gold = reg
             small = big = after = 0.0
@@ -484,22 +484,9 @@ def _tpl_invoice(conn, invoice_id):
           <td>{_w(inv['grand_total'], 2)}</td></tr>
     </table>'''
 
-    # الحساب الذي خرج منه ذهب الفاتورة — يُطبع على الورقة لأن الفاتورة
-    # نفسها هي مستند الخصم: من قرأها بعد سنة يعرف من أي مخزنٍ خرجت
-    # البضاعة بلا أن يفتح القيد.
-    _src = conn.execute(
-        "SELECT a.code, a.name FROM accounts a WHERE a.id="
-        " COALESCE((SELECT source_account_id FROM invoices WHERE id=?),"
-        "          (SELECT id FROM accounts WHERE code='1200'))",
-        (invoice_id,)).fetchone()
-    src_label = f"{_src['name']} ({en(_src['code'])})" if _src else "—"
-    try:
-        _k = int(inv["scrap_karat"] or 0)
-    except (KeyError, IndexError, TypeError, ValueError):
-        _k = 0
-    if _k:
-        src_label += f" — عيار {en(str(_k))}"
-
+    # «من حساب» **لا يُطبع**: الفاتورة ورقةُ العميل، والمخزن الذي خرج
+    # منه الذهب شأنٌ داخليٌّ للمصنع لا يعني العميل. يبقى في الشاشة وفي
+    # القيد وكشف الحساب — ومن أراده فتح المستند لا الورقة.
     time_str = (inv["created_at"] or "")[11:19] or "—"
     # رمز QR لصور موديلات الفاتورة — يمين الورقة تحت عنوان المستند.
     # تحسين بصري بحت: تعذّره يعيد "" فتُطبع الفاتورة كما هي.
@@ -523,9 +510,6 @@ def _tpl_invoice(conn, invoice_id):
           <td style="text-align:right; border:1px solid #999; padding:6px;
                      font-weight:bold; font-size:12pt;">
             {cust['name'] if cust else '—'}</td></tr>
-      <tr><td {TH}>من حساب</td>
-          <td style="text-align:right; border:1px solid #999;
-                     padding:6px;">{src_label}</td></tr>
     </table>'''
 
     body = f'''{info}
@@ -1380,7 +1364,7 @@ def _tpl_work_order(conn, wo_id):
     # ══ نقرأ سطور الدفعة المحفوظة ══
     # القراءة من `work_orders` بـ`entry_id` تفشل في حالتين:
     #   • بعد التعديل: الأطقم تُربط بقيد جديد فلا يطابق قيد الكشف
-    #   • الرقم التجميعي 0001: سجل واحد مربوط بأول دفعة فقط
+    #   • الرقم التجميعي: سجل واحد مربوط بأول دفعة فقط
     # جدول سطور الدفعة يحفظ ما أُدخل فعلاً في كل قيد — فيصحّ دائماً.
     rows = []
     if entry:
@@ -2434,11 +2418,12 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
             tdw(en(f"{x['days']:,}")),
             tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
             tdw(_g(x["weight"]))) + "</tr>"
-    if r["bulk"]["count"]:
+    # سطرٌ لكل رقمٍ تجميعي (00010 · 0010): رصيدان مستقلّان
+    for b in r.get("bulk_rows") or []:
         body += "<tr>" + cells(
-            thw("٠٠٠١"), thw("رصيد تجميعي"), thw("—"), thw("—"),
+            thw(en(b["wo_no"])), thw("رصيد تجميعي"), thw("—"), thw("—"),
             thw("بلا عمر — خارج الفئات"),
-            thw(_g(r["bulk"]["weight"]))) + "</tr>"
+            thw(_g(b["weight"]))) + "</tr>"
     if not body:
         body = f'<tr><td {TD} colspan="6">لا مخزون</td></tr>'
 
@@ -2469,8 +2454,8 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
 
     <div class="note">تاريخ الدخول من قيد التوريد لا من وقت كتابة
       السجل، فالدفعة التي تُسجَّل اليوم وقد ورَدَت الشهر الماضي عمرها
-      من تاريخ قيدها. والرقم التجميعي ٠٠٠١ رصيدُ وزنٍ لا قطعة فلا عمر
-      له — يُعرض في ذيل الجدول خارج الفئات.</div>
+      من تاريخ قيدها. والرقمان التجميعيان 00010 و0010 رصيدُ وزنٍ لا
+      قطع فلا عمر لهما — يُعرض كلٌّ منهما في ذيل الجدول خارج الفئات.</div>
     <div class="note"><ul>{lines}</ul></div>
     '''
     return (_header("أعمار الموديلات — ما رقد في المخزن", "—", today,

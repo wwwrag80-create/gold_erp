@@ -5,7 +5,7 @@
 إجماليٍّ في ذيلها ولوحاتُ ما بعد الفاتورة.
 
 تدعم: عيار إدخالٍ لكل سطر (والقيد بمكافئ 18 دائماً)، والتحويل الداخلي
-(إعادة تشغيل)، والرقم التجميعي 0001 بالوزن الجزئي، والمرتجع لرقم تشغيل
+(إعادة تشغيل)، والرقمان التجميعيان 00010 و0010 بالوزن الجزئي، والمرتجع لرقم تشغيل
 غير مسجّل، وإشعاراً مديناً ضريبياً لفاتورة سابقة غير ضريبية.
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -14,7 +14,7 @@ import config
 from database.database import db
 from models import entities, inventory, invoices
 from models.accounts import acc_id
-from models.inventory import BULK_WO_NO
+from models.inventory import BULK_LABEL, is_bulk_no
 from services import drafts
 from services import gold_math, karat_view as kv
 from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
@@ -118,11 +118,11 @@ class NewReturnItemDialog(QtWidgets.QDialog):
 
 
 class BulkWeightDialog(QtWidgets.QDialog):
-    """نافذة إدخال الوزن المطلوب من الرقم التجميعي 0001."""
+    """نافذة إدخال الوزن المطلوب من رقمٍ تجميعي (00010 أو 0010)."""
 
-    def __init__(self, parent, available, is_sale):
+    def __init__(self, parent, available, is_sale, wo_no=""):
         super().__init__(parent)
-        self.setWindowTitle(f"الرقم التجميعي {BULK_WO_NO}")
+        self.setWindowTitle(f"الرقم التجميعي {wo_no}".strip())
         self.w = wspin()
         form = QtWidgets.QFormLayout(self)
         form.addRow(QtWidgets.QLabel(
@@ -598,7 +598,7 @@ class SalesScreen(QtWidgets.QWidget):
         self.model_no.lineEdit().setPlaceholderText("رقم الموديل")
         self.barcode = QtWidgets.QLineEdit()
         self.barcode.setPlaceholderText(
-            f"امسح الباركود أو اكتب الرقم ({BULK_WO_NO} = رصيد تجميعي)")
+            f"امسح الباركود أو اكتب الرقم ({BULK_LABEL} = رصيد تجميعي)")
         # البحث عند مغادرة الخانة لا عند Enter وحده: الماسح الضوئي
         # يُنهي بـEnter فينتقل التركيز فيقع البحث، ومن ينقر بالفأرة
         # على الخانة التالية يجد البيانات جاهزةً كذلك.
@@ -1448,14 +1448,16 @@ class SalesScreen(QtWidgets.QWidget):
             self._focus(self.barcode)
             return
         try:
+            # من كتب 0001 بحكم العادة يُدلّ على الرقم الجديد
+            inventory.assert_not_legacy(no)
             is_sale = self.kind.currentData() == "sale"
             k = self._k()
             reg_view = self.line_reg.value()
             with db() as conn:
                 wo = inventory.get_wo_by_no(conn, no)
-                if not wo and no == BULK_WO_NO:
+                if not wo and is_bulk_no(no):
                     wo = inventory.get_or_create_bulk_wo(
-                        conn, self.user["username"])
+                        conn, self.user["username"], no)
             if not wo and not is_sale:
                 # **مرتجع لرقم تشغيل غير مسجّل**: بضاعة قديمة تعود
                 # للمصنع قبل تشغيل النظام. تُسجَّل بمكوّناتها المكتوبة
@@ -1493,7 +1495,8 @@ class SalesScreen(QtWidgets.QWidget):
                 avail = kv.g(wo["registered_weight"], k)
                 weight = reg_view
                 if weight <= 0:
-                    dlg = BulkWeightDialog(self, avail, is_sale)
+                    dlg = BulkWeightDialog(self, avail, is_sale,
+                                           wo["work_order_no"])
                     if dlg.exec_() != QtWidgets.QDialog.Accepted:
                         return
                     weight = dlg.value()

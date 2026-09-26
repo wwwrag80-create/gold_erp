@@ -19,18 +19,46 @@ PURE_ACCOUNT = SCRAP_ACCOUNT
 
 BOX_CODE = {18: SCRAP_ACCOUNT, 21: SCRAP_ACCOUNT, 22: SCRAP_ACCOUNT,
             24: SCRAP_ACCOUNT}
-BULK_WO_NO = "0001"   # رقم تشغيل محجوز: رصيد تجميعي بالوزن، بلا قطع فردية
+# ══ الأرقام التجميعية ══
+# رقمان محجوزان، كلٌّ منهما **رصيدٌ وزنيٌّ مستقل** بلا قطعٍ فردية —
+# بالمواصفات نفسها: يُورَّد إليه ويُباع منه بالوزن، ويقبل التكرار في
+# الدفعة الواحدة، ولا يُسوّى إلا بالتوريد. كان رقماً واحداً «0001»
+# فصار «00010» (والسجلّ القائم نُقل إليه برصيده وحركته كما هي —
+# الترحيل 22 في `database.migrate_schema`)، وأُضيف معه «0010».
+BULK_WO_NO = "00010"            # الأول — وهو 0001 سابقاً
+BULK_WO_NO_2 = "0010"           # الثاني — بالمواصفات نفسها
+BULK_WO_NOS = (BULK_WO_NO, BULK_WO_NO_2)
+LEGACY_BULK_WO_NO = "0001"      # الرقم القديم: محجوزٌ كي لا يُنشأ طقمٌ به
+BULK_LABEL = f"{BULK_WO_NO} أو {BULK_WO_NO_2}"
+
+
+def is_bulk_no(no):
+    """هل الرقم أحد الأرقام التجميعية؟"""
+    return str(no or "").strip() in BULK_WO_NOS
+
+
+def assert_not_legacy(no):
+    """الرقم التجميعي القديم لا يُستعمل لطقمٍ مفرد.
+
+    من اعتاد كتابة 0001 سنواتٍ سيكتبها مرةً أخرى؛ فلو قُبلت لنشأ طقمٌ
+    مفردٌ اسمه 0001 بوزنٍ كان يجب أن يذهب إلى الرصيد التجميعي — خطأٌ
+    صامتٌ لا يظهر إلا في الجرد. فيُردّ برسالةٍ تدلّه على الرقم الجديد.
+    """
+    if str(no or "").strip() == LEGACY_BULK_WO_NO:
+        raise ValueError(
+            f"الرقم التجميعي {LEGACY_BULK_WO_NO} صار {BULK_WO_NO}.\n"
+            f"اكتب {BULK_WO_NO} أو {BULK_WO_NO_2} للرصيد التجميعي.")
 
 
 def classify_item(wo_no, gold, small_stones, big_stones):
     """التصنيف الآلي لنوع الطقم بحسب مكوّناته:
 
-    * رقم التشغيل 0001            → إيطالي (مباشرة).
+    * الرقم التجميعي (00010 · 0010) → إيطالي (مباشرة).
     * يحتوي على أحجار (كبيرة)     → أحجار.
     * ذهب وفصوص (صغيرة) فقط       → زركون.
     * ذهب فقط                     → ألماس.
     """
-    if str(wo_no).strip() == BULK_WO_NO:
+    if is_bulk_no(wo_no):
         return "إيطالي"
     if (big_stones or 0) > 0:
         return "أحجار"
@@ -39,26 +67,52 @@ def classify_item(wo_no, gold, small_stones, big_stones):
     return "ألماس"
 
 
-def get_or_create_bulk_wo(conn, username):
-    """يضمن وجود رقم التشغيل التجميعي 0001 كسجل واحد ثابت — لا يُنشأ من
+def get_or_create_bulk_wo(conn, username, wo_no=BULK_WO_NO):
+    """يضمن وجود الرقم التجميعي `wo_no` كسجلٍّ واحدٍ ثابت — لا يُنشأ من
     جديد أبداً، بل يزيد وينقص رصيده الوزني عبر التوريد/البيع/المرتجع."""
-    wo = get_wo_by_no(conn, BULK_WO_NO)
+    wo_no = str(wo_no or BULK_WO_NO).strip()
+    if not is_bulk_no(wo_no):
+        raise ValueError(f"{wo_no} ليس رقماً تجميعياً")
+    wo = get_wo_by_no(conn, wo_no)
     if wo:
+        # رقمٌ تجميعيٌّ مشغولٌ بطقمٍ مفرد (أُدخل قبل حجزه): لا يُمسّ
+        # وزنه على أنه رصيد — فيُفسد القطعة والرصيد معاً.
+        if not wo["is_bulk"]:
+            raise ValueError(
+                f"الرقم {wo_no} مستعملٌ لطقمٍ مفرد لا لرصيدٍ تجميعي —\n"
+                "صحّح رقم ذلك الطقم أولاً من «حركة الطقم».")
         return wo
+    # المواصفات من الرقم الأول إن وُجد: الثاني «بمواصفاته نفسها»
+    twin = next((get_wo_by_no(conn, n) for n in BULK_WO_NOS
+                 if n != wo_no and get_wo_by_no(conn, n)), None)
+    wage = (twin["wage_per_gram"] if twin and twin["is_bulk"]
+            else config.DEFAULT_WAGE_PER_GRAM)
     conn.execute(
         "INSERT INTO work_orders(work_order_no,gross_weight,stones_weight,"
         "gold_weight,small_stones,big_stones,stones_after_discount,"
         "standing_gold,discount_rate,registered_weight,wage_per_gram,is_bulk,"
-        "notes,created_by) VALUES(?,0,0,0,0,0,0,0,0,0,?,1,?,?)",
-        (BULK_WO_NO, config.DEFAULT_WAGE_PER_GRAM,
-         "رصيد تجميعي بالوزن — لا يمثل قطعة مفردة", username))
-    return get_wo_by_no(conn, BULK_WO_NO)
+        "item_type,notes,created_by)"
+        " VALUES(?,0,0,0,0,0,0,0,0,0,?,1,'إيطالي',?,?)",
+        (wo_no, wage, "رصيد تجميعي بالوزن — لا يمثل قطعة مفردة", username))
+    return get_wo_by_no(conn, wo_no)
 
 
-def adjust_bulk_wo(conn, delta_weight, username):
-    """يزيد/ينقص رصيد الرقم التجميعي 0001 (موجب = توريد أو مرتجع، سالب
-    = بيع) — يبقى الرقم «بالمخزون» دوماً بغض النظر عن رصيده."""
-    wo = get_or_create_bulk_wo(conn, username)
+def adjust_bulk_wo(conn, delta_weight, username, wo_no=None, wo_id=None):
+    """يزيد/ينقص رصيد رقمٍ تجميعي (موجب = توريد أو مرتجع، سالب = بيع) —
+    يبقى الرقم «بالمخزون» دوماً بغض النظر عن رصيده.
+
+    **أيّ رقم**: `wo_id` حين يكون السجل معروفاً (بند فاتورة، حذف
+    مستند)، أو `wo_no` حين يُكتب الرقم (سطر توريد). ولا يُفترض الأول
+    أبداً إلا بلا أيٍّ منهما — فالرقمان رصيدان مستقلّان، وبيعٌ من الثاني
+    يُخصم من الأول لو افتُرض.
+    """
+    if wo_id is not None:
+        wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
+                          (wo_id,)).fetchone()
+        if not wo or not wo["is_bulk"]:
+            raise ValueError("السجل ليس رقماً تجميعياً")
+    else:
+        wo = get_or_create_bulk_wo(conn, username, wo_no or BULK_WO_NO)
     # الرصيد السالب مسموح: الرقم التجميعي **رصيد وزني** لا قطعة
     # مفردة، وخروج بضاعة قبل تسجيل توريدها حالة واقعية. الرصيد
     # السالب يظهر في الكشف فيُصحَّح لاحقاً، والقيد المزدوج يبقى
@@ -68,7 +122,8 @@ def adjust_bulk_wo(conn, delta_weight, username):
         "UPDATE work_orders SET registered_weight=?, gold_weight=?,"
         " standing_gold=?, status='in_stock' WHERE id=?",
         (new_reg, new_reg, new_reg, wo["id"]))
-    return get_wo_by_no(conn, BULK_WO_NO)
+    return conn.execute("SELECT * FROM work_orders WHERE id=?",
+                        (wo["id"],)).fetchone()
 
 
 def next_wo_no(conn) -> str:
@@ -173,7 +228,7 @@ def create_work_orders_batch(conn, rows, entry_date, username,
     **حساب الوجهة** (الذهب المشغول افتراضاً) / سطر دائن 1100 واحد بنفس
     الإجمالي — ليظهر الأثر في كشف كل حساب كرقم إجمالي واحد للعملية بدل
     سطر منفصل لكل طقم.
-    الرقم التجميعي 0001 حالة خاصة: لا يُنشأ من جديد، بل يزيد رصيده
+    الرقم التجميعي حالة خاصة: لا يُنشأ من جديد، بل يزيد رصيده
     الوزني القائم فقط (رصيد تراكمي وليس قطعة مفردة).
     rows: [{"wo_no","gold","small_stones","big_stones","discount_rate",
             "wage_per_gram","notes","karat"}, ...]
@@ -207,11 +262,13 @@ def create_work_orders_batch(conn, rows, entry_date, username,
         # لكن السالب خطأ إدخال.
         if wage < 0:
             raise ValueError(f"أجر الجرام لا يكون سالباً — الطقم {wo_no}")
-        is_bulk = wo_no == BULK_WO_NO
+        is_bulk = is_bulk_no(wo_no)
+        if not is_bulk:
+            assert_not_legacy(wo_no)
         if any(p["wo_no"] == wo_no for p in prepared):
-            # الرقم التجميعي 0001 يقبل التكرار: رصيد وزني مجمّع لا
+            # الرقم التجميعي يقبل التكرار: رصيد وزني مجمّع لا
             # قطعة مفردة، فتعدد سطوره في الدفعة الواحدة طبيعي.
-            if wo_no != BULK_WO_NO:
+            if not is_bulk:
                 raise ValueError(
                     f"رقم التشغيل {wo_no} مكرر داخل نفس الدفعة")
         if not is_bulk and conn.execute(
@@ -259,13 +316,13 @@ def create_work_orders_batch(conn, rows, entry_date, username,
     created = []
     for p in prepared:
         if p["is_bulk"]:
-            wo = adjust_bulk_wo(conn, p["reg"], username)
+            wo = adjust_bulk_wo(conn, p["reg"], username, wo_no=p["wo_no"])
             conn.execute("UPDATE work_orders SET wage_per_gram=?,"
                          " entry_id=? WHERE id=?",
                          (p["wage"], entry_id, wo["id"]))
             log_action(conn, username, "update", "work_orders", wo["id"],
-                      f"bulk +{p['reg']}")
-            created.append({"id": wo["id"], "work_order_no": BULK_WO_NO,
+                      f"bulk {p['wo_no']} +{p['reg']}")
+            created.append({"id": wo["id"], "work_order_no": p["wo_no"],
                             "registered_weight": p["reg"],
                             "standing_gold": p["reg"],
                             "barcode_path": None, "is_bulk": True})
@@ -299,7 +356,7 @@ def create_work_orders_batch(conn, rows, entry_date, username,
             (created[0]["id"], entry_id))
 
     # حفظ حصة كل سطر كما أُدخلت — تُقرأ عند التعديل بدل رصيد
-    # الطقم التراكمي (يهمّ خصوصاً الرقم التجميعي 0001).
+    # الطقم التراكمي (يهمّ خصوصاً الرقم التجميعي).
     for i, (p_, c_) in enumerate(zip(prepared, created)):
         conn.execute(
             "INSERT INTO wo_batch_lines(entry_id,work_order_id,model_no,"
@@ -447,18 +504,20 @@ def opening_stock_batch(conn, rows, entry_date, username):
         model_no = str(r.get("model_no") or "").strip() or None
         if not wo_no:
             raise ValueError("رقم تشغيل فارغ في أحد الأسطر")
-        # الرقم التجميعي 0001 يقبل رصيداً افتتاحياً كغيره: فالمصنع قد
+        # الرقم التجميعي يقبل رصيداً افتتاحياً كغيره: فالمصنع قد
         # يبدأ برصيد وزني مجمّع بلا قطع مفردة. يُعالَج بزيادة رصيده
         # بدل إنشاء سجل جديد (لأنه سجل واحد ثابت).
         if gold + small + big <= 0:
             raise ValueError(f"أدخل وزناً صحيحاً للطقم {wo_no}")
+        if not is_bulk_no(wo_no):
+            assert_not_legacy(wo_no)
         if any(p["wo_no"] == wo_no for p in prepared):
-            # الرقم التجميعي 0001 يقبل التكرار: رصيد وزني مجمّع لا
+            # الرقم التجميعي يقبل التكرار: رصيد وزني مجمّع لا
             # قطعة مفردة، فتعدد سطوره في الدفعة الواحدة طبيعي.
-            if wo_no != BULK_WO_NO:
+            if not is_bulk_no(wo_no):
                 raise ValueError(
                     f"رقم التشغيل {wo_no} مكرر داخل نفس الدفعة")
-        if wo_no != BULK_WO_NO and conn.execute(
+        if not is_bulk_no(wo_no) and conn.execute(
                 "SELECT 1 FROM work_orders WHERE work_order_no=?"
                 " AND is_deleted=0", (wo_no,)).fetchone():
             raise ValueError(f"رقم التشغيل {wo_no} مستخدم مسبقاً")
@@ -488,8 +547,8 @@ def opening_stock_batch(conn, rows, entry_date, username):
     created = []
     for p in prepared:
         # الرقم التجميعي سجل واحد ثابت: يُزاد رصيده بدل إنشاء سجل جديد
-        if p["wo_no"] == BULK_WO_NO:
-            bulk = get_or_create_bulk_wo(conn, username)
+        if is_bulk_no(p["wo_no"]):
+            bulk = get_or_create_bulk_wo(conn, username, p["wo_no"])
             conn.execute(
                 "UPDATE work_orders SET registered_weight=registered_weight+?,"
                 " standing_gold=standing_gold+?, gold_weight=gold_weight+?"
@@ -497,7 +556,7 @@ def opening_stock_batch(conn, rows, entry_date, username):
                 (p["reg"], p["standing"], p["gold"], bulk["id"]))
             log_action(conn, username, "update", "work_orders", bulk["id"],
                        f"رصيد افتتاحي تجميعي +{p['reg']:.2f}")
-            created.append({"id": bulk["id"], "work_order_no": BULK_WO_NO,
+            created.append({"id": bulk["id"], "work_order_no": p["wo_no"],
                             "registered_weight": p["reg"]})
             continue
         barcode_path = generate_work_order_barcode(p["wo_no"])
@@ -527,7 +586,7 @@ def opening_stock_batch(conn, rows, entry_date, username):
             (created[0]["id"], entry_id))
 
     # حفظ حصة كل سطر كما أُدخلت — تُقرأ عند التعديل بدل رصيد
-    # الطقم التراكمي (يهمّ خصوصاً الرقم التجميعي 0001).
+    # الطقم التراكمي (يهمّ خصوصاً الرقم التجميعي).
     for i, (p_, c_) in enumerate(zip(prepared, created)):
         conn.execute(
             "INSERT INTO wo_batch_lines(entry_id,work_order_id,model_no,"
@@ -593,8 +652,9 @@ def adjust_wo_weight(conn, wo_id, new_gold, new_small, new_big, username,
                       (wo_id,)).fetchone()
     if not wo:
         raise ValueError("الطقم غير موجود")
-    if wo["work_order_no"] == BULK_WO_NO:
-        raise ValueError("الرقم التجميعي 0001 يُعدَّل بالتوريد لا بالتسوية")
+    if wo["is_bulk"] or is_bulk_no(wo["work_order_no"]):
+        raise ValueError(f"الرقم التجميعي {wo['work_order_no']}"
+                         " يُعدَّل بالتوريد لا بالتسوية")
     new_gold = round(float(new_gold or 0), 3)
     new_small = round(float(new_small or 0), 3)
     new_big = round(float(new_big or 0), 3)
@@ -802,7 +862,7 @@ def turnover_panel(conn, panel, date_from=None, date_to=None):
     return [{"wo": r["wo"], "reg": round(r["reg"] or 0, 2),
              "standing": round(r["standing"] or 0, 2),
              "out_n": r["out_n"], "in_n": r["in_n"],
-             # الرقم التجميعي 0001 رصيد مجمّع لا قطعة، فلا يُنسب لشخص
+             # الرقم التجميعي رصيد مجمّع لا قطعة، فلا يُنسب لشخص
              "buyer": ("—" if r["is_bulk"] else (r["buyer"] or "—")),
              "returner": ("—" if r["is_bulk"]
                           else (r["returner"] or "—"))} for r in rows]
@@ -834,6 +894,9 @@ def create_return_stub(conn, wo_no, gold, small_stones, big_stones,
     wo_no = str(wo_no).strip()
     if not wo_no:
         raise ValueError("أدخل رقم التشغيل")
+    if is_bulk_no(wo_no):
+        raise ValueError(f"الرقم {wo_no} محجوز للرصيد التجميعي")
+    assert_not_legacy(wo_no)
     if get_wo_by_no(conn, wo_no):
         raise ValueError(f"رقم التشغيل {wo_no} مسجَّل مسبقاً")
     gold = float(gold or 0)
@@ -905,7 +968,8 @@ def adjust_or_delete_wo(conn, wo_id, username, new_gold=None,
     # العميل الذي أخذه لا على الذهب المشغول — وهو ما يفعله القيد
     # أصلاً (دائن 1200 / مدين 1250) فيبقى الميزان سليماً.
     if wo["is_bulk"]:
-        raise ValueError("الرقم التجميعي 0001 يُعدَّل بالتوريد لا بالتسوية")
+        raise ValueError(f"الرقم التجميعي {wo['work_order_no']}"
+                         " يُعدَّل بالتوريد لا بالتسوية")
 
     date = adjust_date or _dt.date.today().isoformat()
     old_reg = round(wo["registered_weight"] or 0, 3)
@@ -987,8 +1051,11 @@ def rename_work_order(conn, wo_id, new_no, username, reason=""):
     old_no = wo["work_order_no"]
     if new_no == old_no:
         return {"old": old_no, "new": new_no, "changed": 0}
-    if new_no == BULK_WO_NO:
-        raise ValueError("الرقم 0001 محجوز للرصيد التجميعي")
+    if wo["is_bulk"]:
+        raise ValueError(f"الرقم التجميعي {old_no} ثابتٌ لا يُعاد ترقيمه")
+    if is_bulk_no(new_no):
+        raise ValueError(f"الرقم {new_no} محجوز للرصيد التجميعي")
+    assert_not_legacy(new_no)
     if conn.execute("SELECT 1 FROM work_orders WHERE work_order_no=?"
                     " AND is_deleted=0 AND id<>?",
                     (new_no, wo_id)).fetchone():
@@ -1155,10 +1222,10 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
         cur = by_no.get(no)
         if cur is None:
             # ── طقم جديد يُضاف للدفعة ──
-            if no == BULK_WO_NO:
-                adjust_bulk_wo(conn, reg, username)
-                wid = get_or_create_bulk_wo(conn, username)["id"]
+            if is_bulk_no(no):
+                wid = adjust_bulk_wo(conn, reg, username, wo_no=no)["id"]
             else:
+                assert_not_legacy(no)
                 if conn.execute(
                         "SELECT 1 FROM work_orders WHERE work_order_no=?"
                         " AND is_deleted=0", (no,)).fetchone():
@@ -1207,8 +1274,8 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
             continue
 
         # ── بالمخزن: يُعدَّل وزنه والفرق يُرحَّل ──
-        if no == BULK_WO_NO:
-            adjust_bulk_wo(conn, reg - old_reg, username)
+        if wo["is_bulk"]:
+            adjust_bulk_wo(conn, reg - old_reg, username, wo_id=wo["id"])
         else:
             conn.execute(
                 "UPDATE work_orders SET model_no=?, gold_weight=?,"
@@ -1239,8 +1306,8 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
             kept_sold.append(no)
             continue
         old_reg = float(ln["registered_weight"] or 0)
-        if no == BULK_WO_NO:
-            adjust_bulk_wo(conn, -old_reg, username)
+        if wo["is_bulk"]:
+            adjust_bulk_wo(conn, -old_reg, username, wo_id=wo["id"])
         else:
             conn.execute("UPDATE work_orders SET is_deleted=1 WHERE id=?",
                          (wo["id"],))

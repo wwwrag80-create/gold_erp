@@ -375,7 +375,7 @@ CREATE TABLE IF NOT EXISTS sync_queue(
 CREATE INDEX IF NOT EXISTS ix_sync_status ON sync_queue(status, id);
 
 -- سطور دفعة التوريد: حصة كل طقم في الدفعة كما أُدخلت.
--- الرقم التجميعي 0001 سجل تراكمي واحد، فقراءة وزنه من work_orders
+-- الرقم التجميعي سجل تراكمي واحد، فقراءة وزنه من work_orders
 -- عند التعديل تُظهر الرصيد الكلي لا ما أُدخل في هذه الدفعة — وهو
 -- خطأ يُفسد التعديل. هذا الجدول يحفظ الحصة الأصلية لكل سطر.
 CREATE TABLE IF NOT EXISTS wo_batch_lines(
@@ -1335,6 +1335,51 @@ def migrate_schema() -> None:
         if wbl_cols and "karat" not in wbl_cols:
             conn.execute("ALTER TABLE wo_batch_lines ADD COLUMN karat"
                          " INTEGER NOT NULL DEFAULT 0")
+
+        # 22) الرقم التجميعي: 0001 ← 00010، ومعه رقمٌ تجميعيٌّ ثانٍ 0010
+        #     بالمواصفات نفسها (`models.inventory.BULK_WO_NOS`).
+        #     **يُنقل السجلّ نفسه لا يُنسخ**: معرّفه ثابت، فكل بند فاتورة
+        #     وسطر دفعة يشير إليه بالمعرّف يتبعه برصيده وحركته كما هي —
+        #     لا قيد يُمسّ ولا وزن. والنصوص الحرّة في القيود لا يُستبدل
+        #     فيها «0001»: هو جزءٌ من أرقام فواتير مثل S-00012، والاستبدال
+        #     الأعمى يُفسدها. والرقمان تُقرأ من هنا نصّاً لا من الوحدة —
+        #     الترحيل يسبق تحميل النماذج ولا يعتمد عليها.
+        w_cols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(work_orders)")]
+        if w_cols and "is_bulk" in w_cols:
+            legacy = conn.execute(
+                "SELECT id FROM work_orders WHERE work_order_no='0001'"
+                " AND is_bulk=1 AND is_deleted=0").fetchone()
+            taken = conn.execute(
+                "SELECT 1 FROM work_orders WHERE work_order_no='00010'"
+                " AND is_deleted=0").fetchone()
+            if legacy and not taken:
+                conn.execute("UPDATE work_orders SET work_order_no='00010'"
+                             " WHERE id=?", (legacy["id"],))
+                if wbl_cols:
+                    conn.execute("UPDATE wo_batch_lines SET wo_no='00010'"
+                                 " WHERE work_order_id=?", (legacy["id"],))
+            first = conn.execute(
+                "SELECT * FROM work_orders WHERE work_order_no='00010'"
+                " AND is_bulk=1 AND is_deleted=0").fetchone()
+            second = conn.execute(
+                "SELECT 1 FROM work_orders WHERE work_order_no='0010'"
+                " AND is_deleted=0").fetchone()
+            if first and not second:
+                # الثاني بمواصفات الأول: أجره ونوعه وملاحظته — ورصيدٌ صفر
+                conn.execute(
+                    "INSERT INTO work_orders(work_order_no,gross_weight,"
+                    "stones_weight,gold_weight,small_stones,big_stones,"
+                    "stones_after_discount,standing_gold,discount_rate,"
+                    "registered_weight,wage_per_gram,is_bulk,item_type,"
+                    "notes,status,created_by)"
+                    " VALUES('0010',0,0,0,0,0,0,0,0,0,?,1,?,?,'in_stock',"
+                    "'system')",
+                    (first["wage_per_gram"],
+                     (first["item_type"] if "item_type" in first.keys()
+                      else "") or "إيطالي",
+                     first["notes"] or
+                     "رصيد تجميعي بالوزن — لا يمثل قطعة مفردة"))
 
         # 18) سلسلة بصمات القيود — سجل تدقيق محصَّن (`models.integrity`).
         #     العمودان يبقيان فارغين للقيود السابقة حتى تُختم دفعةً

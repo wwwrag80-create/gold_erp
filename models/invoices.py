@@ -2,7 +2,7 @@
 """فواتير البيع والمرتجعات — الضريبة اختيارية لكل فاتورة + QR للضريبية
 فقط. الأجر مرتبط بكل رقم تشغيل ويُستدعى ديناميكياً منه (وليس رقماً
 موحّداً للفاتورة كلها)، مع إمكانية تعديله يدوياً لكل سطر. الرقم
-التجميعي 0001 يُباع/يُرتجع بجزء من رصيده الوزني القائم بدل قطعة كاملة.
+التجميعي يُباع/يُرتجع بجزء من رصيده الوزني القائم بدل قطعة كاملة.
 الطرف المقابل أي جهة تعامل (عميل/مورد/شريك) أو حساب داخلي."""
 from datetime import datetime
 
@@ -107,7 +107,7 @@ def _where_is(conn, work_order_id):
 
 def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
     """يحلّ كل سطر من السلة إلى (صف الطقم، الوزن المطبَّق، أجر الجرام).
-    cart: [{"work_order_id", "weight": None أو رقم للتجميعي 0001,
+    cart: [{"work_order_id", "weight": None أو رقم للتجميعي (00010 · 0010),
             "wage_override": None أو رقم}]"""
     need_status = "in_stock" if kind == "sale" else "sold"
     out = []
@@ -351,7 +351,7 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
              int(li.get("karat") or 0)))
         if wo["is_bulk"]:
             delta = li["weight"] if kind == "sale_return" else -li["weight"]
-            adjust_bulk_wo(conn, delta, username)
+            adjust_bulk_wo(conn, delta, username, wo_id=wo["id"])
         else:
             # المرتجع بوزن مختلف: تُحدَّث بطاقة الطقم بالوزن العائد
             # فعلاً — فيتطابق المخزون مع ما دخل الخزنة حقيقةً.
@@ -410,7 +410,7 @@ def create_sale_return(conn, entity_id, cart, invoice_date, username,
 def get_invoice_full(conn, invoice_id):
     """الفاتورة مع كل أطقمها — لتعبئة الشاشة عند التعديل. تُستخدم
     القيم المخزَّنة تاريخياً بجدول invoice_items (وزن السطر وأجره) لا
-    الأرقام الحية من work_orders (التي قد تكون تغيّرت للتجميعي 0001)."""
+    الأرقام الحية من work_orders (التي قد تكون تغيّرت للتجميعي)."""
     inv = conn.execute(
         "SELECT i.*, e.name customer_name FROM invoices i"
         " JOIN entities e ON e.id=i.customer_id WHERE i.id=?",
@@ -827,7 +827,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
             if preserve_stock and is_last_movement(conn, wid, invoice_id):
                 if wo["is_bulk"]:
                     adjust_bulk_wo(
-                        conn, w if kind == "sale_return" else -w, username)
+                        conn, w if kind == "sale_return" else -w, username,
+                        wo_id=wid)
                 else:
                     conn.execute(
                         "UPDATE work_orders SET status=? WHERE id=?",
@@ -850,7 +851,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                 and is_last_movement(conn, wid, invoice_id):
             d = (w - ow)
             adjust_bulk_wo(
-                conn, d if kind == "sale_return" else -d, username)
+                conn, d if kind == "sale_return" else -d, username,
+                wo_id=wid)
             touched.append(wo["work_order_no"])
         dw += (w - ow)
         dg += (wages - og)
@@ -867,7 +869,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         if preserve_stock and is_last_movement(conn, wid, invoice_id):
             if prev["is_bulk"]:
                 adjust_bulk_wo(
-                    conn, -ow if kind == "sale_return" else ow, username)
+                    conn, -ow if kind == "sale_return" else ow, username,
+                    wo_id=wid)
             else:
                 conn.execute("UPDATE work_orders SET status=? WHERE id=?",
                              (back_status, wid))

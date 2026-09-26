@@ -812,7 +812,7 @@ class DashboardScreen(QtWidgets.QWidget):
             cb.setCurrentText("" if r["model"] == "—" else r["model"])
             if r["bulk"]:
                 e_wo.setEnabled(False)
-                e_wo.setToolTip("الرقم 0001 محجوز للرصيد التجميعي")
+                e_wo.setToolTip(f"الرقم {r['wo']} محجوز للرصيد التجميعي")
             note = QtWidgets.QLabel(
                 "رقم التشغيل والموديل تصنيفٌ وصفي — تعديلهما لا يمسّ "
                 "أي رصيد أو قيد. ويتبع الرقمَ الجديدُ بياناتُ القيود "

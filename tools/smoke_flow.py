@@ -809,6 +809,8 @@ def main():
     with db(readonly=True) as conn:
         html_inv = print_manager._tpl_invoice(conn, kinv["id"])
     check("الفاتورة المطبوعة بعيار المصنع", "جم 21" in html_inv)
+    # «من حساب» شأنٌ داخليٌّ للمصنع — لا يُطبع على ورقة العميل
+    check("«من حساب» لا يظهر في قالب الفاتورة", "من حساب" not in html_inv)
 
     png = _pq.qr_png_data_uri("http://127.0.0.1:1/inv/t")
     check("رمز QR يُبنى بلا مكتبة صور خارجية",
@@ -2532,7 +2534,7 @@ def main():
                "2026-06-20", "admin")          # نحو 10 أيام
         # ورصيدٌ تجميعي بتاريخٍ قديم عمداً: لو عُومل كقطعةٍ لظهر
         # «راكداً فوق التسعين» وهو وزنٌ يدور كل يوم
-        _batch(conn, [{"wo_no": "0001", "gold": 200.0,
+        _batch(conn, [{"wo_no": "00010", "gold": 200.0,
                        "wage_per_gram": 20.0}], "2025-02-01", "admin")
     with db(readonly=True) as conn:
         _sr = _sa.report(conn, "2026-06-30")
@@ -3145,7 +3147,7 @@ def main():
 
     step("39) دليل الموديلات — الوارد بتاريخ ومع من كل قطعة")
     # السؤال: «ماذا ورد من التصنيع يوم كذا، وأين هو الآن؟» — يُجاب
-    # من سطور الدفعات لا من بطاقات الأطقم، لأن الرقم التجميعي 0001
+    # من سطور الدفعات لا من بطاقات الأطقم، لأن الرقم التجميعي 00010
     # بطاقةٌ واحدة تراكمية: قراءتُها تنسب رصيد الشهر كلِّه ليومٍ واحد.
     from models import invoices as _inv9
     from models import models_catalog as _mcat
@@ -3160,13 +3162,13 @@ def main():
              "model_no": "موديل الوارد"},
             {"wo_no": _r2, "gold": 25.0, "wage_per_gram": 24.0,
              "model_no": "موديل الوارد"},
-            {"wo_no": "0001", "gold": 70.0, "wage_per_gram": 20.0,
+            {"wo_no": "00010", "gold": 70.0, "wage_per_gram": 20.0,
              "model_no": "موديل الوارد"}], "2026-08-03", "admin")
     with db() as conn:
         _b9(conn, [
             {"wo_no": "R903", "gold": 30.0, "wage_per_gram": 24.0,
              "model_no": "موديل الوارد"},
-            {"wo_no": "0001", "gold": 15.0, "wage_per_gram": 20.0,
+            {"wo_no": "00010", "gold": 15.0, "wage_per_gram": 20.0,
              "model_no": "موديل الوارد"}], "2026-08-11", "admin")
     with db(readonly=True) as conn:
         _w1 = conn.execute(
@@ -3183,7 +3185,7 @@ def main():
     _m3 = {m["model"]: m for m in _d3["models"]}["موديل الوارد"]
     _by = {i["wo"]: i for i in _m3["items"]}
     check("وارد اليوم يُفصَّل موديلاً موديلاً بأرقام تشغيله",
-          sorted(_by) == ["0001", _r1, _r2], f"{sorted(_by)}")
+          sorted(_by) == sorted(["00010", _r1, _r2]), f"{sorted(_by)}")
     check("والمباعة تحمل اسم الجهة التي هي عندها الآن",
           _by[_r1]["holder"] == "مشترٍ من دفعة اليوم"
           and not _by[_r1]["safe"], _by[_r1]["holder"])
@@ -3191,11 +3193,11 @@ def main():
           _by[_r2]["holder"] == _mcat.SAFE and _by[_r2]["safe"],
           _by[_r2]["holder"])
     check("والرقم التجميعي يُنسب لكل يومٍ بحصته لا برصيده المتراكم",
-          abs(_by["0001"]["reg"] - 70.0) < 0.011
+          abs(_by["00010"]["reg"] - 70.0) < 0.011
           and abs({i["wo"]: i for i in
                    {m["model"]: m for m in _d11["models"]}
-                   ["موديل الوارد"]["items"]}["0001"]["reg"] - 15.0) < 0.011,
-          f"{_by['0001']['reg']} ثم 15")
+                   ["موديل الوارد"]["items"]}["00010"]["reg"] - 15.0) < 0.011,
+          f"{_by['00010']['reg']} ثم 15")
     check("ووارد يومٍ لا يختلط بوارد غيره",
           all(i["wo"] != "R903" for i in _m3["items"])
           and "2026-08-03" in _days and "2026-08-11" in _days,
@@ -4175,6 +4177,168 @@ def main():
         _s48.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("49) الرقمان التجميعيان 00010 و0010 · ونقل 0001 القديم")
+    from models import inventory as _inv49
+    from models import invoices as _invs49
+    from services.audit import reverse_entry as _rev49
+
+    def _w49(no):
+        with db(readonly=True) as conn:
+            r = conn.execute(
+                "SELECT id, registered_weight w, is_bulk, item_type,"
+                " wage_per_gram wage FROM work_orders"
+                " WHERE work_order_no=? AND is_deleted=0", (no,)).fetchone()
+        return dict(r) if r else None
+
+    # ══ الترحيل: قاعدةٌ قديمة فيها 0001 ببنود فواتير ══
+    # يُعاد الرقم الحالي إلى اسمه القديم ويُحذف الثاني، ثم يُشغَّل
+    # الترحيل: يجب أن ينتقل **السجلّ نفسه** برصيده ويُنشأ الثاني.
+    _b49 = _w49("00010")
+    check("قاعدة الاختبار فيها رقمٌ تجميعي بحركة", bool(_b49)
+          and _b49["is_bulk"] == 1, str(_b49))
+    with db() as conn:
+        _n_items49 = conn.execute(
+            "SELECT COUNT(*) FROM invoice_items WHERE work_order_id=?",
+            (_b49["id"],)).fetchone()[0]
+        conn.execute("UPDATE work_orders SET work_order_no='0001'"
+                     " WHERE id=?", (_b49["id"],))
+        conn.execute("UPDATE wo_batch_lines SET wo_no='0001'"
+                     " WHERE work_order_id=?", (_b49["id"],))
+        conn.execute("DELETE FROM work_orders WHERE work_order_no='0010'"
+                     " AND is_bulk=1")
+    migrate_schema()
+    migrate_schema()                     # مرّتان: الترحيل لا يتكرّر أثره
+    _a49 = _w49("00010")
+    check("الترحيل ينقل 0001 إلى 00010 بسجلّه نفسه ورصيده",
+          _a49 and _a49["id"] == _b49["id"]
+          and abs(_a49["w"] - _b49["w"]) < 0.001 and not _w49("0001"),
+          f"{_b49} ← {_a49}")
+    with db(readonly=True) as conn:
+        check("وبنود الفواتير وسطور الدفعات تتبعه",
+              conn.execute("SELECT COUNT(*) FROM invoice_items"
+                           " WHERE work_order_id=?", (_b49["id"],)
+                           ).fetchone()[0] == _n_items49
+              and not conn.execute("SELECT 1 FROM wo_batch_lines"
+                                   " WHERE wo_no='0001'").fetchone())
+    _s49 = _w49("0010")
+    check("ويُضاف 0010 تجميعياً بمواصفات 00010 ورصيدٍ صفر",
+          _s49 and _s49["is_bulk"] == 1 and abs(_s49["w"]) < 0.001
+          and _s49["item_type"] == "إيطالي"
+          and abs(_s49["wage"] - _a49["wage"]) < 0.001, str(_s49))
+    with db(readonly=True) as conn:
+        check("ولا يتكرّر بتكرار الترحيل",
+              conn.execute("SELECT COUNT(*) FROM work_orders"
+                           " WHERE work_order_no IN ('00010','0010')"
+                           " AND is_deleted=0").fetchone()[0] == 2)
+
+    # ══ رصيدان مستقلّان ══
+    _g1, _g2 = _a49["w"], _s49["w"]
+    with db() as conn:
+        _inv49.create_work_orders_batch(conn, [
+            {"wo_no": "00010", "gold": 10.0},
+            {"wo_no": "0010", "gold": 20.0},
+            {"wo_no": "0010", "gold": 5.0}], "2026-09-01", "admin")
+    check("التوريد إلى كلٍّ منهما يزيده وحده (والتكرار مقبول)",
+          abs(_w49("00010")["w"] - (_g1 + 10)) < 0.001
+          and abs(_w49("0010")["w"] - (_g2 + 25)) < 0.001,
+          f"{_w49('00010')['w']} · {_w49('0010')['w']}")
+    with db() as conn:
+        _c49 = add_entity(conn, "عميل التجميعي الثاني", "customer",
+                          username="admin")
+        _si49 = create_sale(conn, _c49, [{"work_order_id": _s49["id"],
+                                          "weight": 8.0}],
+                            "2026-09-02", "admin", apply_vat=False)
+    check("البيع من 0010 يُخصم منه لا من 00010",
+          abs(_w49("0010")["w"] - (_g2 + 17)) < 0.001
+          and abs(_w49("00010")["w"] - (_g1 + 10)) < 0.001)
+    with db(readonly=True) as conn:
+        _, _its49 = _invs49.get_invoice_full(conn, _si49["id"])
+    with db() as conn:
+        _invs49.update_invoice(conn, _si49["id"], [
+            {"work_order_id": _s49["id"], "weight": 3.0,
+             "item_id": _its49[0]["item_id"]}], "admin")
+    check("وتعديل الفاتورة يُعيد الفرق إلى 0010 نفسه",
+          abs(_w49("0010")["w"] - (_g2 + 22)) < 0.001
+          and abs(_w49("00010")["w"] - (_g1 + 10)) < 0.001,
+          f"{_w49('0010')['w']}")
+    with db(readonly=True) as conn:
+        _html49 = __import__("services.print_manager",
+                             fromlist=["x"])._tpl_invoice(conn, _si49["id"])
+    check("وورقته تطبع وزن السطر لا رصيد الرقم كلّه",
+          "3.000" in _html49 or "3.00" in _html49)
+    with db() as conn:
+        _eid49 = conn.execute("SELECT entry_id FROM invoices WHERE id=?",
+                              (_si49["id"],)).fetchone()[0]
+        _rev49(conn, _eid49, "admin")
+    check("وحذفها يُعيد وزنها إلى 0010 وحده",
+          abs(_w49("0010")["w"] - (_g2 + 25)) < 0.001
+          and abs(_w49("00010")["w"] - (_g1 + 10)) < 0.001,
+          f"{_w49('0010')['w']}")
+
+    # ══ الرقم القديم لا يُنشئ طقماً ══
+    for _lbl49, _fn49 in (
+            ("في التوريد", lambda c: _inv49.create_work_orders_batch(
+                c, [{"wo_no": "0001", "gold": 5.0}], "2026-09-03",
+                "admin")),
+            ("في المرتجع", lambda c: _inv49.create_return_stub(
+                c, "0001", 5.0, 0, 0, 0.5, 20.0, "admin"))):
+        try:
+            with db() as conn:
+                _fn49(conn)
+            check(f"0001 يُرفض {_lbl49}", False)
+        except ValueError as _e49:
+            check(f"0001 يُرفض {_lbl49} برسالةٍ تدلّ على 00010",
+                  "00010" in str(_e49), str(_e49)[:60])
+    check("التصنيف: الرقمان «إيطالي»",
+          _inv49.classify_item("0010", 5, 0, 0) == "إيطالي"
+          and _inv49.classify_item("00010", 5, 0, 0) == "إيطالي"
+          and _inv49.classify_item("0001", 5, 0, 0) != "إيطالي")
+    expect_error("ورقمٌ غير تجميعي لا يُعامَل رصيداً",
+                 lambda: _inv49.get_or_create_bulk_wo(None, "admin", "1234"),
+                 "ليس رقماً تجميعياً")
+    try:
+        from PyQt5 import QtWidgets as _QW49
+        _app49 = _QW49.QApplication.instance() or _QW49.QApplication([])
+        import ui.sales_screen as _ssm49
+        _msgs49 = []
+        _orig_err49 = _ssm49.err
+        _ssm49.err = lambda _p, t, *a, **k: _msgs49.append(str(t))
+        try:
+            _s49 = _ssm49.SalesScreen({"id": 1, "username": "admin",
+                                       "role": "admin",
+                                       "role_local": "accountant"})
+            _s49.refresh()
+            _s49.barcode.setText("0010")
+            _s49.line_reg.setValue(4.0)
+            _s49.add_item()
+            check("شاشة المبيعات تقبل 0010 رقماً تجميعياً بوزنه",
+                  bool(_s49.items)
+                  and _s49.items[-1]["wo"]["work_order_no"] == "0010"
+                  and abs(_s49.items[-1]["weight"] - 4.0) < 0.01,
+                  str([(i["wo"]["work_order_no"], i["weight"])
+                       for i in _s49.items]))
+            _n49 = len(_s49.items)
+            _s49.barcode.setText("0001")
+            _s49.line_reg.setValue(4.0)
+            _s49.add_item()
+            check("وكتابة 0001 بحكم العادة تُدلّ على 00010",
+                  len(_s49.items) == _n49
+                  and any("00010" in m for m in _msgs49), str(_msgs49[-1:]))
+            check("وتلميح خانة الرقم يذكر الرقمين",
+                  "00010" in _s49.barcode.placeholderText()
+                  and "0010" in _s49.barcode.placeholderText())
+            _s49.items = []
+            _s49.close()
+        finally:
+            _ssm49.err = _orig_err49
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    with db(readonly=True) as conn:
+        g, c, gv, cv = ledger_balanced(conn)
+    check("الدفتر متوازن بعد كل حركات الرقمين", g and c,
+          f"ذهب {gv} · نقد {cv}")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

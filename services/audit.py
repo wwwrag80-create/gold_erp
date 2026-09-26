@@ -81,7 +81,8 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                     if it["is_bulk"]:
                         delta = -it["registered_weight"] if inv["kind"] == "sale_return" \
                             else it["registered_weight"]
-                        adjust_bulk_wo(conn, delta, username)
+                        adjust_bulk_wo(conn, delta, username,
+                                       wo_id=it["work_order_id"])
                     else:
                         conn.execute("UPDATE work_orders SET status=? WHERE id=?",
                                      (new_status, it["work_order_id"]))
