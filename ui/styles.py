@@ -313,6 +313,62 @@ QLabel#panelSub { font-size: 9.5pt; color: @muted; }
 QDialog { background: @bg; }
 QMessageBox { background: @surface; }
 QMessageBox QLabel { font-size: 13px; }
+
+/* ══════════════════════════════════════════════════════════════════
+   الطبقة الحديثة
+   ------------------------------------------------------------------
+   · الزر الأساسي تدرّجٌ ذهبيٌّ خفيف (أفتح أعلاه) بدل لونٍ مسطّح —
+     يُقرأ زرّاً قابلاً للضغط من أول نظرة، ويغمق عند الضغط.
+   · الصف المحدَّد في أي جدول ذهبٌ واضح وخطٌّ أغمق، فلا يضيع السطر
+     الذي يعمل عليه المستخدم بين أسطرٍ متشابهة.
+   · شريط الحالة وبحث الجدول والإشعار المنبثق بلغة الأسطح نفسها.
+   ══════════════════════════════════════════════════════════════════ */
+QPushButton { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+    stop:0 @goldHi, stop:1 @gold); }
+QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+    stop:0 @goldBright, stop:1 @goldHi); }
+QPushButton:pressed { background: @goldDim; }
+QPushButton:disabled { background: @disBg; color: @disFg; }
+QPushButton#ghost, QPushButton#ghost:hover { background: @surface; }
+QPushButton#ghost:hover { background: @hover; }
+QPushButton#danger, QPushButton#dangerBtn { background: @red; }
+QPushButton#danger:hover, QPushButton#dangerBtn:hover { background: @redHi; }
+QPushButton#closeBtn { background: @surface; }
+QPushButton#closeBtn:hover { background: @red; }
+QPushButton#dashPanel { background: @surface; }
+QPushButton#dashPanel:hover { background: @hover; }
+QPushButton#dashPanel:checked { background: @goldSel; }
+QPushButton#homeRow, QPushButton#homeRow:hover { background: transparent; }
+QPushButton#homeRow:hover { background: @hover; }
+QFrame#header QPushButton, QFrame#header QPushButton#ghost {
+    background: @barBtn; }
+QFrame#header QPushButton:hover { background: @barBtnHi; }
+
+QTableWidget::item:selected, QTreeWidget::item:selected,
+QListWidget::item:selected { background: @goldSel; color: @ink2; }
+QTableWidget:focus, QTreeWidget:focus { border: 1px solid @goldEdge; }
+QHeaderView::section:hover { background: @goldSoft2; }
+QLineEdit:hover, QDoubleSpinBox:hover, QSpinBox:hover, QComboBox:hover,
+QDateEdit:hover { border-color: @line3; }
+
+/* شريط الحالة */
+QStatusBar#statusbar { background: @surface; border-top: 1px solid @line; }
+QStatusBar#statusbar::item { border: none; }
+QLabel#statusItem { color: @hdrFg; font-size: 11.5pt; padding: 4px 12px;
+  border-left: 1px solid @line; }
+QLabel#statusHint { color: @muted; font-size: 11pt; padding: 4px 12px; }
+
+/* بحثٌ فوريّ داخل الجدول (Ctrl+F) */
+QFrame#tableSearch { background: @surface; border: 1px solid @goldEdge2;
+  border-radius: 10px; }
+QLineEdit#tableSearchInput { font-size: 12pt; padding: 5px 8px; }
+QLabel#tableSearchCount { color: @goldDim; font-weight: bold;
+  font-size: 11pt; padding: 0 4px; }
+
+/* الإشعار المنبثق */
+QLabel#toast { background: @tipBg; color: @tipFg; font-size: 12pt;
+  font-weight: bold; border-radius: 10px; padding: 8px 18px;
+  border: 1px solid @goldEdge2; }
 """
 
 # نسخة جاهزة باللوحة الفاتحة — للتوافق مع أي مستدعٍ قديم يقرأ `QSS`

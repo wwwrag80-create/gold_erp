@@ -87,24 +87,70 @@ class _BlankZeroSpin(QtWidgets.QDoubleSpinBox):
     Range أو minimum/maximum الفعلي للحقل (خلافاً لـ setSpecialValueText
     التي ترتبط حصراً بالحد الأدنى)."""
 
+    # **حقلٌ ذكي** (`ui.widgets.smart_input`): «120+35.5» يصير 155.50
+    # عند Enter أو مغادرة الخانة، والأرقام العربية «١٢٫٥» تُقبل وتتحوّل
+    # فوراً إلى «12.5». التقييم آمن بشجرة التعبير — أرقامٌ وعمليات فقط.
+
     def textFromValue(self, value):
         if value == 0:
             return ""
         return super().textFromValue(value)
 
     def valueFromText(self, text):
+        from ui.widgets import smart_input as _si
         if not text.strip():
             return 0.0
-        return super().valueFromText(text)
+        if _si.is_expression(text):
+            v = _si.evaluate(text)
+            if v is not None:
+                return max(self.minimum(), min(self.maximum(), v))
+        return super().valueFromText(_si.normalize(text))
 
     def validate(self, text, pos):
+        from ui.widgets import smart_input as _si
         if not text.strip():
             return (QtGui.QValidator.Acceptable, text, pos)
+        norm = _si.normalize(text)
+        if _si.is_expression(norm):
+            # **العملية «قيد الكتابة» دائماً** — لا تُقبل قيمةً حتى Enter أو
+            # مغادرة الخانة، فيحسبها `fixup` مرةً واحدة. لو قُبلت أثناء
+            # الكتابة لاعتمد Qt ناتجاً جزئياً («5-1» = 4 وأنت تكتب «5-10»)
+            # ولأطلق الحقلُ قيماً عابرة على شاشاتٍ تحسب مع كل تغيير.
+            return (QtGui.QValidator.Intermediate, norm, pos)
+        if norm != text:
+            # أرقامٌ عربية: تُحوَّل في مكانها ثم تُفحص كأي رقم
+            st, t2, p2 = super().validate(norm, pos)
+            return (st, t2, p2)
         return super().validate(text, pos)
+
+    def fixup(self, text):
+        from ui.widgets import smart_input as _si
+        if _si.is_expression(text):
+            v = _si.evaluate(text)
+            if v is not None and self.minimum() <= v <= self.maximum():
+                return self.textFromValue(v)
+            # عمليةٌ ناقصة أو ناتجٌ خارج المدى (وزنٌ سالب): لا يُقصّ
+            # صامتاً إلى صفر، بل يعود الحقل إلى قيمته قبل الكتابة
+            return self.textFromValue(getattr(self, "_pre_edit",
+                                              self.value()))
+        return super().fixup(_si.normalize(text))
+
+    def focusInEvent(self, ev):
+        self._pre_edit = self.value()
+        super().focusInEvent(ev)
+
+    def _commit_pre_edit(self):
+        # القيمة المعتمدة بعد كل إدخالٍ تامّ — مرجعُ العودة للإدخال التالي
+        self._pre_edit = self.value()
+
+
+def _smart(s):
+    s.editingFinished.connect(s._commit_pre_edit)
+    return s
 
 
 def wspin(maximum=10_000_000.0):
-    s = _BlankZeroSpin()
+    s = _smart(_BlankZeroSpin())
     s.setDecimals(2)
     s.setRange(0.0, maximum)
     s.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
@@ -113,7 +159,7 @@ def wspin(maximum=10_000_000.0):
 
 
 def mspin(maximum=1_000_000_000.0, minimum=0.0):
-    s = _BlankZeroSpin()
+    s = _smart(_BlankZeroSpin())
     s.setDecimals(2)
     s.setRange(minimum, maximum)
     s.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)

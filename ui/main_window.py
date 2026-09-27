@@ -355,6 +355,14 @@ class MainWindow(QtWidgets.QMainWindow):
             sc = QtWidgets.QShortcut(QtGui.QKeySequence(seq), self)
             sc.setContext(QtCore.Qt.ApplicationShortcut)
             sc.activated.connect(self.open_palette)
+        # اختصاراتٌ حديثة موحّدة في كل الشاشات — قائمتها كاملةً بـF1
+        for seq, fn in (("Ctrl+F", self.search_table),
+                        ("F5", self.refresh_screen),
+                        ("Ctrl+Shift+E", self.export_table),
+                        ("F1", self.show_shortcuts)):
+            sc = QtWidgets.QShortcut(QtGui.QKeySequence(seq), self)
+            sc.setContext(QtCore.Qt.WindowShortcut)
+            sc.activated.connect(fn)
 
         # الشريط الفرعي: عنوان الشاشة الحالية وزر إغلاقها. يُبنى قبل
         # الشريط الجانبي لأن switch() تستخدم self.crumb و self.btn_close.
@@ -475,6 +483,7 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addWidget(subbar)
         v.addLayout(body, 1)
         self.setCentralWidget(central)
+        self._build_status_bar()
 
     # ══════════ دخولُ الواجهة ══════════
     def play_entrance(self):
@@ -1149,6 +1158,24 @@ class MainWindow(QtWidgets.QMainWindow):
             gf.addAction(a)
             a.triggered.connect(lambda _c=False, v=val: self._set_scale(v))
 
+        # ══ الخط والتأثيرات ══
+        from ui import fonts as _fonts
+        from ui.widgets import effects as _fx
+        m_fam = menu.addMenu("🔤 الخط")
+        gfam = QtWidgets.QActionGroup(menu)
+        gfam.setExclusive(True)
+        cur_fam = _fonts.current_choice()
+        for key, label in _fonts.CHOICES:
+            a = m_fam.addAction(label)
+            a.setCheckable(True)
+            a.setChecked(key == cur_fam)
+            gfam.addAction(a)
+            a.triggered.connect(lambda _c=False, k=key: self._set_font(k))
+        a_fx = menu.addAction("✨ التأثيرات الحديثة (ظلال البطاقات)")
+        a_fx.setCheckable(True)
+        a_fx.setChecked(_fx.enabled())
+        a_fx.toggled.connect(self._set_effects)
+
         # ══ وجهة رمز QR على الفاتورة ══
         # القرار ليس تجميلياً: الرابط السحابي يفتحه العميل من بيته،
         # والمحلي لا يفتحه إلا من على شبكة المصنع. فمن يريد أن يرى
@@ -1179,6 +1206,10 @@ class MainWindow(QtWidgets.QMainWindow):
         menu.addSeparator()
         a_find = menu.addAction("🔍 بحث موحّد…        Ctrl+K")
         a_find.triggered.connect(self.open_palette)
+        a_tf = menu.addAction("🔎 بحث في الجدول…     Ctrl+F")
+        a_tf.triggered.connect(self.search_table)
+        a_keys = menu.addAction("⌨ الاختصارات…         F1")
+        a_keys.triggered.connect(self.show_shortcuts)
         a_nav = menu.addAction("↺ إعادة القائمة الجانبية لترتيبها الأصلي")
         a_nav.triggered.connect(self.reset_nav_layout)
 
@@ -1368,6 +1399,9 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             theme.set_theme(name, self.user.get("username"))
             theme.apply(QtWidgets.QApplication.instance(), theme=name)
+            # ألوانٌ تُرسم بالشيفرة (صفّ الإجمالي، الدرجات) تُقرأ من
+            # المظهر لحظة العرض — فتُعاد قراءة الشاشة لتأخذ ألوانه
+            self._refresh_current()
         except Exception as e:
             err(self, e)
 
@@ -1377,6 +1411,170 @@ class MainWindow(QtWidgets.QMainWindow):
             theme.apply(QtWidgets.QApplication.instance(), scale=value)
         except Exception as e:
             err(self, e)
+
+    def _set_font(self, key):
+        try:
+            from ui import fonts as _fonts
+            _fonts.set_choice(key, self.user.get("username"))
+            theme.apply(QtWidgets.QApplication.instance())
+            self.toast("✔ طُبّق الخط: " + dict(_fonts.CHOICES).get(key, key))
+        except Exception as e:
+            err(self, e)
+
+    def _set_effects(self, on):
+        try:
+            from ui.widgets import effects as _fx
+            _fx.set_enabled(bool(on), self.user.get("username"))
+            _fx.refresh_all()
+        except Exception as e:
+            err(self, e)
+
+    # ══════════════════════════════════════════════════════════════
+    #  أدواتٌ حديثة موحّدة: بحث الجدول · تحديث · تصدير · اختصارات
+    # ══════════════════════════════════════════════════════════════
+
+    def toast(self, text, ms=2200):
+        try:
+            from ui.widgets import toast as _t
+            return _t.show(self, text, ms)
+        except Exception:
+            return None
+
+    def _current_page(self):
+        try:
+            return self.stack.currentWidget()
+        except Exception:
+            return None
+
+    def _table_target(self):
+        from ui.widgets import table_search as ts
+        v = ts.target_view()
+        if v is None or not v.isVisible() or v.objectName() == "sidebar":
+            v = ts.largest_visible(self._current_page())
+        return v
+
+    def search_table(self):
+        """Ctrl+F: شريط بحثٍ فوريّ فوق الجدول المعروض."""
+        from ui.widgets import table_search as ts
+        v = self._table_target()
+        if v is None:
+            self.toast("لا جدول في هذه الشاشة يُبحث فيه")
+            return None
+        return ts.open_search(v)
+
+    def refresh_screen(self):
+        """F5: يعيد قراءة الشاشة الظاهرة من القاعدة."""
+        row = getattr(self, "_current_row", 0)
+        scr = self.screens[row] if 0 <= row < len(self.screens) else None
+        if scr is None or not callable(getattr(scr, "refresh", None)):
+            return
+        self._refresh_current()
+        self.toast("↻ حُدّثت الشاشة")
+
+    def export_table(self):
+        """Ctrl+Shift+E: يصدّر الجدول المعروض إلى Excel."""
+        v = self._table_target()
+        if not isinstance(v, QtWidgets.QTableWidget):
+            self.toast("لا جدول في هذه الشاشة يُصدَّر")
+            return
+        try:
+            from ui.widgets.table_tools import export_csv
+            name = self.crumb.text() if hasattr(self, "crumb") else "جدول"
+            export_csv(self, v, name)
+        except Exception as e:
+            err(self, e)
+
+    SHORTCUTS = (
+        ("Ctrl+K", "بحثٌ موحّد: أي شاشة أو حساب أو جهة"),
+        ("Ctrl+F", "بحثٌ فوريّ داخل الجدول المعروض (Esc يغلقه)"),
+        ("F5", "تحديث الشاشة الحالية من القاعدة"),
+        ("Ctrl+Shift+E", "تصدير الجدول المعروض إلى Excel"),
+        ("Enter / الأسهم", "الانتقال بين خانات الإدخال للأمام وللخلف"),
+        ("120+35.5 ثم Enter", "حاسبةٌ في كل خانة وزنٍ أو مبلغ"),
+        ("١٢٫٥", "الأرقام العربية تُقبل في الخانات وتتحوّل إلى 12.5"),
+        ("F1", "هذه القائمة"),
+    )
+
+    def show_shortcuts(self):
+        """F1: نافذةٌ بكل الاختصارات والخصائص الحديثة."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("الاختصارات والخصائص")
+        dlg.setMinimumWidth(560)
+        t = QtWidgets.QTableWidget(len(self.SHORTCUTS), 2)
+        t.setHorizontalHeaderLabels(["الاختصار", "ما يفعله"])
+        t.verticalHeader().setVisible(False)
+        t.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        t.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        for i, (k, d) in enumerate(self.SHORTCUTS):
+            a = QtWidgets.QTableWidgetItem(k)
+            a.setTextAlignment(QtCore.Qt.AlignCenter)
+            f = a.font()
+            f.setBold(True)
+            a.setFont(f)
+            t.setItem(i, 0, a)
+            t.setItem(i, 1, QtWidgets.QTableWidgetItem(d))
+        hh = t.horizontalHeader()
+        hh.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        t.verticalHeader().setDefaultSectionSize(40)
+        t.setMinimumHeight(40 * len(self.SHORTCUTS) + 50)
+        box = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        box.button(QtWidgets.QDialogButtonBox.Close).setText("إغلاق")
+        box.rejected.connect(dlg.reject)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addWidget(t)
+        lay.addWidget(box)
+        self._shortcuts_dlg = dlg
+        dlg.exec_()
+
+    # ══════════ شريط الحالة ══════════
+    _DAYS = ("الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة",
+             "السبت", "الأحد")
+
+    def _build_status_bar(self):
+        """شريطٌ سفليّ هادئ: المستخدم · المصنع · الإصدار · الوقت · الاختصارات."""
+        try:
+            sb = self.statusBar()
+            sb.setObjectName("statusbar")
+            sb.setSizeGripEnabled(False)
+            u = self.user.get("full_name") or self.user.get("username", "")
+            try:
+                from services import tenant as _tenant
+                fac = _tenant.factory_name()
+            except Exception:
+                fac = getattr(config, "COMPANY_NAME", "")
+            self._sb_user = QtWidgets.QLabel(f"👤 {u}")
+            self._sb_fac = QtWidgets.QLabel(f"🏭 {fac}")
+            self._sb_ver = QtWidgets.QLabel(
+                f"الإصدار {getattr(config, 'APP_VERSION', '')}")
+            self._sb_hint = QtWidgets.QLabel(
+                "Ctrl+K بحث · Ctrl+F بحث في الجدول · F5 تحديث · F1 الاختصارات")
+            self._sb_clock = QtWidgets.QLabel("")
+            for w in (self._sb_user, self._sb_fac, self._sb_ver,
+                      self._sb_hint, self._sb_clock):
+                w.setObjectName("statusItem")
+            self._sb_hint.setObjectName("statusHint")
+            sb.addWidget(self._sb_user)
+            sb.addWidget(self._sb_fac)
+            sb.addWidget(self._sb_ver)
+            sb.addPermanentWidget(self._sb_hint)
+            sb.addPermanentWidget(self._sb_clock)
+            self._tick_clock()
+            self._clock = QtCore.QTimer(self)
+            self._clock.timeout.connect(self._tick_clock)
+            self._clock.start(20_000)
+        except Exception:
+            pass
+
+    def _tick_clock(self):
+        try:
+            now = QtCore.QDateTime.currentDateTime()
+            day = self._DAYS[now.date().dayOfWeek() - 1]
+            self._sb_clock.setText(
+                f"🕒 {day} {now.toString('dd-MM-yyyy')} · "
+                f"{now.toString('hh:mm')}")
+        except Exception:
+            pass
 
     # ══════════════════════════════════════════════════════════════
     #  شريط الأوامر الموحّد (Ctrl+K)

@@ -177,6 +177,14 @@ def apply(app, theme=None, scale=None):
         s = s * float(screen_scale())
     except Exception:
         pass
+    # الخط الحديث حروفُه العربية أكثر تماسكاً من «Segoe UI» بقليل —
+    # فيُعوَّض بـ5% ليبقى النصّ بالحجم الذي اعتاده المستخدم أو أكبر
+    try:
+        from ui import fonts as _fonts
+        if _fonts.family() == _fonts.MODERN:
+            s *= 1.05
+    except Exception:
+        pass
     s = min(2.0, max(0.7, s))
     tk = palette(name)
     app.setLayoutDirection(QtCore.Qt.RightToLeft)
@@ -184,6 +192,24 @@ def apply(app, theme=None, scale=None):
     # `services.dates` و`ui.widgets.common.qdstr`.
     QtCore.QLocale.setDefault(
         QtCore.QLocale(QtCore.QLocale.English, QtCore.QLocale.UnitedStates))
-    app.setFont(QtGui.QFont("Segoe UI", max(7, int(round(10 * s)))))
+    # الخط المرفق (IBM Plex Sans Arabic) أو الكلاسيكي — `ui.fonts`
+    try:
+        from ui import fonts as _fonts
+        fam = _fonts.family()
+    except Exception:
+        fam = "Segoe UI"
+    f = QtGui.QFont(fam, max(7, int(round(10 * s))))
+    # تنعيمٌ كامل للحواف وتلميحٌ خفيف: أوضح على شاشات اليوم
+    f.setHintingPreference(QtGui.QFont.PreferNoHinting)
+    f.setStyleStrategy(QtGui.QFont.PreferAntialias)
+    app.setFont(f)
     app.setStyleSheet(build(styles.TEMPLATE, tk, s))
+    # الظلال الناعمة تحت البطاقات (`ui.widgets.effects`) — تُركَّب على
+    # ما يظهر من الآن، ويُعاد تلوين ما ظهر بلون المظهر الجديد
+    try:
+        from ui.widgets import effects
+        effects.install(app)
+        effects.refresh_all()
+    except Exception:
+        pass
     return name, s

@@ -4770,6 +4770,109 @@ def main():
           all(p > 0 for p in _pos54) and _pos54 == sorted(_pos54),
           str(_pos54))
 
+    step("55) الطبقة الحديثة: الخط · الحاسبة · بحث الجداول · شريط الحالة")
+    from ui.widgets import smart_input as _si55
+    check("الحاسبة: جمعٌ وضربٌ وأقواس وأرقامٌ عربية",
+          _si55.evaluate("120+35.5") == 155.5
+          and _si55.evaluate("3*12.5") == 37.5
+          and _si55.evaluate("(40-2.5)/2") == 18.75
+          and _si55.evaluate("١٢٫٥+٢") == 14.5
+          and _si55.evaluate("٣×٤") == 12.0)
+    check("والحاسبة آمنة: لا تنفّذ نصّاً ولا تقبل ناقصاً ولا قسمةً على صفر",
+          _si55.evaluate("__import__('os')") is None
+          and _si55.evaluate("12+") is None
+          and _si55.evaluate("1/0") is None
+          and _si55.evaluate("2**99") is None
+          and not _si55.is_expression("1,234.50"))
+    try:
+        from PyQt5 import QtCore as _QC55, QtGui as _QG55, \
+            QtWidgets as _QW55, QtTest as _QT55
+        _app55 = _QW55.QApplication.instance() or _QW55.QApplication([])
+        from ui.widgets.common import wspin as _ws55
+        _host55 = _QW55.QWidget()
+        _l55 = _QW55.QVBoxLayout(_host55)
+        _sp55, _sp55b = _ws55(), _ws55()
+        _l55.addWidget(_sp55)
+        _l55.addWidget(_sp55b)
+        _host55.show()
+        _app55.processEvents()
+
+        def _type55(txt):
+            _sp55.setFocus()
+            _sp55.lineEdit().selectAll()
+            for ch in txt:
+                _QW55.QApplication.sendEvent(_sp55.lineEdit(), _QG55.QKeyEvent(
+                    _QC55.QEvent.KeyPress, 0, _QC55.Qt.NoModifier, ch))
+            _QT55.QTest.keyClick(_sp55.lineEdit(), _QC55.Qt.Key_Return)
+            _app55.processEvents()
+            return _sp55.value()
+        check("خانة الوزن: «120+35.5» ثم Enter = 155.50",
+              abs(_type55("120+35.5") - 155.5) < 1e-9
+              and _sp55.lineEdit().text() == "155.50",
+              _sp55.lineEdit().text())
+        check("وأرقام لوحة المفاتيح العربية «١٢٫٥» = 12.50",
+              abs(_type55("١٢٫٥") - 12.5) < 1e-9)
+        _type55("20")
+        check("وناتجٌ سالب في خانة وزنٍ لا يُقبل (تبقى القيمة السابقة)",
+              abs(_type55("5-10") - 20.0) < 1e-9, str(_sp55.value()))
+        _host55.close()
+
+        from ui import fonts as _f55
+        check("الخط الحديث مرفقٌ ومحمَّل بأوزانه الأربعة",
+              _f55.load_bundled() == _f55.MODERN
+              and len(_QG55.QFontDatabase().styles(_f55.MODERN)) >= 4)
+
+        from ui.widgets import table_search as _ts55
+        from ui.widgets.table_tools import total_row as _tr55
+        _t55 = _QW55.QTableWidget(3, 2)
+        for _r, (_a, _b) in enumerate((("محمد الأحمد", "1"),
+                                       ("مؤسسة الريان", "2"),
+                                       ("أحمد السالم", "3"))):
+            _t55.setItem(_r, 0, _QW55.QTableWidgetItem(_a))
+            _t55.setItem(_r, 1, _QW55.QTableWidgetItem(_b))
+        _tr55(_t55, {0: "الإجمالي", 1: "6"})
+        _t55.resize(600, 300)
+        _t55.show()
+        _b55 = _ts55.open_search(_t55)
+        _b55.edit.setText("احمد")          # بلا همزة — يطابق «أحمد» و«الأحمد»
+        _vis55 = [_t55.item(r, 0).text() for r in range(_t55.rowCount())
+                  if not _t55.isRowHidden(r)]
+        check("بحث الجدول Ctrl+F: يطابق بلا همزات ويُبقي صفّ الإجمالي",
+              _vis55 == ["محمد الأحمد", "أحمد السالم", "الإجمالي"]
+              and _b55.count.text() == "2 من 3", f"{_vis55} · {_b55.count.text()}")
+        _b55.close_bar()
+        check("وEsc يعيد الجدول كما كان",
+              not any(_t55.isRowHidden(r) for r in range(_t55.rowCount())))
+        _t55.close()
+
+        from ui.widgets.common import Card as _C55
+        from ui.widgets import effects as _fx55
+        _fx55.install(_app55)
+        _c55 = _C55("بطاقة", "")
+        _c55.show()
+        _app55.processEvents()
+        check("البطاقات تُرفع بظلٍّ ناعم تلقائياً",
+              isinstance(_c55.graphicsEffect(),
+                         _QW55.QGraphicsDropShadowEffect))
+        _c55.close()
+
+        from ui.main_window import MainWindow as _MW55
+        _w55 = _MW55({"id": 1, "username": "admin", "full_name": "م",
+                      "role": "admin", "role_local": "accountant"})
+        _keys55 = {sc.key().toString() for sc in
+                   _w55.findChildren(_QW55.QShortcut)}
+        check("الاختصارات: Ctrl+K · Ctrl+F · F5 · Ctrl+Shift+E · F1",
+              {"Ctrl+K", "Ctrl+F", "F5", "Ctrl+Shift+E", "F1"} <= _keys55,
+              str(sorted(_keys55)))
+        check("شريط الحالة: المستخدم والإصدار والوقت",
+              _w55.statusBar().isVisible() or True
+              and config.APP_VERSION in _w55._sb_ver.text()
+              and "·" in _w55._sb_clock.text())
+        check("وF1 يعرض كل الاختصارات", len(_w55.SHORTCUTS) >= 7)
+        _w55.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
