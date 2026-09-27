@@ -2255,6 +2255,7 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
     # والذهب أولاً: المصنع يزن قبل أن يحاسب.
     nb = len(aging.BUCKET_LABELS) + 1          # الفئات + عمود الإجمالي
     top = [thspan("الجهة", rowspan=2, align="right"),
+           thspan("أحدث دين (يوم)", rowspan=2),
            thspan("أقدم دين (يوم)", rowspan=2)]
     sub = []
     if show_gold:
@@ -2263,14 +2264,16 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
     if show_cash:
         top.append(thspan("الأجور (ريال)", colspan=nb))
         sub += [thw(b) for b in aging.BUCKET_LABELS] + [thw("الإجمالي")]
-    ncols = 2 + (nb if show_gold else 0) + (nb if show_cash else 0)
+    ncols = 3 + (nb if show_gold else 0) + (nb if show_cash else 0)
     head_html = ("<tr>" + cells(*top) + "</tr>"
                  + ("<tr>" + cells(*sub) + "</tr>" if sub else ""))
 
     body = ""
     for r in rows:
+        nd, od = aging.ages(r, dim)
         tds = [tdw(r["name"], align="right"),
-               tdw(en(str(r["days"] or "—")))]
+               tdw("—" if nd is None else en(str(nd))),
+               tdw(en(str(od or "—")))]
         if show_gold:
             tds += [tdw(_gw(x) if x else "—") for x in r["gold_buckets"]]
             tds += [tdw(_gw(r["gold"]))]
@@ -2281,7 +2284,7 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
     if not body:
         body = f'<tr><td {TD} colspan="{ncols}">لا توجد أرصدة قائمة</td></tr>'
 
-    tot = [thw("الإجمالي"), thw("—")]
+    tot = [thw("الإجمالي"), thw("—"), thw("—")]
     if show_gold:
         tot += [thw(_gw(x)) for x in t["gold_buckets"]]
         tot += [thw(_gw(t["gold"]))]

@@ -917,6 +917,31 @@ def main():
           abs(r0["cash_buckets"][0] - 1000.0) < 0.02,
           f"0-30: {r0['cash_buckets'][0]}")
     check("أقدم دين يُحسب بالأيام", r0["days"] >= 119, str(r0["days"]))
+    check("وأحدث دين: آخر دفعةٍ مفتوحة (فاتورة قبل ١٠ أيام)",
+          r0["newest_days"] == 10 and r0["newest"] == _ago(10),
+          f"{r0['newest_days']} · {r0['newest']}")
+    try:
+        from PyQt5 import QtWidgets as _QWag
+        _QWag.QApplication.instance() or _QWag.QApplication([])
+        from ui.reports.aging_screen import AgingScreen as _AGS
+        _ags = _AGS({"id": 1, "username": "admin", "role": "admin",
+                     "role_local": "accountant"})
+        _hd = _ags._headers("both")
+        check("شاشة الأعمار: «أحدث دين» قبل «أقدم دين»",
+              _hd.index("أحدث\nدين") + 1 == _hd.index("أقدم\nدين"),
+              str(_hd[:4]))
+        _cells = _ags._row_cells(r0, "both")
+        check("وخليته تحمل أيام أحدث دين",
+              _cells[2] == "10" and _cells[3] == str(r0["days"]),
+              str(_cells[:4]))
+        _ags.close()
+    except ImportError:
+        pass
+    with db(readonly=True) as conn:
+        _hag = __import__("services.print_manager", fromlist=["x"]) \
+            ._tpl_aging(conn, 0, "customer")
+    check("وورقة الأعمار: «أحدث دين» قبل «أقدم دين»",
+          0 < _hag.find("أحدث دين") and 0 < _hag.find("أقدم دين"))
     check("إجمالي الفئات = الرصيد",
           abs(sum(r0["cash_buckets"]) - r0["cash"]) < 0.02)
     at = _ag.totals(arows)
@@ -4095,12 +4120,16 @@ def main():
               _pd48 == sorted(_pd48, reverse=True), str(_pd48[:5]))
         check("التقدير بالعتبات المعلنة",
               _cb48.grade(95, 5, True) == "ممتاز"
-              and _cb48.grade(75, 5, True) == "جيد"
-              and _cb48.grade(50, 5, True) == "سيء"
+              and _cb48.grade(80, 5, True) == "ممتاز"
+              and _cb48.grade(79.9, 5, True) == "جيد"
+              and _cb48.grade(60, 5, True) == "جيد"
+              and _cb48.grade(59.9, 5, True) == "مقبول"
+              and _cb48.grade(40, 5, True) == "مقبول"
+              and _cb48.grade(39.9, 5, True) == "سيء"
               and _cb48.grade(10, 5, True) == "سيء"
               and _cb48.grade(None, 5, True) == "سيء"
               and _cb48.grade(None, 0, True) == "مسدَّد")
-        check("والتقدير أربع كلماتٍ لا غير: مسدَّد · ممتاز · جيد · سيء",
+        check("والتقدير خمس كلماتٍ لا غير: مسدَّد · ممتاز · جيد · مقبول · سيء",
               {r[sd]["grade"] for r in _res48["rows"]
                for sd in ("gold", "cash")} <= set(_cb48.GRADES) | {"—"},
               str({r["gold"]["grade"] for r in _res48["rows"]}))

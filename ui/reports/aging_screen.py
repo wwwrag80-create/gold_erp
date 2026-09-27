@@ -230,7 +230,7 @@ class AgingScreen(QtWidgets.QWidget):
     def _headers(self, dim):
         # الذهب أولاً ثم الأجور: المصنع يزن قبل أن يحاسب، وكشف
         # العميل يُقرأ بالوزن أولاً — فالترتيب يتبع القراءة.
-        cols = ["الجهة", "الجوال", "أقدم\nدين"]
+        cols = ["الجهة", "الجوال", "أحدث\nدين", "أقدم\nدين"]
         both = dim == "both"
         if dim in ("both", "gold"):
             cols += [(f"ذهب\n{b}" if both else b) for b in self.SHORT]
@@ -242,8 +242,12 @@ class AgingScreen(QtWidgets.QWidget):
         return cols
 
     def _row_cells(self, r, dim):
+        # أحدث دين وأقدمه **للبُعد المعروض**: «النقد فقط» يُجاب بدين
+        # النقد، لا بتاريخ دينٍ ذهبي
+        nd, od = aging.ages(r, dim)
         out = [r["name"], r["phone"] or "—",
-               str(r["days"]) if r["days"] else "—"]
+               "—" if nd is None else str(nd),
+               "—" if not od else str(od)]
         if dim in ("both", "gold"):
             out += [f"{kv.g(x):,.3f}" if x else ""
                     for x in r["gold_buckets"]]
@@ -285,7 +289,7 @@ class AgingScreen(QtWidgets.QWidget):
                 # الترتيب نفسه الذي في `_headers` و`_row_cells`:
                 # الذهب أولاً ثم الأجور — وإلا وقع الإجمالي تحت عمودٍ
                 # ليس له، وهو خطأٌ لا يُرى لأن الأرقام تبدو معقولة.
-                tot = ["الإجمالي", "—", "—"]
+                tot = ["الإجمالي", "—", "—", "—"]
                 if dim in ("both", "gold"):
                     tot += [f"{kv.g(x):,.3f}" for x in t["gold_buckets"]]
                     tot += [f"{kv.g(t['gold']):,.3f}"]
@@ -309,7 +313,7 @@ class AgingScreen(QtWidgets.QWidget):
         finally:
             self.table.setUpdatesEnabled(True)
         # الاسم يأخذ الحصة الأكبر، والأرقام تتساوى
-        w = [20, 9, 7] + [8] * (len(headers) - 4) + [10]
+        w = [20, 9, 7, 7] + [8] * (len(headers) - 5) + [10]
         fit_columns(self.table, w)
 
         self.c_count.set_value(f"{t['count']:,}")

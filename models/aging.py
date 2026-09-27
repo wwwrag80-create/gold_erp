@@ -138,6 +138,11 @@ def report(conn, entity_type="customer", as_of=None, entity_id=None):
                 and abs(g_credit) < EPS_GOLD and abs(c_credit) < EPS_CASH):
             continue          # حساب متزن — لا شأن له بتقرير الأعمار
         oldest = min((l[0] for l in (g_lots + c_lots)), default="")
+        # **أحدث دين**: آخر دفعةٍ مدينةٍ ما زالت مفتوحة — الدين الجاري.
+        # بجانب أقدمها يقول الاثنان معاً: هل الجهة تأخذ وتسدّد بانتظام
+        # (أحدثه قريب وأقدمه قريب)، أم تأخذ ولا تسدّد القديم (أحدثه
+        # قريب وأقدمه بعيد)، أم توقّفت (الاثنان بعيدان).
+        newest = max((l[0] for l in (g_lots + c_lots)), default="")
         out.append({
             "entity_id": eid, "name": info["name"], "phone": info["phone"],
             "code": info["code"],
@@ -148,9 +153,30 @@ def report(conn, entity_type="customer", as_of=None, entity_id=None):
             "cash_credit": round(-c_credit, 2) if c_credit else 0.0,
             "oldest": oldest,
             "days": _days(oldest, as_of) if oldest else 0,
+            "newest": newest,
+            "newest_days": _days(newest, as_of) if newest else 0,
+            "as_of": as_of,
+            # ولكل بُعدٍ وحده: عرضُ «النقد فقط» يسأل عن دين النقد، فلا
+            # يُجاب بتاريخ دينٍ ذهبي
+            "by_dim": {
+                d: {"oldest": min((l[0] for l in lots), default=""),
+                    "newest": max((l[0] for l in lots), default="")}
+                for d, lots in (("gold", g_lots), ("cash", c_lots))},
         })
     # الأخطر أولاً: الأقدم ديناً في رأس القائمة
     return sorted(out, key=lambda r: (-r["days"], -abs(r["cash"])))
+
+
+def ages(r, dim="both", as_of=None):
+    """(أيام أحدث دين، أيام أقدم دين) بحسب البُعد المعروض — 0 إن لم يكن."""
+    if dim in ("gold", "cash") and r.get("by_dim"):
+        d = r["by_dim"][dim]
+        as_of = str(as_of or r.get("as_of")
+                    or _dt.date.today().isoformat())[:10]
+        return ((_days(d["newest"], as_of) if d["newest"] else None),
+                (_days(d["oldest"], as_of) if d["oldest"] else None))
+    return ((r["newest_days"] if r.get("newest") else None),
+            (r["days"] if r.get("oldest") else None))
 
 
 def totals(rows):
