@@ -2257,9 +2257,10 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
     # **عمودا العمر ضيّقان**: «أحدث» و«أقدم دين» — والوحدة (يوم) في
     # سطر الشرح فوق الجدول. بالعنوان الطويل كان الجدول بالذهب والنقد
     # معاً أعرض من الورقة فيُقصّ عمود الإجمالي الأخير.
-    top = ['<th class="r" rowspan="2" style="width:13%">الجهة</th>',
-           '<th rowspan="2" style="width:4.5%">أحدث</th>',
-           '<th rowspan="2" style="width:5.5%">أقدم دين</th>']
+    top = ['<th class="r" rowspan="2" style="width:12%">الجهة</th>',
+           '<th class="age" rowspan="2" style="width:4.5%;'
+           'white-space:nowrap">أحدث</th>',
+           '<th class="age" rowspan="2" style="width:5%">أقدم دين</th>']
     sub = []
     if show_gold:
         top.append(thspan(f"الذهب ({u})", colspan=nb))
@@ -2313,12 +2314,12 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
     </table>
 
     <style>
+      /* الخط كما هو في كل الأوراق — العرض يُكسب من عمودَي العمر وحدهما */
       table.agetbl {{ table-layout: fixed; width: 100%; }}
-      table.agetbl th, table.agetbl td {{
-        padding: 3px 2px; font-size: {"9pt" if (show_gold and show_cash)
-                                         else "10pt"}; }}
-      table.agetbl td {{ white-space: nowrap; overflow: hidden; }}
+      table.agetbl th {{ white-space: normal; }}
+      table.agetbl td {{ white-space: nowrap; }}
       table.agetbl td.r {{ white-space: normal; }}
+      table.agetbl th.age {{ padding-left: 1px; padding-right: 1px; }}
     </style>
     <div class="note">«أحدث»: أقدم دينٍ في فئة «أقل من 30» (منذ كم يوماً
       بدأ الدين الجاري) · «أقدم دين»: أقدم دينٍ قائم — بالأيام.</div>
