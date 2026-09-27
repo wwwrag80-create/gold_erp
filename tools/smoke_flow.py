@@ -940,8 +940,9 @@ def main():
     with db(readonly=True) as conn:
         _hag = __import__("services.print_manager", fromlist=["x"]) \
             ._tpl_aging(conn, 0, "customer")
-    check("وورقة الأعمار: «أحدث دين» قبل «أقدم دين»",
-          0 < _hag.find("أحدث دين") and 0 < _hag.find("أقدم دين"))
+    check("وورقة الأعمار: «أحدث» و«أقدم دين» بعنوانين قصيرين",
+          '>أحدث</th>' in _hag and '>أقدم دين</th>' in _hag
+          and "(يوم)" not in _hag and "table-layout: fixed" in _hag)
     check("إجمالي الفئات = الرصيد",
           abs(sum(r0["cash_buckets"]) - r0["cash"]) < 0.02)
     at = _ag.totals(arows)

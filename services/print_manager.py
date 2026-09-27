@@ -2254,9 +2254,12 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
     # فتضيق الأعمدة ويطول العنوان ويصعب تتبّع الصف بالمسطرة.
     # والذهب أولاً: المصنع يزن قبل أن يحاسب.
     nb = len(aging.BUCKET_LABELS) + 1          # الفئات + عمود الإجمالي
-    top = [thspan("الجهة", rowspan=2, align="right"),
-           thspan("أحدث دين (يوم)", rowspan=2),
-           thspan("أقدم دين (يوم)", rowspan=2)]
+    # **عمودا العمر ضيّقان**: «أحدث» و«أقدم دين» — والوحدة (يوم) في
+    # سطر الشرح فوق الجدول. بالعنوان الطويل كان الجدول بالذهب والنقد
+    # معاً أعرض من الورقة فيُقصّ عمود الإجمالي الأخير.
+    top = ['<th class="r" rowspan="2" style="width:13%">الجهة</th>',
+           '<th rowspan="2" style="width:4.5%">أحدث</th>',
+           '<th rowspan="2" style="width:5.5%">أقدم دين</th>']
     sub = []
     if show_gold:
         top.append(thspan(f"الذهب ({u})", colspan=nb))
@@ -2309,7 +2312,17 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
       <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
     </table>
 
-    {TBL}
+    <style>
+      table.agetbl {{ table-layout: fixed; width: 100%; }}
+      table.agetbl th, table.agetbl td {{
+        padding: 3px 2px; font-size: {"9pt" if (show_gold and show_cash)
+                                         else "10pt"}; }}
+      table.agetbl td {{ white-space: nowrap; overflow: hidden; }}
+      table.agetbl td.r {{ white-space: normal; }}
+    </style>
+    <div class="note">«أحدث» و«أقدم دين»: عدد الأيام منذ أحدث دينٍ قائم
+      وأقدمه.</div>
+    <table class="items agetbl" width="100%" cellspacing="0" cellpadding="3">
       {head_html}
       {body}
       <tr>{cells(*tot)}</tr>
