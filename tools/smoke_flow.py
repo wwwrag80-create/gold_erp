@@ -4708,6 +4708,31 @@ def main():
               "موديل الصور" in _h53 and "بالخزنة: <b>2</b>" in _h53
               and "عند المناديب: <b>1</b>" in _h53)
 
+    step("54) صور الموديلات بترتيب أسمائها: A1 ← A2 ← A3 ← B1")
+    from models.models_catalog import model_key as _mk54
+    _names54 = ["B1", "A10", "a2", "A1", "— بلا موديل —", "A3", "B4",
+                "A٥", "الياسمين 2", "الياسمين 10"]
+    check("الترتيب الطبيعي: الأرقام أرقامٌ لا حروف",
+          sorted(_names54, key=_mk54) == [
+              "A1", "a2", "A3", "A٥", "A10", "B1", "B4", "الياسمين 2",
+              "الياسمين 10", "— بلا موديل —"],
+          str(sorted(_names54, key=_mk54)))
+    _img54 = pathlib.Path(_TMP) / "m54.png"
+    _img54.write_bytes(_img53.read_bytes())
+    with db() as conn:
+        _inv49.create_work_orders_batch(conn, [
+            {"wo_no": f"NS-{n}", "gold": 5.0, "model_no": n}
+            for n in ("A10", "B1", "A2", "A1")], "2026-08-05", "admin")
+    for _n54 in ("A10", "B1", "A2", "A1"):
+        _mc53.set_image(_n54, str(_img54), "admin")
+    with db() as conn:
+        # حتى لو كان فرز الشاشة «الأكثر عدداً» — الورقة بالأسماء
+        _h54 = _tp53(conn, 0, min_count=1, per_page=8, sort="most")
+    _pos54 = [_h54.find(f'class="mn">{n}<') for n in ("A1", "A2", "A10", "B1")]
+    check("ورقة الصور تبدأ بالأسماء بترتيبها: A1 · A2 · A10 · B1",
+          all(p > 0 for p in _pos54) and _pos54 == sorted(_pos54),
+          str(_pos54))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -184,9 +184,9 @@ ICONS_DIR = (BUNDLE_DIR / "assets" / "icons"
              else BASE_DIR / "assets" / "icons")
 
 APP_NAME = "نظام محاسبة مصنع الذهب — عيار 18"
-APP_VERSION = "4.16.0"
+APP_VERSION = "4.16.1"
 # بصمة تتغيّر مع كل بناء — تكشف تشغيل نسخة قديمة فوراً
-BUILD_STAMP = "2026-09-26"
+BUILD_STAMP = "2026-09-27"
 
 # ── الثوابت المحاسبية (من وثيقة المتطلبات SRS) ─────────────
 VAT_RATE = 0.15               # ضريبة القيمة المضافة: على الأجور فقط

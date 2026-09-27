@@ -15,6 +15,7 @@
         └─ الموجود                  (متاح للبيع في الذهب المشغول)
              └─ رقم التشغيل + الوزن
 """
+import re
 
 
 # تاريخ الورود: تاريخُ **قيد** الدفعة لا لحظةُ كتابة السجل. القيد
@@ -28,6 +29,26 @@ IN_DATE = ("COALESCE((SELECT e.entry_date FROM journal_entries e"
 # مكانُ القطعة اليوم: الخزنة أو جهة. لا ثالث لهما — حالة الطقم
 # `in_stock` أو `sold`، والمرتجع يعيدها `in_stock` فتعود للخزنة.
 SAFE = "الخزنة"
+
+
+_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def model_key(name):
+    """مفتاح ترتيبٍ **طبيعي** لأسماء الموديلات: A1 ← A2 ← A3 ← A10 ← B1.
+
+    الترتيب النصّي المجرّد يضع A10 قبل A2 (لأن «1» قبل «2» حرفاً
+    بحرف)، فتتبعثر صور الموديلات في الورقة. هنا تُقرأ الأرقام داخل
+    الاسم أرقاماً — والعربية والهندية منها سواء — والحروف بلا تفريقٍ بين
+    كبيرها وصغيرها. و«بلا موديل» في الذيل دائماً.
+    """
+    s = str(name or "").strip()
+    if not s or s.startswith("—"):
+        return (1, ())
+    s = s.translate(_DIGITS).casefold()
+    parts = re.split(r"(\d+)", s)
+    return (0, tuple((0, int(p), "") if p.isdigit() else (1, 0, p)
+                     for p in parts if p != ""))
 
 
 def list_models(conn, date_from=None, date_to=None):

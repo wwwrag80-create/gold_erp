@@ -1636,13 +1636,13 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
                 else m["out_count"] if mode == "sold" else m["count"])
 
     if sort == "za":
-        models.sort(key=lambda m: str(m["model"]), reverse=True)
+        models.sort(key=lambda m: mc.model_key(m["model"]), reverse=True)
     elif sort == "most":
-        models.sort(key=lambda m: (-_n(m), str(m["model"])))
+        models.sort(key=lambda m: (-_n(m), mc.model_key(m["model"])))
     elif sort == "least":
-        models.sort(key=lambda m: (_n(m), str(m["model"])))
+        models.sort(key=lambda m: (_n(m), mc.model_key(m["model"])))
     else:
-        models.sort(key=lambda m: str(m["model"]))
+        models.sort(key=lambda m: mc.model_key(m["model"]))
 
     today = _qd(QtCore.QDate.currentDate())
     labels = {"all": "الكل", "in_stock": "المتاح للبيع",
@@ -1733,13 +1733,13 @@ def _tpl_models_received(conn, _id=0, date_from=None, date_to=None,
         models.append(g)
 
     if sort == "za":
-        models.sort(key=lambda m: str(m["model"]), reverse=True)
+        models.sort(key=lambda m: mc.model_key(m["model"]), reverse=True)
     elif sort == "most":
-        models.sort(key=lambda m: (-m["count"], str(m["model"])))
+        models.sort(key=lambda m: (-m["count"], mc.model_key(m["model"])))
     elif sort == "least":
-        models.sort(key=lambda m: (m["count"], str(m["model"])))
+        models.sort(key=lambda m: (m["count"], mc.model_key(m["model"])))
     else:
-        models.sort(key=lambda m: str(m["model"]))
+        models.sort(key=lambda m: mc.model_key(m["model"]))
 
     body = ""
     for m in models:
@@ -1873,14 +1873,8 @@ def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
             "weight": round(sum(i["reg"] for i in items), 2),
             "in_count": sum(1 for i in items if i["safe"]),
         })
-    if sort == "za":
-        picked.sort(key=lambda m: str(m["model"]), reverse=True)
-    elif sort == "most":
-        picked.sort(key=lambda m: (-m["count"], str(m["model"])))
-    elif sort == "least":
-        picked.sort(key=lambda m: (m["count"], str(m["model"])))
-    else:
-        picked.sort(key=lambda m: str(m["model"]))
+    # ورقة الصور بأسماء الموديلات دائماً — ترتيبٌ طبيعي (A1 ← A2 ← B1)
+    picked.sort(key=lambda m: mc.model_key(m["model"]))
 
     span = (en(res["date_from"]) if res["date_from"] == res["date_to"]
             else f'{en(res["date_from"])} ← {en(res["date_to"])}')
@@ -2137,14 +2131,10 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
             continue
         picked.append((m, p_img, _n(m)))
 
-    if sort == "za":
-        picked.sort(key=lambda x: str(x[0]["model"]), reverse=True)
-    elif sort == "most":
-        picked.sort(key=lambda x: (-x[2], str(x[0]["model"])))
-    elif sort == "least":
-        picked.sort(key=lambda x: (x[2], str(x[0]["model"])))
-    else:
-        picked.sort(key=lambda x: str(x[0]["model"]))
+    # **ورقة الصور بأسماء الموديلات دائماً**: A1 ← A2 ← A3 ← B1 — ترتيبٌ
+    # طبيعي تُقرأ فيه الأرقام أرقاماً (فلا يسبق A10 الموديلَ A2). من
+    # يقلّب الورقة يبحث عن موديلٍ باسمه، لا بعدد قطعه.
+    picked.sort(key=lambda x: mc.model_key(x[0]["model"]))
 
     today = _qd(QtCore.QDate.currentDate())
     if not picked:

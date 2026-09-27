@@ -428,15 +428,17 @@ class ModelsScreen(QtWidgets.QWidget):
                 return m["out_count"]
             return m["count"]
 
+        # الترتيب الطبيعي: A1 ← A2 ← A10 ← B1 (الأرقام أرقامٌ لا حروف)
+        from models.models_catalog import model_key as _k
         if mode == "az":
-            return sorted(models, key=lambda m: str(m["model"]))
+            return sorted(models, key=lambda m: _k(m["model"]))
         if mode == "za":
-            return sorted(models, key=lambda m: str(m["model"]),
+            return sorted(models, key=lambda m: _k(m["model"]),
                           reverse=True)
         if mode == "most":
             return sorted(models, key=lambda m: (-_count(m),
-                                                 str(m["model"])))
-        return sorted(models, key=lambda m: (_count(m), str(m["model"])))
+                                                 _k(m["model"])))
+        return sorted(models, key=lambda m: (_count(m), _k(m["model"])))
 
     def _render(self, models, data):
         st = self._styles()
