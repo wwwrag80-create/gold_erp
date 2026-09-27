@@ -2320,8 +2320,8 @@ def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
       table.agetbl td {{ white-space: nowrap; overflow: hidden; }}
       table.agetbl td.r {{ white-space: normal; }}
     </style>
-    <div class="note">«أحدث» و«أقدم دين»: عدد الأيام منذ أحدث دينٍ قائم
-      وأقدمه.</div>
+    <div class="note">«أحدث»: أقدم دينٍ في فئة «أقل من 30» (منذ كم يوماً
+      بدأ الدين الجاري) · «أقدم دين»: أقدم دينٍ قائم — بالأيام.</div>
     <table class="items agetbl" width="100%" cellspacing="0" cellpadding="3">
       {head_html}
       {body}

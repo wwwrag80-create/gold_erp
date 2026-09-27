@@ -54,6 +54,14 @@ def _age(lots, as_of, eps):
     return [round(x, 3) for x in out]
 
 
+def _oldest_current(lots, as_of, eps=1e-9):
+    """تاريخ أقدم دفعةٍ مفتوحة في الفئة الجارية (أقل من 30) — أو ""."""
+    lo, hi = BUCKETS[0]
+    cur = [l[0] for l in lots
+           if l[1] > eps and lo <= _days(l[0], as_of) <= hi]
+    return min(cur, default="")
+
+
 def _fifo(rows, dim, eps):
     """يطبّق «الأقدم فالأقدم» على بعدٍ واحد ويعيد الدفعات المفتوحة.
 
@@ -138,11 +146,10 @@ def report(conn, entity_type="customer", as_of=None, entity_id=None):
                 and abs(g_credit) < EPS_GOLD and abs(c_credit) < EPS_CASH):
             continue          # حساب متزن — لا شأن له بتقرير الأعمار
         oldest = min((l[0] for l in (g_lots + c_lots)), default="")
-        # **أحدث دين**: آخر دفعةٍ مدينةٍ ما زالت مفتوحة — الدين الجاري.
-        # بجانب أقدمها يقول الاثنان معاً: هل الجهة تأخذ وتسدّد بانتظام
-        # (أحدثه قريب وأقدمه قريب)، أم تأخذ ولا تسدّد القديم (أحدثه
-        # قريب وأقدمه بعيد)، أم توقّفت (الاثنان بعيدان).
-        newest = max((l[0] for l in (g_lots + c_lots)), default="")
+        # **أحدث دين** = أقدمُ دينٍ **في فئة «أقل من 30»** — الدين الجاري:
+        # منذ كم يوماً بدأ دينه الحالي. لا آخرُ بضاعةٍ أخذها (تلك قد تكون
+        # أمس ودينه الجاري بدأ قبل أربعة أسابيع). ولا دين جارياً → «—».
+        newest = _oldest_current(g_lots + c_lots, as_of)
         out.append({
             "entity_id": eid, "name": info["name"], "phone": info["phone"],
             "code": info["code"],
@@ -160,7 +167,7 @@ def report(conn, entity_type="customer", as_of=None, entity_id=None):
             # يُجاب بتاريخ دينٍ ذهبي
             "by_dim": {
                 d: {"oldest": min((l[0] for l in lots), default=""),
-                    "newest": max((l[0] for l in lots), default="")}
+                    "newest": _oldest_current(lots, as_of)}
                 for d, lots in (("gold", g_lots), ("cash", c_lots))},
         })
     # الأخطر أولاً: الأقدم ديناً في رأس القائمة

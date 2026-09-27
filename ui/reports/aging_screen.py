@@ -274,6 +274,13 @@ class AgingScreen(QtWidgets.QWidget):
         try:
             self.table.setColumnCount(len(headers))
             self.table.setHorizontalHeaderLabels(headers)
+            _tips = {"أحدث\nدين": "أقدم دينٍ في فئة «أقل من 30» — منذ كم "
+                                   "يوماً بدأ الدين الجاري",
+                     "أقدم\nدين": "أقدم دينٍ قائم — بالأيام"}
+            for _c, _h in enumerate(headers):
+                _it = self.table.horizontalHeaderItem(_c)
+                if _it is not None and _h in _tips:
+                    _it.setToolTip(_tips[_h])
             self.table.setRowCount(len(rows) + (1 if rows else 0))
             for i, r in enumerate(rows):
                 for c, v in enumerate(self._row_cells(r, dim)):

@@ -917,9 +917,16 @@ def main():
           abs(r0["cash_buckets"][0] - 1000.0) < 0.02,
           f"0-30: {r0['cash_buckets'][0]}")
     check("أقدم دين يُحسب بالأيام", r0["days"] >= 119, str(r0["days"]))
-    check("وأحدث دين: آخر دفعةٍ مفتوحة (فاتورة قبل ١٠ أيام)",
+    check("وأحدث دين: أقدم دينٍ في فئة «أقل من 30» (فاتورة قبل ١٠ أيام)",
           r0["newest_days"] == 10 and r0["newest"] == _ago(10),
           f"{r0['newest_days']} · {r0['newest']}")
+    _today_ag = _ago(0)
+    check("«أحدث» = أقدم ما في «أقل من 30» لا آخر بضاعة (40·25·5 ← 25)",
+          _ag._oldest_current([[_ago(40), 5.0], [_ago(25), 3.0],
+                               [_ago(5), 2.0]], _today_ag) == _ago(25)
+          and _ag._oldest_current([[_ago(40), 5.0]], _today_ag) == "",
+          _ag._oldest_current([[_ago(40), 5.0], [_ago(25), 3.0],
+                               [_ago(5), 2.0]], _today_ag))
     try:
         from PyQt5 import QtWidgets as _QWag
         _QWag.QApplication.instance() or _QWag.QApplication([])
