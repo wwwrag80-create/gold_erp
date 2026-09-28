@@ -421,8 +421,8 @@ class CustomersScreen(QtWidgets.QWidget):
 
     def _paint_total(self, t, r):
         p = _pal()
-        bg = QtGui.QBrush(QtGui.QColor(p.get("sumBg", p["goldSoft"])))
-        ink = QtGui.QBrush(QtGui.QColor(p.get("sumInk", p["ink"])))
+        bg = QtGui.QBrush(QtGui.QColor(p.get("totBg", "#1C1A17")))
+        ink = QtGui.QBrush(QtGui.QColor(p.get("totFg", "#FFFFFF")))
         for c in range(t.columnCount()):
             it = t.item(r, c)
             if it is None:

@@ -422,12 +422,65 @@ def fill(table, headers, rows):
         except Exception:
             pass
 
+    # صفُّ الإجمالي (آخر الجدول عادةً) — أسود بخطٍّ أبيض في كل جدول
+    try:
+        for r in range(max(0, len(rows) - 2), len(rows)):
+            if is_total_row(table, r):
+                style_total_row(table, r)
+    except Exception:
+        pass
     try:
         from ui.widgets.table_fit import fit_columns
         # التوزيع النسبي حسابي محض — لا يقرأ محتوى الخلايا
         fit_columns(table)
     except Exception:
         pass
+
+# ══════════ صفُّ الإجمالي: أسود بخطٍّ أبيض في كل جدول ══════════
+TOTAL_LABELS = ("الإجمالي", "إجمالي", "المجموع")
+
+
+def total_colors():
+    """(خلفية، خط) صفِّ الإجمالي من سمة الواجهة الحالية."""
+    try:
+        from ui import theme
+        pal = theme.palette(theme.current_theme())
+        return (QtGui.QColor(pal.get("totBg", "#1C1A17")),
+                QtGui.QColor(pal.get("totFg", "#FFFFFF")))
+    except Exception:
+        return QtGui.QColor("#1C1A17"), QtGui.QColor("#FFFFFF")
+
+
+def style_total_item(it):
+    bg, fg = total_colors()
+    f = it.font()
+    f.setBold(True)
+    it.setFont(f)
+    it.setBackground(QtGui.QBrush(bg))
+    it.setForeground(QtGui.QBrush(fg))
+
+
+def style_total_row(table, r):
+    """يلوّن صفَّ الإجمالي: خلفيةٌ سوداء وخطٌّ أبيض عريض — كل الأعمدة،
+    وتُملأ الخانات الفارغة فيه بخليةٍ فارغةٍ ملوّنة فلا ينقطع الشريط."""
+    for c in range(table.columnCount()):
+        it = table.item(r, c)
+        if it is None:
+            if table.cellWidget(r, c) is not None:
+                continue
+            it = QtWidgets.QTableWidgetItem("")
+            table.setItem(r, c, it)
+        style_total_item(it)
+
+
+def is_total_row(table, r, cols=3):
+    for c in range(min(cols, table.columnCount())):
+        it = table.item(r, c)
+        txt = (it.text() if it is not None else "").strip()
+        if txt and txt.startswith(TOTAL_LABELS):
+            return True
+    return False
+
 
 @contextlib.contextmanager
 def bulk_rows(table, n_rows, headers=None):
@@ -470,6 +523,13 @@ def bulk_rows(table, n_rows, headers=None):
     finally:
         try:
             table.setUpdatesEnabled(True)
+        except Exception:
+            pass
+        try:
+            n = table.rowCount()
+            for r in range(max(0, n - 2), n):
+                if is_total_row(table, r):
+                    style_total_row(table, r)
         except Exception:
             pass
         # توزيعٌ حسابي لا يقرأ محتوى الخلايا — بديل

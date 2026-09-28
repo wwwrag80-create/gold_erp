@@ -871,7 +871,7 @@ class DashboardScreen(QtWidgets.QWidget):
                         f.setBold(True)
                         it.setFont(f)
                         try:
-                            it.setBackground(QtGui.QColor("#EFE9DC"))
+                            __import__("ui.widgets.common", fromlist=["x"]).style_total_item(it)
                         except Exception:
                             pass
                     self.table.setItem(i, c, it)

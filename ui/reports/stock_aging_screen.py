@@ -292,8 +292,8 @@ class StockAgingScreen(QtWidgets.QWidget):
     def _mark(self, table, rows):
         from ui import theme
         pal = theme.palette(theme.current_theme())
-        bg = QtGui.QColor(pal.get("sumBg", "#FDF3E2"))
-        ink = QtGui.QColor(pal.get("sumInk", "#7A4F10"))
+        bg = QtGui.QColor(pal.get("totBg", "#1C1A17"))
+        ink = QtGui.QColor(pal.get("totFg", "#FFFFFF"))
         for i in rows:
             for c in range(table.columnCount()):
                 it = table.item(i, c)

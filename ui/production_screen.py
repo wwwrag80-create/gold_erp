@@ -752,10 +752,10 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         try:
             from ui import theme
             pal = theme.palette(theme.current_theme())
-            bg = QtGui.QColor(pal.get("sumBg", "#FDF3E2"))
-            ink = QtGui.QColor(pal.get("sumInk", "#7A4F10"))
+            bg = QtGui.QColor(pal.get("totBg", "#1C1A17"))
+            ink = QtGui.QColor(pal.get("totFg", "#FFFFFF"))
         except Exception:
-            bg, ink = QtGui.QColor("#FDF3E2"), QtGui.QColor("#7A4F10")
+            bg, ink = QtGui.QColor("#1C1A17"), QtGui.QColor("#FFFFFF")
         for c in range(self.grid.columnCount()):
             item = self.grid.item(r, c)
             if item is None:

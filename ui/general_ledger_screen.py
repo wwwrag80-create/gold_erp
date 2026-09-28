@@ -153,8 +153,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         """
         from ui import theme
         pal = theme.palette(theme.current_theme())
-        bg = QtGui.QColor(pal.get("sumBg", "#FDF3E2"))
-        ink = QtGui.QColor(pal.get("sumInk", "#7A4F10"))
+        bg = QtGui.QColor(pal.get("totBg", "#1C1A17"))
+        ink = QtGui.QColor(pal.get("totFg", "#FFFFFF"))
         # ══ خطُّ الإجمالي أصغر قليلاً ══
         # أرقام الإجمالي أكبر من أرقام الأسطر بطبيعتها (مجموع مئة
         # سطر) والعمود بعرضه، فكان الرقم الكبير يُقصّ فيُقرأ ناقصاً —

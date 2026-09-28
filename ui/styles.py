@@ -104,8 +104,8 @@ QTableWidget, QTreeWidget, QListWidget {
   background: @surface; alternate-background-color: @surface2;
   gridline-color: @grid; border: 1px solid @line; border-radius: 10px;
   color: @ink; selection-background-color: @goldSoft; selection-color: @ink;
-  font-size: 13.5pt; font-weight: 500; }
-QTableWidget::item { padding: 8px 10px; border: none; }
+  font-size: 13pt; font-weight: 500; }
+QTableWidget::item { padding: 8px 5px; }
 QTableWidget::item:hover { background: @hover; }
 /* ══ إطارٌ حديث (4.25) ══
    لا مستطيل تركيزٍ منقّط حول الخلية، ورأسٌ أعلى بخطٍّ أوضح، وزاوية

@@ -121,11 +121,35 @@ class ColumnFitter(QtCore.QObject):
             if not shown:
                 return
             total = float(sum(w[i] for i in shown)) or 1.0
+            share = {i: max(self.min_px, avail * w[i] / total)
+                     for i in shown}
+            need = _content_need(t, shown, avail)
+            px = {i: max(share[i], need.get(i, 0)) for i in shown}
+            # ══ الرقم كاملاً قبل النصّ ══
+            # عمودٌ رقمه أعرض من نصيبه يأخذ ما يحتاجه، ويُقتطع الفرق من
+            # الأعمدة التي عندها فائض (الاسم والبيان) — والنصّ يحتمل
+            # القصّ بنقاطٍ وكاملُه في التلميح، أمّا الرقم المقصوص فخطأ.
+            over = sum(px.values()) - (avail - 2)
+            if over > 0:
+                slack = {i: px[i] - max(need.get(i, 0), self.min_px)
+                         for i in shown}
+                room = sum(v for v in slack.values() if v > 0)
+                if room > 0:
+                    cut = min(over, room)
+                    for i in shown:
+                        if slack[i] > 0:
+                            px[i] -= cut * slack[i] / room
+            # أرقامٌ أعرض من الجدول كلّه: تصغيرٌ متناسب لكل الأعمدة —
+            # لا يُضحّى بآخر عمودٍ وحده
+            tot_px = sum(px.values())
+            if tot_px > avail - 2:
+                k = (avail - 2) / tot_px
+                px = {i: v * k for i, v in px.items()}
             used = 0
             for i in shown[:-1]:
-                px = max(self.min_px, int(avail * w[i] / total))
-                t.setColumnWidth(i, px)
-                used += px
+                v = max(self.min_px, int(px[i]))
+                t.setColumnWidth(i, v)
+                used += v
             t.setColumnWidth(shown[-1], max(self.min_px, avail - used - 2))
             # ملاحظة: كان هنا `resizeRowsToContents()` للجداول الصغيرة،
             # فيصير ارتفاع كل صفٍّ بقدر محتواه: صفٌّ بيانه سطرٌ يبقى
@@ -137,6 +161,51 @@ class ColumnFitter(QtCore.QObject):
             pass
         finally:
             self._busy = False
+
+
+_NUMERIC = set("0123456789٠١٢٣٤٥٦٧٨٩.,٫٬-−+%() ")
+
+
+def _is_number(txt):
+    return bool(txt) and any(ch.isdigit() for ch in txt) and all(
+        ch in _NUMERIC for ch in txt)
+
+
+def _content_need(t, shown, avail, sample=80):
+    """العرض الذي يحتاجه أعرضُ رقمٍ في كل عمود — من عيّنة صفوف.
+
+    الأعمدة الرقمية وحدها: رقمٌ مقصوص يُقرأ خطأً، والنصّ يحتمل القصّ.
+    والعيّنة أول الجدول وآخره (حيث صفُّ الإجمالي) فلا يُقاس جدولٌ كبير
+    خليةً خلية. وسقف العمود ثلث الجدول فلا يبتلع رقمٌ شاذٌّ الباقي.
+    """
+    try:
+        from PyQt5 import QtGui
+        n = t.rowCount()
+        rows = list(range(min(n, sample)))
+        rows += [r for r in range(max(0, n - 6), n) if r not in rows]
+        fm = QtGui.QFontMetrics(t.font())
+        bold = QtGui.QFont(t.font())
+        bold.setBold(True)
+        fmb = QtGui.QFontMetrics(bold)
+        pad = 26
+        cap = avail / 3.0
+        out = {}
+        for c in shown:
+            best = 0
+            for r in rows:
+                it = t.item(r, c)
+                if it is None:
+                    continue
+                txt = (it.text() or "").strip()
+                if not _is_number(txt):
+                    continue
+                m = fmb if it.font().bold() else fm
+                best = max(best, m.horizontalAdvance(txt))
+            if best:
+                out[c] = min(cap, best + pad)
+        return out
+    except Exception:
+        return {}
 
 
 def fit_columns(table, weights=None, min_px=42):

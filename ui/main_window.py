@@ -828,6 +828,10 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._panel_visible = not is_sub
         self.btn_close.setVisible(is_sub)      # زر الإغلاق في كل شاشة فرعية
+        # سعر الذهب في الواجهة الرئيسية وحدها — داخل الشاشة لا يزاحمها
+        gb = getattr(self, "gold_bar", None)
+        if gb is not None:
+            gb.setVisible(not is_sub)
         # ══ شريط الحالة في الرئيسية وحدها ══
         # داخل الشاشة كل سطرٍ للجدول: الشريط السفلي يُطوى ويعود
         # عند الرجوع إلى الرئيسية.

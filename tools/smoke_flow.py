@@ -5229,6 +5229,42 @@ def main():
           _t60["net"] == 250.0 and _t60["vat"] == 37.5
           and _sub60 == "standard")
 
+    # ══════════════════════════════════════════════════════════════
+    step("61) صفُّ الإجمالي أسود بخطٍّ أبيض · الأرقام لا تُقصّ")
+    from PyQt5 import QtGui as _G61, QtWidgets as _W61
+    from PyQt5.QtTest import QTest as _T61
+    from ui.widgets.common import fill as _fill61, make_table as _mk61
+    from ui.widgets.table_fit import fit_columns as _fit61
+    _t61 = _mk61()
+    _t61.resize(1200, 300)
+    _t61.show()
+    _big = 987654321.12
+    _fill61(_t61, ["الاسم", "أ", "ب", "ج", "د", "هـ", "و", "ز"],
+            [("مؤسسة طويلة الاسم جداً", 1.5, _big / 10, 12.0, _big / 3,
+              3.0, _big, "45.2%")] * 4
+            + [("الإجمالي",) + (_big,) * 6 + ("50%",)])
+    _fit61(_t61, [40, 8, 8, 8, 8, 8, 8, 4])
+    _T61.qWait(150)
+    _img = _t61.viewport().grab().toImage()
+    _px = _G61.QColor(_img.pixel(_t61.columnViewportPosition(3) + 20,
+                                 _t61.rowViewportPosition(4) + 6)).name()
+    check("صفُّ الإجمالي يُرسم أسود بخطٍّ أبيض",
+          _px == "#1c1a17"
+          and _t61.item(4, 2).foreground().color().name() == "#ffffff", _px)
+    _fm = _G61.QFontMetrics(_t61.font())
+    _b = _G61.QFont(_t61.font())
+    _b.setBold(True)
+    _fmb = _G61.QFontMetrics(_b)
+    _clip = sum(1 for c in range(1, 8) for r in range(_t61.rowCount())
+                if (_fmb if _t61.item(r, c).font().bold() else _fm)
+                .horizontalAdvance(_t61.item(r, c).text()) + 10
+                > _t61.columnWidth(c))
+    check("الأعمدة تتّسع لأعرض رقمٍ فيها — لا رقم مقصوص", _clip == 0,
+          f"{_clip} · {[_t61.columnWidth(c) for c in range(8)]} · "
+          f"{_fmb.horizontalAdvance(_t61.item(4, 2).text())} · "
+          f"{_t61.font().pointSizeF()} vp={_t61.viewport().width()}")
+    _t61.close()
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
