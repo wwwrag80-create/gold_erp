@@ -23,6 +23,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 import config
 from services import login_flow
+from ui.widgets.gold_frame import GoldCard, screen_overlay
 from ui.widgets.gold_stage import GoldStage, ShineLabel, animations_on
 
 # اسمُ النظام كما يُخاطَب به صاحبه — لا العنوان التقني
@@ -41,11 +42,8 @@ GATE_QSS = """
    الفاتح لرأى المستخدم ومضةً بيضاء قبل الليل. فيُصبغ هنا بلون
    المسرح نفسه — فما يُرى أولاً هو ما يبقى. */
 QDialog#gateWindow { background: #17120C; }
-QWidget#gateCard {
-    background: rgba(28, 22, 14, 218);
-    border: 1px solid rgba(201, 162, 39, 110);
-    border-radius: 16px;
-}
+/* اللوحة تُرسم بيدها (GoldCard): زجاجٌ داكن في إطارٍ ذهبي مصقول */
+QWidget#gateCard { background: transparent; border: none; }
 QWidget#gateHero { background: transparent; }
 QLabel#gateWelcome { color: #F6E7B6; font-size: 30px; font-weight: bold; }
 QLabel#gateFarewell { color: #F6E7B6; font-size: 38px; font-weight: bold; }
@@ -54,27 +52,51 @@ QLabel#gateAsk     { color: #E8D9A8; font-size: 16px; }
 QLabel#gateNote    { color: #A2916A; font-size: 12px; }
 QLabel#gateState   { color: #E3C96B; font-size: 13px; }
 QLabel#gateField   { color: #D9C68E; font-size: 13px; font-weight: bold; }
+/* الحقول غائرة: ظلٌّ في أعلاها وضوءٌ خفيف في أسفلها */
 QLineEdit#gateInput {
-    background: rgba(255, 252, 244, 20);
-    border: 1px solid rgba(201, 162, 39, 90);
-    border-radius: 9px; padding: 10px 12px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(0, 0, 0, 95), stop:0.35 rgba(12, 9, 5, 70),
+                stop:1 rgba(255, 246, 220, 16));
+    border: 1px solid rgba(201, 162, 39, 95);
+    border-top: 1px solid rgba(0, 0, 0, 170);
+    border-bottom: 1px solid rgba(255, 232, 170, 70);
+    border-radius: 9px; padding: 11px 13px;
     color: #FFF6DC; font-size: 15px;
     selection-background-color: #C9A227; selection-color: #17120C;
 }
 QLineEdit#gateInput:focus {
-    border: 1px solid #E4C665; background: rgba(255, 252, 244, 34);
+    border: 1px solid #E9C96A;
+    border-top: 1px solid rgba(90, 64, 14, 220);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(0, 0, 0, 80), stop:1 rgba(255, 240, 200, 28));
 }
+/* زرّ ذهبٍ مصقول: وميضٌ في الحافة العليا، وعمقٌ في الوسط، وانعكاسٌ
+   سفلي — ثلاث طبقاتٍ تصنع المعدن لا لونٌ واحد */
 QPushButton#gateEnter {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #D8B23A, stop:1 #A9861E);
-    color: #1B1409; border: none; border-radius: 10px;
-    padding: 12px 34px; font-size: 16px; font-weight: bold;
+                stop:0 #FFF3C4, stop:0.07 #F4D576, stop:0.42 #D8AD3C,
+                stop:0.52 #B98B22, stop:0.80 #CFA23A, stop:1 #EBC862);
+    color: #241804; border: 1px solid #6E500F;
+    border-top: 1px solid #FFF6D2; border-bottom: 1px solid #4E380A;
+    border-radius: 11px;
+    padding: 13px 34px; font-size: 17px; font-weight: bold;
 }
 QPushButton#gateEnter:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #EFCB5A, stop:1 #BE9826);
+                stop:0 #FFF8DA, stop:0.07 #FADF8A, stop:0.42 #E6BD4C,
+                stop:0.52 #C99A2C, stop:0.80 #DDB248, stop:1 #F6D676);
 }
-QPushButton#gateEnter:disabled { background: #5A4C2A; color: #9C8C68; }
+QPushButton#gateEnter:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #9E7419, stop:0.5 #C0922A, stop:1 #E3BD55);
+    border-top: 1px solid #4E380A; border-bottom: 1px solid #FFF0C0;
+    padding-top: 14px; padding-bottom: 12px;
+}
+QPushButton#gateEnter:disabled {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #6E5C33, stop:1 #4A3D21);
+    color: #A6946A; border: 1px solid #3A2F18;
+}
 QPushButton#gateQuit {
     background: transparent; color: #A2916A; border: none;
     padding: 8px 14px; font-size: 13px; font-weight: normal;
@@ -403,11 +425,13 @@ class GateWindow(QtWidgets.QDialog):
 
     def _build_card(self):
         """لوحة الدخول — تُبنى عند أوانها لا قبله."""
-        self.card = QtWidgets.QWidget(self)
+        # زجاجٌ داكن في إطارٍ ذهبي مصقول بزخارف أركان — يُرسم بيده
+        self.card = GoldCard(self)
         self.card.setObjectName("gateCard")
-        self.card.setFixedWidth(520)
+        m = GoldCard.MARGIN
+        self.card.setFixedWidth(540 + 2 * m)
         lay = QtWidgets.QVBoxLayout(self.card)
-        lay.setContentsMargins(38, 26, 38, 22)
+        lay.setContentsMargins(46 + m, 32 + m, 46 + m, 26 + m)
         lay.setSpacing(8)
 
         self.username = QtWidgets.QLineEdit()
@@ -517,6 +541,7 @@ class GateWindow(QtWidgets.QDialog):
         """
         super().showEvent(e)
         self.stage.setGeometry(self.rect())
+        self._build_overlay()
         if not animations_on():
             self.hero.show()
             self._ensure_card()
@@ -619,7 +644,21 @@ class GateWindow(QtWidgets.QDialog):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.stage.setGeometry(self.rect())
+        self._build_overlay()
         self._layout_scene()
+
+    def _build_overlay(self):
+        """حواف الشاشة: تعتيمٌ وإطارٌ ذهبي بأركانٍ مزخرفة — مرةً للمقاس."""
+        try:
+            size = (self.width(), self.height())
+            if getattr(self, "_overlay_size", None) == size:
+                return
+            self._overlay_size = size
+            self.stage.overlay = screen_overlay(size[0], size[1],
+                                                _screen_dpr())
+            self.stage.update()
+        except Exception:
+            self.stage.overlay = None
 
     def _layout_scene(self):
         """يرتّب الترحيب واللوحة كتلةً واحدة في وسط الشاشة.
@@ -702,6 +741,10 @@ class GateWindow(QtWidgets.QDialog):
         if self.card is not None:
             try:
                 self.card.setGraphicsEffect(None)
+            except Exception:
+                pass
+            try:
+                self.card.start_shine()      # لمعةٌ تمرّ على الإطار
             except Exception:
                 pass
             # النافذة نشطةٌ فعلاً قبل أن تُطلب الكتابة: بعد شاشة البدء قد

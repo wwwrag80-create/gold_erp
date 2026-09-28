@@ -88,7 +88,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # يرى نظامه المحاسبي وحده بلا أي شاشة إدارية.
         self.is_super = bool(user.get("is_super")
                              or user.get("role") == "super_admin")
-        self.setWindowTitle(config.APP_NAME)
+        self.setWindowTitle(self._app_title())
         try:
             from services import app_icon
             app_icon.apply(window=self)
@@ -268,8 +268,9 @@ class MainWindow(QtWidgets.QMainWindow):
         h.setSpacing(10)
 
         # العنوان واسم المستخدم يُقصّان عند الضيق ولا يفرضان عرضاً
-        t = ElidedLabel(config.APP_NAME, minimum=90)
+        t = ElidedLabel(self._app_title(), minimum=90)
         t.setObjectName("headerTitle")
+        self._title_lbl = t
 
         # ── البحث السريع ──
         # السؤال الأكثر تكراراً في أي نظام محاسبي: «كم على فلان؟».
@@ -1063,6 +1064,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if getattr(dlg, "applied", False):
             self.refresh_identity()
 
+    @staticmethod
+    def _app_title():
+        """«نظام محاسبة مصنع الذهب — عيار 21»: بعيار المصنع الفعّال."""
+        try:
+            return kv.rename(config.APP_NAME)
+        except Exception:
+            return config.APP_NAME
+
     def _factory_name(self):
         """اسم المصنع المعروض: المعتمد في «هوية المصنع» إن ضُبطت."""
         try:
@@ -1279,13 +1288,14 @@ class MainWindow(QtWidgets.QMainWindow):
             if k is None or int(k) == cur:
                 return
             if not ask(self,
-                       f"تحويل عرض النظام كله إلى عيار {k}؟\n\n"
-                       "• كل الأوزان تُعرض وتُدخل بعيار "
-                       f"{k} في جميع الشاشات والتقارير.\n"
-                       "• المبالغ النقدية لا تتغيّر إطلاقاً.\n"
-                       "• القيد يبقى مخزَّناً بمكافئ عيار 18، فلا يتغيّر "
-                       "رقم واحد في قاعدة البيانات والتبديل قابل "
-                       "للرجوع.\n\n"
+                       f"تحويل المصنع إلى مصنع عيار {k}؟\n\n"
+                       f"• كل القيود والأرصدة والمخزون والفواتير وصناديق "
+                       f"الكسر والتقارير والقوالب تُعرض وتُدخل وتُطبع "
+                       f"بمكافئ عيار {k}.\n"
+                       "• المبالغ النقدية لا تتغيّر إطلاقاً، والأجر "
+                       "للجرام يتعدّل ليبقى إجمالي الأجور كما هو.\n"
+                       "• التبديل آمن وقابل للرجوع في أي لحظة: الأرصدة "
+                       "نفسها لا تتغيّر، وتُقرأ بالعيار الجديد.\n\n"
                        "أي إدخال لم يُرحَّل في الشاشة المفتوحة سيُفقد."):
                 idx = self.karat_box.findData(cur)
                 self.karat_box.blockSignals(True)
@@ -1294,6 +1304,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.karat_box.blockSignals(False)
                 return
             kv.set_active(k, self.user.get("username"))
+            # عنوان النظام يحمل عيار المصنع
+            self.setWindowTitle(self._app_title())
+            tl = getattr(self, "_title_lbl", None)
+            if tl is not None:
+                tl.setText(self._app_title())
             # الوحدة الجديدة للنظام كله: عيار صندوق الكسر في المبيعات
             # والتوريد يتبعها من الآن (يُنسى آخر اختيارٍ بالعيار القديم)
             for _pref in ("sales_scrap_karat", "supply_scrap_karat"):
@@ -1312,7 +1327,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     rel()
                 self._current_row = 0
                 self.switch(row)
-            info(self, f"النظام يعرض الآن كل الأوزان بعيار {k}.")
+            info(self, f"أصبح المصنع مصنع عيار {k}: كل القيود والأرصدة "
+                       f"والمخزون والتقارير بمكافئ عيار {k}.")
         except Exception as e:
             err(self, e)
 

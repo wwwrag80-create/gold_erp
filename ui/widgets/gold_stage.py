@@ -356,6 +356,10 @@ class GoldStage(QtWidgets.QWidget):
         self._card_glow(p)
         self._ripple(p, w, h)
         self._dust_layer(p, w, h)
+        # حواف الشاشة: تعتيمٌ وإطارٌ ذهبي — صورةٌ مخبّأة تُلصق كما هي
+        ov = getattr(self, "overlay", None)
+        if ov is not None and not ov.isNull():
+            p.drawPixmap(0, 0, ov)
         if self.exit > 0.001:
             self._flash(p, w, h)
         p.end()

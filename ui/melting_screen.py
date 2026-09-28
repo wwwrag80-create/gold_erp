@@ -144,7 +144,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label(
-            "الصب والتصفية — دورة مرحلية بمعادل عيار 18"))
+            f"الصب والتصفية — دورة مرحلية بمعادل {kv.label()}"))
         lay.addWidget(self.boxes_label)
         lay.addWidget(box)
         lay.addWidget(cbox)

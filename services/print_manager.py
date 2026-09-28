@@ -770,10 +770,10 @@ def _tpl_voucher(conn, voucher_id):
           <tr><th>الوقت</th><td>{en(time_str)}</td></tr>
         </table></td>''')
     box_cells = cells(
-        f'<td {TH} width="25%">وزن الذهب (عيار 18)</td>',
+        f'<td {TH} width="25%">وزن الذهب ({_kunit()})</td>',
         f'''<td align="center" style="text-align:center;
             border:1px solid #999; padding:4px; font-size:12pt;
-            font-weight:bold; width:25%;">{_w(v["gold_equiv18"])}</td>''',
+            font-weight:bold; width:25%;">{_gw(v["gold_equiv18"])}</td>''',
         f'<td {TH} width="25%">ريال سعودي</td>',
         f'''<td align="center" style="text-align:center;
             border:1px solid #999; padding:4px; font-size:12pt;
@@ -808,7 +808,7 @@ def _tpl_voucher(conn, voucher_id):
       <tr><td {TH} width="60%">رصيدكم الجديد للنقدية هو</td>
           <td>{_w(abs(c_bal), 2)}</td><td>{side(c_bal)}</td></tr>
       <tr><th>رصيدكم الجديد للذهب هو</th>
-          <td>{_w(abs(g_bal))}</td><td>{side(g_bal)}</td></tr>
+          <td>{_gw(abs(g_bal))}</td><td>{side(g_bal)}</td></tr>
     </table>
 
     <table class="sig" width="100%" cellspacing="0" cellpadding="6">
@@ -915,19 +915,19 @@ def _tpl_melting(conn, op_id):
     if not op:
         raise ValueError("المستند غير موجود")
     label = melting.KIND_LABELS.get(op["kind"], "عملية صب وتصفية")
-    rows = [(f"عيار {l['karat']}", _w(l["weight"]), _w(l["equiv18"]))
+    rows = [(f"عيار {l['karat']}", _w(l["weight"]), _gw(l["equiv18"]))
             for l in melting.op_lines(conn, op_id)]
     if not rows:
-        rows = [("—", "—", _w(op["equiv18"]))]
+        rows = [("—", "—", _gw(op["equiv18"]))]
     body = f"""
     <table class="items">
-      <tr><th>العيار</th><th>الوزن الفعلي (جم)</th><th>معادل عيار 18 (جم)</th></tr>
+      <tr><th>العيار</th><th>الوزن الفعلي (جم)</th><th>المعادل ({_kunit()})</th></tr>
       {_rows(rows)}
       <tr class="total"><td class="num">الإجمالي</td><td class="num">—</td>
-        <td class="num">{_w(op['equiv18'])}</td></tr>
+        <td class="num">{_gw(op['equiv18'])}</td></tr>
     </table><br/>
-    <div class="note">كل الأوزان تُقيَّد بمعادل عيار 18:
-      الوزن الفعلي × العيار ÷ 18.</div>
+    <div class="note">المعادل بعيار المصنع: الوزن الفعلي × العيار ÷
+      {_kactive()}.</div>
     """
     return (_header(label, op["op_no"] or f"#{op_id}", op["op_date"])
             + body + _footer(op["notes"] or ""))
@@ -1615,8 +1615,8 @@ def _tpl_turnover(conn, _id=0, date_from=None, date_to=None):
         rows_html = "".join(
             "<tr>" + cells(f'<td>{en(i["wo"])}</td>',
                            f'<td>{en(i.get(_key) or "—")}</td>',
-                           f'<td>{_w(i["reg"])}</td>',
-                           f'<td>{_w(i["standing"])}</td>') + "</tr>"
+                           f'<td>{_gw(i["reg"])}</td>',
+                           f'<td>{_gw(i["standing"])}</td>') + "</tr>"
             for i in d["items"])
         if not rows_html:
             rows_html = f'<tr><td {TD} colspan="4">لا توجد أطقم</td></tr>'
@@ -1631,8 +1631,8 @@ def _tpl_turnover(conn, _id=0, date_from=None, date_to=None):
                  thw("الوزن المقيد"), thw("الوزن القائم"))}</tr>
       {rows_html}
       <tr>{cells(thw("الإجمالي"), thw(f'{d["count"]} طقم'),
-                 thw(_w(d["total_reg"])),
-                 thw(_w(d["total_standing"])))}</tr>
+                 thw(_gw(d["total_reg"])),
+                 thw(_gw(d["total_standing"])))}</tr>
     </table><br/>'''
 
     body = f'''
@@ -1662,7 +1662,7 @@ def _tpl_balances(conn, entity_type, rows):
     for r in rows:
         body_rows += (
             f'<tr><td class="r">{r["name"]}</td>'
-            f'<td>{_w(abs(r["gold"]))}</td>'
+            f'<td>{_gw(abs(r["gold"]))}</td>'
             f'<td>{_side(r["gold"])}</td>'
             f'<td>{_w(abs(r["cash"]), 2)}</td>'
             f'<td>{_side(r["cash"])}</td></tr>')
@@ -1682,7 +1682,7 @@ def _tpl_balances(conn, entity_type, rows):
     body = f'''
     <div {WIDE}>تاريخ الكشف: <b>{en(today)}</b></div>
     {TBL}
-      <tr>{cells(thw("الجهة", 34), thw("ذهب 18 (جم)", 18),
+      <tr>{cells(thw("الجهة", 34), thw(f"ذهب ({_kunit()})", 18),
                  thw("الحالة", 12), thw("الأجور (ريال)", 24),
                  thw("الحالة", 12))}</tr>
       {body_rows}
@@ -1692,9 +1692,9 @@ def _tpl_balances(conn, entity_type, rows):
            cellpadding="6" style="margin-top:8px">
       <tr>{cells(thw("الإجمالي", 34), thw("مدين", 18),
                  thw("دائن", 18), thw("الصافي", 30))}</tr>
-      <tr>{cells('<td class="r"><b>ذهب 18 (جم)</b></td>',
-                 f'<td>{_w(dg)}</td>', f'<td>{_w(cg)}</td>',
-                 f'<td><b>{_w(ng)}</b> — {_side(ng)}</td>')}</tr>
+      <tr>{cells(f'<td class="r"><b>ذهب ({_kunit()})</b></td>',
+                 f'<td>{_gw(dg)}</td>', f'<td>{_gw(cg)}</td>',
+                 f'<td><b>{_gw(ng)}</b> — {_side(ng)}</td>')}</tr>
       <tr>{cells('<td class="r"><b>الأجور (ريال)</b></td>',
                  f'<td>{_w(dc, 2)}</td>', f'<td>{_w(cc, 2)}</td>',
                  f'<td><b>{_w(nc, 2)}</b> — {_side(nc)}</td>')}</tr>
@@ -1871,20 +1871,20 @@ def _tpl_work_order(conn, wo_id):
         t_reg += r["registered_weight"] or 0
         t_stand += r["standing_gold"] or 0
         body += "<tr>" + cells(
-            tdw(en(r["work_order_no"])), tdw(_w(r["gold_weight"])),
-            tdw(_w(r["small_stones"])), tdw(_w(r["big_stones"])),
-            tdw(_w(r["stones_after_discount"])),
-            tdw(_w(r["standing_gold"])),
-            tdw(_w(r["registered_weight"]))) + "</tr>"
+            tdw(en(r["work_order_no"])), tdw(_gw(r["gold_weight"])),
+            tdw(_gw(r["small_stones"])), tdw(_gw(r["big_stones"])),
+            tdw(_gw(r["stones_after_discount"])),
+            tdw(_gw(r["standing_gold"])),
+            tdw(_gw(r["registered_weight"]))) + "</tr>"
     if not body:
         body = f'<tr><td {TD} colspan="7">لا توجد أطقم</td></tr>'
 
     head = cells(thw("رقم التشغيل"), thw("الذهب"), thw("الفصوص"),
                  thw("الأحجار"), thw("بعد الخصم"), thw("الذهب القائم"),
                  thw("الوزن المقيد"))
-    foot = cells(thw("الإجمالي"), thw(_w(t_gold)), thw(_w(t_small)),
-                 thw(_w(t_big)), thw(_w(t_after)), thw(_w(t_stand)),
-                 thw(_w(t_reg)))
+    foot = cells(thw("الإجمالي"), thw(_gw(t_gold)), thw(_gw(t_small)),
+                 thw(_gw(t_big)), thw(_gw(t_after)), thw(_gw(t_stand)),
+                 thw(_gw(t_reg)))
     meta = f'''{TBL}
       <tr>{cells(thw("رقم القيد"),
                  f'<td>{en("#" + str(wo["entry_id"] or ""))}</td>',
@@ -1905,7 +1905,7 @@ def _tpl_workshop_losses(conn, _id=0, date_from=None, date_to=None):
         "<tr>" + cells(
             tdw(en(r["doc_no"] or "—")), tdw(en(r["loss_date"])),
             f'<td class="r">{r["acc_name"]}</td>',
-            tdw(_w(r["weight"])),
+            tdw(_gw(r["weight"])),
             f'<td class="r">{r["description"] or ""}</td>') + "</tr>"
         for r in rows)
     if not body:
@@ -1914,7 +1914,7 @@ def _tpl_workshop_losses(conn, _id=0, date_from=None, date_to=None):
     head = cells(thw("رقم السند"), thw("التاريخ"), thw("نوع الفاقد"),
                  thw("الوزن (جم)"), thw("البيان"))
     foot = cells(thw("الإجمالي"), thw(""), thw(f"{len(rows)} سند"),
-                 thw(_w(tot)), thw(""))
+                 thw(_gw(tot)), thw(""))
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
     return (_header("سجل فواقد الورشة", "—", today, show_meta=False)
             + table)
@@ -1939,7 +1939,7 @@ def _tpl_workshop_accounts(conn, _id=0, rows=None, date_from=None,
         tc += cb
         body += "<tr>" + cells(
             f'<td class="r">{x.get("code", "")} — {x.get("name", "")}</td>',
-            tdw(_w(gd)), tdw(_w(gc)), tdw(_w(gb)),
+            tdw(_gw(gd)), tdw(_gw(gc)), tdw(_gw(gb)),
             tdw(_w(cd, 2)), tdw(_w(cc, 2)),
             tdw(_w(cb, 2))) + "</tr>"
     if not body:
@@ -1947,7 +1947,7 @@ def _tpl_workshop_accounts(conn, _id=0, rows=None, date_from=None,
     head = cells(thw("الحساب"), thw("مدين ذهب"), thw("دائن ذهب"),
                  thw("رصيد الذهب"), thw("مدين نقد"), thw("دائن نقد"),
                  thw("رصيد النقد"))
-    foot = cells(thw("الإجمالي"), thw(""), thw(""), thw(_w(tg)),
+    foot = cells(thw("الإجمالي"), thw(""), thw(""), thw(_gw(tg)),
                  thw(""), thw(""), thw(_w(tc, 2)))
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
     meta = (f'<div {WIDE}>الفترة: <b>{en(date_from or "—")}</b>'
@@ -1974,7 +1974,7 @@ def _tpl_balance_tree(conn, _id=0, date_to=None, max_level=3,
             f'<td class="r"><b>◄ {sec["title"]}</b></td>',
             f'<td><b>{en(sec["code"])}</b></td>',
             f'<td><b>{_w(sec["cash"], 2)}</b></td>',
-            f'<td><b>{_w(sec["gold"])}</b></td>') + "</tr>")
+            f'<td><b>{_gw(sec["gold"])}</b></td>') + "</tr>")
         for r in sec["rows"]:
             if r["level"] == 1:
                 continue
@@ -1984,7 +1984,7 @@ def _tpl_balance_tree(conn, _id=0, date_to=None, max_level=3,
                 f'{r["name"]}</td>',
                 f'<td>{en(r["code"])}</td>',
                 f'<td>{_w(r["cash"], 2)}</td>',
-                f'<td>{_w(r["gold"])}</td>') + "</tr>")
+                f'<td>{_gw(r["gold"])}</td>') + "</tr>")
     if not body:
         body = f'<tr><td {TD} colspan="4">لا توجد أرصدة</td></tr>'
 
@@ -1993,7 +1993,7 @@ def _tpl_balance_tree(conn, _id=0, date_to=None, max_level=3,
     ok = b["balanced_cash"] and b["balanced_gold"]
     head = cells(thw("الحساب", 42), thw("الكود", 12),
                  thw("النقد / الأجور (ريال)", 23),
-                 thw("الذهب (جم 18)", 23))
+                 thw(f"الذهب ({_kunit()})", 23))
     meta = f'''{TBL}
       <tr>{cells(thw("حتى تاريخ"), f'<td>{en(date_to or today)}</td>',
                  thw("مستوى التفصيل"), f'<td>{en(max_level)}</td>')}</tr>
@@ -2002,17 +2002,17 @@ def _tpl_balance_tree(conn, _id=0, date_to=None, max_level=3,
     <table class="items totals" width="100%" cellspacing="0"
            cellpadding="6" style="margin-top:8px">
       <tr>{cells(thw("البيان", 40), thw("النقد (ريال)", 30),
-                 thw("الذهب (جم 18)", 30))}</tr>
+                 thw(f"الذهب ({_kunit()})", 30))}</tr>
       <tr>{cells('<td class="r"><b>إجمالي الأصول</b></td>',
                  f'<td><b>{_w(ac, 2)}</b></td>',
-                 f'<td><b>{_w(ag)}</b></td>')}</tr>
+                 f'<td><b>{_gw(ag)}</b></td>')}</tr>
       <tr>{cells('<td class="r"><b>الخصوم + حقوق الملكية + النتيجة</b>'
                  '</td>',
                  f'<td><b>{_w(rc, 2)}</b></td>',
-                 f'<td><b>{_w(rg)}</b></td>')}</tr>
+                 f'<td><b>{_gw(rg)}</b></td>')}</tr>
       <tr>{cells('<td class="r">الفرق</td>',
                  f'<td>{_w(b["diff_cash"], 2)}</td>',
-                 f'<td>{_w(b["diff_gold"])}</td>')}</tr>
+                 f'<td>{_gw(b["diff_gold"])}</td>')}</tr>
     </table>
     <div {WIDE} style="margin-top:6px">
       <b>{"✔ الميزانية متوازنة في البعدين" if ok
@@ -2038,10 +2038,10 @@ def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
             f'<td>{en(r["code"])}</td>',
             f'<td class="r">{r["name"]}</td>',
             f'<td>{types.get(r["type"], r["type"])}</td>',
-            f'<td>{_w(r["open_gold"])}</td>',
-            f'<td>{_w(r["gold_debit"])}</td>',
-            f'<td>{_w(r["gold_credit"])}</td>',
-            f'<td>{_w(r["close_gold"])}</td>',
+            f'<td>{_gw(r["open_gold"])}</td>',
+            f'<td>{_gw(r["gold_debit"])}</td>',
+            f'<td>{_gw(r["gold_credit"])}</td>',
+            f'<td>{_gw(r["close_gold"])}</td>',
             f'<td>{_w(r["open_cash"], 2)}</td>',
             f'<td>{_w(r["cash_debit"], 2)}</td>',
             f'<td>{_w(r["cash_credit"], 2)}</td>',
@@ -2052,10 +2052,10 @@ def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
     t = tb["totals"]
     body += ("<tr>" + cells(
         '<td></td>', '<td class="r"><b>الإجمالي</b></td>', '<td></td>',
-        f'<td><b>{_w(t["open_gold"])}</b></td>',
-        f'<td><b>{_w(t["gold_debit"])}</b></td>',
-        f'<td><b>{_w(t["gold_credit"])}</b></td>',
-        f'<td><b>{_w(t["close_gold"])}</b></td>',
+        f'<td><b>{_gw(t["open_gold"])}</b></td>',
+        f'<td><b>{_gw(t["gold_debit"])}</b></td>',
+        f'<td><b>{_gw(t["gold_credit"])}</b></td>',
+        f'<td><b>{_gw(t["close_gold"])}</b></td>',
         f'<td><b>{_w(t["open_cash"], 2)}</b></td>',
         f'<td><b>{_w(t["cash_debit"], 2)}</b></td>',
         f'<td><b>{_w(t["cash_credit"], 2)}</b></td>',
@@ -2126,7 +2126,7 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
         body += ("<tr>" + cells(
             f'<td class="r"><b>◄ {img}الموديل {m["model"]}</b></td>',
             f'<td><b>{en(hn)}</b></td>',
-            f'<td><b>{_w(hw)}</b></td>', '<td></td>') + "</tr>")
+            f'<td><b>{_gw(hw)}</b></td>', '<td></td>') + "</tr>")
         if m["model"] not in expanded:
             continue          # مطويّ على الشاشة → سطر واحد
         for branch, label in (("sold", "طرف المناديب"),
@@ -2141,13 +2141,13 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
             body += ("<tr>" + cells(
                 f'<td class="r" style="padding-right:14px">'
                 f'<b>{label}</b></td>',
-                f'<td>{en(n)}</td>', f'<td>{_w(w)}</td>',
+                f'<td>{en(n)}</td>', f'<td>{_gw(w)}</td>',
                 '<td></td>') + "</tr>")
             for i in items:
                 body += ("<tr>" + cells(
                     f'<td class="r" style="padding-right:30px">'
                     f'{en(i["wo"])}</td>',
-                    '<td></td>', f'<td>{_w(i["reg"])}</td>',
+                    '<td></td>', f'<td>{_gw(i["reg"])}</td>',
                     f'<td>{i["holder"]}  ·  {en(i["date"])}</td>')
                     + "</tr>")
     if not body:
@@ -2158,7 +2158,7 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
     head = cells(thw("الموديل / رقم التشغيل", 40), thw("العدد", 12),
                  thw("الوزن المقيد (جم)", 22), thw("الجهة / التاريخ", 26))
     foot = cells(thw(f"الإجمالي — {len(models)} موديل"), thw(""),
-                 thw(_w(tin + tout if mode == "all"
+                 thw(_gw(tin + tout if mode == "all"
                         else tin if mode == "in_stock" else tout)),
                  thw(""))
     meta = (f'<div {WIDE}>العرض: <b>{labels.get(mode, mode)}</b>'
@@ -2429,13 +2429,13 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
         body = "".join(
             "<tr>" + cells(f'<td class="r">عيار {en(r["karat"])}</td>',
                            f'<td>{_w(r["actual"])}</td>',
-                           f'<td>{_w(r["eq18"])}</td>') + "</tr>"
+                           f'<td>{_gw(r["eq18"])}</td>') + "</tr>"
             for r in rows)
         ta = round(sum(r["actual"] for r in rows), 3)
         te = round(sum(r["eq18"] for r in rows), 3)
         head = cells(thw("العيار", 34), thw("الوزن الفعلي (جم)", 33),
-                     thw("المكافئ بعيار 18 (جم)", 33))
-        foot = cells(thw("الإجمالي"), thw(_w(ta)), thw(_w(te)))
+                     thw(f"المكافئ ({_kunit()})", 33))
+        foot = cells(thw("الإجمالي"), thw(_w(ta)), thw(_gw(te)))
         table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
         note = (f'<div {WIDE}>صندوق الكسر حساب واحد (1310) يضمّ '
                 f'الأعيرة الأربعة؛ الرصيد المحاسبي بمكافئ 18.</div>')
@@ -2486,9 +2486,9 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
     body = "".join(
         "<tr>" + cells(
             f'<td class="r">{r["code"]} — {r["name"]}</td>',
-            f'<td>{_w(r["gold_debit"])}</td>',
-            f'<td>{_w(r["gold_credit"])}</td>',
-            f'<td>{_w(r["gold_balance"])}</td>',
+            f'<td>{_gw(r["gold_debit"])}</td>',
+            f'<td>{_gw(r["gold_credit"])}</td>',
+            f'<td>{_gw(r["gold_balance"])}</td>',
             f'<td>{_w(r["cash_debit"], 2)}</td>',
             f'<td>{_w(r["cash_credit"], 2)}</td>',
             f'<td>{_w(r["cash_balance"], 2)}</td>') + "</tr>"
@@ -2501,8 +2501,8 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
                  thw("دائن ذهب", 12), thw("رصيد ذهب", 13),
                  thw("مدين نقد", 12), thw("دائن نقد", 12),
                  thw("رصيد نقد", 14))
-    foot = cells(thw("الإجمالي"), thw(_w(t["gold_debit"])),
-                 thw(_w(t["gold_credit"])), thw(_w(t["gold_balance"])),
+    foot = cells(thw("الإجمالي"), thw(_gw(t["gold_debit"])),
+                 thw(_gw(t["gold_credit"])), thw(_gw(t["gold_balance"])),
                  thw(_w(t["cash_debit"], 2)),
                  thw(_w(t["cash_credit"], 2)),
                  thw(_w(t["cash_balance"], 2)))

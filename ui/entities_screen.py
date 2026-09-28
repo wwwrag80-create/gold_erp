@@ -444,11 +444,11 @@ class EntitiesScreen(QtWidgets.QWidget):
                 if e["id"] in over:
                     limit_txt = "⛔ تجاوز — " + limit_txt
                 rows.append((e["name"], entities.TYPE_LABELS[e["entity_type"]],
-                            f"{c:,.2f}", f"{g:,.2f}", limit_txt, extra))
+                            f"{c:,.2f}", f"{kv.g(g):,.2f}", limit_txt, extra))
                 self._row_ids.append(e["id"])
             share_total = entities.partners_share_total(conn)
         fill(self.table, ["الاسم", "النوع", "رصيد نقدي",
-                          "رصيد ذهب (جم 18)", "حدّ الائتمان",
+                          f"رصيد ذهب ({kv.unit()})", "حدّ الائتمان",
                           "بيانات إضافية"], rows)
         w = "" if abs(share_total - 100) < 0.01 or share_total == 0 else \
             "  ⚠ المجموع لا يساوي 100%"

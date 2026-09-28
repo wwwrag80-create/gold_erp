@@ -74,7 +74,7 @@ class TurnoverPanel(QtWidgets.QFrame):
              ["رقم التشغيل", "المُرجِع" if ret else "البائع",
               "الوزن المقيد", "الوزن القائم"],
              [(i["wo"], i.get(key) or "—",
-               f"{i['reg']:,.2f}", f"{i['standing']:,.2f}")
+               f"{kv.g(i['reg']):,.2f}", f"{kv.g(i['standing']):,.2f}")
               for i in data["items"]])
 
 

@@ -5522,6 +5522,59 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    # ══════════════════════════════════════════════════════════════
+    step("65) مصنع عيار 21: كل الأوزان والقوالب بمكافئ 21 · إطار البوابة")
+    import re as _re65
+    from services import print_manager as _pm65
+    with db(readonly=True) as conn:
+        _wo65 = conn.execute(
+            "SELECT id, registered_weight FROM work_orders WHERE is_deleted=0"
+            " AND registered_weight > 1 ORDER BY id LIMIT 1").fetchone()
+    _r18 = f"{_wo65['registered_weight']:,.2f}"
+    _r21 = f"{_wo65['registered_weight'] * 18 / 21:,.2f}"
+    _kv.set_active(21, "admin")
+    try:
+        _hw65 = _pm65.build_html("work_orders", _wo65["id"])
+        _hb65 = _pm65.build_html("balance_tree", 0)
+        _txt65 = _re65.sub("<[^>]+>", " ", _hw65)
+        check("قالب رقم التشغيل بمكافئ 21 لا 18",
+              _r21 in _txt65 and _r18 not in _txt65, f"{_r18} → {_r21}")
+        check("والميزانية بعنوان «جم 21» بلا «جم 18»",
+              "جم 21" in _hb65 and "جم 18" not in _hb65)
+        try:
+            from PyQt5 import QtWidgets as _QW65
+            _QW65.QApplication.instance() or _QW65.QApplication([])
+            from ui.main_window import MainWindow as _MW65
+            check("عنوان النظام يحمل عيار المصنع",
+                  "عيار 21" in _MW65._app_title())
+            import ui.entities_screen as _es65
+            _src65 = pathlib.Path(_es65.__file__).read_text(encoding="utf-8")
+            check("جدول الجهات يعرض رصيد الذهب بعيار المصنع",
+                  "(جم 18)" not in _src65 and "kv.g(g)" in _src65)
+        except ImportError:
+            print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+    finally:
+        _kv.set_active(18, "admin")
+    try:
+        from PyQt5 import QtGui as _QG65
+        from ui.widgets import gold_frame as _gf65
+        _ov = _gf65.screen_overlay(400, 300, 1.0).toImage().convertToFormat(
+            _QG65.QImage.Format_ARGB32)
+        _edge = _QG65.QColor.fromRgba(_ov.pixel(2, 150)).alpha()
+        _mid = _QG65.QColor.fromRgba(_ov.pixel(200, 140)).alpha()
+        check("حواف الشاشة: تعتيمٌ على الأطراف وصفاءٌ في الوسط",
+              _edge > 25 and _mid == 0, f"{_edge}/{_mid}")
+        _card = _gf65.GoldCard()
+        _card.resize(420, 300)
+        _img = _card.grab().toImage()
+        _fr = _card.frame_rect()
+        _px = _QG65.QColor(_img.pixel(int(_fr.center().x()),
+                                      int(_fr.top() + 2)))
+        check("إطار اللوحة معدنٌ ذهبي (أحمر > أزرق بوضوح)",
+              _px.red() > _px.blue() + 60, _px.name())
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

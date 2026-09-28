@@ -24,7 +24,8 @@ class StockReportScreen(QtWidgets.QWidget):
         lay.addWidget(self.gold_summary)
         lay.addWidget(self.cash_summary)
         box = QtWidgets.QGroupBox(
-            "صناديق الكسر: الوزن الفعلي بعياره مقابل المكافئ الدفتري بعيار 18")
+            "صناديق الكسر: الوزن الفعلي بعياره مقابل المكافئ الدفتري "
+            f"بـ{kv.label()}")
         bl = QtWidgets.QVBoxLayout(box)
         bl.addWidget(self.boxes)
         lay.addWidget(box, 1)

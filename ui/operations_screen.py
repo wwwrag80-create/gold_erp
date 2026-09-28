@@ -15,6 +15,13 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                title_label)
 
 DOC_COLS = ["الرقم", "النوع", "التاريخ", "الجهة", "الوزن", "القيمة"]
+# عمود الوزن بمكافئ عيار المصنع — يُسمّى عند التعبئة (`_doc_cols`)
+
+
+def _doc_cols():
+    c = list(DOC_COLS)
+    c[4] = f"الوزن ({kv.unit()})"
+    return c
 AUDIT_COLS = ["التاريخ والوقت", "المستخدم", "نوع التعديل", "الجدول",
               "رقم السجل", "التفاصيل"]
 
@@ -162,9 +169,9 @@ class OperationsScreen(QtWidgets.QWidget):
             self.docs = [{"id": r["id"], "no": r["no"], "kind": r["k"],
                           "src": src, "party": r["party"] or "—"}
                          for r in rows]
-            fill(self.table, DOC_COLS,
+            fill(self.table, _doc_cols(),
                  [(r["no"], lbl.get(r["k"], r["k"]), r["d"],
-                   r["party"] or "—", f"{r['w'] or 0:,.2f}",
+                   r["party"] or "—", f"{kv.g(r['w'] or 0):,.2f}",
                    f"{r['v'] or 0:,.2f}") for r in rows])
             self.picked.setText(f"{len(rows)} عملية — اختر سطراً للتحويل")
         except Exception as e:
