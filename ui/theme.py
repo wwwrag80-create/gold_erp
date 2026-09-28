@@ -41,7 +41,7 @@ LIGHT = {
     "bg": "#F7F5F0", "surface": "#FFFFFF", "surface2": "#FAF8F3",
     "hover": "#FBF7EC", "focusBg": "#FFFDF6",
     "line": "#E3DDD0", "line2": "#D6CFC0", "line3": "#C0B79F",
-    "grid": "#EDE8DC",
+    "grid": "#E0D8C6",
     "gold": "#9A7B22", "goldHi": "#B08E2A", "goldDim": "#5E4A0C",
     "goldSoft": "#F3E9CE", "goldSoft2": "#F7EFD9", "goldSel": "#EFDFAE",
     "goldEdge": "#E0CC8F", "goldEdge2": "#B99B33", "goldBright": "#C9A227",
@@ -159,6 +159,14 @@ def build(template, tokens, scale=1.0):
     if abs(s - 1.0) > 0.001:
         def _fix(m):
             val = float(m.group(2)) * s
+            # ══ البكسل عددٌ صحيح إلزاماً (4.20) ══
+            # Qt يرفض بصمتٍ مقاساً كسرياً بالبكسل («22.4px») ويعود للخط
+            # الأساسي — فكانت العناوين وأرقام البطاقات والملصقات كلها
+            # تُرسم بالمقاس الصغير نفسه كلما لم يكن المعامل واحداً تماماً
+            # (وهو كذلك دائماً مع تناسب الشاشة والخط الحديث). النقطة
+            # (pt) تقبل الكسر فتبقى بدقّتها.
+            if m.group(3) == "px":
+                return f"{m.group(1)}{max(1, int(round(val)))}px"
             return f"{m.group(1)}{val:.1f}{m.group(3)}"
         out = _FSIZE.sub(_fix, out)
     return out
@@ -208,7 +216,16 @@ def apply(app, theme=None, scale=None):
     if fam == getattr(_fonts, "MODERN", ""):
         f.setWeight(QtGui.QFont.Medium)
     # تنعيمٌ كامل للحواف وتلميحٌ خفيف: أوضح على شاشات اليوم
-    f.setHintingPreference(QtGui.QFont.PreferNoHinting)
+    # ══ حِدّة الحرف (4.20) ══
+    # «بلا تلميح» (PreferNoHinting) يدفع Qt على ويندوز إلى DirectWrite
+    # برسمٍ رماديٍّ غير مُلتقَط على شبكة البكسل: ناعمٌ لكنه **ضبابيٌّ
+    # باهت** — وهو «الخط غير الواضح» الذي شُكي منه. التلميح الكامل
+    # يُلزم كل خطٍّ في الحرف ببكسلٍ كامل مع ClearType، فيخرج الرقم
+    # والاسم حادَّين أسودين كنصوص ويندوز نفسها.
+    import sys as _sys
+    f.setHintingPreference(QtGui.QFont.PreferFullHinting
+                           if _sys.platform.startswith("win")
+                           else QtGui.QFont.PreferDefaultHinting)
     f.setStyleStrategy(QtGui.QFont.PreferAntialias)
     app.setFont(f)
     app.setStyleSheet(build(styles.TEMPLATE, tk, s))

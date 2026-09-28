@@ -1262,8 +1262,14 @@ def main():
     check("اسمٌ غير معروف لا يكسر النمط",
           "@nope" in _th.build("a { color: @nope; }", _th.LIGHT, 1.0))
     _big = _th.build(_tpl, _th.LIGHT, 2.0)
-    check("مقاس الخط يُضرب في المعامل", "font-size:28.0px" in
-          _big.replace("font-size: ", "font-size:"), _big)
+    check("مقاس الخط يُضرب في المعامل", "font-size:28px" in
+          _big.replace("font-size: ", "font-size:"), _big[:200])
+    import re as _re_fs
+    from ui import styles as _sty27
+    _odd = _th.build(_sty27.TEMPLATE, _th.LIGHT, 0.93)
+    check("والبكسل عددٌ صحيح دائماً — Qt يُسقط «22.4px» بصمت فيصغر النصّ",
+          not _re_fs.search(r"font-size:\s*\d+\.\d+px", _odd)
+          and _re_fs.search(r"font-size:\s*\d+\.\dpt", _odd))
     check("كل مفاتيح اللوحة الفاتحة لها مقابل في الليلية",
           set(_th.LIGHT) == set(_th.DARK),
           str(set(_th.LIGHT) ^ set(_th.DARK)))

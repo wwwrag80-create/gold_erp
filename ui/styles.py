@@ -21,13 +21,13 @@ TEMPLATE = """
      يُرى دائماً (حلقة ذهبية) لأن الإدخال هنا بلوحة المفاتيح غالباً.
    ══════════════════════════════════════════════════════════════════ */
 
-QWidget { background: @bg; color: @ink; font-size: 14px; }
+QWidget { background: @bg; color: @ink; font-size: 16px; }
 QLabel { background: transparent; }
 QLabel#title { font-size: 19px; font-weight: bold; color: @goldDim;
                padding: 6px 2px 2px 2px; }
-QLabel#big { font-size: 15px; font-weight: bold; color: @ink; }
-QLabel#warn { font-size: 15px; font-weight: bold; color: @redText; }
-QLabel#ok { font-size: 13px; font-weight: bold; color: @green; }
+QLabel#big { font-size: 16.5px; font-weight: bold; color: @ink; }
+QLabel#warn { font-size: 16px; font-weight: bold; color: @redText; }
+QLabel#ok { font-size: 15px; font-weight: bold; color: @green; }
 QToolTip { background: @tipBg; color: @tipFg; border: none;
            padding: 6px 9px; border-radius: 6px; }
 
@@ -74,7 +74,7 @@ QMenu::separator { height: 1px; background: @line; margin: 4px 8px; }
 QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox, QDateEdit, QTextEdit {
   background: @surface; border: 1px solid @line2; border-radius: 8px;
   padding: 6px 9px; color: @ink; selection-background-color: @goldRing;
-  selection-color: @ink2; }
+  selection-color: @ink2; font-weight: 500; }
 QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus,
 QDateEdit:focus, QTextEdit:focus { border: 2px solid @goldBright;
   background: @focusBg; }
@@ -92,6 +92,11 @@ QRadioButton::indicator { width: 16px; height: 16px; border-radius: 8px;
   border: 1px solid @line3; background: @surface; }
 QRadioButton::indicator:checked { background: @gold; border-color: @goldDim; }
 
+/* ══ وزن الأرقام والأسماء (4.20) ══
+   الجداول والخانات بوزن «شبه عريض» (SemiBold) لا العادي: كل رقمٍ واسمٍ
+   بخطوطٍ أسمك فيُقرأ من بعيد. وقيمة 500 هنا — لا 600 — مقصودة: محلّل
+   أنماط Qt يقسم الوزن على 8، فـ500 ← 62 = شبه عريض، و600 ← 75 = عريض. */
+
 /* ══ الجداول ══
    الرأس فاتح لا أسود: الرأس الداكن يسحب العين إليه وهي يجب أن تكون
    على الأرقام. التمييز بالثقل والخط الفاصل يكفي. */
@@ -99,11 +104,11 @@ QTableWidget, QTreeWidget, QListWidget {
   background: @surface; alternate-background-color: @surface2;
   gridline-color: @grid; border: 1px solid @line; border-radius: 10px;
   color: @ink; selection-background-color: @goldSoft; selection-color: @ink;
-  font-size: 12.5pt; }
+  font-size: 13pt; font-weight: 500; }
 QTableWidget::item { padding: 7px 8px; }
 QTableWidget::item:hover { background: @hover; }
 QHeaderView::section { background: @hdrBg; color: @hdrFg; padding: 9px 6px;
-  font-size: 11pt; font-weight: bold; border: none;
+  font-size: 11.5pt; font-weight: bold; border: none;
   border-bottom: 2px solid @hdrLine; border-left: 1px solid @hdrLine2; }
 QHeaderView::section:first { border-left: none; }
 QHeaderView::section:hover { color: @goldDim; }
@@ -141,7 +146,7 @@ QListWidget#sidebar, QTreeWidget#sidebar {
   border-left: 3px solid qlineargradient(x1:0, y1:0, x2:0, y2:1,
       stop:0 @goldPale, stop:0.5 @goldBright, stop:1 @goldPale);
   border-radius: 0;
-  font-size: 14.5px;
+  font-size: 16.5px;
   font-weight: bold;
   outline: none;
   padding: 6px 0;
@@ -168,7 +173,7 @@ QTreeWidget#sidebar::branch { background: transparent; }
 /* ══ الشريطان العلوي والفرعي ══ */
 QFrame#header { background: @barBg; border-bottom: 2px solid @gold; }
 QLabel#headerTitle { color: @barFg; font-size: 17px; font-weight: bold; }
-QLabel#headerUser { color: @goldRing; font-size: 13px; font-weight: bold; }
+QLabel#headerUser { color: @goldRing; font-size: 15px; font-weight: bold; }
 QFrame#header QPushButton, QFrame#header QToolButton { background: @barBtn;
   color: @barFg; border: 1px solid @barEdge; border-radius: 7px;
   padding: 7px 12px; }
@@ -223,9 +228,9 @@ QLabel#groupTitle { font-size: 12.5pt; font-weight: bold; color: @goldDim;
 QFrame#card { background: @surface; border: 1px solid @line;
   border-radius: 10px; padding: 6px; }
 QFrame#card:hover { border: 1px solid @goldBright; background: @focusBg; }
-QLabel#cardTitle { color: @goldDim; font-size: 12.5px; font-weight: bold; }
-QLabel#cardValue { color: @ink; font-size: 19px; font-weight: bold; }
-QLabel#cardSub { color: @muted; font-size: 11.5px; }
+QLabel#cardTitle { color: @goldDim; font-size: 15px; font-weight: bold; }
+QLabel#cardValue { color: @ink; font-size: 24px; font-weight: bold; }
+QLabel#cardSub { color: @muted; font-size: 14px; }
 
 /* ══ لوحة الخلاصة: الرصيد وحده ══
    بين ستّ لوحاتٍ متشابهة يضيع الرصيد — وهو الرقم الذي فُتحت الشاشة
@@ -235,7 +240,7 @@ QFrame#cardSum { background: @sumBg; border: 1px solid @sumEdge;
   border-radius: 10px; padding: 6px; }
 QFrame#cardSum:hover { border: 1px solid @goldBright; background: @sumBg2; }
 QFrame#cardSum QLabel#cardTitle { color: @sumInk; }
-QFrame#cardSum QLabel#cardValue { color: @sumInk; font-size: 21px; }
+QFrame#cardSum QLabel#cardValue { color: @sumInk; font-size: 26px; }
 QFrame#cardSum QLabel#cardSub { color: @sumInk; }
 
 /* ══ شاشة البداية الحيّة ══
@@ -291,12 +296,12 @@ QFrame#goldBar {
   padding: 8px;
   margin: 4px 7px;
 }
-QLabel#goldBarTitle { color: @goldDim; font-size: 12px; font-weight: bold; }
-QLabel#goldBarValue { color: @ink; font-size: 17px; font-weight: bold; }
-QLabel#goldBarSub   { color: @hdrFg; font-size: 11px; }
-QLabel#goldBarStamp { color: @disFg; font-size: 10px; }
+QLabel#goldBarTitle { color: @goldDim; font-size: 14px; font-weight: bold; }
+QLabel#goldBarValue { color: @ink; font-size: 19px; font-weight: bold; }
+QLabel#goldBarSub   { color: @hdrFg; font-size: 15px; font-weight: bold; }
+QLabel#goldBarStamp { color: @disFg; font-size: 13px; }
 QLabel#goldKarat {
-  color: @ink; font-size: 13px; font-weight: bold;
+  color: @ink; font-size: 16px; font-weight: bold;
   background: @goldSoft2; border: 1px solid @goldEdge;
   border-radius: 7px; padding: 5px 7px;
 }
@@ -312,7 +317,7 @@ QLabel#panelSub { font-size: 9.5pt; color: @muted; }
 /* ══ الحوارات ══ */
 QDialog { background: @bg; }
 QMessageBox { background: @surface; }
-QMessageBox QLabel { font-size: 13px; }
+QMessageBox QLabel { font-size: 15px; }
 
 /* ══════════════════════════════════════════════════════════════════
    الطبقة الحديثة
