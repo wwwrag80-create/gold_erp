@@ -1421,7 +1421,11 @@ def migrate_schema() -> None:
                          ("account_id", "INTEGER"),
                          ("price_mode", "TEXT DEFAULT 'net'"),
                          # 4.23: خصم فاتورة المورد (قبل الضريبة)
-                         ("discount", "REAL NOT NULL DEFAULT 0")):
+                         ("discount", "REAL NOT NULL DEFAULT 0"),
+                         # 4.24: طريقة الدفع ونوع فاتورة المورد
+                         ("pay_mode", "TEXT NOT NULL DEFAULT 'credit'"),
+                         ("invoice_type", "TEXT NOT NULL DEFAULT"
+                                          " 'standard'")):
             if pcols and col not in pcols:
                 conn.execute(f"ALTER TABLE purchases ADD COLUMN {col} {ddl}")
 

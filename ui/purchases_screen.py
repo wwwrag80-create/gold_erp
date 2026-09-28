@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""المشتريات — آجلة إلزامياً على حساب المورد (السداد حصراً من شاشة
-السندات)، مرتّبةً كما تطلبها الضريبة والمحاسبة:
+"""المشتريات — آجلةٌ على حساب المورد، أو نقداً من الصندوق، أو بتحويلٍ
+من البنك — مرتّبةً كما تطلبها الضريبة والمحاسبة:
 
   • فاتورة المورد: رقمها وتاريخها والمورد برقمه الضريبي، والحساب الذي
     تُحمَّل عليه، والمعالجة الضريبية، والمبلغ صافياً أو شاملاً —
-    ثم **القيد قبل ترحيله**.
+    وطريقة الدفع، ونوع ورقة المورد (ضريبية / مبسطة).
   • سجل المشتريات الضريبية: لكل فاتورةٍ رقمها لدى المورد ورقمه الضريبي
     وصافيها وضريبتها، وإجمالي ضريبة المدخلات القابلة للخصم للفترة.
   • الأصول الثابتة والإهلاك.
@@ -21,8 +21,10 @@ from ui.widgets.common import (Card, date_edit, dstr, enter_chain, err,
 from ui.widgets.table_fit import fit_columns
 
 REG_COLS = ["", "الرقم", "التاريخ", "المورد", "الرقم الضريبي للمورد",
-            "فاتورة المورد", "البيان", "المعالجة", "الخصم", "الصافي",
-            "الضريبة", "الإجمالي"]
+            "فاتورة المورد", "نوعها", "الدفع", "المعالجة", "الخصم",
+            "الصافي", "الضريبة", "الإجمالي"]
+TYPE_SHORT = {"standard": "ضريبية", "simplified": "مبسطة"}
+PAY_SHORT = {"credit": "آجل", "cash": "نقداً", "bank": "بنكي"}
 TREAT_SHORT = {"standard": "خاضعة 15%", "blocked": "لا تُسترد",
                "zero": "صفرية", "exempt": "معفاة",
                "unregistered": "غير مسجّل"}
@@ -90,7 +92,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         super().__init__()
         self.user = user
         self.tabs = tab_widget()
-        self.tabs.addTab(self._build_purchase_tab(), "فاتورة مورد (آجلة)")
+        self.tabs.addTab(self._build_purchase_tab(), "فاتورة مورد")
         self.tabs.addTab(self._build_register_tab(),
                          "سجل المشتريات الضريبية")
         self.tabs.addTab(self._build_assets_tab(), "الأصول الثابتة والإهلاك")
@@ -125,30 +127,44 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.life.setSuffix(" شهراً")
         self.life.setSpecialValueText("يُحدَّد لاحقاً")
         self.life_lbl = QtWidgets.QLabel("العمر الإنتاجي:")
+        self.pay = QtWidgets.QComboBox()
+        for k, lbl in purchases.PAY_MODES:
+            self.pay.addItem(lbl, k)
+        self.pay.currentIndexChanged.connect(self._recalc)
+        self.inv_type = QtWidgets.QComboBox()
+        for k, lbl in purchases.INVOICE_TYPES:
+            self.inv_type.addItem(lbl, k)
+        self.inv_type.setToolTip(
+            "ضريبية: باسم المصنع ورقمه الضريبي · مبسطة: إيصالٌ بلا بيانات "
+            "المشتري (محطة، مطعم، محل تجزئة)")
 
         sup_row = QtWidgets.QHBoxLayout()
         sup_row.addWidget(self.supplier, 1)
         sup_row.addWidget(btn_new_sup)
         box_head = QtWidgets.QGroupBox("① فاتورة المورد")
         g = QtWidgets.QGridLayout(box_head)
-        g.addWidget(QtWidgets.QLabel("المورد:"), 0, 0)
-        g.addLayout(sup_row, 0, 1)
-        g.addWidget(QtWidgets.QLabel("الرقم الضريبي:"), 0, 2)
-        g.addWidget(self.sup_vat, 0, 3)
-        g.addWidget(QtWidgets.QLabel("رقم فاتورة المورد:"), 1, 0)
-        g.addWidget(self.inv_no, 1, 1)
-        g.addWidget(QtWidgets.QLabel("التاريخ:"), 1, 2)
-        g.addWidget(self.p_date, 1, 3)
-        g.addWidget(QtWidgets.QLabel("نوع الشراء:"), 2, 0)
-        g.addWidget(self.kind, 2, 1)
-        g.addWidget(QtWidgets.QLabel("الحساب:"), 2, 2)
-        g.addWidget(self.account, 2, 3)
+        cells = (
+            (0, 0, "المورد:", sup_row), (0, 2, "الرقم الضريبي:",
+                                         self.sup_vat),
+            (0, 4, "التاريخ:", self.p_date),
+            (1, 0, "رقم فاتورة المورد:", self.inv_no),
+            (1, 2, "نوع الفاتورة:", self.inv_type),
+            (1, 4, "طريقة الدفع:", self.pay),
+            (2, 0, "نوع الشراء:", self.kind), (2, 2, "الحساب:",
+                                                self.account),
+            (2, 4, self.life_lbl, self.life))
+        for r, c, lbl, wd in cells:
+            g.addWidget(lbl if isinstance(lbl, QtWidgets.QWidget)
+                        else QtWidgets.QLabel(lbl), r, c)
+            if isinstance(wd, QtWidgets.QLayout):
+                g.addLayout(wd, r, c + 1)
+            else:
+                g.addWidget(wd, r, c + 1)
         g.addWidget(QtWidgets.QLabel("البيان:"), 3, 0)
-        g.addWidget(self.desc, 3, 1)
-        g.addWidget(self.life_lbl, 3, 2)
-        g.addWidget(self.life, 3, 3)
+        g.addWidget(self.desc, 3, 1, 1, 5)
         g.setColumnStretch(1, 3)
         g.setColumnStretch(3, 2)
+        g.setColumnStretch(5, 2)
 
         # ② المبالغ — سطرٌ واحد بترتيب ورقة المورد: المبلغ ثم الخصم ثم
         # الضريبة، وتحته الإجماليات
@@ -182,8 +198,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.c_disc = Card("الخصم", "")
         self.c_net = Card("الصافي الخاضع", "يُحمَّل على الحساب")
         self.c_vat = Card("ضريبة المدخلات", "تُخصم في الإقرار")
-        self.c_total = Card("المستحق للمورد", "آجل — يُسدَّد بسند صرف",
-                            summary=True)
+        self.c_total = Card("إجمالي الفاتورة", "", summary=True)
         cards = QtWidgets.QHBoxLayout()
         for c in (self.c_amount, self.c_disc, self.c_net, self.c_vat,
                   self.c_total):
@@ -293,7 +308,11 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.c_vat.set_value(_m(vat if claim else 0),
                              "تُخصم في الإقرار" if claim else
                              ("لا ضريبة" if not vat else "تُضاف للتكلفة"))
-        self.c_total.set_value(_m(net + vat))
+        self.c_total.set_value(_m(net + vat), {
+            "credit": "آجل — على حساب المورد، يُسدَّد بسند صرف",
+            "cash": "نقداً — يُخصم من الصندوق",
+            "bank": "بنكي — يُخصم من البنك"}.get(self.pay.currentData(),
+                                                 ""))
 
     def new_supplier(self):
         dlg = NewSupplierDialog(self, self.user["username"])
@@ -324,7 +343,9 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                   "account_code": self.account.currentData(),
                   "price_mode": self._pmode(),
                   "life_months": self.life.value(),
-                  "discount": disc}
+                  "discount": disc,
+                  "pay_mode": self.pay.currentData(),
+                  "invoice_type": self.inv_type.currentData()}
             with db() as conn:
                 if self.is_editing:
                     res = editing.repost(
@@ -336,7 +357,9 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             self.end_edit()
             self._clear()
             self.refresh()
-            posted(self, f"تم ترحيل الفاتورة {res['purchase_no']} آجلة على "
+            how = {"credit": "آجلة على", "cash": "نقداً من الصندوق —",
+                   "bank": "بتحويل بنكي —"}[res["pay_mode"]]
+            posted(self, f"تم ترحيل الفاتورة {res['purchase_no']} {how} "
                        f"المورد {res['supplier_name']} — الإجمالي "
                        f"{res['total']:,.2f} ريال"
                        + (f" (ضريبة مدخلات {res['claimed_vat']:,.2f})"
@@ -362,12 +385,16 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.r_to = date_edit()
         btn = QtWidgets.QPushButton("عرض")
         btn.clicked.connect(self.refresh_register)
+        btn_print = QtWidgets.QPushButton("🖨 طباعة السجل")
+        btn_print.setObjectName("ghost")
+        btn_print.clicked.connect(self.print_register)
         top = QtWidgets.QHBoxLayout()
         for lbl, wd in (("من:", self.r_from), ("إلى:", self.r_to)):
             top.addWidget(QtWidgets.QLabel(lbl))
             top.addWidget(wd)
         top.addStretch(1)
         top.addWidget(btn)
+        top.addWidget(btn_print)
         self.r_n = Card("فواتير الموردين", "")
         self.r_net = Card("صافي المشتريات", "قبل الضريبة")
         self.r_other = Card("صفرية ومعفاة وغير مسجّل", "")
@@ -379,7 +406,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.reg = make_table()
         self.reg.setColumnCount(len(REG_COLS))
         self.reg.setHorizontalHeaderLabels(REG_COLS)
-        fit_columns(self.reg, [9, 8, 9, 13, 12, 8, 13, 8, 7, 9, 8, 9])
+        fit_columns(self.reg, [8, 8, 9, 12, 12, 8, 6, 6, 8, 6, 8, 7, 8])
         self._reg_rows = []
         lay = QtWidgets.QVBoxLayout(w)
         lay.addLayout(top)
@@ -398,11 +425,13 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             tr = p["tax_treatment"] or "standard"
             vals = [p["purchase_no"], p["purchase_date"], p["supplier_name"],
                     p["supplier_vat"] or "—", p["supplier_invoice_no"] or "—",
-                    p["description"], TREAT_SHORT.get(tr, tr),
+                    TYPE_SHORT.get(p["invoice_type"] or "standard", "—"),
+                    PAY_SHORT.get(p["pay_mode"] or "credit", "—"),
+                    TREAT_SHORT.get(tr, tr),
                     _m(p["discount"]), _m(p["amount"]), _m(p["vat_amount"]),
                     _m(p["total"])]
             for c, v in enumerate(vals, 1):
-                t.setItem(r, c, num_item(v) if c >= 8 else text_item(v))
+                t.setItem(r, c, num_item(v) if c >= 9 else text_item(v))
         for r in range(len(rows)):
             box = QtWidgets.QWidget()
             h = QtWidgets.QHBoxLayout(box)
@@ -428,6 +457,15 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.r_net.set_value(_m(tot["net"]))
         self.r_other.set_value(_m(other))
         self.r_vat.set_value(_m(tot["claimed"]))
+
+    def print_register(self):
+        try:
+            from services import print_manager
+            print_manager.preview_document(
+                self, "purchases_register", 0, date_from=dstr(self.r_from),
+                date_to=dstr(self.r_to))
+        except Exception as e:
+            err(self, e)
 
     def _preview_row(self, r):
         if 0 <= r < len(self._reg_rows):
@@ -492,6 +530,11 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             self.refresh()
             self.tabs.setCurrentIndex(0)
             keys = p.keys()
+            for combo, col, dflt in ((self.pay, "pay_mode", "credit"),
+                                     (self.inv_type, "invoice_type",
+                                      "standard")):
+                v = (p[col] if col in keys else "") or dflt
+                combo.setCurrentIndex(max(combo.findData(v), 0))
             i = self.kind.findData(p["kind"])
             if i >= 0:
                 self.kind.setCurrentIndex(i)

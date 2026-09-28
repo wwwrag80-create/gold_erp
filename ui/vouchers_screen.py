@@ -19,6 +19,13 @@ from ui.widgets.edit_mode import EditModeMixin
 DRAFT_KEY = "vouchers"
 
 
+def _sub(t):
+    lbl = QtWidgets.QLabel(t)
+    lbl.setObjectName("cardSub")
+    lbl.setAlignment(QtCore.Qt.AlignCenter)
+    return lbl
+
+
 class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
     def __init__(self, user):
         super().__init__()
@@ -63,14 +70,22 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self.g_note.setPlaceholderText("بيان السطر (اختياري)")
         btn_add_gold = QtWidgets.QPushButton("➕ إضافة سطر ذهب")
         btn_add_gold.clicked.connect(self.add_gold_row)
-        gold_box = QtWidgets.QGroupBox(
-            "تسديد الذهب (يمكن إضافة عدة أسطر بأعيرة مختلفة)")
-        gf = QtWidgets.QFormLayout(gold_box)
-        gf.addRow("الوزن المستلم (جم):", self.g_weight)
-        gf.addRow("العيار:", self.g_karat)
-        gf.addRow("البيان:", self.g_note)
-        gf.addRow(self.g_equiv)
-        gf.addRow(btn_add_gold)
+        # ══ الترتيب: صفٌّ للسند · لوحتا الذهب والنقد متجاورتين · صفُّ
+        # الخصومات بخاناتٍ صغيرة · ثم الجدول والترحيل — كلّه أمام العين
+        # بلا تمرير ══
+        gold_box = QtWidgets.QGroupBox("🟡 الذهب")
+        gg = QtWidgets.QGridLayout(gold_box)
+        gg.addWidget(_sub("الوزن الفعلي (جم)"), 0, 0)
+        gg.addWidget(_sub("العيار"), 0, 1)
+        gg.addWidget(_sub("البيان"), 0, 2)
+        gg.addWidget(self.g_weight, 1, 0)
+        gg.addWidget(self.g_karat, 1, 1)
+        gg.addWidget(self.g_note, 1, 2)
+        gg.addWidget(self.g_equiv, 2, 0, 1, 2)
+        gg.addWidget(btn_add_gold, 2, 2)
+        gg.setColumnStretch(0, 2)
+        gg.setColumnStretch(1, 1)
+        gg.setColumnStretch(2, 3)
 
         # تسديد النقد
         self.c_amount = mspin()
@@ -81,13 +96,18 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self.c_note.setPlaceholderText("بيان السطر (اختياري)")
         btn_add_cash = QtWidgets.QPushButton("➕ إضافة سطر نقد")
         btn_add_cash.clicked.connect(self.add_cash_row)
-        cash_box = QtWidgets.QGroupBox(
-            "تسديد النقد (يمكن إضافة عدة أسطر)")
-        cf = QtWidgets.QFormLayout(cash_box)
-        cf.addRow("المبلغ (ريال):", self.c_amount)
-        cf.addRow("من/إلى:", self.c_target)
-        cf.addRow("البيان:", self.c_note)
-        cf.addRow(btn_add_cash)
+        cash_box = QtWidgets.QGroupBox("💵 النقد")
+        cg = QtWidgets.QGridLayout(cash_box)
+        cg.addWidget(_sub("المبلغ (ريال)"), 0, 0)
+        cg.addWidget(_sub("من / إلى"), 0, 1)
+        cg.addWidget(_sub("البيان"), 0, 2)
+        cg.addWidget(self.c_amount, 1, 0)
+        cg.addWidget(self.c_target, 1, 1)
+        cg.addWidget(self.c_note, 1, 2)
+        cg.addWidget(btn_add_cash, 2, 2)
+        cg.setColumnStretch(0, 2)
+        cg.setColumnStretch(1, 1)
+        cg.setColumnStretch(2, 3)
 
         # جدول أسطر السند
         self.rows_table = make_table()
@@ -96,56 +116,59 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         btn_del_row.clicked.connect(self.del_row)
         self.rows_total = big_label()
 
-        # فرق الصافي والخصومات
-        # ضابط صارم: لا يُحتسب أي خصم أو فرق صافي إلا بتفعيل صريح
-        # من المستخدم، وإلا فُرضت القيمة صفراً مهما كان محتوى الحقل.
-        self.adj_enable = QtWidgets.QCheckBox(
-            "تفعيل الخصم / فرق الصافي (إدخال يدوي صريح)")
+        # فرق الصافي والخصومات — ضابط صارم: لا يُحتسب شيءٌ منها إلا
+        # بتفعيل صريح، وإلا فُرضت القيمة صفراً مهما كان في الخانة.
+        self.adj_enable = QtWidgets.QCheckBox("تفعيل الخصم والفرق")
         self.adj_enable.stateChanged.connect(self.toggle_adjustments)
         self.net_diff = mspin(minimum=-1_000_000_000.0)
+        self.net_diff.setToolTip("+ يزيد مديونية الطرف النقدية / − يخفضها")
         self.disc_cash = mspin()
         self.disc_gold = wspin()
-        adj_box = QtWidgets.QGroupBox("فرق الصافي والخصومات")
-        af = QtWidgets.QFormLayout(adj_box)
-        af.addRow("فرق الصافي (+ يزيد مديونية الطرف النقدية / − يخفضها):",
-                  self.net_diff)
-        af.addRow(self.adj_enable)
-        af.addRow("خصم مسموح نقداً (ريال):", self.disc_cash)
-        af.addRow(f"خصم مسموح وزناً ({kv.unit()}):", self.disc_gold)
-
         self.notes = QtWidgets.QLineEdit()
-        btn_save = QtWidgets.QPushButton("ترحيل السند")
+        self.notes.setPlaceholderText("البيان / ملاحظات السند")
+        adj = QtWidgets.QHBoxLayout()
+        adj.addWidget(self.adj_enable)
+        for lbl, wd in (("مسموح نقداً:", self.disc_cash),
+                        (f"خصم ذهباً ({kv.unit()}):", self.disc_gold),
+                        ("فرق صافي:", self.net_diff)):
+            adj.addWidget(QtWidgets.QLabel(lbl))
+            wd.setFixedWidth(130)
+            adj.addWidget(wd)
+        adj.addSpacing(12)
+        adj.addWidget(self.notes, 1)
+
+        btn_save = QtWidgets.QPushButton("✔ ترحيل السند")
         btn_save.clicked.connect(self.save)
         self.init_edit_mode(btn_save, "السند")
 
-        head = QtWidgets.QGridLayout()
-        head.addWidget(QtWidgets.QLabel("نوع السند:"), 0, 0)
-        head.addWidget(self.kind, 0, 1)
-        head.addWidget(QtWidgets.QLabel("التاريخ:"), 0, 2)
-        head.addWidget(self.date, 0, 3)
-        head.addWidget(QtWidgets.QLabel("الوجهة:"), 1, 0)
-        head.addWidget(self.target_mode, 1, 1)
-        head.addWidget(self.target_stack, 1, 2, 1, 2)
+        head = QtWidgets.QHBoxLayout()
+        head.addWidget(QtWidgets.QLabel("نوع السند:"))
+        head.addWidget(self.kind)
+        head.addWidget(QtWidgets.QLabel("التاريخ:"))
+        head.addWidget(self.date)
+        head.addWidget(QtWidgets.QLabel("الوجهة:"))
+        head.addWidget(self.target_mode)
+        head.addWidget(self.target_stack, 1)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label("السندات والخصومات — توجيه شامل، ميزان مزدوج (ذهب/نقد)"))
+        lay.addWidget(title_label("السندات والخصومات — ميزان مزدوج (ذهب/نقد)"))
         lay.addLayout(head)
-        lay.addWidget(self.balances)
-        lay.addWidget(self.measure_note)
-        grid = QtWidgets.QGridLayout()
-        grid.addWidget(gold_box, 0, 0)
-        grid.addWidget(cash_box, 0, 1)
-        grid.addWidget(adj_box, 1, 0, 1, 2)
-        lay.addLayout(grid)
-        form = QtWidgets.QFormLayout()
-        form.addRow("البيان / ملاحظات:", self.notes)
+        info_row = QtWidgets.QHBoxLayout()
+        info_row.addWidget(self.balances, 1)
+        info_row.addWidget(self.measure_note)
+        lay.addLayout(info_row)
+        panels = QtWidgets.QHBoxLayout()
+        panels.addWidget(gold_box, 1)
+        panels.addWidget(cash_box, 1)
+        lay.addLayout(panels)
+        lay.addLayout(adj)
         enter_chain(self, [self.g_weight, self.c_amount, self.notes],
                     self.save)
-        lay.addLayout(form)
-        lay.addWidget(QtWidgets.QLabel("أسطر السند:"))
         lay.addWidget(self.rows_table, 1)
-        lay.addWidget(btn_del_row)
-        lay.addWidget(self.rows_total)
+        trow = QtWidgets.QHBoxLayout()
+        trow.addWidget(self.rows_total, 1)
+        trow.addWidget(btn_del_row)
+        lay.addLayout(trow)
         # يظهر حين يُستعاد سند لم يُرحَّل — فلا يظن المستخدم أن أسطراً
         # ظهرت من تلقاء نفسها.
         self.draft_note = QtWidgets.QLabel("")
@@ -158,14 +181,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         srow.addWidget(btn_save, 1)
         srow.addWidget(self.btn_cancel_edit)
         lay.addLayout(srow)
-        lay.addStretch(1)
-        note = QtWidgets.QLabel(
-            "لسداد مورد: اختر «حساب مباشر» غير مطلوب — اختر المورد نفسه من "
-            "«جهة تعامل» في سند صرف. لعرض سجل السندات أو حذفها: افتح شاشة "
-            "(سجل العمليات).")
-        note.setObjectName("cardSub")
-        note.setWordWrap(True)
-        lay.addWidget(note)
+        self.toggle_adjustments()
 
     def kind_changed(self):
         receipt = self.kind.currentData() == "receipt"
@@ -304,6 +320,8 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             w.setEnabled(on)
             if not on:
                 w.setValue(0)
+        if on:
+            self.kind_changed()      # الخصم المسموح للقبض وحده
 
     def adj_values(self):
         """القيم المعتمدة للترحيل — أصفار ما لم يُفعّلها المستخدم."""
@@ -318,8 +336,8 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         try:
             mode, _val = self._current_target()
             if mode == "entity":
-                return self.entity.currentText()
-            return self.account.currentText()
+                return self.entity_combo.currentText()
+            return self.account_combo.currentText()
         except Exception:
             return "—"
 
@@ -471,9 +489,14 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             i = self.g_karat.findData(v.get("gold_karat") or 18)
             if i >= 0:
                 self.g_karat.setCurrentIndex(i)
+            # الخصم والفرق مقفلان ما لم يُفعَّلا — والسند المفتوح للتعديل
+            # يحملهما فيُفعَّلان أولاً، وإلا صُفّرا عند الحفظ بصمت
+            has_adj = any(v.get(k) for k in ("net_diff", "disc_cash",
+                                             "disc_gold"))
+            self.adj_enable.setChecked(bool(has_adj))
             self.net_diff.setValue(v.get("net_diff") or 0)
             self.disc_cash.setValue(v.get("disc_cash") or 0)
-            self.disc_gold.setValue(v.get("disc_gold") or 0)
+            self.disc_gold.setValue(kv.g(v.get("disc_gold") or 0))
             self.notes.setText(v.get("notes") or "")
             self.begin_edit(eid, source_id)
         except Exception as e:

@@ -843,6 +843,12 @@ def _tpl_purchase(conn, pid):
             ("الرقم الضريبي للمورد", en((sup["vat_number"] if sup else "")
                                         or "—")),
             ("رقم فاتورة المورد", en(inv_no)),
+            ("نوع فاتورة المورد", dict(_pu.INVOICE_TYPES).get(
+                (p["invoice_type"] if "invoice_type" in keys else "")
+                or "standard")),
+            ("طريقة الدفع", dict(_pu.PAY_MODES).get(
+                (p["pay_mode"] if "pay_mode" in keys else "")
+                or "credit", "")),
             ("المعالجة الضريبية", dict(_pu.TAX_TREATMENTS).get(tr, tr)),
             ("يُحمَّل على حساب", acc)]
     trs = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in info)
@@ -859,7 +865,9 @@ def _tpl_purchase(conn, pid):
     {TBL}
       <tr><th width="70%">ضريبة المدخلات القابلة للخصم (حساب 1900)</th>
           <td>{_w(vat if claim else 0, 2)}</td></tr>
-      <tr><th>المستحق للمورد (آجل)</th>
+      <tr><th>{"المستحق للمورد (آجل)" if ((p["pay_mode"] if "pay_mode"
+                 in keys else "") or "credit") == "credit"
+                 else "المدفوع للمورد"}</th>
           <td><b>{_w(amount + vat, 2)}</b></td></tr>
     </table>
     <div class="tafqeet">فقط: {tafqeet(amount + vat)}</div>
@@ -942,19 +950,22 @@ def _tpl_tax_sale(conn, sid):
     rate = float(s["vat_rate"] or 0) * 100
     body_rows = ""
     wo_mode = any(li["wo_no"] for li in lines)
+    has_disc = any(li["discount"] for li in lines)
     for li in lines:
+        dcells = ((tdw(_w(li["net"] + li["discount"], 2)),
+                   tdw(_w(li["discount"], 2))) if has_disc else ())
         if wo_mode and li["wo_no"]:
             body_rows += "<tr>" + cells(
                 tdw(en(li["line_no"])), tdw(en(li["model_no"] or "—")),
                 tdw(en(li["wo_no"])), tdw(_gw(li["qty"], 3)),
-                tdw(_w(_krate(li["unit_price"]), 2)),
+                tdw(_w(_krate(li["unit_price"]), 2)), *dcells,
                 tdw(_w(li["net"], 2)), tdw(_w(li["vat"], 2)),
                 tdw(_w(li["total"], 2))) + "</tr>"
         elif wo_mode:
             body_rows += "<tr>" + cells(
                 tdw(en(li["line_no"])),
                 f'<td class="r" colspan="4">{li["description"]}</td>',
-                tdw(_w(li["net"], 2)), tdw(_w(li["vat"], 2)),
+                *dcells, tdw(_w(li["net"], 2)), tdw(_w(li["vat"], 2)),
                 tdw(_w(li["total"], 2))) + "</tr>"
         else:
             body_rows += "<tr>" + cells(
@@ -966,15 +977,22 @@ def _tpl_tax_sale(conn, sid):
     if wo_mode:
         head = cells(thw("م"), thw("رقم الموديل"), thw("رقم التشغيل"),
                      thw(f"الوزن<br/>{_kunit()}"), thw("الأجر/جم"),
-                     thw("الأجور (الخاضع)"),
+                     *((thw("الأجور"), thw("الخصم")) if has_disc else ()),
+                     thw("الصافي (الخاضع)" if has_disc
+                         else "الأجور (الخاضع)"),
                      thw(f"الضريبة {en(f'{rate:g}')}%"), thw("الإجمالي"))
     else:
         head = cells(thw("م"), thw("البيان"), thw("الكمية"),
                      thw("سعر الوحدة"), thw("الخصم"),
                      thw("الصافي (الخاضع)"), thw("النسبة"),
                      thw("الضريبة"), thw("الإجمالي"))
+    tdisc = sum(float(li["discount"] or 0) for li in lines)
+    disc_rows = (f"<tr><th>الإجمالي قبل الخصم</th>"
+                 f"<td>{_w(s['net'] + tdisc, 2)}</td></tr>"
+                 f"<tr><th>الخصم</th><td>{_w(tdisc, 2)}</td></tr>"
+                 if tdisc else "")
     totals = f'''
-    {TBL}
+    {TBL}{disc_rows}
       <tr><th width="70%">الإجمالي الخاضع للضريبة (غير شامل)</th>
           <td>{_w(s['net'], 2)}</td></tr>
       <tr><th>ضريبة القيمة المضافة ({en(f"{rate:g}")}%)</th>
@@ -988,6 +1006,101 @@ def _tpl_tax_sale(conn, sid):
     {totals}'''
     return (_header(title, s["doc_no"], s["doc_date"], show_meta=False)
             + body + _footer(s["notes"] or ""))
+
+
+def _period_head(date_from, date_to):
+    today = _qd(QtCore.QDate.currentDate())
+    return f'''
+    {TBL}
+      <tr><th>الفترة من</th><td>{en(date_from or "—")}</td>
+          <th>إلى</th><td>{en(date_to or "—")}</td>
+          <th>تاريخ الطباعة</th><td>{en(today)}</td></tr>
+    </table><br/>''', today
+
+
+def _tpl_tax_sales_register(conn, _id=0, date_from=None, date_to=None):
+    """سجل المبيعات الضريبية للفترة — ضريبية/مبسطة لكل مستند، والإجماليات
+    التي تنتقل للإقرار."""
+    from models import tax_sales
+    rows = sorted(tax_sales.search(conn, "", date_from, date_to,
+                                   limit=100000),
+                  key=lambda r: (r["doc_date"], r["id"]))
+    kinds = {"invoice": "فاتورة", "credit": "إشعار دائن",
+             "debit": "إشعار مدين"}
+    body_rows, n_std, n_simp = "", 0, 0
+    for r in rows:
+        sub = tax_sales.subtype(conn, r)
+        n_std += sub == "standard"
+        n_simp += sub == "simplified"
+        sign = "−" if r["kind"] == "credit" else ""
+        body_rows += "<tr>" + cells(
+            tdw(en(r["doc_no"])), tdw(kinds.get(r["kind"], r["kind"])),
+            tdw(tax_sales.SUBTYPE_LABEL[sub]), tdw(en(r["doc_date"])),
+            tdw(r["customer_name"], align="right"),
+            tdw(en(r["customer_vat"] or "—")),
+            tdw(r["rep_name"] or "—"),
+            tdw(sign + _w(r["net"], 2)), tdw(sign + _w(r["vat"], 2)),
+            tdw(sign + _w(r["total"], 2))) + "</tr>"
+    if not body_rows:
+        body_rows = f'<tr><td {TD} colspan="10">لا مستندات في الفترة</td></tr>'
+    t = tax_sales.totals(conn, date_from or "0000-00-00",
+                         date_to or "9999-12-31")
+    head, today = _period_head(date_from, date_to)
+    body = f'''{head}
+    {TBL}<tr>{cells(thw("الرقم"), thw("النوع"), thw("ضريبية/مبسطة"),
+                    thw("التاريخ"), thw("المشتري"), thw("رقمه الضريبي"),
+                    thw("المندوب"), thw("الصافي"), thw("الضريبة"),
+                    thw("الإجمالي"))}</tr>{body_rows}</table>
+    {TBL}
+      <tr><th width="70%">فواتير ضريبية (للشركات) · مبسطة (للأفراد)</th>
+          <td>{en(n_std)} · {en(n_simp)}</td></tr>
+      <tr><th>صافي المبيعات الضريبية بعد الإشعارات</th>
+          <td>{_w(t["net"], 2)}</td></tr>
+      <tr><th>صافي ضريبة المخرجات</th><td><b>{_w(t["vat"], 2)}</b></td></tr>
+    </table>'''
+    return (_header("سجل المبيعات الضريبية", "—", today, show_meta=False)
+            + body + _footer(""))
+
+
+def _tpl_purchases_register(conn, _id=0, date_from=None, date_to=None):
+    """سجل المشتريات الضريبية للفترة — ما يُطلب عند الفحص: فاتورة المورد
+    ونوعها ورقمه الضريبي والصافي والضريبة."""
+    from models import purchases as _pu
+    rows, tot, by = _pu.vat_register(conn, date_from or "0000-00-00",
+                                     date_to or "9999-12-31")
+    types = {"standard": "ضريبية", "simplified": "مبسطة"}
+    pays = {"credit": "آجل", "cash": "نقداً", "bank": "بنكي"}
+    treats = {"standard": "خاضعة 15%", "blocked": "لا تُسترد",
+              "zero": "صفرية", "exempt": "معفاة", "unregistered": "غير مسجّل"}
+    body_rows = ""
+    for r in rows:
+        body_rows += "<tr>" + cells(
+            tdw(en(r["purchase_no"])), tdw(en(r["purchase_date"])),
+            tdw(r["supplier_name"], align="right"),
+            tdw(en(r["supplier_vat"] or "—")),
+            tdw(en(r["supplier_invoice_no"] or "—")),
+            tdw(types.get(r["invoice_type"] or "standard", "—")),
+            tdw(pays.get(r["pay_mode"] or "credit", "—")),
+            tdw(treats.get(r["tax_treatment"] or "standard", "—")),
+            tdw(_w(r["amount"], 2)), tdw(_w(r["vat_amount"], 2)),
+            tdw(_w(r["total"], 2))) + "</tr>"
+    if not body_rows:
+        body_rows = f'<tr><td {TD} colspan="11">لا فواتير في الفترة</td></tr>'
+    head, today = _period_head(date_from, date_to)
+    body = f'''{head}
+    {TBL}<tr>{cells(thw("الرقم"), thw("التاريخ"), thw("المورد"),
+                    thw("رقمه الضريبي"), thw("فاتورة المورد"),
+                    thw("نوعها"), thw("الدفع"), thw("المعالجة"),
+                    thw("الصافي"), thw("الضريبة"), thw("الإجمالي"))}</tr>
+    {body_rows}</table>
+    {TBL}
+      <tr><th width="70%">عدد الفواتير</th><td>{en(tot["n"])}</td></tr>
+      <tr><th>صافي المشتريات</th><td>{_w(tot["net"], 2)}</td></tr>
+      <tr><th>ضريبة المدخلات القابلة للخصم</th>
+          <td><b>{_w(tot["claimed"], 2)}</b></td></tr>
+    </table>'''
+    return (_header("سجل المشتريات الضريبية", "—", today, show_meta=False)
+            + body + _footer(""))
 
 
 def _tpl_fixing(conn, op_id):
@@ -1488,6 +1601,12 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "turnover":
             return en(_tpl_turnover(conn, doc_id, kw.get("date_from"),
                                     kw.get("date_to")))
+        if doc_type == "tax_sales_register":
+            return en(_tpl_tax_sales_register(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to")))
+        if doc_type == "purchases_register":
+            return en(_tpl_purchases_register(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to")))
         if doc_type in ("workshop_losses", "workshop_losses_log"):
             return en(_tpl_workshop_losses(conn, doc_id,
                                            kw.get("date_from"),
@@ -3093,6 +3212,8 @@ BUILDERS = {
     "melting": _tpl_melting, "melting_ops": _tpl_melting,
     "purchase": _tpl_purchase, "purchases": _tpl_purchase,
     "tax_sale": _tpl_tax_sale, "tax_sales": _tpl_tax_sale,
+    "tax_sales_register": _tpl_tax_sales_register,
+    "purchases_register": _tpl_purchases_register,
     "fixing": _tpl_fixing, "fixing_ops": _tpl_fixing,
     "work_orders": _tpl_work_order, "wo_supply": _tpl_work_order,
     "wo_adjust": _tpl_work_order,
@@ -3148,6 +3269,10 @@ def build_html(doc_type, doc_id, **kw):
                               kw.get("entity_type", "customer"),
                               kw.get("as_of"), kw.get("dim", "both"),
                               kw.get("only"))
+        elif doc_type in ("tax_sales_register", "purchases_register"):
+            fn = (_tpl_tax_sales_register if doc_type == "tax_sales_register"
+                  else _tpl_purchases_register)
+            html = fn(conn, doc_id, kw.get("date_from"), kw.get("date_to"))
         elif doc_type == "day_close":
             html = _tpl_day_close(conn, doc_id, kw.get("date"))
         elif doc_type == "customer_board":

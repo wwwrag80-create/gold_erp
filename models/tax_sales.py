@@ -446,11 +446,32 @@ def _rep_line(it, wage_per_gram=None):
             "model_no": it["model_no"]}
 
 
+def spread_discount(grosses, discount):
+    """يوزّع خصم الفاتورة على أسطرها بنسبة أجور كلٍّ منها.
+
+    الخصم في الفاتورة الإلكترونية يُحمل على السطر (صافي السطر بعد خصمه)
+    فيطابق مجموعُ الأسطر إجماليَّ الفاتورة هللةً بهللة. وفرق التقريب
+    يُحمَّل على أكبر سطرٍ — فلا يتجاوز خصمُ سطرٍ قيمتَه.
+    """
+    disc = float(money(discount or 0))
+    tot = float(sum(grosses))
+    if disc <= 0 or not grosses:
+        return [0.0] * len(grosses)
+    if disc > tot + 1e-9:
+        raise ValueError(f"الخصم {disc:,.2f} أكبر من إجمالي الأجور "
+                         f"{tot:,.2f}")
+    shares = [float(money(disc * g / tot)) for g in grosses]
+    big = max(range(len(grosses)), key=lambda i: grosses[i])
+    shares[big] = float(money(shares[big] + disc - sum(shares)))
+    return shares
+
+
 def create_rep_invoice(conn, company_id, rep_id, doc_date, items, username,
-                       notes=""):
+                       notes="", discount=0.0):
     """فاتورة ضريبية باسم الشركة عن أطقمٍ بيعت للمندوب.
 
     `items` = [{sale_item_id, wage_per_gram (اختياري — بمكافئ 18)}].
+    `discount` خصمٌ على الفاتورة قبل الضريبة — يُوزَّع على الأسطر.
     """
     ensure_tables(conn)
     comp = get_entity(conn, company_id)
@@ -471,6 +492,9 @@ def create_rep_invoice(conn, company_id, rep_id, doc_date, items, username,
             raise ValueError("سطرٌ لم يعد صالحاً (فُوتر أو أُرجع) — أعد "
                              "إضافته")
         lines.append(_rep_line(it, x.get("wage_per_gram")))
+    grosses = [float(money(li["qty"] * li["unit_price"])) for li in lines]
+    for li, d in zip(lines, spread_discount(grosses, discount)):
+        li["discount"] = d
     rows, t = compute(lines)
     if t["vat"] <= 0:
         raise ValueError("لا أجور في الفاتورة — لا ضريبة عليها")
@@ -670,8 +694,8 @@ def get(conn, sale_id):
 
 def search(conn, q="", date_from=None, date_to=None, kind=None, limit=1000):
     ensure_tables(conn)
-    sql = ("SELECT s.*, e.name customer_name, r.doc_no ref_no,"
-           " m.name rep_name FROM tax_sales s"
+    sql = ("SELECT s.*, e.name customer_name, e.vat_number customer_vat,"
+           " r.doc_no ref_no, m.name rep_name FROM tax_sales s"
            " JOIN entities e ON e.id=s.customer_id"
            " LEFT JOIN entities m ON m.id=s.rep_id"
            " LEFT JOIN tax_sales r ON r.id=s.ref_id WHERE s.is_deleted=0")
@@ -692,6 +716,30 @@ def search(conn, q="", date_from=None, date_to=None, kind=None, limit=1000):
     sql += " ORDER BY s.doc_date DESC, s.id DESC LIMIT ?"
     params.append(limit)
     return conn.execute(sql, params).fetchall()
+
+
+SUBTYPE_LABEL = {"standard": "ضريبية", "simplified": "مبسطة"}
+
+
+def subtype(conn, s):
+    """ضريبية أم مبسطة؟ ما صدر به المستند الإلكتروني إن وُجد، وإلا
+    بالرقم الضريبي للمشتري: صحيحٌ ⇒ ضريبية (شركة)، وإلا مبسطة (فرد)."""
+    try:
+        d = conn.execute(
+            "SELECT subtype FROM fatoora_documents WHERE source_table="
+            "'tax_sales' AND source_id=? AND archived=0 ORDER BY icv DESC"
+            " LIMIT 1", (s["id"],)).fetchone()
+        if d:
+            return d["subtype"]
+    except Exception:
+        pass
+    from services.fatoora import profile as pf
+    vat = s["customer_vat"] if "customer_vat" in s.keys() else None
+    if vat is None:
+        e = conn.execute("SELECT vat_number FROM entities WHERE id=?",
+                         (s["customer_id"],)).fetchone()
+        vat = e["vat_number"] if e else ""
+    return "standard" if pf.valid_vat(vat) else "simplified"
 
 
 def open_invoices(conn):

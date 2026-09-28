@@ -18,7 +18,8 @@ import config
 from database.database import db
 from models import entities, tax_sales
 from services import karat_view as kv
-from ui.widgets.common import (Card, confirm_post, date_edit, dstr,
+from ui.widgets.common import (StatChip as Card, confirm_post, date_edit,
+                               dstr,
                                enter_chain, err, make_table, mspin,
                                num_item, posted, reload_combo,
                                row_action_buttons, row_height,
@@ -236,6 +237,10 @@ class TaxSalesScreen(QtWidgets.QWidget):
         self.inv_date = date_edit()
         self.notes = QtWidgets.QLineEdit()
         self.notes.setPlaceholderText("البيان (اختياري) — يظهر على الفاتورة")
+        self.disc = mspin()
+        self.disc.setToolTip("خصمٌ على الفاتورة قبل الضريبة — يُوزَّع على "
+                             "أسطرها بنسبة أجورها")
+        self.disc.valueChanged.connect(lambda *_: self._render_items())
         self.buyer_lbl = QtWidgets.QLabel("—")
         self.buyer_lbl.setWordWrap(True)
 
@@ -245,19 +250,24 @@ class TaxSalesScreen(QtWidgets.QWidget):
         rep_row = QtWidgets.QHBoxLayout()
         rep_row.addWidget(self.rep, 1)
         rep_row.addWidget(self.btn_pick)
+        # صفّان فقط: الأطراف ثم البيان والخصم — فيبقى للجدول ما يكفيه
         g = QtWidgets.QGridLayout(box)
+        g.setVerticalSpacing(6)
         g.addWidget(QtWidgets.QLabel("الشركة (المشتري):"), 0, 0)
         g.addLayout(comp_row, 0, 1)
         g.addWidget(QtWidgets.QLabel("نوع الفاتورة:"), 0, 2)
         g.addWidget(self.buyer_lbl, 0, 3)
+        g.addWidget(QtWidgets.QLabel("التاريخ:"), 0, 4)
+        g.addWidget(self.inv_date, 0, 5)
         g.addWidget(QtWidgets.QLabel("المندوب (البائع):"), 1, 0)
         g.addLayout(rep_row, 1, 1)
-        g.addWidget(QtWidgets.QLabel("التاريخ:"), 1, 2)
-        g.addWidget(self.inv_date, 1, 3)
-        g.addWidget(QtWidgets.QLabel("البيان:"), 2, 0)
-        g.addWidget(self.notes, 2, 1, 1, 3)
-        g.setColumnStretch(1, 3)
-        g.setColumnStretch(3, 2)
+        g.addWidget(QtWidgets.QLabel("البيان:"), 1, 2)
+        g.addWidget(self.notes, 1, 3)
+        g.addWidget(QtWidgets.QLabel("الخصم (ريال):"), 1, 4)
+        g.addWidget(self.disc, 1, 5)
+        g.setColumnStretch(1, 4)
+        g.setColumnStretch(3, 3)
+        g.setColumnStretch(5, 1)
         return box
 
     # ══════════════════════════ ② سطر الإدخال ══════════════════════════
@@ -298,25 +308,27 @@ class TaxSalesScreen(QtWidgets.QWidget):
 
     # ══════════════════════════ ③ البنود ══════════════════════════
     ITEM_COLS = ["", "م", "رقم الموديل", "رقم التشغيل", "الوزن المقيد",
-                 "الأجر/جم", "الأجور", "الضريبة 15%", "الإجمالي",
-                 "فاتورة البيع"]
+                 "الأجر/جم", "الأجور", "الخصم", "الصافي", "الضريبة 15%",
+                 "الإجمالي", "فاتورة البيع"]
 
     def _build_items(self):
         box = QtWidgets.QGroupBox("③ بنود الفاتورة")
         self.items_tbl = make_table()
         self.items_tbl.setColumnCount(len(self.ITEM_COLS))
         self.items_tbl.setHorizontalHeaderLabels(self.ITEM_COLS)
-        self.items_tbl.setMinimumHeight(240)
-        fit_columns(self.items_tbl, [8, 4, 12, 12, 11, 9, 11, 10, 11, 12])
-        self.p_weight = Card("إجمالي الوزن المقيد", kv.unit())
-        self.p_wages = Card("إجمالي الأجور", "قبل الضريبة")
+        self.items_tbl.setMinimumHeight(200)
+        fit_columns(self.items_tbl, [7, 4, 11, 11, 10, 8, 9, 7, 9, 8, 9, 10])
+        self.p_weight = Card(f"الوزن ({kv.unit()})")
+        self.p_wages = Card("الأجور")
+        self.p_disc = Card("الخصم")
+        self.p_net = Card("الصافي الخاضع")
         self.p_vat = Card(f"الضريبة {config.VAT_RATE * 100:g}%",
-                          "تُقيَّد على حساب المندوب", summary=True)
-        self.p_total = Card("إجمالي الفاتورة", "في كشف الشركة بلا رصيد")
+                          summary=True)
+        self.p_total = Card("إجمالي الفاتورة")
         v = QtWidgets.QVBoxLayout(box)
         v.addWidget(self.items_tbl, 1)
-        v.addLayout(_cards(self.p_weight, self.p_wages, self.p_vat,
-                           self.p_total))
+        v.addLayout(_cards(self.p_weight, self.p_wages, self.p_disc,
+                           self.p_net, self.p_vat, self.p_total))
         self._render_items()
         return box
 
@@ -452,33 +464,48 @@ class TaxSalesScreen(QtWidgets.QWidget):
     def _render_items(self):
         t = self.items_tbl
         t.setRowCount(len(self.items))
-        tw = tn = 0.0
-        for r, it in enumerate(self.items):
-            net = round(float(it["weight"]) * float(it["rate18"]), 2)
+        grosses = [round(float(it["weight"]) * float(it["rate18"]), 2)
+                   for it in self.items]
+        try:
+            shares = tax_sales.spread_discount(grosses, self.disc.value())
+            self.disc.setToolTip("")
+        except ValueError as e:
+            shares = [0.0] * len(grosses)
+            self.disc.setToolTip(str(e))
+        tw = tg = tn = 0.0
+        for r, (it, gross, d) in enumerate(zip(self.items, grosses,
+                                               shares)):
+            net = round(gross - d, 2)
             vat = _vat(net)
             tw += float(it["weight"])
+            tg += gross
             tn += net
             vals = [r + 1, it["model_no"] or "—", it["wo_no"],
-                    _w(it["weight"]), _m(kv.rate(it["rate18"])), _m(net),
-                    _m(vat), _m(net + vat), it["invoice_no"]]
+                    _w(it["weight"]), _m(kv.rate(it["rate18"])), _m(gross),
+                    _m(d) if d else "—", _m(net), _m(vat), _m(net + vat),
+                    it["invoice_no"]]
             for c, v in enumerate(vals, 1):
-                t.setItem(r, c, num_item(v) if 4 <= c <= 8
+                t.setItem(r, c, num_item(v) if 4 <= c <= 10
                           else text_item(v))
         row_action_buttons(t, len(self.items), self._edit_item,
                            self._del_item, edit_tip="تصحيح الأجر",
                            del_tip="حذف السطر")
-        _fix_rows(t)
+        _fix_rows(t, 10)
         tv = _vat(tn)          # ضريبة المستند على صافيه كلّه
         self.p_weight.set_value(_w(tw))
-        self.p_wages.set_value(_m(tn))
-        self.p_vat.set_value(_m(tv), "تُقيَّد على حساب المندوب" + (
-            f" {self.rep.currentText()}" if self.rep.currentData()
-            is not None else ""))
+        self.p_wages.set_value(_m(tg))
+        self.p_disc.set_value(_m(tg - tn))
+        self.p_net.set_value(_m(tn))
+        self.p_vat.set_value(_m(tv))
+        self.p_vat.setToolTip("تُقيَّد على حساب المندوب وحده")
         self.p_total.set_value(_m(tn + tv))
 
     def clear_invoice(self):
         self.items = []
         self.notes.clear()
+        self.disc.blockSignals(True)
+        self.disc.setValue(0)
+        self.disc.blockSignals(False)
         self._clear_entry()
         self._render_items()
 
@@ -496,7 +523,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
             if not confirm_post(
                     self, f"فاتورة ضريبية باسم «{self.company.currentText()}»"
                     f" — المندوب «{self.rep.currentText()}»\n"
-                    f"الأجور {self.p_wages.value_lbl.text()} + الضريبة "
+                    f"الصافي {self.p_net.value_lbl.text()} + الضريبة "
                     f"{self.p_vat.value_lbl.text()} = "
                     f"{self.p_total.value_lbl.text()} ريال\n"
                     f"على حساب المندوب: الضريبة {self.p_vat.value_lbl.text()}"
@@ -507,7 +534,8 @@ class TaxSalesScreen(QtWidgets.QWidget):
                     conn, cid, rid, dstr(self.inv_date),
                     [{"sale_item_id": x["item_id"],
                       "wage_per_gram": x["rate18"]} for x in self.items],
-                    self.user["username"], self.notes.text())
+                    self.user["username"], self.notes.text(),
+                    discount=self.disc.value())
             self.clear_invoice()
             posted(self, f"تم ترحيل الفاتورة الضريبية {res['doc_no']} باسم "
                          f"{res['customer_name']} — الإجمالي "
@@ -783,8 +811,9 @@ class TaxSalesScreen(QtWidgets.QWidget):
             err(self, e)
 
     # ══════════════════════════ السجل ══════════════════════════
-    REG_COLS = ["", "الرقم", "النوع", "التاريخ", "الشركة (المشتري)",
-                "المندوب", "الصافي", "الضريبة", "الإجمالي", "على الفاتورة"]
+    REG_COLS = ["", "الرقم", "النوع", "ضريبية/مبسطة", "التاريخ",
+                "الشركة (المشتري)", "المندوب", "الصافي", "الضريبة",
+                "الإجمالي", "على الفاتورة"]
 
     def _build_register_tab(self):
         w = QtWidgets.QWidget()
@@ -801,6 +830,9 @@ class TaxSalesScreen(QtWidgets.QWidget):
             self.r_kind.addItem(lbl, k)
         btn = QtWidgets.QPushButton("عرض")
         btn.clicked.connect(self.refresh_register)
+        btn_print = QtWidgets.QPushButton("🖨 طباعة السجل")
+        btn_print.setObjectName("ghost")
+        btn_print.clicked.connect(self.print_register)
         top = QtWidgets.QHBoxLayout()
         for lbl, wd in (("من:", self.r_from), ("إلى:", self.r_to),
                         ("النوع:", self.r_kind)):
@@ -808,6 +840,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
             top.addWidget(wd)
         top.addWidget(self.r_q, 1)
         top.addWidget(btn)
+        top.addWidget(btn_print)
         self.r_c_inv = Card("الفواتير", "")
         self.r_c_crd = Card("الإشعارات", "")
         self.r_c_net = Card("صافي المبيعات الضريبية", "بعد الإشعارات")
@@ -816,7 +849,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
         self.reg_tbl = make_table()
         self.reg_tbl.setColumnCount(len(self.REG_COLS))
         self.reg_tbl.setHorizontalHeaderLabels(self.REG_COLS)
-        fit_columns(self.reg_tbl, [5, 10, 10, 9, 17, 13, 9, 9, 9, 9])
+        fit_columns(self.reg_tbl, [5, 9, 9, 8, 9, 15, 12, 8, 8, 8, 9])
         self.reg_tbl.doubleClicked.connect(
             lambda ix: self._preview_row(ix.row()))
         lay = QtWidgets.QVBoxLayout(w)
@@ -832,6 +865,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
             rows = tax_sales.search(conn, self.r_q.text().strip(), d1, d2,
                                     self.r_kind.currentData())
             tot = tax_sales.totals(conn, d1, d2)
+            subs = [tax_sales.subtype(conn, s) for s in rows]
         self._reg_rows = rows
         t = self.reg_tbl
         t.setRowCount(len(rows))
@@ -839,12 +873,13 @@ class TaxSalesScreen(QtWidgets.QWidget):
         for r, s in enumerate(rows):
             credit = s["kind"] == "credit"
             vals = [s["doc_no"], KIND_LABEL.get(s["kind"], s["kind"]),
+                    tax_sales.SUBTYPE_LABEL[subs[r]],
                     s["doc_date"], s["customer_name"], s["rep_name"] or "—",
                     _m(s["net"]), _m(s["vat"]), _m(s["total"]),
                     s["ref_no"] or "—"]
             for c, v in enumerate(vals, 1):
-                it = num_item(v) if 6 <= c <= 8 else text_item(v)
-                if credit and (6 <= c <= 8 or c == 2):
+                it = num_item(v) if 7 <= c <= 9 else text_item(v)
+                if credit and (7 <= c <= 9 or c == 2):
                     it.setForeground(red)
                 t.setItem(r, c, it)
         row_action_buttons(t, len(rows), self._preview_row, None,
@@ -861,6 +896,15 @@ class TaxSalesScreen(QtWidgets.QWidget):
                                f"{crd['n']} دائن · {dbt['n']} مدين")
         self.r_c_net.set_value(_m(tot["net"]))
         self.r_c_vat.set_value(_m(tot["vat"]))
+
+    def print_register(self):
+        try:
+            from services import print_manager
+            print_manager.preview_document(
+                self, "tax_sales_register", 0, date_from=dstr(self.r_from),
+                date_to=dstr(self.r_to))
+        except Exception as e:
+            err(self, e)
 
     def _preview_row(self, r):
         if not (0 <= r < len(self._reg_rows)):

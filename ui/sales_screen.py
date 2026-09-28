@@ -21,7 +21,8 @@ from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                big_label, date_edit, dstr, enter_chain, err,
                                fill, has_model_image, info, load_pref,
                                make_table, mspin, reload_combo,
-                               row_action_buttons, run_bg, save_pref,
+                               row_action_buttons, row_height, run_bg,
+                               save_pref,
                                search_combo, show_model_image, title_label,
                                wspin)
 from ui.widgets.table_fit import fit_columns
@@ -341,26 +342,34 @@ class _Panel(QtWidgets.QFrame):
     """
 
     def __init__(self, title, sub=""):
+        # مدمجة (سطرٌ للعنوان والرقم): الجدول فوقها يأخذ المساحة كلّها،
+        # والشاشة كلّها أمام العين بلا تمريرٍ صعوداً ونزولاً
         super().__init__()
-        self.setObjectName("card")
-        self.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.setObjectName("chip")
         lay = QtWidgets.QVBoxLayout(self)
-        lay.setSpacing(2)
-        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(0)
+        lay.setContentsMargins(10, 4, 10, 4)
+        row = QtWidgets.QHBoxLayout()
         t = QtWidgets.QLabel(title)
-        t.setObjectName("cardTitle")
+        t.setObjectName("chipTitle")
         self.value = QtWidgets.QLabel("—")
-        self.value.setObjectName("cardValue")
+        self.value.setObjectName("chipValue")
+        row.addWidget(t)
+        row.addStretch(1)
+        row.addWidget(self.value)
+        lay.addLayout(row)
         self.sub = QtWidgets.QLabel(sub)
-        self.sub.setObjectName("cardSub")
-        self.sub.setWordWrap(True)
-        for w in (t, self.value, self.sub):
-            lay.addWidget(w)
+        self.sub.setObjectName("chipSub")
+        self.sub.setVisible(bool(sub))
+        lay.addWidget(self.sub)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
+                           QtWidgets.QSizePolicy.Maximum)
 
     def set_value(self, value, sub=None):
         self.value.setText(value)
         if sub is not None:
             self.sub.setText(sub)
+            self.sub.setVisible(bool(sub))
 
 
 class NewSourceDialog(QtWidgets.QDialog):
@@ -1801,6 +1810,9 @@ class SalesScreen(QtWidgets.QWidget):
                          round(kv.g(t["after"]), 3), "—",
                          round(t["wages"], 2)))
         fill(self.items_table, self.COLS, rows)
+        # صفوفٌ أعلى من جداول العرض: البنود تُراجَع رقماً رقماً قبل الترحيل
+        self.items_table.verticalHeader().setDefaultSectionSize(
+            row_height(self.items_table) + 12)
         fit_columns(self.items_table, self.COL_W)
         if rows:
             self._bold_row(len(rows) - 1)

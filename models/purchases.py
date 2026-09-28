@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""المشتريات (تشغيلية/أصول) — آجلة إلزامياً: تُقيَّد على حساب المورد
-(جهة تعامل من نوع مورد) لا نقداً مباشرة؛ السداد يتم حصراً لاحقاً عبر
-سندات الصرف.
+"""المشتريات (تشغيلية/أصول) — آجلةٌ على حساب المورد (تُسدَّد لاحقاً بسند
+صرف)، أو نقداً من الصندوق، أو بتحويلٍ من البنك.
 
 وتُسجَّل **كما تطلبها الضريبة**: رقم فاتورة المورد (ولا تُقيَّد الفاتورة
 نفسها مرتين)، ومعالجتها الضريبية، والحساب الذي تُحمَّل عليه، وإدخال
@@ -25,6 +24,15 @@ TAX_TREATMENTS = (
     ("unregistered", "مورد غير مسجّل في الضريبة"),
 )
 NO_VAT = ("zero", "exempt", "unregistered")
+PAY_MODES = (("credit", "آجل — على حساب المورد"),
+             ("cash", "نقداً — يُخصم من الصندوق"),
+             ("bank", "تحويل بنكي — يُخصم من البنك"))
+PAY_ACCOUNTS = {"cash": "1400", "bank": "1500"}
+# ورقة المورد: «فاتورة ضريبية» (باسم المصنع ورقمه الضريبي) أو «مبسطة»
+# (بلا بيانات المشتري — كإيصال محطة أو مطعم). كلتاهما تُثبت ضريبة
+# المدخلات، والفرق يُحفظ ليظهر في السجل عند الفحص الضريبي.
+INVOICE_TYPES = (("standard", "فاتورة ضريبية"),
+                 ("simplified", "فاتورة ضريبية مبسطة"))
 PRICE_MODES = (("net", "المبلغ قبل الضريبة"),
                ("gross", "المبلغ شامل الضريبة"))
 VAT_IN = "1900"
@@ -78,7 +86,8 @@ def _resolve_account(conn, kind, account_code):
 def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
                     purchase_date, username, supplier_invoice_no="",
                     tax_treatment="standard", account_code=None,
-                    price_mode="net", life_months=0, discount=0.0):
+                    price_mode="net", life_months=0, discount=0.0,
+                    pay_mode="credit", invoice_type="standard"):
     """فاتورة مورد آجلة — `amount` الصافي الخاضع (بعد الخصم وقبل الضريبة)
     و`vat_amount` ضريبته، و`discount` خصم المورد قبل الضريبة (للبيان).
 
@@ -97,6 +106,10 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
         raise ValueError("المعالجة الضريبية غير معروفة")
     if price_mode not in dict(PRICE_MODES):
         price_mode = "net"
+    if pay_mode not in dict(PAY_MODES):
+        raise ValueError("طريقة الدفع غير معروفة")
+    if invoice_type not in dict(INVOICE_TYPES):
+        invoice_type = "standard"
     sup = get_entity(conn, supplier_id)
     if not sup or sup["entity_type"] != "supplier":
         raise ValueError("اختر مورداً من دليل جهات التعامل")
@@ -158,29 +171,41 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
         lines.append({"account_id": acc_id(conn, VAT_IN),
                       "cash_debit": vat_amount,
                       "line_desc": "ضريبة مدخلات" + ref})
-    lines.append({"account_id": sup["account_id"], "cash_credit": total,
-                  "line_desc": "مشتريات آجلة" + ref})
+    if pay_mode == "credit":
+        lines.append({"account_id": sup["account_id"], "cash_credit": total,
+                      "line_desc": "مشتريات آجلة" + ref})
+    else:
+        # نقداً/بنكاً: الدفع من الصندوق أو البنك مباشرةً — والمورد لا
+        # يبقى له رصيد
+        lines.append({"account_id": acc_id(conn, PAY_ACCOUNTS[pay_mode]),
+                      "cash_credit": total,
+                      "line_desc": f"مشتريات {'نقداً' if pay_mode == 'cash' else 'بتحويل بنكي'}"
+                                   f" — {sup['name']}" + ref})
 
     cur = conn.execute(
         "INSERT INTO purchases(purchase_date,supplier,supplier_id,kind,"
         "description,amount,vat_amount,total,asset_id,created_by,"
-        "supplier_invoice_no,tax_treatment,account_id,price_mode,discount)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "supplier_invoice_no,tax_treatment,account_id,price_mode,discount,"
+        "pay_mode,invoice_type)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (purchase_date, sup["name"], supplier_id, kind, description,
          amount, vat_amount, total, asset_id, username, supplier_invoice_no,
-         tax_treatment, acc["id"], price_mode, discount))
+         tax_treatment, acc["id"], price_mode, discount, pay_mode,
+         invoice_type))
     p_id = cur.lastrowid
     p_no = f"P-{p_id:05d}"
     label = "شراء أصل ثابت" if kind == "asset" else "مشتريات تشغيلية"
+    how = {"credit": "آجلة", "cash": "نقداً", "bank": "بتحويل بنكي"}[pay_mode]
     entry_id = post_entry(
         conn, purchase_date,
-        f"{label} آجلة {p_no} — المورد {sup['name']}{ref} — {description}",
+        f"{label} {how} {p_no} — المورد {sup['name']}{ref} — {description}",
         lines, source_table="purchases", source_id=p_id, username=username,
         note=description)
     conn.execute("UPDATE purchases SET purchase_no=?, entry_id=? WHERE id=?",
                  (p_no, entry_id, p_id))
     log_action(conn, username, "create", "purchases", p_id, p_no)
     return {"id": p_id, "purchase_no": p_no, "total": total,
+            "pay_mode": pay_mode,
             "asset_id": asset_id, "entry_id": entry_id,
             "supplier_name": sup["name"], "claimed_vat": vat_amount
             if claim else 0.0, "cost": cost}

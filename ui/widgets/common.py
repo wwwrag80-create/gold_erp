@@ -44,6 +44,41 @@ class Card(QtWidgets.QFrame):
         super().mousePressEvent(event)
 
 
+class StatChip(QtWidgets.QFrame):
+    """لوحة إجماليٍّ مدمجة: العنوان والرقم في سطرٍ واحد، والتفصيل سطرٌ
+    صغيرٌ تحته إن وُجد. ارتفاعها ثلث بطاقة `Card` — للشاشات التي يجب أن
+    يأخذ جدولها المساحة كلّها.
+    """
+
+    def __init__(self, title, sub="", summary=False):
+        super().__init__()
+        self.setObjectName("chipSum" if summary else "chip")
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(10, 4, 10, 4)
+        v.setSpacing(0)
+        row = QtWidgets.QHBoxLayout()
+        self.title_lbl = QtWidgets.QLabel(title)
+        self.title_lbl.setObjectName("chipTitle")
+        self.value_lbl = QtWidgets.QLabel("—")
+        self.value_lbl.setObjectName("chipValue")
+        row.addWidget(self.title_lbl)
+        row.addStretch(1)
+        row.addWidget(self.value_lbl)
+        v.addLayout(row)
+        self.sub_lbl = QtWidgets.QLabel(sub)
+        self.sub_lbl.setObjectName("chipSub")
+        self.sub_lbl.setVisible(bool(sub))
+        v.addWidget(self.sub_lbl)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
+                           QtWidgets.QSizePolicy.Maximum)
+
+    def set_value(self, value_text, subtitle=None):
+        self.value_lbl.setText(value_text)
+        if subtitle is not None:
+            self.sub_lbl.setText(subtitle)
+            self.sub_lbl.setVisible(bool(subtitle))
+
+
 class ElidedLabel(QtWidgets.QLabel):
     """ملصق يقصّ نصّه بثلاث نقاط بدل أن يفرض عرضه على النافذة.
 

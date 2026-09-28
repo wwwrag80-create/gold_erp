@@ -243,6 +243,19 @@ QFrame#cardSum QLabel#cardTitle { color: @sumInk; }
 QFrame#cardSum QLabel#cardValue { color: @sumInk; font-size: 26px; }
 QFrame#cardSum QLabel#cardSub { color: @sumInk; }
 
+/* ══ لوحة إجماليٍّ مدمجة (chip) ══
+   تحت جداول الإدخال: العنوان والرقم في سطرٍ واحد، فيأخذ الجدول
+   المساحة كلّها ولا تحتاج الشاشة إلى تمرير. */
+QFrame#chip { background: @surface; border: 1px solid @line;
+  border-radius: 8px; }
+QFrame#chipSum { background: @sumBg; border: 1px solid @sumEdge;
+  border-radius: 8px; }
+QLabel#chipTitle { color: @goldDim; font-size: 14px; font-weight: bold; }
+QLabel#chipValue { color: @ink; font-size: 19px; font-weight: bold; }
+QLabel#chipSub { color: @muted; font-size: 13px; }
+QFrame#chipSum QLabel#chipTitle, QFrame#chipSum QLabel#chipValue,
+QFrame#chipSum QLabel#chipSub { color: @sumInk; }
+
 /* ══ شاشة البداية الحيّة ══
    بطاقاتٌ تُقرأ لا تُزيَّن: الرقم كبير، وعنوانه فوقه صغير، وحالته
    لونٌ على حافته اليمنى — فالعين تلتقط الخلل قبل أن تقرأ. */

@@ -5198,6 +5198,37 @@ def main():
     check("خصم المشتريات قبل الضريبة: 1000 − 100 ⇒ 900 + 135 = 1035",
           (_n59, _v59) == (900.0, 135.0) and _p59["total"] == 1035.0)
 
+    # ══════════════════════════════════════════════════════════════
+    step("60) مشتريات نقداً/بنكاً · خصم الفاتورة الضريبية · ضريبية/مبسطة")
+    with db() as conn:
+        _pc = _pu59.create_purchase(
+            conn, "expense", _s59, "ضيافة", 100, 15, "2026-11-06", "admin",
+            supplier_invoice_no="CASH-1", pay_mode="cash",
+            invoice_type="simplified")
+        _jc = [(r[0], r[1], r[2]) for r in conn.execute(
+            "SELECT a.code, l.cash_debit, l.cash_credit FROM journal_lines l"
+            " JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=?"
+            " ORDER BY l.id", (_pc["entry_id"],))]
+    check("شراءٌ نقدي: الدائن الصندوق 1400 لا المورد",
+          _jc[-1] == ("1400", 0, 115.0), str(_jc))
+    with db() as conn:
+        _b59(conn, [{"wo_no": "REP-2", "gold": 30.0,
+                     "wage_per_gram": 10.0}], "2026-11-06", "admin")
+        _w60 = conn.execute("SELECT id FROM work_orders WHERE"
+                            " work_order_no='REP-2'").fetchone()["id"]
+        _inv59.create_sale(conn, _rep59, [{"work_order_id": _w60}],
+                           "2026-11-06", "admin", apply_vat=False)
+        _i60 = _ts59.find_rep_item(conn, _rep59, "REP-2")
+        _t60 = _ts59.create_rep_invoice(
+            conn, _co59, _rep59, "2026-11-07",
+            [{"sale_item_id": _i60["item_id"]}], "admin", discount=50)
+        _s60 = conn.execute("SELECT * FROM tax_sales WHERE id=?",
+                            (_t60["id"],)).fetchone()
+        _sub60 = _ts59.subtype(conn, _s60)
+    check("خصم 50 من أجور 300 ⇒ صافي 250 وضريبة 37.5 · والفاتورة ضريبية",
+          _t60["net"] == 250.0 and _t60["vat"] == 37.5
+          and _sub60 == "standard")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
