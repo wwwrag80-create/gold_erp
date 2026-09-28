@@ -120,7 +120,7 @@ def build_copy(tid, name, url, key, out_dir):
     (target / "data" / "tenant.json").write_text(
         json.dumps({"tenant_id": tid, "factory_name": name,
                     "cloud_url": url, "cloud_key": key,
-                    "sync_enabled": True, "sync_interval_sec": 30,
+                    "sync_enabled": False, "sync_interval_sec": 30,
                     "role": "factory", "license_key": ""},
                    ensure_ascii=False, indent=2),
         encoding="utf-8")
@@ -138,7 +138,7 @@ def build_exe(tid, name, url, key, safe, out_dir):
     (stage / "data" / "tenant.json").write_text(
         json.dumps({"tenant_id": tid, "factory_name": name,
                     "cloud_url": url, "cloud_key": key,
-                    "sync_enabled": True, "sync_interval_sec": 30,
+                    "sync_enabled": False, "sync_interval_sec": 30,
                     "role": "factory", "license_key": ""},
                    ensure_ascii=False, indent=2), encoding="utf-8")
     (stage / ".env").write_text(
@@ -165,8 +165,8 @@ def build_exe(tid, name, url, key, safe, out_dir):
     args += ["--add-data", f"{stage / '.env'}{sep}."]
     for h in ("PyQt5.QtPrintSupport", "PyQt5.QtSvg", "sqlite3",
               "services.migrations", "services.updater_client",
-              "services.licensing", "services.cloud_sync",
-              "services.tenant", "qrcode", "PIL"):
+              "services.licensing", "services.tenant",
+              "services.branding", "services.storage", "qrcode", "PIL"):
         args += ["--hidden-import", h]
     args.append(str(ROOT / "main.py"))
 

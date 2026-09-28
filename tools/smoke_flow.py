@@ -289,14 +289,17 @@ def main():
     except Exception as e:
         check("المعاملة المتداخلة تنضم للقائمة بلا تجمّد", False, str(e)[:80])
 
+    # ══ لا رفع سحابي (4.29) ══ فواتير وسندات وقيود رُحّلت أعلاه، ولم
+    # يُضف منها شيء لطابور الرفع — وبقايا الإصدارات السابقة تُفرَّغ.
     with db() as conn:
         st = sync_queue.stats(conn)
-        conn.execute("UPDATE sync_queue SET status='sent',"
-                     " sent_at=datetime('now','localtime','-30 days')")
-        purged = sync_queue.purge_sent(conn)
+        conn.execute("INSERT INTO sync_queue(tenant_id,op_uuid,entity,"
+                     "payload) VALUES('T','legacy-1','invoice','{}')")
+        purged = sync_queue.purge_all(conn)
         st2 = sync_queue.stats(conn)
-    check("إحصاءات الطابور تُحسب", st["total"] >= 0, f"{st['total']} حزمة")
-    check("تنظيف الحزم المرفوعة يعمل", purged > 0 and st2["total"] == 0,
+    check("لا شيء من عمليات المصنع يُوضع للرفع السحابي",
+          st["total"] == 0, f"{st['total']} حزمة")
+    check("وبقايا الطابور القديمة تُفرَّغ", purged == 1 and st2["total"] == 0,
           f"حُذفت {purged}")
 
     step("10) صيانة قاعدة البيانات")
@@ -1365,8 +1368,14 @@ def main():
           abs(_d["total"] - inv["grand_total"]) < 0.01,
           f"{_d['total']} / {inv['grand_total']}")
     _page = _ish.page_html(_d, _m, lambda i: "", "مصنع الاختبار")
-    check("الفاتورة تظهر أولاً في الصفحة",
-          _page.index(str(_d["no"])) < _page.index("موديلات الفاتورة"))
+    with db(readonly=True) as conn:
+        _cn = conn.execute("SELECT e.name FROM invoices i JOIN entities e"
+                           " ON e.id=i.customer_id WHERE i.id=?",
+                           (inv_id,)).fetchone()[0]
+    check("صفحة الرمز لصور الموديلات وحدها: لا عميل ولا مبالغ",
+          str(_d["no"]) in _page and _cn not in _page
+          and f'{_d["total"]:,.2f}' not in _page
+          and "العميل" not in _page, _cn)
     check("وموديلاتها أسفلها بأسمائها وأعدادها",
           all(f'<b>{x["model"]}</b>' in _page and
               f'العدد: {x["count"]}' in _page for x in _m),
@@ -1615,7 +1624,7 @@ def main():
         # الرسّام المفتوح على صورةٍ تُجمَع يُجهض Qt العملية كلها، فخللٌ
         # في تجميل يُسقط نظاماً محاسبياً. الإغلاق في `finally` يمنعه.
         _bad = dict(_empty)
-        _bad["lines"] = None            # يرفع استثناءً داخل الرسم
+        del _bad["date"]                # يرفع استثناءً داخل الرسم
         check("واستثناء أثناء الرسم يعيد فراغاً بلا إجهاض",
               _ish.render_page_image(_bad, [], "") == b"")
     except ImportError:
@@ -5385,6 +5394,133 @@ def main():
               and config.COMPANY_NAME == "مصنع جاديت للتصنيع")
     finally:
         config.BASE_DIR = _base63
+
+    # ══════════════════════════════════════════════════════════════
+    step("64) كل مصنع على جهازه: لا رفع سحابي · آخر 20 نسخة · الإيقاف من المدير")
+    import importlib.util as _iu64
+    from services import licensing as _lic64
+    from services import storage as _st64
+    from services import tenant as _tn64
+    check("وحدات الرفع والاستقبال السحابي حُذفت، ولا انتحال شخصية",
+          _iu64.find_spec("services.cloud_sync") is None
+          and _iu64.find_spec("services.cloud_backup") is None
+          and not hasattr(_tn64, "impersonate")
+          and _tn64.effective_tenant_id() == _tn64.tenant_id())
+    _bk64 = pathlib.Path(_TMP) / "bk64"
+    _bk64.mkdir(exist_ok=True)
+    _orig_bd64 = _st64.backup_dir
+    _st64.backup_dir = lambda: _bk64          # لا يُمسّ مجلد نسخ الجهاز
+    try:
+        _p1 = _st64.make_backup("auto")
+        _p2 = _st64.make_backup("auto")
+        check("نسخةٌ مطابقة لسابقتها لا تُكرَّر",
+              _p1 == _p2 and len(_st64.list_backups()) == 1)
+        with db() as conn:
+            _a64 = acc_id(conn, "1400")
+            post_entry(conn, "2026-11-01", "حركة للنسخ", [
+                {"account_id": _a64, "cash_debit": 5},
+                {"account_id": acc_id(conn, "1100"), "cash_credit": 5}],
+                source_table="manual", username="admin")
+        _p3 = _st64.make_backup("auto")
+        check("وبعد أي تغيير تُؤخذ نسخة جديدة",
+              _p3 != _p1 and len(_st64.list_backups()) == 2)
+        for _i in range(22):
+            _st64.make_backup("manual")
+        _rows64 = _st64.list_backups()
+        check("يُحتفظ بآخر 20 نسخة فقط", len(_rows64) == 20
+              and _st64.KEEP_LAST == 20, str(len(_rows64)))
+        # الاسترجاع: أقدم العشرين — ولا يحذفها التدوير قبل قراءتها
+        with db(readonly=True) as conn:
+            _n0 = conn.execute("SELECT COUNT(*) FROM journal_entries"
+                               ).fetchone()[0]
+        _old64 = _rows64[-1]["path"]
+        with db() as conn:
+            post_entry(conn, "2026-11-02", "بعد النسخة", [
+                {"account_id": _a64, "cash_debit": 7},
+                {"account_id": acc_id(conn, "1100"), "cash_credit": 7}],
+                source_table="manual", username="admin")
+        _r64 = _st64.restore(_old64)
+        with db(readonly=True) as conn:
+            _n1 = conn.execute("SELECT COUNT(*) FROM journal_entries"
+                               ).fetchone()[0]
+        _after64 = _st64.list_backups()
+        check("استرجاع أقدم النسخ يعيد البيانات إلى حالتها",
+              _n1 == _n0 and _r64["restored"], f"{_n0} ← {_n1}")
+        check("وتُؤخذ نسخة «قبل الاسترجاع» للتراجع، والعدد يبقى 20",
+              any(r["reason"] == "before_restore" for r in _after64)
+              and len(_after64) == 20)
+        _junk = _bk64 / "junk.bak"
+        _junk.write_bytes(b"not a database")
+        check("ونسخةٌ تالفة تُرفض قبل أن تمسّ البيانات",
+              not _st64.verify_backup(_junk)[0])
+        try:
+            _st64.restore(_junk)
+            _ok64 = False
+        except ValueError:
+            _ok64 = True
+        check("والاسترجاع منها يُمنع برسالة واضحة", _ok64)
+        # التراجع عن الاسترجاع يعيد القيد الذي أُضيف بعد النسخة
+        _before = next(r for r in _after64 if r["reason"] == "before_restore")
+        _st64.restore(_before["path"])
+        with db(readonly=True) as conn:
+            _n2 = conn.execute("SELECT COUNT(*) FROM journal_entries"
+                               ).fetchone()[0]
+        check("والتراجع عن الاسترجاع يعيد ما بعده", _n2 == _n0 + 1,
+              f"{_n2}")
+    finally:
+        _st64.backup_dir = _orig_bd64
+
+    # إيقاف المصنع: كل حساباته — وحساب المدير لا يُمسّ
+    from services import cloud_auth as _ca64
+    _calls64 = []
+    _orig_set64 = _ca64.set_user_active
+    _ca64.set_user_active = lambda u, a: _calls64.append((u, a))
+    try:
+        _users64 = [
+            {"username": "f1", "tenant_id": "F-A", "is_active": True,
+             "role": "factory"},
+            {"username": "f1b", "tenant_id": "F-A", "is_active": True,
+             "role": "factory"},
+            {"username": "f2", "tenant_id": "F-B", "is_active": True,
+             "role": "factory"},
+            {"username": "boss", "tenant_id": "F-A", "is_active": True,
+             "role": "super_admin"}]
+        _n64 = _lic64.set_factory_active("F-A", False, users=_users64)
+    finally:
+        _ca64.set_user_active = _orig_set64
+    check("«إيقاف المصنع» يوقف كل حساباته ولا يمسّ غيره ولا المدير",
+          _n64 == 2 and sorted(_calls64) == [("f1", False), ("f1b", False)])
+    # الحارس: حسابٌ أُوقف ⇒ نداء الإيقاف مرةً واحدة
+    _hit64 = []
+    _orig_st64 = _lic64.account_status
+    _lic64.account_status = lambda u, timeout=10: {
+        "online": True, "known": True, "active": False}
+    try:
+        _g64 = _lic64.AccountGuard("f1", lambda: _hit64.append(1))
+        _g64.check_now()
+        _lic64.account_status = lambda u, timeout=10: {
+            "online": False, "known": False, "active": True}
+        _g65 = _lic64.AccountGuard("f2", lambda: _hit64.append(2))
+        _g65.check_now()
+    finally:
+        _lic64.account_status = _orig_st64
+    check("الحارس يوقف البرنامج عند إيقاف الحساب — ولا يوقفه انقطاع الإنترنت",
+          _hit64 == [1] and _g64._stop.is_set() and not _g65._stop.is_set())
+    try:
+        from PyQt5 import QtWidgets as _QW64
+        _QW64.QApplication.instance() or _QW64.QApplication([])
+        from ui.backups_dialog import BackupsDialog as _BD64
+        _st64.backup_dir = lambda: _bk64
+        try:
+            _d64 = _BD64(None, {"username": "admin"})
+            _rows_ui = _d64.table.rowCount()
+            _d64.close()
+        finally:
+            _st64.backup_dir = _orig_bd64
+        check("نافذة النسخ والاسترجاع تعرض آخر 20 نسخة لكل مستخدم",
+              _rows_ui == 20, str(_rows_ui))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

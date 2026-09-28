@@ -37,9 +37,10 @@ DATA = [
 HIDDEN = [
     "PyQt5.QtPrintSupport", "PyQt5.QtSvg", "PyQt5.QtNetwork", "sqlite3",
     "gzip", "urllib.request", "urllib.parse", "urllib.error",
-    "services.migrations", "services.licensing", "services.cloud_sync",
-    "services.tenant", "services.cloud_auth", "services.cloud_backup",
+    "services.migrations", "services.licensing", "services.storage",
+    "services.tenant", "services.cloud_auth", "services.branding",
     "services.sync_queue", "services.auth", "services.audit",
+    "ui.backups_dialog", "ui.factory_identity_dialog",
     "app_config", "core.app_config", "core.config",
     "qrcode", "PIL", "barcode",
 ]

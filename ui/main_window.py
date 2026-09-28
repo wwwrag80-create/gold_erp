@@ -76,7 +76,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 6
+NAV_VERSION = 7
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -249,9 +249,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # يمكن الوصول إليها ولو بالتنقّل اليدوي أو تعديل ملف القائمة.
         if self.is_super:
             groups.append(("الإدارة العليا", [
-                ("النظام السحابي وإدارة المصانع",
+                ("الحسابات وإيقاف المصانع",
                  Lazy(lambda: SuperAdminScreen(user),
-                      "النظام السحابي وإدارة المصانع")),
+                      "الحسابات وإيقاف المصانع")),
             ]))
 
         # ══════════════════════════════════════════════════════════
@@ -322,18 +322,25 @@ class MainWindow(QtWidgets.QMainWindow):
             "تحقّق من التحديثات عبر الإنترنت، أو ثبّت حزمة محفوظة")
         btn_update.clicked.connect(self.do_update)
         self.btn_update = btn_update
-        btn_backup = QtWidgets.QPushButton("💾 نسخة")
-        btn_backup.setToolTip("ينشئ نسخة احتياطية كاملة الآن")
+        # «💾 نسخة»: الضغط ينسخ الآن، وسهمه يفتح النسخ والاسترجاع.
+        # البيانات على الجهاز وحده (لا سحابة 4.29)، فالاسترجاع لكل
+        # مستخدمٍ على جهازه لا للمدير وحده.
+        btn_backup = QtWidgets.QToolButton()
+        btn_backup.setText("💾 نسخة")
+        btn_backup.setToolTip("نسخة احتياطية الآن — والسهم: آخر 20 نسخة "
+                              "واسترجاع أيٍّ منها")
+        btn_backup.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         btn_backup.clicked.connect(self.do_backup)
-        # فحص صامت عند الإقلاع: يضيء الزر إن وُجد تحديث
-        try:
-            from services import update_channel
-            update_channel.start_background_check(
-                delay=8.0,
-                on_done=lambda st: QtCore.QTimer.singleShot(
-                    0, self._on_update_checked))
-        except Exception:
-            pass
+        m_bk = QtWidgets.QMenu(btn_backup)
+        m_bk.addAction("💾 نسخة احتياطية الآن").triggered.connect(
+            self.do_backup)
+        m_bk.addAction("♻ النسخ الاحتياطية والاسترجاع…").triggered.connect(
+            self.open_backups)
+        btn_backup.setMenu(m_bk)
+        self._backup_menu = m_bk
+        # ══ لا فحص تحديثات صامت (4.29) ══
+        # برنامج المصنع لا يتصل بالسحابة إلا ليسأل عن حالة حسابه.
+        # التحديث عند الطلب من زر «⬆ تحديث» (أو حزمة محفوظة).
         for b in (btn_view, btn_update, btn_backup):
             b.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
                             QtWidgets.QSizePolicy.Fixed)
@@ -504,6 +511,7 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addLayout(body, 1)
         self.setCentralWidget(central)
         self._build_status_bar()
+        self._start_account_guard()
 
     # ══════════ دخولُ الواجهة ══════════
     def play_entrance(self):
@@ -774,7 +782,7 @@ class MainWindow(QtWidgets.QMainWindow):
             cls = type(real).__name__ if real is not None else ""
             builder = getattr(scr, "_builder", None)
             label = getattr(scr, "title", "") or ""
-            if "السحابي وإدارة المصانع" in label or cls == "SuperAdminScreen":
+            if "إيقاف المصانع" in label or cls == "SuperAdminScreen":
                 from ui.super_admin_screen import SuperAdminScreen as _S
                 return _S.request_access(self)
         except Exception:
@@ -1332,6 +1340,8 @@ class MainWindow(QtWidgets.QMainWindow):
         f.setBold(True)
         a_id.setFont(f)
         a_id.triggered.connect(self.open_identity)
+        a_bk = menu.addAction("♻ النسخ الاحتياطية والاسترجاع (آخر 20)…")
+        a_bk.triggered.connect(self.open_backups)
         # ══ الربط مع الهيئة ══
         a_zatca = menu.addAction("🧾 الربط مع هيئة الزكاة والضريبة "
                                  "(الفوترة الإلكترونية)…")
@@ -1989,10 +1999,57 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def do_backup(self):
         try:
-            path = backup.backup_now()
-            info(self, f"تم إنشاء نسخة احتياطية:\n{path}")
+            backup.backup_now()
+            from services import storage
+            n = len(storage.list_backups())
+            info(self, f"تم إنشاء نسخة احتياطية على هذا الجهاز.\n\n"
+                       f"المحفوظ: {n} من آخر {storage.KEEP_LAST} نسخة — "
+                       f"وتسترجع أيّها من سهم زر «💾 نسخة».")
         except Exception as e:
             err(self, e)
+
+    def open_backups(self):
+        try:
+            from ui.backups_dialog import open_dialog
+            open_dialog(self, self.user)
+        except Exception as e:
+            err(self, e)
+
+    # ══════════════════════════════════════════════════════════════
+    #  إيقاف البرنامج من الإدارة — الشيء الوحيد الذي يأتي من السحابة
+    # ══════════════════════════════════════════════════════════════
+
+    def _start_account_guard(self):
+        """يسأل دورياً: هل ما زال الحساب نشطاً؟ — لحسابات المصانع."""
+        if self.is_super or not self.user.get("username"):
+            return
+        try:
+            from services import licensing
+            self._guard = licensing.AccountGuard(
+                self.user["username"],
+                lambda: QtCore.QMetaObject.invokeMethod(
+                    self, "_on_suspended", QtCore.Qt.QueuedConnection))
+            self._guard.start()
+        except Exception:
+            self._guard = None
+
+    @QtCore.pyqtSlot()
+    def _on_suspended(self):
+        """أوقفت الإدارة الحساب: يُحفظ كل شيء ثم يُغلق البرنامج."""
+        try:
+            from services import storage
+            storage.make_backup("exit")
+        except Exception:
+            pass
+        QtWidgets.QMessageBox.critical(
+            self, "تم إيقاف البرنامج",
+            "أوقفت الإدارة هذا الحساب — سيُغلق البرنامج الآن.\n\n"
+            "بياناتك محفوظة على هذا الجهاز كما هي ولم يُحذف منها شيء.\n"
+            "للتفعيل يرجى مراجعة الإدارة.")
+        self._suspended = True
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def closeEvent(self, event):
         # ضمان أخير: يُحفظ ترتيب القائمة وأسماؤها قبل الإغلاق
@@ -2008,7 +2065,15 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         try:
-            backup.backup_now()
+            g = getattr(self, "_guard", None)
+            if g is not None:
+                g.stop()
+        except Exception:
+            pass
+        try:
+            # نسخة الإغلاق: لا تُحفظ إن لم يتغيّر شيء منذ آخر نسخة
+            from services import storage
+            storage.make_backup("exit")
         except Exception:
             pass
         try:

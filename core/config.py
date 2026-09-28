@@ -184,7 +184,7 @@ ICONS_DIR = (BUNDLE_DIR / "assets" / "icons"
              else BASE_DIR / "assets" / "icons")
 
 APP_NAME = "نظام محاسبة مصنع الذهب — عيار 18"
-APP_VERSION = "4.28.0"
+APP_VERSION = "4.29.0"
 # بصمة تتغيّر مع كل بناء — تكشف تشغيل نسخة قديمة فوراً
 BUILD_STAMP = "2026-09-28"
 
@@ -232,7 +232,7 @@ LOGO_GOLD_PATH = BUNDLE_DIR / "assets" / "logo_gold.png"
 LETTERHEAD_PATH = BASE_DIR / "assets" / "letterhead.png"
 
 # ── النسخ الاحتياطي ───────────────────────────────────────
-BACKUP_KEEP_LAST = 30         # عدد النسخ الاحتياطية المحتفظ بها
+BACKUP_KEEP_LAST = 20         # آخر 20 نسخة احتياطية (services/storage.py)
 
 # الأجر الافتراضي للجرام (قابل للتعديل يدوياً في كل فاتورة)
 DEFAULT_WAGE_PER_GRAM = 23.0

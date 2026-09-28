@@ -378,10 +378,6 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     _edoc = _fatoora.on_invoice_saved(conn, inv_id, username)
     if _edoc:
         qr_b64 = _edoc["qr"]
-    # حزمة المزامنة الذرّية: الفاتورة وبنودها وقيدها وحركة الأطقم معاً
-    from services import sync_queue
-    sync_queue.enqueue(conn, "invoice",
-                       sync_queue.bundle_invoice(conn, inv_id))
     log_action(conn, username, "create", "invoices", inv_id,
               f"{inv_no} vat={int(apply_vat)}")
     return {"id": inv_id, "invoice_no": inv_no, "total_weight": total_w,

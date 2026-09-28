@@ -224,6 +224,12 @@ def prepare_steps():
             ensure_internal_counterparties(conn)
             ensure_employee_accrual_accounts(conn)
             ensure_system_tags(conn)
+            # بقايا طابور المزامنة من الإصدارات السابقة — لا شيء يُرفع
+            try:
+                from services import sync_queue
+                sync_queue.purge_all(conn)
+            except Exception:
+                pass
 
     def _branding():
         # القاعدة هي المرجع: نسخةُ مصنعٍ مستعادة تأتي بهويتها
@@ -257,12 +263,9 @@ def start_background_workers():
     for label, fn in (
             ("tenant", lambda: __import__(
                 "services.tenant", fromlist=["x"]).ensure_tenant_id()),
-            ("cloud_sync", lambda: __import__(
-                "services.cloud_sync", fromlist=["x"]).start_worker()),
-            # نسخ احتياطي محلي دوري
-            ("licensing_backup", lambda: __import__(
-                "services.licensing", fromlist=["x"]).start_backup_worker()),
-            # نسخ إلى قرص آخر كل 30 دقيقة
+            # ══ لا مزامنة ولا نسخ سحابي (4.29) ══
+            # بيانات المصنع على جهازه وحده: نسخٌ محلي تلقائي واحد يحفظ
+            # آخر 20 نسخة، ويُسترجع منها أيّها من «💾 نسخة».
             ("disk_backup", lambda: __import__(
                 "services.storage", fromlist=["x"]).start_backup_worker()),
             # مراقب سلامة القيود
@@ -273,9 +276,6 @@ def start_background_workers():
             # يتجمّد النظام عند أول فتح لمربع «تم الترحيل».
             ("preload", lambda: __import__(
                 "services.preload", fromlist=["x"]).start(delay=2.0)),
-            # نسخة سحابية كل ساعة
-            ("cloud_backup", lambda: __import__(
-                "services.cloud_backup", fromlist=["x"]).start_worker()),
             # صيانة يومية: تنظيف الطابور، تفتيش WAL، تحديث إحصاءات
             # مخطِّط الاستعلام — بها يبقى النظام سريعاً مع نموّ الدفتر
             ("maintenance", lambda: __import__(

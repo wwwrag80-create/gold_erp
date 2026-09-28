@@ -239,9 +239,6 @@ def create_voucher(conn, kind, voucher_date, username, *,
         if gold_weight:
             delta = gold_weight if kind == "receipt" else -gold_weight
             add_scrap_move(conn, gold_karat, delta, "vouchers", v_id)
-    from services import sync_queue
-    sync_queue.enqueue(conn, "voucher",
-                       sync_queue.bundle_voucher(conn, v_id))
     log_action(conn, username, "create", "vouchers", v_id, v_no)
     return {"id": v_id, "voucher_no": v_no, "equiv18": equiv,
             "entry_id": entry_id, "target_label": target_label}

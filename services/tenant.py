@@ -26,8 +26,8 @@ _DEFAULTS = {
     # تُقرأ تلقائياً من .env / config.ini إن لم تُضبط يدوياً
     "cloud_url": app_config.supabase_url(),
     "cloud_key": app_config.supabase_key(),
-    "sync_enabled": bool(app_config.supabase_url()
-                         and app_config.supabase_key()),
+    # المزامنة أُلغيت (4.29): المفتاح باقٍ لتوافق ملفات tenant.json القديمة
+    "sync_enabled": False,
     "sync_interval_sec": 30,
     "role": "factory",          # factory | super_admin
 }
@@ -125,40 +125,13 @@ def update(**kw):
 
 
 # ══════════════════════════════════════════════════════════════════
-# انتحال الشخصية (Impersonation) — للمدير الأعلى فقط
+# لا انتحال شخصية (أُلغي 4.29)
 # ══════════════════════════════════════════════════════════════════
-
-_impersonated = {"tenant_id": None, "name": None}
-
-
-def impersonate(target_tenant_id, target_name=None):
-    """يتبنّى هوية مصنع آخر لعرض بياناته كما يراها صاحبه.
-
-    متاح للمدير الأعلى حصراً، ولا يتطلب كلمة مرور المصنع لأن الاتصال
-    يتم بمفتاح السحابة الخاص بالمالك.
-    """
-    if not is_super_admin():
-        raise PermissionError("انتحال الشخصية متاح للمدير الأعلى فقط")
-    if not target_tenant_id:
-        raise ValueError("حدّد المصنع المطلوب")
-    _impersonated["tenant_id"] = target_tenant_id
-    _impersonated["name"] = target_name or target_tenant_id
-    return dict(_impersonated)
-
-
-def stop_impersonation():
-    _impersonated["tenant_id"] = None
-    _impersonated["name"] = None
-
-
-def impersonating():
-    return _impersonated["tenant_id"] is not None
-
-
-def impersonation_info():
-    return dict(_impersonated)
-
+#
+# كان المدير «يدخل كـ» أي مصنع فيرى بياناته من السحابة. بعد إلغاء
+# الرفع لا بيانات لأي مصنع خارج جهازه أصلاً — فلا شيء يُرى، والباب
+# نفسه أُغلق: لا دالة تبدّل هوية المصنع في جلسةٍ قائمة.
 
 def effective_tenant_id():
-    """الهوية المعتمدة حالياً — هوية المصنع المنتحَل إن وُجد."""
-    return _impersonated["tenant_id"] or tenant_id()
+    """هوية المصنع في هذه الجلسة — هويته هو دائماً."""
+    return tenant_id()

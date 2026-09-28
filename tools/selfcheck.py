@@ -196,14 +196,29 @@ def check_optional_features_safe():
 
 
 def check_backup_intervals():
-    """فترات النسخ الاحتياطي ضمن حدود معقولة."""
+    """النسخ المحلي: فترة معقولة، وآخر 20 نسخة — ولا رفع سحابي.
+
+    منذ 4.29 لا تُرفع بيانات المصانع ولا تُستقبل. وحدات الرفع حُذفت،
+    فعودة أيٍّ منها (أو نداءٍ لها) خطأٌ يُكشف هنا قبل التسليم.
+    """
     errs = []
-    cb = (ROOT / "services" / "cloud_backup.py").read_text(encoding="utf-8")
-    m = re.search(r"UPLOAD_EVERY_SEC\s*=\s*(\d+)", cb)
-    # 10 دقائق حدّ مقبول: الرفع كل 30 ثانية كان يُثقل القرص والشبكة،
-    # ومع الرفع عند كل إغلاق لا تُفقد بيانات تُذكر.
-    if m and int(m.group(1)) > 900:
-        errs.append(f"الرفع السحابي بطيء ({m.group(1)} ثانية)")
+    st = (ROOT / "services" / "storage.py").read_text(encoding="utf-8")
+    m = re.search(r"BACKUP_EVERY_SEC\s*=\s*(\d+)\s*\*\s*60", st)
+    if not m or not (5 <= int(m.group(1)) <= 60):
+        errs.append("فترة النسخ المحلي خارج 5–60 دقيقة")
+    k = re.search(r"KEEP_LAST\s*=\s*(\d+)", st)
+    if not k or int(k.group(1)) != 20:
+        errs.append("عدد النسخ المحفوظة ليس 20")
+    for gone in ("cloud_sync.py", "cloud_backup.py"):
+        if (ROOT / "services" / gone).exists():
+            errs.append(f"وحدة الرفع السحابي عادت: {gone}")
+    for p in list((ROOT / "services").glob("*.py")) + \
+            list((ROOT / "ui").rglob("*.py")) + \
+            list((ROOT / "models").glob("*.py")) + [ROOT / "main.py"]:
+        src = p.read_text(encoding="utf-8", errors="ignore")
+        if re.search(r"\bcloud_sync\b|\bcloud_backup\b|sync_queue\.enqueue"
+                     r"|\bimpersonate\(", src):
+            errs.append(f"{p.name}: نداءٌ لرفعٍ سحابي أو انتحال شخصية")
     return errs
 
 

@@ -110,19 +110,6 @@ def wipe_local(conn, keep_admin=True):
     return cleared
 
 
-def wipe_cloud():
-    """يمسح بيانات هذا المصنع من السحابة عبر دالة الخادم."""
-    from services import cloud_auth, tenant
-    tid = tenant.effective_tenant_id()
-    try:
-        cloud_auth._rpc("admin_wipe_tenant",
-                        {"p_token": cloud_auth._need_token(),
-                         "p_tenant": tid})
-        return {"ok": True, "tenant": tid}
-    except Exception as e:
-        return {"ok": False, "error": str(e)[:200]}
-
-
 def wipe_backups():
     """يحذف كل النسخ الاحتياطية المحلية."""
     from services import licensing, storage
@@ -189,9 +176,11 @@ def wipe_all_tenants(keep_tenant=None):
     return removed
 
 
-def full_reset(conn, wipe_cloud_too=True, wipe_backups_too=True,
-               wipe_other_tenants=True):
-    """التهيئة الكاملة: محلي + كل المصانع + سحابي + النسخ."""
+def full_reset(conn, wipe_backups_too=True, wipe_other_tenants=True):
+    """التهيئة الكاملة: محلي + كل المصانع على الجهاز + النسخ.
+
+    لا شيء سحابي يُمسح: بيانات المصانع لا تُرفع أصلاً (4.29).
+    """
     result = {"local": [], "cloud": None, "backups": 0, "last_backup": None,
               "tenants": []}
 
@@ -212,8 +201,6 @@ def full_reset(conn, wipe_cloud_too=True, wipe_backups_too=True,
                 keep_tenant=tenant_db.active_tenant())
         except Exception:
             pass
-    if wipe_cloud_too:
-        result["cloud"] = wipe_cloud()
     if wipe_backups_too:
         result["backups"] = wipe_backups()
     return result

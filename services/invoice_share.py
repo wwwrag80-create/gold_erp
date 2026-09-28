@@ -178,48 +178,17 @@ _PAGE = """<!DOCTYPE html>
          padding:10px 0 4px; }}
 </style></head><body>
 <div class="card">
-  <h1>{kind} · {no}</h1>
+  <h1>موديلات {kind} · {no}</h1>
   <div class="sub">{company}</div>
   <div class="kv"><b>التاريخ</b><span>{date}</span></div>
-  <div class="kv"><b>العميل</b><span>{customer}</span></div>
-  {table}
 </div>
-<h2>موديلات الفاتورة</h2>
 <div class="g">{models}</div>
-<div class="foot">{company} — صفحة الفاتورة</div>
+<div class="foot">{company} — صور الموديلات</div>
 </body></html>"""
 
 
 def _esc(v):
     return html.escape(str(v if v is not None else ""))
-
-
-def _table(d):
-    rows = "".join(
-        "<tr>"
-        f"<td>{_esc(l['model'])}</td>"
-        f"<td>{_esc(l['wo'])}</td>"
-        f"<td>{l['weight']:,.3f}</td>"
-        f"<td>{l['wage']:,.2f}</td>"
-        "</tr>" for l in d["lines"])
-    if not rows:
-        rows = '<tr><td colspan="4">لا توجد أصناف</td></tr>'
-    vat = ""
-    if d["vat_applied"]:
-        vat = (f'<tr><td colspan="3">ضريبة القيمة المضافة</td>'
-               f'<td>{d["vat"]:,.2f}</td></tr>')
-    return (
-        '<table><thead><tr>'
-        '<th>الموديل</th><th>رقم التشغيل</th>'
-        f'<th>الوزن ({_esc(d["unit"])})</th><th>الأجرة</th>'
-        '</tr></thead>'
-        f'<tbody>{rows}</tbody><tfoot>'
-        f'<tr><td colspan="2">الإجمالي</td>'
-        f'<td>{d["weight"]:,.3f}</td><td>{d["wages"]:,.2f}</td></tr>'
-        f'{vat}'
-        f'<tr><td colspan="3">الإجمالي النهائي (ريال)</td>'
-        f'<td>{d["total"]:,.2f}</td></tr>'
-        '</tfoot></table>')
 
 
 def page_html(data, models, img_src, company=""):
@@ -236,11 +205,13 @@ def page_html(data, models, img_src, company=""):
             f'{_esc(m["unit"])}</span></div></div>')
     body = ("".join(cards) if cards
             else '<div class="card">لا توجد موديلات في هذه الفاتورة.</div>')
+    # ══ صور الموديلات وحدها (4.29) ══
+    # لا اسم عميل ولا أوزان فاتورة ولا مبالغ: الرمز يعرض الموديلات
+    # فقط — فلا يخرج من المصنع شيءٌ من حساباته، والصفحة أخفّ.
     return _PAGE.format(
-        title=f'{_esc(data["kind"])} {_esc(data["no"])}',
+        title=f'موديلات {_esc(data["kind"])} {_esc(data["no"])}',
         kind=_esc(data["kind"]), no=_esc(data["no"]),
         company=_esc(company), date=_esc(data["date"]),
-        customer=_esc(data["customer"]), table=_table(data),
         models=body)
 
 
@@ -326,69 +297,19 @@ def render_page_image(data, models, company="", width=PAGE_WIDTH):
             p.setBrush(QColor(_C_CARD))
             p.drawRoundedRect(QRect(pad, int(yy), inner, int(h)), 12, 12)
 
-        # ── ترويسة الفاتورة ──
-        rows = data["lines"]
-        head_h = 96
-        tbl_h = 34 + 30 * (len(rows) or 1) + 30 * (3 if data["vat_applied"]
-                                                   else 2)
-        box_h = head_h + tbl_h + 34
-        card(y, box_h)
-        text(f'{data["kind"]} · {data["no"]}', pad + 14, y + 12, inner - 28,
-             30, font(15, True), _C_GOLD)
-        text(company, pad + 14, y + 42, inner - 28, 20, font(9), _C_MUT)
-        text(f'التاريخ: {data["date"]}', pad + 14, y + 64, inner - 28, 24,
-             font(10), _C_INK)
-        text(f'العميل: {data["customer"]}', pad + 14, y + 64, inner - 28, 24,
-             font(10, True), _C_INK, Qt.AlignLeft | Qt.AlignVCenter)
-        ty = y + head_h
-
-        # ── جدول الأصناف ──
-        cols = [("الموديل", 0.22), ("رقم التشغيل", 0.28),
-                (f'الوزن ({data["unit"]})', 0.25), ("الأجرة", 0.25)]
-        x0 = pad + 10
-        tw = inner - 20
-        p.setBrush(QColor(_C_HEAD))
-        p.setPen(QColor(_C_LINE))
-        p.drawRect(QRect(x0, int(ty), tw, 34))
-        cx = x0 + tw
-        for title, frac in cols:
-            w = int(tw * frac)
-            cx -= w
-            text(title, cx, ty, w, 34, font(9, True), "#4A4237", AC)
-        ty += 34
-        for ln in (rows or [{}]):
-            cx = x0 + tw
-            vals = [ln.get("model", "—"), ln.get("wo", "—"),
-                    f'{ln.get("weight", 0):,.3f}', f'{ln.get("wage", 0):,.2f}']
-            for (t_, frac), v in zip(cols, vals):
-                w = int(tw * frac)
-                cx -= w
-                text(v, cx, ty, w, 30, font(9), _C_INK, AC)
-            p.setPen(QColor("#F0EBE0"))
-            p.drawLine(x0, int(ty + 30), x0 + tw, int(ty + 30))
-            ty += 30
-
-        def total_row(label, value, bold=True):
-            nonlocal ty
-            p.setBrush(QColor("#FAF8F3"))
-            p.setPen(QColor(_C_LINE))
-            p.drawRect(QRect(x0, int(ty), tw, 30))
-            text(label, x0 + 8, ty, tw - 16, 30, font(9, bold), _C_INK)
-            text(value, x0 + 8, ty, tw - 16, 30, font(10, True), _C_GOLD,
-                 Qt.AlignLeft | Qt.AlignVCenter)
-            ty += 30
-
-        total_row("إجمالي الوزن", f'{data["weight"]:,.3f} {data["unit"]}')
-        if data["vat_applied"]:
-            total_row("الأجور قبل الضريبة", f'{data["wages"]:,.2f}', False)
-            total_row("ضريبة القيمة المضافة", f'{data["vat"]:,.2f}', False)
-        total_row("الإجمالي النهائي (ريال)", f'{data["total"]:,.2f}')
-        y += box_h + 16
+        # ── ترويسة صغيرة: رقم المستند وتاريخه فقط ──
+        # الصفحة **لصور الموديلات وحدها** (4.29): لا اسم عميل ولا
+        # جدول أوزان ولا مبالغ — فلا يُرفع شيء من حسابات المصنع،
+        # والصورة أصغر حجماً في التخزين.
+        card(y, 70)
+        text(f'موديلات {data["kind"]} · {data["no"]}', pad + 14, y + 8,
+             inner - 28, 30, font(14, True), _C_GOLD)
+        text(company, pad + 14, y + 40, inner - 28, 22, font(9), _C_MUT)
+        text(f'التاريخ: {data["date"]}', pad + 14, y + 40, inner - 28, 22,
+             font(9), _C_INK, Qt.AlignLeft | Qt.AlignVCenter)
+        y += 70 + 14
 
         # ── الموديلات ──
-        text("موديلات الفاتورة", pad + 4, y, inner - 8, 28, font(12, True),
-             _C_GOLD)
-        y += 32
         cols_n = 2
         cw = (inner - 12) // cols_n
         for idx, m in enumerate(models):

@@ -157,14 +157,7 @@ def post_entry(conn, entry_date, description, lines,
 
     _verify_entry_posted(conn, entry_id)
 
-    # كل قيد يُدرَج في طابور المزامنة بحزمته الكاملة (القيد وأسطره)
-    try:
-        from services import sync_queue
-        if source_table not in ("invoices", "vouchers"):
-            sync_queue.enqueue(conn, "journal",
-                               sync_queue.bundle_entry(conn, entry_id))
-    except Exception:
-        pass          # المزامنة لا تعطّل العملية المحلية أبداً
+    # لا طابور مزامنة: بيانات المصنع تبقى على جهازه (أُلغي الرفع 4.29)
 
     # ملاحظة: كان هنا «حارس الأرصدة السالبة» يفحص أثر كل قيد على
     # الحسابات المادية وينبّه فور الترحيل. أُلغي بطلب صاحب النظام:
