@@ -33,21 +33,25 @@ PREF_SCALE = "ui_font_scale"
 # ══════════════════════════════════════════════════════════════════
 
 LIGHT = {
-    "ink": "#1F1B17", "ink2": "#14100A", "muted": "#6B6459",
+    # ══ حبرٌ أعمق (4.19) ══ النصّ أسودُ صريح لا رماديٌّ داكن، والرمادي
+    # الثانوي والذهبي والأخضر والأحمر كلٌّ درجةٌ أغمق — تباينٌ أعلى
+    # على السطح الأبيض فيُقرأ الرقم من بعيد بلا إجهاد. الخلفيات
+    # (الأزرار والتظليل) كما هي؛ الذي تغيّر لونُ الكتابة وحده.
+    "ink": "#0B0907", "ink2": "#000000", "muted": "#4A443A",
     "bg": "#F7F5F0", "surface": "#FFFFFF", "surface2": "#FAF8F3",
     "hover": "#FBF7EC", "focusBg": "#FFFDF6",
     "line": "#E3DDD0", "line2": "#D6CFC0", "line3": "#C0B79F",
     "grid": "#EDE8DC",
-    "gold": "#9A7B22", "goldHi": "#B08E2A", "goldDim": "#7A611A",
+    "gold": "#9A7B22", "goldHi": "#B08E2A", "goldDim": "#5E4A0C",
     "goldSoft": "#F3E9CE", "goldSoft2": "#F7EFD9", "goldSel": "#EFDFAE",
     "goldEdge": "#E0CC8F", "goldEdge2": "#B99B33", "goldBright": "#C9A227",
     "goldRing": "#E4C665", "goldPale": "#F0E0AE",
-    "green": "#1E6B33", "red": "#A33131", "redHi": "#BE3C3C",
-    "redSoft": "#E2C3C3", "redText": "#B02A2A",
-    "disBg": "#DED8CB", "disFg": "#9A9384", "disField": "#F2EFE8",
+    "green": "#0F5A24", "red": "#A33131", "redHi": "#BE3C3C",
+    "redSoft": "#E2C3C3", "redText": "#9A1414",
+    "disBg": "#DED8CB", "disFg": "#7C7566", "disField": "#F2EFE8",
     "barBg": "#2B2723", "barBtn": "#3A342D", "barBtnHi": "#4A4239",
     "barEdge": "#4E463C", "barFg": "#F3EEE2",
-    "hdrBg": "#F1ECE0", "hdrFg": "#4A4237", "hdrLine": "#D8CDB4",
+    "hdrBg": "#F1ECE0", "hdrFg": "#1E1A14", "hdrLine": "#D8CDB4",
     "hdrLine2": "#E6E0D2",
     "sideItem": "#FCFAF5", "scroll": "#D8D1C2", "scrollHi": "#C0B79F",
     "tipBg": "#2B2723", "tipFg": "#F3EEE2",
@@ -56,31 +60,31 @@ LIGHT = {
     # أفتحُ من الذهب وأدفأُ من السطح، فتلتقطه العين أولاً
     # ويبقى النصّ فوقه مقروءاً.
     "sumBg": "#FDF3E2", "sumBg2": "#FAEBD2",
-    "sumEdge": "#E6C68A", "sumInk": "#7A4F10",
+    "sumEdge": "#E6C68A", "sumInk": "#5A3806",
 }
 
 DARK = {
-    "ink": "#EFE9DD", "ink2": "#FFFFFF", "muted": "#A79E8D",
+    "ink": "#FAF6EE", "ink2": "#FFFFFF", "muted": "#C6BDAB",
     "bg": "#15130F", "surface": "#1E1C17", "surface2": "#232019",
     "hover": "#2A261D", "focusBg": "#241F15",
     "line": "#332E25", "line2": "#3E382C", "line3": "#554D3C",
     "grid": "#2C2820",
-    "gold": "#C9A227", "goldHi": "#E0B93E", "goldDim": "#A98C33",
+    "gold": "#C9A227", "goldHi": "#E0B93E", "goldDim": "#D2AF46",
     "goldSoft": "#3A3120", "goldSoft2": "#332B1C", "goldSel": "#4A3E24",
     "goldEdge": "#6B5A2E", "goldEdge2": "#A98C33", "goldBright": "#E4C665",
     "goldRing": "#E4C665", "goldPale": "#6B5A2E",
-    "green": "#5FC97E", "red": "#B24A4A", "redHi": "#CC5C5C",
-    "redSoft": "#5E3030", "redText": "#F09A9A",
-    "disBg": "#2A2721", "disFg": "#6E685B", "disField": "#201E19",
+    "green": "#72DE91", "red": "#B24A4A", "redHi": "#CC5C5C",
+    "redSoft": "#5E3030", "redText": "#FFB3B3",
+    "disBg": "#2A2721", "disFg": "#8C8573", "disField": "#201E19",
     "barBg": "#0F0E0B", "barBtn": "#272219", "barBtnHi": "#332E23",
     "barEdge": "#3A3429", "barFg": "#F3EEE2",
-    "hdrBg": "#272218", "hdrFg": "#D8D0BE", "hdrLine": "#4E4530",
+    "hdrBg": "#272218", "hdrFg": "#F1E9D7", "hdrLine": "#4E4530",
     "hdrLine2": "#322C21",
     "sideItem": "#1C1A15", "scroll": "#3A3429", "scrollHi": "#554D3C",
     "tipBg": "#3A342A", "tipFg": "#F6F1E6",
     # النبرة نفسها في الداكن: كهرمانٌ معتم لا أصفرُ ساطع
     "sumBg": "#302716", "sumBg2": "#3A2F1B",
-    "sumEdge": "#6E5626", "sumInk": "#F0C87A",
+    "sumEdge": "#6E5626", "sumInk": "#FFD68C",
 }
 
 THEMES = (("light", "☀ فاتح", LIGHT), ("dark", "🌙 ليلي", DARK))
@@ -199,6 +203,10 @@ def apply(app, theme=None, scale=None):
     except Exception:
         fam = "Segoe UI"
     f = QtGui.QFont(fam, max(7, int(round(10 * s))))
+    # الخط الحديث بوزنه **المتوسط** نصّاً عادياً: خطوطُ الحرف أسمك قليلاً
+    # فيبدو الأسود أسودَ فعلاً والملوّن أوضح — والعريض يبقى عريضاً
+    if fam == getattr(_fonts, "MODERN", ""):
+        f.setWeight(QtGui.QFont.Medium)
     # تنعيمٌ كامل للحواف وتلميحٌ خفيف: أوضح على شاشات اليوم
     f.setHintingPreference(QtGui.QFont.PreferNoHinting)
     f.setStyleStrategy(QtGui.QFont.PreferAntialias)

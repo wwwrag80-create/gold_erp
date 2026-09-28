@@ -178,8 +178,8 @@ class BalanceSheetScreen(QtWidgets.QWidget):
             f"فرق الذهب: {kv.g(b['diff_gold']):,.2f} {kv.unit()}")
         try:
             self.check.setStyleSheet(
-                "color:#1E6B33;font-weight:bold" if ok
-                else "color:#8B1E1E;font-weight:bold")
+                "color:#0F5A24;font-weight:bold" if ok
+                else "color:#8A1010;font-weight:bold")
         except Exception:
             pass
 

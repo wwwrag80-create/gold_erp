@@ -60,8 +60,12 @@ def main():
     # الشعار يختفي ثم سواداً ثم البوابة تظهر — وهو «التداخل» الذي
     # شُكي منه. والمؤقّت حارسٌ إن لم يصل حدثُ الرسم (بيئةٌ بلا
     # عرض): لا يبقى الشعار فوق البوابة بحال.
-    gate.painted.connect(_close_splash)
-    QtCore.QTimer.singleShot(2500, _close_splash)
+    # ══ ظهورٌ مرتّب (4.19) ══ البوابة تظهر من الشفافية حول بطاقة التحميل،
+    # وتُغلق البطاقة حين يكتمل المشهد الداكن (`revealed`) — فلا يُرى
+    # سطحُ المكتب ولا شعارٌ ينبثق ثم يختفي. والمؤقّت حارسٌ إن لم تصل
+    # الإشارة (بيئةٌ بلا عرض): لا تبقى البطاقة فوق البوابة بحال.
+    gate.revealed.connect(_close_splash)
+    QtCore.QTimer.singleShot(3000, _close_splash)
     gate.showFullScreen()
     app.processEvents()
     gate.prepare(prepare_steps())
@@ -135,23 +139,27 @@ def wire_gate(app, gate, main_window_factory=None):
             pass
 
     def _build_system(session):
-        """يبني النظام والبوابةُ ما زالت ظاهرة، ثم يُسلّم."""
-        gate.set_state("جارٍ تجهيز الشاشات…")
+        """يُبنى النظام خلف المشهد الهادئ بعد الموجة، ثم يُسلَّم.
+
+        **الترتيب (4.19)**: الموجة أولاً والبناء بعدها. كان البناء يسبق
+        الموجة فيتوقّف الغبار والخواتم وسط حركتها ثانيةً كاملة — «يتوقف
+        كل شيء ثم يدخل». الآن تنتهي الموجة إلى مشهدٍ ساكنٍ بطبعه (ليلٌ
+        وتحيّة)، والبناء يجري عليه فلا يُرى توقّف، ثم يظهر النظام.
+        """
         try:
             win = main_window_factory(session)
         except Exception as e:                   # noqa: BLE001
-            # فشلُ البناء يُقال على البوابة — لا يُغلق كل شيء صامتاً
+            # فشلُ البناء يُقال على البوابة — ويعود مشهدها كما كان
             gate.fail(f"تعذّر فتح النظام: {e}")
             return
         holder["win"] = win
-        # تُعرض مخفيّةَ الشفافية قبل الموجة: جاهزةٌ خلف البوابة،
-        # فحين تنتهي الموجة لا يبقى إلا أن تظهر.
+        # تُعرض مخفيّةَ الشفافية خلف البوابة، ثم تتمازجان
         win.setWindowOpacity(0.0 if fade_ok() else 1.0)
         win.showMaximized()
         # ويندوز يمنح النافذة الجديدة الواجهة فور عرضها، فتنزل
         # البوابة خلفها — والبوابة هي التي تُغطّي المشهد الآن
         # (النظام شفافٌ تماماً بعد). رفعُها يُبقي الشاشة مشغولة
-        # حتى تبدأ الموجة، فلا يظهر سطح المكتب لحظةً واحدة.
+        # حتى يبدأ التمازج، فلا يظهر سطح المكتب لحظةً واحدة.
         try:
             gate.raise_()
             gate.activateWindow()
@@ -166,11 +174,14 @@ def wire_gate(app, gate, main_window_factory=None):
             ui_watchdog.start(win)
         except Exception:
             pass
-        gate.hand_off(lambda: _reveal(win))
+        # إطارٌ واحد يُرسم فيه النظام خلف البوابة قبل التمازج
+        QtCore.QTimer.singleShot(30, lambda: _reveal(win))
 
     def _on_signed_in(session):
-        # مهلةٌ قصيرة: تُرسم رسالة الترحيب قبل أن يشغل البناءُ الخيط
-        QtCore.QTimer.singleShot(80, lambda: _build_system(session))
+        # الموجة الذهبية تنطلق فوراً من لحظة النجاح، والنظام يُبنى في
+        # نهايتها — والبوابة ظاهرةٌ طوال ذلك
+        gate.hand_off(lambda: QtCore.QTimer.singleShot(
+            16, lambda: _build_system(session)))
 
     gate.on_signed_in = _on_signed_in
     # إغلاق البوابة قبل الدخول = إنهاء البرنامج، لا نافذةٌ معلّقة

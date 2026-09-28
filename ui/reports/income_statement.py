@@ -127,7 +127,7 @@ class IncomeStatementScreen(QtWidgets.QWidget):
             f"{g(r['net_gold_sold'])} {kv.unit()}   "
             f"(مبيعات {g(r['sales_weight'])} − مرتجعات {g(r['returns_weight'])})")
         self.movement.setStyleSheet(
-            "background:#f3ece0; color:#7a5c1e; font-size:12pt;"
+            "background:#f3ece0; color:#5E4A0C; font-size:12pt;"
             " font-weight:bold; padding:8px; border-radius:6px;")
 
         rows = [

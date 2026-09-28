@@ -117,31 +117,61 @@ def _splash_png():
         app = (QtWidgets.QApplication.instance()
                or QtWidgets.QApplication([]))
         _ = app
-        # ══ أول إطارٍ من البوابة، لا لوحةً أخرى ══
-        # كانت الشاشة لوحةً مؤطّرةً بعنوانٍ وسطرِ حالة، فيراها
-        # المستخدم **شعاراً ظهر ثم اختفى** قبل أن تفتح البوابة —
-        # مشهدان لا مشهد. الآن هي نفس خلفية البوابة وشعارُها وحده
-        # بلا إطارٍ ولا نص: فالانتقال اتّساعُ الصورة لا تبديلُها.
-        # ══ الجيل الثاني: إطارٌ من المسرح نفسه بدقّةٍ أعلى ══
-        # الخلفية والوهج والحبيبات وخواتمُ في أول رسمها — يرسمها
-        # `GoldStage` ذاته لا نسخةٌ عنه، فالانتقال إلى البوابة
-        # استمرارٌ للمشهد نفسه. والشعار في الوسط بهالته المعدنية.
-        w, h = 600, 380
+        # ══ بطاقةُ تحميلٍ لا شعارٌ منبثق (4.19) ══
+        # كان الشعار وحده يظهر فجأةً ثم يختفي فتظهر البوابة — مشهدان
+        # بلا رابط. الآن البطاقة تقول ما يجري: الشعار واسم النظام وسطر
+        # «جارٍ تشغيل النظام…» وخطٌّ ذهبي كشريط تقدّم. ثم تظهر البوابة
+        # من الشفافية حولها وتُغلق البطاقة حين يكتمل المشهد الداكن.
+        w, h = 560, 330
         img = QtGui.QImage(w, h, QtGui.QImage.Format_ARGB32_Premultiplied)
         img.fill(QtGui.QColor("#17120C"))
         from ui.widgets.gold_stage import GoldStage
         stage = GoldStage()
         stage.resize(w, h)
-        stage.intro = 0.34            # الخواتم تبدأ رسمها: وعدٌ بما يأتي
-        stage.t = 0.8
-        stage.logo_center = QtCore.QPointF(w / 2, h * 0.46)
+        stage.intro = 0.22
+        stage.t = 0.6
+        stage.logo_center = QtCore.QPointF(w / 2, h * 0.34)
         stage.render(img)
         p = QtGui.QPainter(img)
         p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        p.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
         p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+        # إطارٌ ذهبيٌّ رفيع — بطاقةٌ لها حدود لا صورةٌ سائبة
+        p.setPen(QtGui.QPen(QtGui.QColor(201, 162, 39, 150), 1.2))
+        p.setBrush(QtCore.Qt.NoBrush)
+        p.drawRect(QtCore.QRectF(0.6, 0.6, w - 1.2, h - 1.2))
         from ui.gate_window import _emblem
-        em = _emblem(140)
-        p.drawPixmap(QtCore.QPointF(w / 2 - 70, h * 0.46 - 70), em)
+        em = _emblem(118)
+        p.drawPixmap(QtCore.QPointF(w / 2 - 59, h * 0.34 - 59), em)
+        try:
+            from ui import fonts as _f
+            fam = _f.load_bundled() or "Segoe UI"
+        except Exception:
+            fam = "Segoe UI"
+        f = QtGui.QFont(fam, 17)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#F6E7B6"))
+        p.drawText(QtCore.QRectF(0, h * 0.58, w, 40), QtCore.Qt.AlignCenter,
+                   "نظام إدارة مصانع الذهب")
+        f2 = QtGui.QFont(fam, 10)
+        p.setFont(f2)
+        p.setPen(QtGui.QColor("#CDBB8A"))
+        p.drawText(QtCore.QRectF(0, h * 0.58 + 40, w, 26),
+                   QtCore.Qt.AlignCenter, "جارٍ تشغيل النظام…")
+        # شريط التقدّم: مسارٌ خافت وثلثُه ذهبٌ متدرّج
+        bw, by = w * 0.46, h * 0.87
+        bx = (w - bw) / 2
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QColor(201, 162, 39, 45))
+        p.drawRoundedRect(QtCore.QRectF(bx, by, bw, 3), 1.5, 1.5)
+        # يمتلئ من اليمين — اتجاه القراءة العربية
+        g = QtGui.QLinearGradient(bx + bw, 0, bx + bw * 0.62, 0)
+        g.setColorAt(0.0, QtGui.QColor("#F0D98A"))
+        g.setColorAt(1.0, QtGui.QColor(201, 162, 39, 0))
+        p.setBrush(QtGui.QBrush(g))
+        p.drawRoundedRect(QtCore.QRectF(bx + bw * 0.62, by, bw * 0.38, 3),
+                          1.5, 1.5)
         p.end()
         _ = QtCore
         out = Path(tempfile.mkdtemp(prefix="jadeite_splash_")) / "splash.png"

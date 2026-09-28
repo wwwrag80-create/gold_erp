@@ -180,7 +180,7 @@ class BankReconScreen(QtWidgets.QWidget):
                         else:
                             it.setFlags(it.flags() & ~QtCore.Qt.ItemIsEditable)
                         if not r["matched"]:
-                            it.setForeground(QtGui.QColor("#8A6D1D"))
+                            it.setForeground(QtGui.QColor("#5E4A0C"))
                         self.table.setItem(i, c, it)
         finally:
             self._loading = False

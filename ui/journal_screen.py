@@ -248,8 +248,8 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
             f"ذهب {kv.active()}: {kv.g(gd):.2f} / {kv.g(gc):.2f} | "
             f"نقد: {cd:,.2f} / {cc:,.2f} — {state}")
         self.totals.setStyleSheet(
-            "color:#1E6B33;font-weight:bold" if ok
-            else "color:#B02A2A;font-weight:bold")
+            "color:#0F5A24;font-weight:bold" if ok
+            else "color:#9A1414;font-weight:bold")
 
     def post(self):
         try:

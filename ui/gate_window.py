@@ -16,6 +16,7 @@
 باب أعطالٍ لا تُشخَّص، ومكسبُ الثواني لا يساوي ثمنها. تُنفَّذ الخطوة
 ثم تُعالَج الأحداث، فتبقى الحركة حيّة والسطر يتقدّم بلا خيوط.
 """
+import threading
 from pathlib import Path
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -31,8 +32,9 @@ ASK_LOGIN = "يرجى تسجيل الدخول"
 # توقيتُ المشهد بالمللي ثانية — الترحيب يُقرأ قبل أن تُدعى اليد
 # للكتابة. أقلُّ من هذا يجعل اللوحة تزاحم الجملة، وأكثرُ منه يجعل
 # من يفتح النظام عشرين مرةً في اليوم ينتظر بلا طائل.
-HERO_DELAY = 260            # متى يبدأ الترحيب بالظهور
-CARD_DELAY = 1500           # متى تُبنى لوحة الدخول وتصعد
+HERO_DELAY = 420            # متى يبدأ الترحيب — بعد أن يكتمل ظهور المشهد
+CARD_DELAY = 1650           # متى تُبنى لوحة الدخول وتصعد
+FADE_IN = 380               # ظهور البوابة نفسها من الشفافية
 
 GATE_QSS = """
 /* أولُ إطارٍ يُرسم قبل أن يبدأ المسرح: لو بقي على لون النظام
@@ -46,6 +48,7 @@ QWidget#gateCard {
 }
 QWidget#gateHero { background: transparent; }
 QLabel#gateWelcome { color: #F6E7B6; font-size: 30px; font-weight: bold; }
+QLabel#gateFarewell { color: #F6E7B6; font-size: 38px; font-weight: bold; }
 QLabel#gateHello   { color: #C9A227; font-size: 15px; font-weight: bold; }
 QLabel#gateAsk     { color: #E8D9A8; font-size: 16px; }
 QLabel#gateNote    { color: #A2916A; font-size: 12px; }
@@ -193,6 +196,22 @@ def _greeting():
     return "أهلاً بك في هدأة الليل"
 
 
+class _LoginWorker(QtCore.QObject):
+    """جسرُ الدخول الخلفي — إشاراته تصل خيطَ الواجهة مصفوفةً في دورها.
+
+    **لماذا خيطٌ خلفي**: الدخول تحقّقٌ عبر الإنترنت، وتجزئةُ كلمة
+    المرور (PBKDF2 بمئات آلاف الدورات)، وتجهيزُ قاعدة المصنع، وربما
+    استرجاعُ نسخةٍ سحابية — ثوانٍ كاملة. على خيط الواجهة كانت تتجمّد
+    فيها كلُّ حركة، ولا يُرى أثرٌ للنقرة، فينقر المستخدم مرةً ثانية
+    ظانّاً أن الأولى لم تُحسب. الآن يجري ذلك كلُّه خلف المشهد، والمشهد
+    حيٌّ، والزرّ يقول فوراً «جارٍ الدخول…».
+    """
+    progress = QtCore.pyqtSignal(str)
+    restored = QtCore.pyqtSignal(object)
+    done = QtCore.pyqtSignal(object)
+    failed = QtCore.pyqtSignal(str)
+
+
 class _CardKeys(QtCore.QObject):
     """↑ ↓ تتنقّلان بين خانات لوحة الدخول — كأي نموذجٍ في النظام.
 
@@ -232,6 +251,9 @@ class GateWindow(QtWidgets.QDialog):
     # به تُغلق شاشة بدء الـexe في لحظتها بالضبط: لا قبلها فيظهر
     # فراغٌ بينهما، ولا بعدها فتبقى طبقةٌ فوق البوابة.
     painted = QtCore.pyqtSignal()
+    # يُطلق حين يكتمل ظهور البوابة من الشفافية: شاشة بدء الـexe تُغلق
+    # عندها — فوق مشهدٍ داكنٍ مكتمل لا فوق سطح المكتب.
+    revealed = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -278,6 +300,17 @@ class GateWindow(QtWidgets.QDialog):
         self._build_hero()
         self.hero.hide()
         self.card = None            # تُبنى في `_begin_card`
+        # تحيّةُ الوداع: تظهر وحدها في وسط المشهد الهادئ بعد الموجة،
+        # بينما يُبنى النظام خلفها
+        self.farewell = QtWidgets.QLabel(self)
+        self.farewell.setObjectName("gateFarewell")
+        self.farewell.setAlignment(QtCore.Qt.AlignCenter)
+        _ff = QtGui.QFont(self.font())
+        _ff.setPixelSize(38)
+        _ff.setBold(True)
+        self.farewell.setFont(_ff)
+        self.farewell.hide()
+        self._worker = None
 
         # ومقاس الشاشة يُؤخذ قبل العرض: نافذةٌ تُرسم بمقاسٍ صغير ثم
         # تتمدّد لملء الشاشة ومضةٌ أخرى — والصحيح أن تولد بمقاسها.
@@ -322,7 +355,7 @@ class GateWindow(QtWidgets.QDialog):
         self._exit = QtCore.QVariantAnimation(self)
         self._exit.setStartValue(0.0)
         self._exit.setEndValue(1.0)
-        self._exit.setDuration(900)
+        self._exit.setDuration(820)
         self._exit.setEasingCurve(QtCore.QEasingCurve.InCubic)
         self._exit.valueChanged.connect(self._on_exit)
         self._exit.finished.connect(self._exit_done)
@@ -493,12 +526,46 @@ class GateWindow(QtWidgets.QDialog):
             self._apply_card(1.0)
             self._layout_scene()
             self._start_prepare()
+            QtCore.QTimer.singleShot(0, self.revealed.emit)
             return
         self.hero.hide()
         self.stage.intro = 0.0
         self.stage.start()
+        self._fade_in()
         QtCore.QTimer.singleShot(HERO_DELAY, self._begin_hero)
         QtCore.QTimer.singleShot(CARD_DELAY, self._begin_card)
+
+    def _fade_in(self):
+        """البوابة تظهر من الشفافية مرةً واحدة — لا تنبثق دفعةً.
+
+        تُعلن `revealed` عند اكتمالها، فتُغلق شاشة البدء فوق مشهدٍ
+        داكنٍ مكتمل. والمنصّات التي لا تدعم شفافية النوافذ تُعلنها
+        فوراً بلا انتظار.
+        """
+        if getattr(self, "_faded", False):
+            return
+        self._faded = True
+        try:
+            self.setWindowOpacity(0.0)
+            anim = QtCore.QPropertyAnimation(self, b"windowOpacity", self)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setDuration(FADE_IN)
+            anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+            anim.finished.connect(self._revealed)
+            self._fade = anim
+            anim.start()
+        except Exception:
+            self._revealed()
+
+    def _revealed(self):
+        try:
+            self.setWindowOpacity(1.0)
+            self.raise_()
+            self.activateWindow()
+        except Exception:
+            pass
+        self.revealed.emit()
 
     def paintEvent(self, e):
         """أول رسمٍ حقيقي: تُعلن البوابة أنها صارت على الشاشة.
@@ -614,7 +681,8 @@ class GateWindow(QtWidgets.QDialog):
         def seg(a, b):
             return max(0.0, min(1.0, (v - a) / max(1e-6, b - a)))
 
-        self._fade_pixmap(self.logo, seg(0.00, 0.45))
+        self._fade_pixmap(self.logo, seg(0.00, 0.45),
+                          zoom=0.82 + 0.18 * (1 - (1 - seg(0.0, 0.5)) ** 3))
         self._fade_text(self.hello, "#C9A227", seg(0.18, 0.58))
         self._fade_text(self.welcome, "#F6E7B6", seg(0.28, 0.78))
         self._fade_text(self.ask, "#E8D9A8", seg(0.55, 1.00))
@@ -636,6 +704,11 @@ class GateWindow(QtWidgets.QDialog):
                 self.card.setGraphicsEffect(None)
             except Exception:
                 pass
+            # النافذة نشطةٌ فعلاً قبل أن تُطلب الكتابة: بعد شاشة البدء قد
+            # يبقى الإدخالُ عند نافذةٍ أخرى، فتضيع النقرة الأولى في
+            # «تنشيط» البوابة — وهي «النقر مرتين» الذي شُكي منه.
+            self.raise_()
+            self.activateWindow()
             self.username.setFocus()
             if self.username.text().strip():
                 self.password.setFocus()
@@ -662,7 +735,12 @@ class GateWindow(QtWidgets.QDialog):
         label.update()
 
     @staticmethod
-    def _fade_pixmap(label, value):
+    def _fade_pixmap(label, value, zoom=1.0):
+        """الشعار يظهر متدرّجاً ويكبر قليلاً إلى مقاسه — لا يُلقى دفعةً.
+
+        الصورة بمقاسها الكامل دائماً (فلا يتحرّك ما حولها)، والرسم
+        داخلها يكبر من ٨٢٪ إلى تمامه وهو يتّضح.
+        """
         src = getattr(label, "_src_pix", None)
         if src is None:
             src = label.pixmap()
@@ -671,15 +749,21 @@ class GateWindow(QtWidgets.QDialog):
             label._src_pix = QtGui.QPixmap(src)
             src = label._src_pix
         v = max(0.0, min(1.0, float(value)))
-        if v >= 0.999:
+        z = max(0.5, min(1.0, float(zoom)))
+        if v >= 0.999 and z >= 0.999:
             label.setPixmap(src)
             return
         out = QtGui.QPixmap(src.size())
-        out.setDevicePixelRatio(src.devicePixelRatio())
+        dpr = src.devicePixelRatio()
+        out.setDevicePixelRatio(dpr)
         out.fill(QtCore.Qt.transparent)
         p = QtGui.QPainter(out)
+        p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
         p.setOpacity(v)
-        p.drawPixmap(0, 0, src)
+        w, h = src.width() / dpr, src.height() / dpr
+        p.drawPixmap(QtCore.QRectF(w * (1 - z) / 2, h * (1 - z) / 2,
+                                   w * z, h * z),
+                     src, QtCore.QRectF(src.rect()))
         p.end()
         label.setPixmap(out)
 
@@ -800,43 +884,81 @@ class GateWindow(QtWidgets.QDialog):
 
     # ─────────────────────────────── الدخول
     def try_login(self):
-        if self._busy:
+        """يبدأ الدخول **في خيطٍ خلفي** — والمشهد حيٌّ والزرّ يردّ فوراً.
+
+        الفراغ يُرفض في مكانه بلا خيط. وما بعده (السحابة · التجزئة ·
+        تجهيز القاعدة) يجري خلف المشهد، وتصل نتيجته إلى `_login_ok` أو
+        `_login_failed` على خيط الواجهة. والنقرة الثانية أثناء ذلك لا
+        تبدأ دخولاً ثانياً (`_busy`).
+        """
+        if self._busy or self.card is None:
+            return
+        user = self.username.text().strip()
+        pwd = self.password.text()
+        if not user:
+            self._reject_shake("أدخل اسم المستخدم")
+            self.username.setFocus()
+            return
+        if not pwd:
+            self._reject_shake("أدخل كلمة المرور")
             return
         self._busy = True
         self.btn.setEnabled(False)
-        try:
-            session = login_flow.sign_in(
-                self.username.text(), self.password.text(),
-                on_progress=self.set_state,
-                on_restored=lambda r: self.set_state(
-                    "استُرجعت بياناتك من النسخة السحابية"
-                    + (f" — آخر نسخة {r.get('when', '')}"
-                       if r.get("when") else "")))
-        except login_flow.LoginError as e:
-            self._busy = False
-            self.btn.setEnabled(True)
-            self._reject_shake(str(e))
-            return
-        except Exception as e:                   # noqa: BLE001
-            self._busy = False
-            self.btn.setEnabled(True)
-            self._reject_shake(str(e))
-            return
+        self._btn_text = self.btn.text()
+        self.btn.setText("جارٍ الدخول…")
+        for w in (self.username, self.password, self.remember):
+            w.setEnabled(False)
+        self.set_state("جارٍ التحقق…")
+        worker = _LoginWorker(self)
+        worker.progress.connect(self.set_state)
+        worker.restored.connect(lambda r: self.set_state(
+            "استُرجعت بياناتك من النسخة السحابية"
+            + (f" — آخر نسخة {r.get('when', '')}"
+               if isinstance(r, dict) and r.get("when") else "")))
+        worker.done.connect(self._login_ok)
+        worker.failed.connect(self._login_failed)
+        self._worker = worker
+
+        def _run():
+            try:
+                session = login_flow.sign_in(
+                    user, pwd, on_progress=worker.progress.emit,
+                    on_restored=worker.restored.emit)
+            except Exception as e:               # noqa: BLE001
+                worker.failed.emit(str(e) or "تعذّر الدخول")
+                return
+            worker.done.emit(session)
+
+        threading.Thread(target=_run, daemon=True,
+                         name="GateSignIn").start()
+
+    def _unlock_card(self):
+        for w in (self.username, self.password, self.remember):
+            w.setEnabled(True)
+        self.btn.setText(getattr(self, "_btn_text", "دخول"))
+        self.btn.setEnabled(True)
+
+    def _login_failed(self, msg):
+        self._busy = False
+        self._unlock_card()
+        self._reject_shake(str(msg))
+
+    def _login_ok(self, session):
         login_flow.save_last_user(
             self.username.text() if self.remember.isChecked() else "")
         self.user = session
         name = (session.get("full_name") or session.get("username")
                 or self.username.text().strip())
+        self._name = name
         self.set_state(f"أهلاً {name} — جارٍ فتح النظام…")
         self.card.setEnabled(False)
-        QtWidgets.QApplication.processEvents()
 
         # ══ لا `accept()` هنا ══
         # `QDialog.accept` يُخفي النافذة في اللحظة نفسها. والبوابة
         # ملءُ الشاشة، فإخفاؤها يكشف سطحَ المكتب بينما يُبنى النظام
         # خلفها — فيرى صاحبُه البرنامجَ **يُغلق ثم يُفتح**، وهو عكس
-        # ما وُضعت له البوابة. لذلك تبقى ظاهرةً ويُبلَّغ من ينتظرها،
-        # وهو الذي يبني النظام ثم يطلب التسليم.
+        # ما وُضعت له البوابة. لذلك تبقى ظاهرةً ويُبلَّغ من ينتظرها
+        # (`on_signed_in`)، وهو الذي يبني النظام ثم يطلب التسليم.
         cb = getattr(self, "on_signed_in", None)
         if callable(cb):
             QtCore.QTimer.singleShot(0, lambda: cb(session))
@@ -850,10 +972,27 @@ class GateWindow(QtWidgets.QDialog):
         والبوابة أقرب مكانٍ يقرأ فيه الخبر.
         """
         self._busy = False
+        self._restore_scene()
         if self.card is not None:
             self.card.setEnabled(True)
-            self.btn.setEnabled(True)
+            self._unlock_card()
         self._reject_shake(str(msg))
+
+    def _restore_scene(self):
+        """بعد موجةٍ لم يُفتح بعدها النظام: يعود المشهد كما كان."""
+        try:
+            self._exit.stop()
+        except Exception:
+            pass
+        self._after_exit = None
+        self.stage.exit = 0.0
+        self.farewell.hide()
+        self.hero.show()
+        if self.card is not None:
+            self.card.show()
+        self._layout_scene()
+        self.stage.start()
+        self.stage.update()
 
     def _reject_shake(self, msg):
         """خطأٌ يُقال في مكانه لا في نافذةٍ تقطع المشهد.
@@ -903,10 +1042,24 @@ class GateWindow(QtWidgets.QDialog):
             if w is not None:
                 w.hide()
         self.stage.card_k = 0.0         # لا هالةَ للوحةٍ غابت
+        name = getattr(self, "_name", "")
+        self.farewell.setText(f"أهلاً {name}" if name else "أهلاً بك")
+        self.farewell.adjustSize()
+        self.farewell.resize(max(420, self.farewell.width() + 60),
+                             self.farewell.height() + 16)
+        self.farewell.move((self.width() - self.farewell.width()) // 2,
+                           int(self.height() * 0.44
+                               - self.farewell.height() / 2))
+        self._fade_text(self.farewell, "#F6E7B6", 0.0)
+        self.farewell.show()
+        self.farewell.raise_()
         self._exit.start()
 
     def _on_exit(self, v):
         self.stage.exit = float(v)
+        # التحيّة تتّضح في النصف الثاني من الموجة، حين يهدأ المشهد
+        self._fade_text(self.farewell, "#F6E7B6",
+                        max(0.0, min(1.0, (float(v) - 0.45) / 0.45)))
         self.stage.update()
 
     def _exit_done(self):

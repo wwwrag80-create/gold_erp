@@ -583,7 +583,9 @@ class GoldStage(QtWidgets.QWidget):
 
     def _dust_layer(self, p, w, h):
         """غبار الذهب بثلاثة أعماق — وعند الخروج ينطلق خطوطاً ضوئية."""
-        fade = (self.intro ** 0.8) * (1.0 - self.exit * 0.5)
+        # في آخر الموجة يخبو الغبار تماماً: يُبنى النظام خلف مشهدٍ هادئ
+        # ساكنٍ بطبعه، فلا تُرى لحظةُ البناء توقّفاً في حركة
+        fade = (self.intro ** 0.8) * (1.0 - self.exit ** 1.5)
         if fade <= 0.01:
             return
         scale = max(1.0, min(w, h) / 900.0)

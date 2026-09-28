@@ -198,7 +198,7 @@ QPushButton#dashPanel:checked { background: @goldSel;
   border: 1px solid @goldEdge2; color: @ink; }
 QPushButton#updateReady {
   background: @goldRing; border: 1px solid @goldEdge2; border-radius: 7px;
-  color: #14100A; font-weight: bold; padding: 6px 12px;
+  color: #000000; font-weight: bold; padding: 6px 12px;
 }
 QPushButton#updateReady:hover { background: @goldHi; }
 QFrame#ratioBar { background: @surface; border: 1px solid @line;

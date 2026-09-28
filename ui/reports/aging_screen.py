@@ -289,9 +289,9 @@ class AgingScreen(QtWidgets.QWidget):
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     # المتعثّر يُلوَّن: العين تلتقطه قبل أن تقرأ الأرقام
                     if r["days"] >= 91:
-                        it.setForeground(QtGui.QColor("#B02A2A"))
+                        it.setForeground(QtGui.QColor("#9A1414"))
                     elif r["days"] >= 61:
-                        it.setForeground(QtGui.QColor("#8A6D1D"))
+                        it.setForeground(QtGui.QColor("#5E4A0C"))
                     self.table.setItem(i, c, it)
             if rows:
                 # الترتيب نفسه الذي في `_headers` و`_row_cells`:

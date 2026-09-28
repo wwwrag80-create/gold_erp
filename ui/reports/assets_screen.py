@@ -201,11 +201,11 @@ class AssetsScreen(QtWidgets.QWidget):
             if it is None:
                 continue
             if r["is_disposed"]:
-                it.setForeground(QtGui.QColor("#7A7A7A"))
+                it.setForeground(QtGui.QColor("#555049"))
             elif int(r.get("life_months") or 0) <= 0:
-                it.setForeground(QtGui.QColor("#B02A2A"))
+                it.setForeground(QtGui.QColor("#9A1414"))
             elif r["done"]:
-                it.setForeground(QtGui.QColor("#2E7D32"))
+                it.setForeground(QtGui.QColor("#0F5A24"))
 
     # ─────────────────────────────── أفعال
     def add_asset(self):

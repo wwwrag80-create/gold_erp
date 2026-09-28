@@ -3385,7 +3385,12 @@ def main():
 
     import main as _main9
     _src_main = _insp9.getsource(_main9)
-    _src_login = _insp9.getsource(_gw9.GateWindow.try_login)
+    # الدخول يجري في خيطٍ خلفي (4.19) ونتيجته تصل `_login_ok`
+    _src_try9 = _insp9.getsource(_gw9.GateWindow.try_login)
+    _src_login = _insp9.getsource(_gw9.GateWindow._login_ok)
+    check("الدخول في خيطٍ خلفي فلا تتجمّد الحركة ولا تضيع النقرة",
+          "threading.Thread" in _src_try9 and "self._busy" in _src_try9
+          and "_login_ok" in _src_try9 and "_login_failed" in _src_try9)
     check("الفتح مربوطٌ بنداءٍ بعد الدخول لا بقبولٍ يُخفي البوابة",
           hasattr(_main9, "wire_gate")
           and "gate.exec_()" not in _src_main
@@ -3394,11 +3399,15 @@ def main():
               "cb = getattr")[0])
     _build9 = _src_main[_src_main.index("def _build_system"):
                         _src_main.index("def _on_signed_in")]
-    check("والنظام يُعرض ثم تُطلب الموجة — فلا يسبق الإغلاقُ الظهور",
-          "win.showMaximized()" in _build9
-          and "gate.hand_off" in _build9
+    _signed9 = _src_main[_src_main.index("def _on_signed_in"):
+                         _src_main.index("gate.on_signed_in =")]
+    check("الموجة أولاً ثم البناء خلف مشهدٍ ساكن، ثم يُعرض النظام قبل "
+          "التمازج — فلا يسبق الإغلاقُ الظهور",
+          "gate.hand_off" in _signed9 and "_build_system" in _signed9
+          and "win.showMaximized()" in _build9
+          and "_reveal(win)" in _build9
           and _build9.index("win.showMaximized()")
-          < _build9.index("gate.hand_off")
+          < _build9.index("_reveal(win)")
           and "gate.close" not in _build9,
           "الإغلاق في نهاية التمازج وحده")
     _steps9 = _main9.prepare_steps()

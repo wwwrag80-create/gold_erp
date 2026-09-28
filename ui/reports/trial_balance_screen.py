@@ -125,7 +125,7 @@ class TrialBalanceScreen(QtWidgets.QWidget):
                        f"✘ فرق {t['cash_debit'] - t['cash_credit']:,.2f} ريال"))
             self.status.setText("   |   ".join(msg))
             if not (ok_g and ok_c):
-                self.status.setStyleSheet("color:#b00020;")
+                self.status.setStyleSheet("color:#9A0018;")
             else:
                 self.status.setStyleSheet("")
         except Exception as e:
