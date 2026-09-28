@@ -846,11 +846,13 @@ def _tpl_purchase(conn, pid):
             ("المعالجة الضريبية", dict(_pu.TAX_TREATMENTS).get(tr, tr)),
             ("يُحمَّل على حساب", acc)]
     trs = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in info)
+    disc = float((p["discount"] if "discount" in keys else 0) or 0)
     rows = "<tr>" + cells(
-        tdw(p["description"] or "—", align="right"), tdw(_w(amount, 2)),
+        tdw(p["description"] or "—", align="right"),
+        tdw(_w(amount + disc, 2)), tdw(_w(disc, 2)), tdw(_w(amount, 2)),
         tdw(_w(vat, 2)), tdw(_w(amount + vat, 2))) + "</tr>"
-    head = cells(thw("البيان"), thw("الصافي قبل الضريبة"), thw("الضريبة"),
-                 thw("الإجمالي"))
+    head = cells(thw("البيان"), thw("المبلغ"), thw("الخصم"),
+                 thw("الصافي الخاضع"), thw("الضريبة"), thw("الإجمالي"))
     body = f"""
     {TBL}{trs}</table><br/>
     {TBL}<tr>{head}</tr>{rows}</table>
@@ -891,6 +893,8 @@ def _tpl_tax_sale(conn, sid):
         std = edoc["subtype"] == "standard"
     if s["kind"] == "credit":
         title = "إشعار دائن — مرتجع مبيعات ضريبية"
+    elif s["kind"] == "debit":
+        title = "إشعار مدين — زيادة على فاتورة ضريبية"
     else:
         title = "فاتورة ضريبية" if std else "فاتورة ضريبية مبسطة"
     qr = (edoc["cleared_qr"] or edoc["qr"]) if edoc is not None else (
@@ -904,7 +908,9 @@ def _tpl_tax_sale(conn, sid):
             ("تاريخ الإصدار", en(s["doc_date"])),
             ("الوقت", en(time_str)),
             ("طريقة الدفع", pay.split(" — ")[0])]
-    if s["kind"] == "credit":
+    if s["rep_id"]:
+        meta[-1] = ("المندوب", s["rep_name"] or "—")
+    if s["kind"] in ("credit", "debit"):
         meta += [("إشعارٌ على الفاتورة", en(s["ref_no"] or "—")),
                  ("سبب الإشعار", s["reason"] or "—")]
     seller = [("البائع", prof.get("name") or config.COMPANY_NAME),
@@ -935,16 +941,38 @@ def _tpl_tax_sale(conn, sid):
     </tr></table>'''
     rate = float(s["vat_rate"] or 0) * 100
     body_rows = ""
+    wo_mode = any(li["wo_no"] for li in lines)
     for li in lines:
-        body_rows += "<tr>" + cells(
-            tdw(en(li["line_no"])), tdw(li["description"], align="right"),
-            tdw(_w(li["qty"], 2)), tdw(_w(li["unit_price"], 2)),
-            tdw(_w(li["discount"], 2)), tdw(_w(li["net"], 2)),
-            tdw(en(f"{rate:g}%")), tdw(_w(li["vat"], 2)),
-            tdw(_w(li["total"], 2))) + "</tr>"
-    head = cells(thw("م"), thw("البيان"), thw("الكمية"), thw("سعر الوحدة"),
-                 thw("الخصم"), thw("الصافي (الخاضع)"), thw("النسبة"),
-                 thw("الضريبة"), thw("الإجمالي"))
+        if wo_mode and li["wo_no"]:
+            body_rows += "<tr>" + cells(
+                tdw(en(li["line_no"])), tdw(en(li["model_no"] or "—")),
+                tdw(en(li["wo_no"])), tdw(_gw(li["qty"], 3)),
+                tdw(_w(_krate(li["unit_price"]), 2)),
+                tdw(_w(li["net"], 2)), tdw(_w(li["vat"], 2)),
+                tdw(_w(li["total"], 2))) + "</tr>"
+        elif wo_mode:
+            body_rows += "<tr>" + cells(
+                tdw(en(li["line_no"])),
+                f'<td class="r" colspan="4">{li["description"]}</td>',
+                tdw(_w(li["net"], 2)), tdw(_w(li["vat"], 2)),
+                tdw(_w(li["total"], 2))) + "</tr>"
+        else:
+            body_rows += "<tr>" + cells(
+                tdw(en(li["line_no"])), tdw(li["description"], align="right"),
+                tdw(_w(li["qty"], 2)), tdw(_w(li["unit_price"], 2)),
+                tdw(_w(li["discount"], 2)), tdw(_w(li["net"], 2)),
+                tdw(en(f"{rate:g}%")), tdw(_w(li["vat"], 2)),
+                tdw(_w(li["total"], 2))) + "</tr>"
+    if wo_mode:
+        head = cells(thw("م"), thw("رقم الموديل"), thw("رقم التشغيل"),
+                     thw(f"الوزن<br/>{_kunit()}"), thw("الأجر/جم"),
+                     thw("الأجور (الخاضع)"),
+                     thw(f"الضريبة {en(f'{rate:g}')}%"), thw("الإجمالي"))
+    else:
+        head = cells(thw("م"), thw("البيان"), thw("الكمية"),
+                     thw("سعر الوحدة"), thw("الخصم"),
+                     thw("الصافي (الخاضع)"), thw("النسبة"),
+                     thw("الضريبة"), thw("الإجمالي"))
     totals = f'''
     {TBL}
       <tr><th width="70%">الإجمالي الخاضع للضريبة (غير شامل)</th>

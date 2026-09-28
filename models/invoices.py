@@ -480,6 +480,19 @@ def create_tax_debit_note(conn, invoice_id, note_date, username):
         (invoice_id,)).fetchone()
     if existing:
         raise ValueError("سبق إصدار إشعار مدين ضريبي لهذه الفاتورة")
+    # أطقمها فُوترت ضريبياً عبر المندوب (شاشة المبيعات الضريبية)؟ فضريبتها
+    # قُيّدت هناك — وإشعارٌ هنا يُحمّلها مرتين
+    try:
+        taxed = conn.execute(
+            "SELECT s.doc_no FROM tax_sale_lines l JOIN tax_sales s"
+            " ON s.id=l.sale_id JOIN invoice_items ii ON ii.id=l.sale_item_id"
+            " WHERE ii.invoice_id=? AND s.is_deleted=0 AND s.kind='invoice'"
+            " LIMIT 1", (invoice_id,)).fetchone()
+    except Exception:
+        taxed = None
+    if taxed:
+        raise ValueError(f"أطقم هذه الفاتورة صدرت لها فاتورةٌ ضريبية "
+                         f"({taxed['doc_no']}) من شاشة المبيعات الضريبية")
     ent = get_entity(conn, inv["customer_id"])
     vat = gold_math.wages_vat(inv["total_wages"])
     if vat <= 0:

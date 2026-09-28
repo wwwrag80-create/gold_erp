@@ -34,14 +34,18 @@ DEFAULT_ACCOUNT = {"expense": "5500", "asset": "1700"}
 _NOT_PURCHASABLE = ("5860", "5700", "5710", "5200", "5300", "5600")
 
 
-def split_amount(value, price_mode="net", treatment="standard", rate=None):
-    """(الصافي، الضريبة) من المبلغ المكتوب — بطريقة إدخاله.
+def split_amount(value, price_mode="net", treatment="standard", rate=None,
+                 discount=0.0):
+    """(الصافي، الضريبة) من المبلغ المكتوب — بطريقة إدخاله، بعد خصمه.
+
+    الخصم بطريقة المبلغ نفسها: من المبلغ قبل الضريبة إن كُتب صافياً،
+    ومن الشامل إن كُتب شاملاً.
 
     شامل الضريبة: الصافي = المبلغ × 100 ÷ 115 والضريبة الباقي — فلا تضيع
     هللة بين الصافي والضريبة والإجمالي المكتوب على فاتورة المورد.
     """
     r = config.VAT_RATE if rate is None else rate
-    v = round(float(value or 0), 2)
+    v = round(float(value or 0) - float(discount or 0), 2)
     if treatment in NO_VAT:
         return v, 0.0
     if price_mode == "gross":
@@ -74,8 +78,12 @@ def _resolve_account(conn, kind, account_code):
 def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
                     purchase_date, username, supplier_invoice_no="",
                     tax_treatment="standard", account_code=None,
-                    price_mode="net", life_months=0):
-    """فاتورة مورد آجلة — `amount` الصافي قبل الضريبة و`vat_amount` ضريبتها.
+                    price_mode="net", life_months=0, discount=0.0):
+    """فاتورة مورد آجلة — `amount` الصافي الخاضع (بعد الخصم وقبل الضريبة)
+    و`vat_amount` ضريبته، و`discount` خصم المورد قبل الضريبة (للبيان).
+
+    الخصم التجاري يُنقص التكلفة نفسها — فالمصروف أو الأصل يُقيَّد بصافيه
+    بعد الخصم، والضريبة على الصافي، كما في ورقة المورد.
 
     القيد:
         من حـ/ المصروف أو الأصل       الصافي (+ الضريبة إن لم تُسترد)
@@ -98,8 +106,11 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
         raise ValueError("أدخل بيان الفاتورة")
     amount = round(float(amount or 0), 2)
     vat_amount = round(float(vat_amount or 0), 2)
+    discount = round(float(discount or 0), 2)
     if amount <= 0:
         raise ValueError("أدخل مبلغ الفاتورة")
+    if discount < 0:
+        raise ValueError("الخصم لا يقبل السالب")
     if vat_amount < 0:
         raise ValueError("الضريبة لا تقبل السالب")
     if tax_treatment in NO_VAT and vat_amount:
@@ -153,11 +164,11 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
     cur = conn.execute(
         "INSERT INTO purchases(purchase_date,supplier,supplier_id,kind,"
         "description,amount,vat_amount,total,asset_id,created_by,"
-        "supplier_invoice_no,tax_treatment,account_id,price_mode)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "supplier_invoice_no,tax_treatment,account_id,price_mode,discount)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (purchase_date, sup["name"], supplier_id, kind, description,
          amount, vat_amount, total, asset_id, username, supplier_invoice_no,
-         tax_treatment, acc["id"], price_mode))
+         tax_treatment, acc["id"], price_mode, discount))
     p_id = cur.lastrowid
     p_no = f"P-{p_id:05d}"
     label = "شراء أصل ثابت" if kind == "asset" else "مشتريات تشغيلية"
@@ -186,13 +197,14 @@ def vat_register(conn, date_from, date_to):
         " WHERE p.is_deleted=0 AND p.purchase_date BETWEEN ? AND ?"
         " ORDER BY p.purchase_date, p.id", (date_from, date_to)).fetchall()
     tot = {"n": len(rows), "net": 0.0, "vat": 0.0, "claimed": 0.0,
-           "total": 0.0}
+           "total": 0.0, "discount": 0.0}
     by = {}
     for r in rows:
         tr = r["tax_treatment"] or "standard"
         tot["net"] += r["amount"] or 0
         tot["vat"] += r["vat_amount"] or 0
         tot["total"] += r["total"] or 0
+        tot["discount"] += r["discount"] or 0
         if tr == "standard":
             tot["claimed"] += r["vat_amount"] or 0
         b = by.setdefault(tr, {"n": 0, "net": 0.0, "vat": 0.0})

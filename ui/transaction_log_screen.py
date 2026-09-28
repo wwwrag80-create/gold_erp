@@ -93,11 +93,13 @@ DOC_TYPES = [
                r["vat_amount"], r["total"], r["purchase_date"], r["entry_id"])),
 
     ("tax_sales", "المبيعات الضريبية (خارج المخزون)",
-     ["الرقم", "النوع", "العميل", "الصافي", "الضريبة", "الإجمالي",
-      "على الفاتورة", "التاريخ", "رقم القيد"],
+     ["الرقم", "النوع", "الشركة", "المندوب", "الصافي", "الضريبة",
+      "الإجمالي", "على الفاتورة", "التاريخ", "رقم القيد"],
      lambda conn, q, f, t: tax_sales.search(conn, q, f, t),
-     lambda r: (r["doc_no"], "إشعار دائن" if r["kind"] == "credit"
-               else "فاتورة ضريبية", r["customer_name"], r["net"],
+     lambda r: (r["doc_no"], {"credit": "إشعار دائن",
+                              "debit": "إشعار مدين"}.get(
+                                  r["kind"], "فاتورة ضريبية"),
+               r["customer_name"], r["rep_name"] or "—", r["net"],
                r["vat"], r["total"], r["ref_no"] or "—", r["doc_date"],
                r["entry_id"])),
 

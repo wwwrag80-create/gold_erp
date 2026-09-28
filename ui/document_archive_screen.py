@@ -66,6 +66,7 @@ QUERIES = {
                CASE t.kind WHEN 'credit' THEN -t.total ELSE t.total END cash,
                0 gold, t.is_deleted,
                CASE t.kind WHEN 'credit' THEN 'إشعار دائن ضريبي'
+                           WHEN 'debit' THEN 'إشعار مدين ضريبي'
                            ELSE 'فاتورة ضريبية' END label
         FROM tax_sales t LEFT JOIN entities e ON e.id=t.customer_id""",
     "melting_ops": """

@@ -5136,6 +5136,68 @@ def main():
           f"{_va58['output_vat']} {_va58['tax_sales_vat']} "
           f"{_va58['input_vat']}")
 
+    # ══════════════════════════════════════════════════════════════
+    step("59) فاتورة الشركة عبر المندوب · الإشعار المدين · خصم المشتريات")
+    from models import invoices as _inv59
+    from models import purchases as _pu59
+    from models import tax_sales as _ts59
+    from models.entities import add_entity as _add59
+    from models.inventory import create_work_orders_batch as _b59
+    with db() as conn:
+        _rep59 = _add59(conn, "مندوب الفحص", "customer", username="admin")
+        _co59 = _add59(conn, "شركة الفحص", "customer", username="admin",
+                       vat_number="311111111100003")
+        _b59(conn, [{"wo_no": "REP-1", "gold": 40.0,
+                     "wage_per_gram": 10.0}], "2026-11-01", "admin")
+        _w59 = conn.execute("SELECT id FROM work_orders WHERE"
+                            " work_order_no='REP-1'").fetchone()["id"]
+        _inv59.create_sale(conn, _rep59, [{"work_order_id": _w59}],
+                           "2026-11-02", "admin", apply_vat=False)
+        _acc = lambda e: conn.execute(  # noqa: E731
+            "SELECT account_id FROM entities WHERE id=?",
+            (e,)).fetchone()[0]
+        _ra, _ca = _acc(_rep59), _acc(_co59)
+        _bal = lambda a: conn.execute(  # noqa: E731
+            "SELECT COALESCE(SUM(cash_debit-cash_credit),0) FROM"
+            " journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+            " WHERE e.is_deleted=0 AND l.account_id=?", (a,)).fetchone()[0]
+        _r0, _c0 = _bal(_ra), _bal(_ca)
+        _st0 = conn.execute("SELECT status FROM work_orders WHERE id=?",
+                            (_w59,)).fetchone()[0]
+        _it59 = _ts59.find_rep_item(conn, _rep59, "REP-1")
+        _t59 = _ts59.create_rep_invoice(
+            conn, _co59, _rep59, "2026-11-03",
+            [{"sale_item_id": _it59["item_id"]}], "admin")
+        _r1, _c1 = _bal(_ra), _bal(_ca)
+        _st1 = conn.execute("SELECT status FROM work_orders WHERE id=?",
+                            (_w59,)).fetchone()[0]
+    check("الفاتورة باسم الشركة: على المندوب الضريبة وحدها، والشركة بلا "
+          "رصيد، والطقم كما هو",
+          _t59["vat"] == round(_t59["net"] * 0.15, 2)
+          and round(_r1 - _r0, 2) == _t59["vat"] and round(_c1 - _c0, 2) == 0
+          and _st0 == _st1 == "sold", f"{_t59['net']} {_t59['vat']}")
+    try:
+        with db(readonly=True) as conn:
+            _ts59.find_rep_item(conn, _rep59, "REP-1")
+        _x59 = False
+    except ValueError:
+        _x59 = True
+    with db() as conn:
+        _d59 = _ts59.create_debit_note(conn, _t59["id"], "2026-11-04", 50,
+                                       "فرق أجر", "admin")
+        _r2 = _bal(_ra)
+    check("لا يُفوتر الطقم مرتين · والإشعار المدين (50 + 7.5) على المندوب",
+          _x59 and _d59["total"] == 57.5 and round(_r2 - _r1, 2) == 57.5)
+    with db() as conn:
+        _s59 = _add59(conn, "مورد الخصم", "supplier",
+                      vat_number="300000000000003", username="admin")
+        _n59, _v59 = _pu59.split_amount(1000, "net", discount=100)
+        _p59 = _pu59.create_purchase(
+            conn, "expense", _s59, "مواد", _n59, _v59, "2026-11-05",
+            "admin", supplier_invoice_no="DISC-1", discount=100)
+    check("خصم المشتريات قبل الضريبة: 1000 − 100 ⇒ 900 + 135 = 1035",
+          (_n59, _v59) == (900.0, 135.0) and _p59["total"] == 1035.0)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -31,9 +31,6 @@ QT_INHERITED = {
     "minimum", "maximum",
     # المسرح الذهبي (QWidget): موضع الفأرة للمنظور، ونسبة البكسل للدقّة
     "mapFromGlobal", "devicePixelRatioF",
-    # معاينة القيد (QTableWidget مشتق): جدولٌ للقراءة بارتفاعٍ ثابت
-    "setSelectionMode", "setFocusPolicy", "setVerticalScrollBarPolicy",
-    "setTextElideMode", "setFixedHeight",
     # توابع الجداول الموروثة (QTableWidget) — تظهر في الأصناف المشتقة
     "state", "setCurrentCell", "currentRow", "currentColumn", "rowCount",
     "indexWidget", "commitData", "closeEditor", "currentIndex",

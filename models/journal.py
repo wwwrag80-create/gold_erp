@@ -97,8 +97,9 @@ def _doc_info(conn, src, sid, cache):
         r = conn.execute("SELECT kind FROM tax_sales WHERE id=?",
                          (sid,)).fetchone()
         if r:
-            label = ("إشعار دائن ضريبي" if r["kind"] == "credit"
-                     else "مبيعات ضريبية")
+            label = {"credit": "إشعار دائن ضريبي",
+                     "debit": "إشعار مدين ضريبي"}.get(r["kind"],
+                                                      "مبيعات ضريبية")
     cache[key] = (no, label)
     return no, label
 
