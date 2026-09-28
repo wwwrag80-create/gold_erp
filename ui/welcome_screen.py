@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""شاشة الترحيب — مساحة فارغة يتوسّطها شعار مصنع جاديت.
+"""شاشة الترحيب — مساحة فارغة يتوسّطها شعار المصنع (من «هوية المصنع»).
 
 تظهر عند فتح النظام وعند إغلاق أي شاشة، فتبقى الواجهة نظيفة والتنقّل
 عبر الشريط الجانبي الثابت على اليمين.
@@ -50,27 +50,20 @@ class WelcomeScreen(QtWidgets.QWidget):
         lay.setAlignment(QtCore.Qt.AlignCenter)
         lay.addStretch(1)
 
-        logo = QtWidgets.QLabel()
-        logo.setAlignment(QtCore.Qt.AlignCenter)
-        path = getattr(config, "LOGO_GOLD_PATH", None) or \
-            getattr(config, "LOGO_PATH", None)
-        if path and Path(str(path)).exists():
-            pix = QtGui.QPixmap(str(path))
-            if not pix.isNull():
-                logo.setPixmap(pix.scaledToWidth(
-                    300, QtCore.Qt.SmoothTransformation))
-        lay.addWidget(logo)
+        self.logo = QtWidgets.QLabel()
+        self.logo.setAlignment(QtCore.Qt.AlignCenter)
+        lay.addWidget(self.logo)
 
-        name = QtWidgets.QLabel(config.COMPANY_NAME)
-        name.setObjectName("welcomeName")
-        name.setAlignment(QtCore.Qt.AlignCenter)
-        lay.addWidget(name)
+        self.name = QtWidgets.QLabel()
+        self.name.setObjectName("welcomeName")
+        self.name.setAlignment(QtCore.Qt.AlignCenter)
+        lay.addWidget(self.name)
 
-        sub = QtWidgets.QLabel(
-            f"{config.COMPANY_NAME_EN}  ·  {getattr(config, 'COMPANY_TAGLINE', '')}")
-        sub.setObjectName("welcomeSub")
-        sub.setAlignment(QtCore.Qt.AlignCenter)
-        lay.addWidget(sub)
+        self.sub = QtWidgets.QLabel()
+        self.sub.setObjectName("welcomeSub")
+        self.sub.setAlignment(QtCore.Qt.AlignCenter)
+        lay.addWidget(self.sub)
+        self.refresh_identity()
 
         hint = QtWidgets.QLabel(
             "اختر شاشة من القائمة على اليمين للبدء  ·  أو اضغط Ctrl+K "
@@ -85,6 +78,25 @@ class WelcomeScreen(QtWidgets.QWidget):
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(self.box)
+
+    def refresh_identity(self):
+        """الشعار والاسم من «هوية المصنع» — يُعاد بعد اعتمادها."""
+        path = getattr(config, "LOGO_GOLD_PATH", None) or \
+            getattr(config, "LOGO_PATH", None)
+        pix = QtGui.QPixmap(str(path)) if path and Path(str(path)).exists() \
+            else QtGui.QPixmap()
+        if pix.isNull():
+            self.logo.clear()
+            self.logo.hide()
+        else:
+            self.logo.setPixmap(pix.scaled(
+                300, 220, QtCore.Qt.KeepAspectRatio,
+                QtCore.Qt.SmoothTransformation))
+            self.logo.show()
+        self.name.setText(config.COMPANY_NAME)
+        self.sub.setText("  ·  ".join(
+            x for x in (getattr(config, "COMPANY_NAME_EN", ""),
+                        getattr(config, "COMPANY_TAGLINE", "")) if x))
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

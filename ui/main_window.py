@@ -307,12 +307,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.karat_box.setCurrentIndex(_idx)
         self.karat_box.currentIndexChanged.connect(self._change_karat)
 
-        role_label = ("المدير العام" if self.is_super
-                      else f"مصنع: {tenant.factory_name()}")
-        u = ElidedLabel(
-            f"{user.get('full_name') or user['username']} — {role_label}",
-            minimum=110)
+        u = ElidedLabel(self._user_label(), minimum=110)
         u.setObjectName("headerUser")
+        self._hdr_user = u
 
         # ── الأدوات ──
         # نصوص قصيرة وشرحها في التلميح: الشريط أداةٌ لا صفحة شرح.
@@ -1047,6 +1044,56 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
 
     # ══════════ الربط مع الهيئة ══════════
+    def open_identity(self):
+        """حوار هوية المصنع — وبعد الاعتماد تتبدّل الواجهة فوراً."""
+        try:
+            from ui.factory_identity_dialog import open_dialog
+            dlg = open_dialog(self, self.user)
+        except Exception as e:
+            err(self, e)
+            return
+        if getattr(dlg, "applied", False):
+            self.refresh_identity()
+
+    def _factory_name(self):
+        """اسم المصنع المعروض: المعتمد في «هوية المصنع» إن ضُبطت."""
+        try:
+            from services import branding
+            if branding.current().get("custom"):
+                return config.COMPANY_NAME
+        except Exception:
+            pass
+        return tenant.factory_name()
+
+    def _user_label(self):
+        role = ("المدير العام" if self.is_super
+                else f"مصنع: {self._factory_name()}")
+        return (f"{self.user.get('full_name') or self.user['username']}"
+                f" — {role}")
+
+    def refresh_identity(self):
+        """الاسم والشعار في الواجهة بعد تغيير الهوية (القوالب تقرؤها
+        عند كل طباعة فلا تحتاج شيئاً)."""
+        name = config.COMPANY_NAME
+        try:
+            self.welcome.refresh_identity()
+        except Exception:
+            pass
+        if self.stack.currentIndex() == 0:
+            self.crumb.setText(name)
+        lbl = getattr(self, "_sb_fac", None)
+        if lbl is not None:
+            lbl.setText(f"🏭 {name}")
+        hu = getattr(self, "_hdr_user", None)
+        if hu is not None:
+            hu.setText(self._user_label())
+        try:
+            from services import tenant
+            if tenant.get_all().get("factory_name") != name:
+                tenant.update(factory_name=name)
+        except Exception:
+            pass
+
     def open_fatoora(self):
         """نافذة الربط والجاهزية — ثم يُحدَّث مؤشّرها في شريط الحالة."""
         try:
@@ -1278,11 +1325,16 @@ class MainWindow(QtWidgets.QMainWindow):
         btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         menu = QtWidgets.QMenu(btn)
 
-        # ══ الربط مع الهيئة — أول بندٍ في القائمة ══
+        # ══ هوية المصنع — أول بندٍ: كل مصنعٍ باسمه وشعاره ══
+        a_id = menu.addAction("🏭 هوية المصنع — الشعار والاسم والعنوان"
+                              " والسجل…")
+        f = a_id.font()
+        f.setBold(True)
+        a_id.setFont(f)
+        a_id.triggered.connect(self.open_identity)
+        # ══ الربط مع الهيئة ══
         a_zatca = menu.addAction("🧾 الربط مع هيئة الزكاة والضريبة "
                                  "(الفوترة الإلكترونية)…")
-        f = a_zatca.font()
-        f.setBold(True)
         a_zatca.setFont(f)
         a_zatca.triggered.connect(self.open_fatoora)
         menu.addSeparator()
@@ -1695,8 +1747,7 @@ class MainWindow(QtWidgets.QMainWindow):
             sb.setSizeGripEnabled(False)
             u = self.user.get("full_name") or self.user.get("username", "")
             try:
-                from services import tenant as _tenant
-                fac = _tenant.factory_name()
+                fac = self._factory_name()
             except Exception:
                 fac = getattr(config, "COMPANY_NAME", "")
             self._sb_user = QtWidgets.QLabel(f"👤 {u}")

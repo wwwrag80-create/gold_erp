@@ -5326,6 +5326,66 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    # ══════════════════════════════════════════════════════════════
+    step("63) هوية المصنع — لكل مصنعٍ شعاره واسمه في كل القوالب")
+    from services import branding as _br63
+    _base63 = config.BASE_DIR
+    config.BASE_DIR = pathlib.Path(_TMP)        # صور الهوية في مجلد الاختبار
+    try:
+        with db(readonly=True) as conn:
+            _inv63 = conn.execute("SELECT id FROM invoices WHERE"
+                                  " is_deleted=0 LIMIT 1").fetchone()[0]
+        _h0 = _pm62.build_html("invoices", _inv63)
+        check("قبل الضبط: الترويسة الأصلية كما هي",
+              "مصنع جاديت للتصنيع" in _h0 and "Jadeite Factory" in _h0)
+        _png63 = (__import__("services.photo_qr", fromlist=["x"])
+                  .qr_png_data_uri("logo63").split(",", 1)[1])
+        _id63 = dict(_br63.defaults(), name="مصنع النخبة للذهب",
+                     name_en="Elite Gold", address="جدة — الصناعية",
+                     cr="4030123456", layout="logo_left", logo_b64=_png63)
+        check("رقمٌ ضريبي خاطئ واسمٌ فارغ يُرفضان قبل الاعتماد",
+              _br63.validate(dict(_id63, vat="123"))
+              and _br63.validate(dict(_id63, name=" ")))
+        with db() as conn:
+            _br63.save(conn, _id63, "admin")
+        _h1 = _pm62.build_html("invoices", _inv63)
+        _lg63 = pathlib.Path(str(config.LOGO_PATH))
+        check("بعد الاعتماد: الفاتورة باسم المصنع وعنوانه وسجله وشعاره",
+              "مصنع النخبة للذهب" in _h1 and "جاديت" not in _h1
+              and "4030123456" in _h1 and "جدة — الصناعية" in _h1
+              and _lg63.exists() and _lg63.as_uri() in _h1)
+        _pm62.RTL_ORDER_OVERRIDE = True
+        _lh63 = _pm62.letterhead()
+        _pm62.RTL_ORDER_OVERRIDE = None
+        check("الشعار يساراً: بيانات المصنع يميناً ثم الشعار",
+              _lh63.index("مصنع النخبة") < _lh63.index("<img"))
+        check("وكل القوالب تمرّ بالترويسة نفسها (قيد · تسكير · مشتريات)",
+              all("مصنع النخبة للذهب" in _pm62.build_html(t, i)
+                  for t, i in (("manual", _e62), ("fixing_ops", _f62),
+                               ("purchases", _p62))))
+        config.COMPANY_NAME = "—"
+        _br63.apply_cached()
+        _c1 = config.COMPANY_NAME
+        config.COMPANY_NAME = "—"
+        _br63.sync_from_db()
+        check("الإقلاع: الهوية من المرآة قبل القاعدة، ثم القاعدة مرجعها",
+              _c1 == config.COMPANY_NAME == "مصنع النخبة للذهب")
+        _f63 = pathlib.Path(_TMP) / "id63.json"
+        _br63.export_file(_f63, _br63.current())
+        check("ملف الهوية يُصدَّر ويُستورد بشعاره (لجهازٍ آخر)",
+              _br63.import_file(_f63)["logo_b64"] == _png63)
+        with db() as conn:
+            _br63.save(conn, dict(_id63, hide_logo=True), "admin")
+        check("«بلا شعار»: لا يُطبع شعار مصنعٍ آخر مكانه",
+              "<img" not in _pm62.letterhead())
+        with db() as conn:
+            _br63.reset(conn, "admin")
+        check("«الهوية الأصلية» تعيد الترويسة المسلَّمة",
+              "Jadeite Factory" in _pm62.letterhead()
+              and config.COMPANY_NAME == "مصنع جاديت للتصنيع")
+    finally:
+        config.BASE_DIR = _base63
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

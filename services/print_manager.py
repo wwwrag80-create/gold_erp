@@ -271,18 +271,93 @@ def tdw(value, pct=None, align="center"):
     return f'<td{cls}>{value}</td>'
 
 
-def _logo_tag(height=120):
-    """وسم صورة الشعار الرسمي (يُتجاهل بأمان إن لم يوجد الملف)."""
+def _logo_tag(height=None):
+    """وسم صورة الشعار (يُتجاهل بأمان إن لم يوجد الملف).
+
+    الشعار والمقاس من «هوية المصنع» — لكل مصنعٍ شعاره.
+    """
     path = getattr(config, "LOGO_PATH", None)
+    h = int(height or getattr(config, "LOGO_HEIGHT", 120) or 120)
     if path and Path(str(path)).exists():
-        return (f'<img src="{Path(str(path)).as_uri()}" height="{height}">')
+        return f'<img src="{Path(str(path)).as_uri()}" height="{h}">'
     return ""
+
+
+def _id_lines(lang="ar", align=None):
+    """أسطر الهوية تحت الاسم: البلد · العنوان · السجل · (الضريبي) · الاتصال."""
+    if lang == "en":
+        rows = [config.COMPANY_COUNTRY_EN, config.COMPANY_ADDRESS_EN,
+                f"C.R: {en(config.COMPANY_CR)}" if config.COMPANY_CR else ""]
+        if getattr(config, "HEADER_SHOW_VAT", False) and \
+                getattr(config, "COMPANY_VAT_NUMBER", ""):
+            rows.append(f"VAT: {en(config.COMPANY_VAT_NUMBER)}")
+    else:
+        rows = [config.COMPANY_COUNTRY, config.COMPANY_ADDRESS,
+                f"سجل تجاري: {en(config.COMPANY_CR)}"
+                if config.COMPANY_CR else ""]
+        if getattr(config, "HEADER_SHOW_VAT", False) and \
+                getattr(config, "COMPANY_VAT_NUMBER", ""):
+            rows.append(f"الرقم الضريبي: {en(config.COMPANY_VAT_NUMBER)}")
+        contact = "  ·  ".join(
+            x for x in (
+                f"هاتف: {en(config.COMPANY_PHONE)}"
+                if getattr(config, "COMPANY_PHONE", "") else "",
+                en(getattr(config, "COMPANY_EMAIL", "") or ""))
+            if x)
+        rows.append(contact)
+    # `align` صفةً لا `text-align` في CSS: محرك Qt يعكس الثانية داخل
+    # النص العربي (فيقع يساراً) ويحترم الأولى في المحرّكين معاً.
+    a = align or ("left" if lang == "en" else "right")
+    return "".join(f'<div align="{a}" style="font-size:9.5pt;">{r}</div>'
+                   for r in rows if r)
+
+
+def letterhead():
+    """ترويسة المصنع وحدها — بحسب ترتيب «هوية المصنع».
+
+    * `logo_left`: الاسم وتحته البلد والعنوان والسجل يميناً، والشعار يساراً.
+    * `logo_right`: الشعار يميناً والبيانات يساراً.
+    * `classic`: عربي يميناً · الشعار في الوسط · إنجليزي يساراً.
+    """
+    layout = getattr(config, "HEADER_LAYOUT", "classic")
+    name_en = (config.COMPANY_NAME_EN
+               if getattr(config, "HEADER_SHOW_EN", True) else "")
+    logo = _logo_tag()
+    if layout in ("logo_left", "logo_right"):
+        a = "right" if layout == "logo_left" else "left"
+        sub_en = (f'<div align="{a}" style="font-size:10pt;color:#555;">'
+                  f'{name_en}</div>' if name_en else "")
+        info = (f'<td width="62%" align="{a}" style="width:62%;'
+                f' vertical-align:middle;">'
+                f'<div align="{a}" style="font-size:16pt; font-weight:bold;">'
+                f'{config.COMPANY_NAME}</div>{sub_en}{_id_lines("ar", a)}'
+                f'</td>')
+        lside = "left" if layout == "logo_left" else "right"
+        logo_cell = (f'<td width="38%" align="{lside}" style="width:38%;'
+                     f' vertical-align:middle;">'
+                     f'<div align="{lside}">{logo}</div></td>')
+        row = (cells(info, logo_cell) if layout == "logo_left"
+               else cells(logo_cell, info))
+    else:
+        ar_cell = (f'<td width="35%" align="right" style="width:35%;">'
+                   f'<div align="right" style="font-size:14pt;'
+                   f' font-weight:bold;">{config.COMPANY_NAME}</div>'
+                   f'{_id_lines()}</td>')
+        logo_cell = (f'<td width="30%" align="center" style="width:30%;">'
+                     f'<div align="center">{logo}</div></td>')
+        en_cell = (f'<td width="35%" align="left" style="width:35%;">'
+                   f'<div align="left" style="font-size:14pt;'
+                   f' font-weight:bold;">{name_en}</div>'
+                   f'{_id_lines("en") if name_en else ""}</td>')
+        row = cells(ar_cell, logo_cell, en_cell)
+    return (f'<table class="lh" width="100%" cellspacing="0" cellpadding="4">'
+            f'<tr>{row}</tr></table>')
 
 
 def _header(doc_type, doc_no, date, extra="", show_meta=True):
     """الترويسة الموحدة بخصائص HTML صريحة (يدعمها محرك Qt للطباعة):
-    عربي يميناً · الشعار بارزاً في المنتصف · إنجليزي يساراً · خط فاصل ·
-    عنوان المستند في مربع ممتد بعرض الصفحة بخلفية رمادية فاتحة.
+    ترويسة المصنع (`letterhead`) · خط فاصل · عنوان المستند في مربع
+    ممتد بعرض الصفحة بخلفية رمادية فاتحة.
     """
     meta = ""
     if show_meta:
@@ -297,24 +372,8 @@ def _header(doc_type, doc_no, date, extra="", show_meta=True):
         </table>{extra}
       </td>
     </tr></table>'''
-    ar_cell = f'''<td align="right" width="35%"
-            style="text-align:right; direction:rtl;">
-          <div style="font-size:14pt; font-weight:bold;">{config.COMPANY_NAME}</div>
-          <div style="font-size:9.5pt;">{config.COMPANY_COUNTRY}</div>
-          <div style="font-size:9.5pt;">{config.COMPANY_ADDRESS}</div>
-          <div style="font-size:9.5pt;">سجل تجاري: {en(config.COMPANY_CR)}</div>
-        </td>'''
-    logo_cell = (f'<td align="center" width="30%" '
-                 f'style="text-align:center;">{_logo_tag()}</td>')
-    en_cell = f'''<td align="left" width="35%"
-            style="text-align:left; direction:ltr;">
-          <div style="font-size:14pt; font-weight:bold;">{config.COMPANY_NAME_EN}</div>
-          <div style="font-size:9.5pt;">{config.COMPANY_COUNTRY_EN}</div>
-          <div style="font-size:9.5pt;">{config.COMPANY_ADDRESS_EN}</div>
-          <div style="font-size:9.5pt;">C.R: {en(config.COMPANY_CR)}</div>
-        </td>'''
     return f"""
-    <table class="lh" width="100%" cellspacing="0" cellpadding="4"><tr>{cells(ar_cell, logo_cell, en_cell)}</tr></table>
+    {letterhead()}
     <table class="titlebar" width="100%" cellspacing="0" cellpadding="6"><tr><td width="100%">{doc_type}</td></tr></table>{meta}
     """
 
@@ -324,10 +383,14 @@ def _footer(notes=""):
     لا توقيعات متعددة ولا نصوص برمجية سفلية."""
     note_html = (f'<div class="note">ملاحظات: {notes}</div>'
                  if notes else "")
+    stamp = getattr(config, "STAMP_PATH", None)
+    stamp_img = (f'<img src="{Path(str(stamp)).as_uri()}" height="90"'
+                 f' style="vertical-align:middle">'
+                 if stamp and Path(str(stamp)).exists() else "")
     return f"""
     <br/>{note_html}
     <div style="text-align:left; padding-top:22px; font-size:10.5pt">
-      التوقيع: .............................
+      {stamp_img} التوقيع: .............................
     </div>
     """
 

@@ -29,6 +29,12 @@ def main():
         return
     from ui import styles
     from ui.gate_window import GateWindow
+    # هوية المصنع قبل أول رسم: البوابة تظهر بشعار هذا المصنع واسمه
+    try:
+        from services import branding
+        branding.apply_cached()
+    except Exception:
+        pass
 
     app = QtWidgets.QApplication(sys.argv)
     # تناسب تلقائي مع حجم شاشة المستخدم: الخطوط والحشو تصغر على
@@ -219,6 +225,14 @@ def prepare_steps():
             ensure_employee_accrual_accounts(conn)
             ensure_system_tags(conn)
 
+    def _branding():
+        # القاعدة هي المرجع: نسخةُ مصنعٍ مستعادة تأتي بهويتها
+        try:
+            from services import branding
+            branding.sync_from_db()
+        except Exception as ex:
+            print(f"[branding] {ex}")
+
     return [
         ("جارٍ تجهيز قاعدة البيانات…", create_tables),
         ("جارٍ التحقّق من سلامة البيانات…", _recover),
@@ -227,6 +241,7 @@ def prepare_steps():
         ("جارٍ تهيئة شجرة الحسابات…", seed_initial_data),
         ("جارٍ ضبط الحسابات المستحدثة…", ensure_new_accounts),
         ("جارٍ تجهيز الجهات والوسوم…", _identities),
+        ("جارٍ تحميل هوية المصنع…", _branding),
         ("جارٍ تشغيل الخدمات الخلفية…", start_background_workers),
     ]
 

@@ -184,7 +184,7 @@ ICONS_DIR = (BUNDLE_DIR / "assets" / "icons"
              else BASE_DIR / "assets" / "icons")
 
 APP_NAME = "نظام محاسبة مصنع الذهب — عيار 18"
-APP_VERSION = "4.27.0"
+APP_VERSION = "4.28.0"
 # بصمة تتغيّر مع كل بناء — تكشف تشغيل نسخة قديمة فوراً
 BUILD_STAMP = "2026-09-28"
 
@@ -208,6 +208,15 @@ COMPANY_ADDRESS_EN = "Industrial City"
 COMPANY_CR = "1010851840"                 # السجل التجاري
 COMPANY_VAT_NUMBER = "300000000000003"    # يُعدَّل من شاشة الإعدادات
 COMPANY_TAGLINE = "للذهب والمجوهرات"
+COMPANY_PHONE = ""
+COMPANY_EMAIL = ""
+# ترتيب الترويسة وشعارها — تُضبط من «عرض ← هوية المصنع» وتُحفظ في قاعدة
+# المصنع (services/branding.py)، فلكل مصنعٍ هويته. هذه قيم ما قبل الضبط.
+HEADER_LAYOUT = "classic"     # logo_left | logo_right | classic
+LOGO_HEIGHT = 120             # ارتفاع الشعار في الترويسة (بكسل)
+HEADER_SHOW_VAT = False       # سطر الرقم الضريبي تحت السجل
+HEADER_SHOW_EN = True         # الاسم الإنجليزي في الترويسة
+STAMP_PATH = None             # صورة الختم/التوقيع بجوار «التوقيع»
 
 # ── بوابة الدخول ──
 # حركةُ شاشة الترحيب (غبار الذهب · الخواتم الدائرة · التلاشي عند
