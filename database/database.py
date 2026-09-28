@@ -1398,6 +1398,15 @@ def migrate_schema() -> None:
             except Exception:
                 pass
 
+        # 26) الفوترة الإلكترونية (المرحلة الثانية): سجل المستندات بعدّاده
+        #     وسلسلة بصماته، ومُشغِّلاتٌ تمنع حذف أي مستندٍ أو تعديل نصّه —
+        #     وعناوين المشترين الوطنية (services/fatoora).
+        try:
+            from services.fatoora import ledger as _fatoora
+            _fatoora.ensure_tables(conn)
+        except Exception:
+            pass
+
 
 def run_migrations_files():
     """ينفّذ ملفات الهجرة المرقّمة مرة واحدة لكل إصدار.

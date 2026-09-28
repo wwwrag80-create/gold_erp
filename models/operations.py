@@ -72,6 +72,8 @@ def transfer_invoice(conn, invoice_id, new_entity_id, username, notes=""):
        كمبيعات.
     3. أرقام التشغيل تُسجَّل حركتها فتبقى لوحات دوران المخزون دقيقة.
     """
+    from services.fatoora import ledger as _fatoora
+    _fatoora.guard_change(conn, "invoices", invoice_id, "نقل")
     inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
                        (invoice_id,)).fetchone()
     if not inv:
@@ -128,6 +130,8 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
 
     كل ذلك داخل معاملة واحدة — فإن فشلت خطوة تراجع كل شيء.
     """
+    from services.fatoora import ledger as _fatoora
+    _fatoora.guard_change(conn, "invoices", invoice_id, "تعديل بنود")
     inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
                        (invoice_id,)).fetchone()
     if not inv:
@@ -321,6 +325,8 @@ def flip_invoice_kind(conn, invoice_id, username, notes=""):
     مديناً في حالة التحويل إلى مرتجع)، وتُحدَّث حالة **جميع** أرقام
     التشغيل المرتبطة لتعود للخزنة أو تخرج منها بحسب النوع الجديد.
     """
+    from services.fatoora import ledger as _fatoora
+    _fatoora.guard_change(conn, "invoices", invoice_id, "عكس نوع")
     inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
                        (invoice_id,)).fetchone()
     if not inv:

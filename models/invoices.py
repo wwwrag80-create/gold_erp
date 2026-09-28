@@ -370,6 +370,14 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     _sync_scrap_moves(conn, inv_id, src_id, _karat, total_w, kind)
     # تحقق صريح قبل إنهاء المعاملة: لا فاتورة بلا قيد مرحَّل فعلياً
     _verify_posted(conn, inv_id, entry_id)
+    # ══ الفاتورة الإلكترونية (المرحلة الثانية) ══
+    # داخل المعاملة نفسها: الفاتورة وقيدها ومستندها الإلكتروني يُحفظون
+    # معاً أو لا يُحفظ شيء — فلا رقمٌ في سلسلة الهيئة لفاتورةٍ أُلغيت.
+    # لا يفعل شيئاً ما لم يُفعَّل الربط (services/fatoora/ledger.py).
+    from services.fatoora import ledger as _fatoora
+    _edoc = _fatoora.on_invoice_saved(conn, inv_id, username)
+    if _edoc:
+        qr_b64 = _edoc["qr"]
     # حزمة المزامنة الذرّية: الفاتورة وبنودها وقيدها وحركة الأطقم معاً
     from services import sync_queue
     sync_queue.enqueue(conn, "invoice",
@@ -461,6 +469,12 @@ def create_tax_debit_note(conn, invoice_id, note_date, username):
         raise ValueError("إشعار المدين الضريبي يخص فواتير البيع فقط")
     if inv["vat_applied"]:
         raise ValueError("الفاتورة ضريبية أصلاً — لا حاجة لإشعار مدين")
+    from services.fatoora import ledger as _fatoora
+    if _fatoora.enabled(conn):
+        raise ValueError(
+            "مع الربط بالفوترة الإلكترونية لا يُضاف الضريبة لفاتورةٍ غير "
+            "ضريبية بإشعار مدين: أصدر مرتجعاً للفاتورة ثم فاتورةً ضريبية "
+            "جديدة بالأطقم نفسها.")
     existing = conn.execute(
         "SELECT 1 FROM tax_debit_notes WHERE invoice_id=? AND is_deleted=0",
         (invoice_id,)).fetchone()
@@ -665,6 +679,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         (invoice_id,)).fetchone()
     if not inv:
         raise ValueError("الفاتورة غير موجودة أو محذوفة")
+    from services.fatoora import ledger as _fatoora
+    _fatoora.guard_change(conn, "invoices", invoice_id, "تعديل")
     kind = inv["kind"]
     if kind not in ("sale", "sale_return"):
         raise ValueError("هذا النوع من الفواتير لا يُعدَّل في مكانه")

@@ -410,6 +410,24 @@ def _tpl_invoice(conn, invoice_id):
     cust = conn.execute("SELECT * FROM entities WHERE id=?",
                         (inv["customer_id"],)).fetchone()
     kind = "المبيعات" if inv["kind"] == "sale" else "المرتجعات"
+    # ══ الفاتورة الإلكترونية (المرحلة الثانية) ══
+    # ما صدر له مستندٌ إلكتروني يُطبع بالعنوان الذي يشترطه نظام الفوترة
+    # («فاتورة ضريبية» · «فاتورة ضريبية مبسطة» · «إشعار دائن») ومعه
+    # رمز QR الموقّع والرقمان الضريبيان — لا بعنوان «المبيعات» العام.
+    edoc = None
+    try:
+        from services.fatoora import ledger as _ft
+        edoc = _ft.doc_for(conn, "invoices", invoice_id)
+    except Exception:
+        edoc = None
+    if edoc is not None:
+        kind = {("invoice", "standard"): "فاتورة ضريبية",
+                ("invoice", "simplified"): "فاتورة ضريبية مبسطة",
+                ("credit", "standard"): "إشعار دائن",
+                ("credit", "simplified"): "إشعار دائن",
+                ("debit", "standard"): "إشعار مدين",
+                ("debit", "simplified"): "إشعار مدين"}.get(
+                    (edoc["kind"], edoc["subtype"]), kind)
 
     # الأعمدة تطابق شاشة المبيعات تماماً، والجدول يبدأ من اليمين:
     # رقم التشغيل ← الذهب ← الفصوص ← الأحجار ← الأحجار بعد الخصم ←
@@ -512,7 +530,7 @@ def _tpl_invoice(conn, invoice_id):
             {cust['name'] if cust else '—'}</td></tr>
     </table>'''
 
-    body = f'''{info}
+    body = f'''{info}{_fatoora_block(conn, inv, cust, edoc)}
     {TBL}
       <tr>{head_cells}</tr>
       {body_rows}
@@ -533,6 +551,48 @@ def _tpl_invoice(conn, invoice_id):
     return (_header(kind, inv["invoice_no"], inv["invoice_date"],
                     show_meta=False) + body
             + _footer(inv["description"] or ""))
+
+
+def _fatoora_block(conn, inv, cust, edoc):
+    """رمز QR الموقّع والبيانات الضريبية — لمستندٍ إلكتروني صدر فقط."""
+    if edoc is None:
+        return ""
+    try:
+        from services import photo_qr
+        from services.fatoora import ledger as _ft
+        from services.fatoora import profile as _pf
+        prof = _pf.load(conn)
+        qr = edoc["cleared_qr"] or edoc["qr"]
+        uri = photo_qr.qr_png_data_uri(qr, box_size=3, border=1)
+        img = (f'<img src="{uri}" style="width:40mm; height:40mm;'
+               f' max-height:none;" width="150" height="150"/>'
+               if uri else '<div class="note">رمز QR</div>')
+        rows = [("الرقم الضريبي للمنشأة", en(prof.get("vat", ""))),
+                ("السجل التجاري", en(prof.get("crn", "")))]
+        if edoc["subtype"] == "standard":
+            b = _pf.buyer(conn, inv["customer_id"]) or {}
+            rows += [("الرقم الضريبي للمشتري", en(b.get("vat", ""))),
+                     ("عنوان المشتري", f"{en(b.get('building', ''))} "
+                      f"{b.get('street', '')}، {b.get('district', '')}، "
+                      f"{b.get('city', '')} {en(b.get('postal', ''))}")]
+        if edoc["kind"] == "credit":
+            import re
+            refs = re.findall(r"<cac:InvoiceDocumentReference>\s*<cbc:ID>"
+                              r"([^<]+)</cbc:ID>", edoc["xml"])
+            if refs:
+                rows.append(("إشعارٌ للفاتورة", en("، ".join(refs))))
+        rows += [("عدّاد الفاتورة (ICV)", en(str(edoc["icv"]))),
+                 ("حالتها لدى الهيئة",
+                  _ft.STATUS_LABELS.get(edoc["status"], edoc["status"]))]
+        trs = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
+        return f'''
+    {TBL_PLAIN}<tr>
+      <td width="68%" valign="top">{TBL}{trs}</table></td>
+      <td width="32%" align="center" valign="middle"
+          style="text-align:center;">{img}</td>
+    </tr></table>'''
+    except Exception:
+        return ""
 
 
 def _tpl_voucher(conn, voucher_id):

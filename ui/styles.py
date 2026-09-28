@@ -375,6 +375,11 @@ QLabel#toast { background: @tipBg; color: @tipFg; font-size: 12pt;
   font-weight: bold; border-radius: 10px; padding: 8px 18px;
   border: 1px solid @goldEdge2; }
 
+/* حالة الربط مع الهيئة في شريط الحالة — رابطٌ لا زرّ */
+QPushButton#statusLink { background: transparent; border: none;
+  padding: 4px 12px; font-size: 11.5pt; }
+QPushButton#statusLink:hover { background: @hover; }
+
 /* «ⓘ» شرح الشاشة المطويّ — وبطاقته العائمة */
 QToolButton#notesBtn { color: @goldDim; font-size: 15pt; font-weight: bold;
   border: 1px solid transparent; border-radius: 14px; padding: 0 6px;

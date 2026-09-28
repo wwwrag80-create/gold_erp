@@ -1025,6 +1025,33 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
 
+    # ══════════ الربط مع الهيئة ══════════
+    def open_fatoora(self):
+        """نافذة الربط والجاهزية — ثم يُحدَّث مؤشّرها في شريط الحالة."""
+        try:
+            from ui.fatoora_screen import open_dialog
+            open_dialog(self, self.user)
+        except Exception as e:
+            err(self, e)
+        self._tick_fatoora()
+
+    def _tick_fatoora(self):
+        """مؤشّر الربط في شريط الحالة: الحكم نفسه بكلمتين ولونه."""
+        lbl = getattr(self, "_sb_zatca", None)
+        if lbl is None:
+            return
+        try:
+            from services.fatoora import readiness
+            with db(readonly=True) as conn:
+                level, title, _d = readiness.verdict(conn)
+        except Exception:
+            return
+        color = {"ok": "#0F5A24", "warn": "#8A5A00",
+                 "fail": "#9A1414"}.get(level, "#555")
+        lbl.setText(f"🧾 {title}")
+        lbl.setStyleSheet(f"color:{color}; font-weight:bold;")
+        lbl.setToolTip("الربط مع هيئة الزكاة والضريبة — انقر لفتحه")
+
     # ══════════ شرح الشاشة المطويّ ══════════
     def _current_notes(self):
         from ui.widgets import declutter
@@ -1225,6 +1252,15 @@ class MainWindow(QtWidgets.QMainWindow):
         btn.setToolTip("المظهر (فاتح/ليلي) · مقاس الخط · البحث الموحّد")
         btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         menu = QtWidgets.QMenu(btn)
+
+        # ══ الربط مع الهيئة — أول بندٍ في القائمة ══
+        a_zatca = menu.addAction("🧾 الربط مع هيئة الزكاة والضريبة "
+                                 "(الفوترة الإلكترونية)…")
+        f = a_zatca.font()
+        f.setBold(True)
+        a_zatca.setFont(f)
+        a_zatca.triggered.connect(self.open_fatoora)
+        menu.addSeparator()
 
         cur_theme = theme.current_theme()
         m_theme = menu.addMenu("🎨 المظهر")
@@ -1652,6 +1688,21 @@ class MainWindow(QtWidgets.QMainWindow):
             sb.addWidget(self._sb_user)
             sb.addWidget(self._sb_fac)
             sb.addWidget(self._sb_ver)
+            # حالة الربط مع الهيئة — ظاهرةٌ في الرئيسية، والنقر يفتحها
+            self._sb_zatca = QtWidgets.QPushButton("🧾 …")
+            self._sb_zatca.setObjectName("statusLink")
+            self._sb_zatca.setFlat(True)
+            self._sb_zatca.setCursor(QtCore.Qt.PointingHandCursor)
+            self._sb_zatca.clicked.connect(self.open_fatoora)
+            sb.addWidget(self._sb_zatca)
+            QtCore.QTimer.singleShot(400, self._tick_fatoora)
+            # مُرسِل الفواتير الإلكترونية في الخلفية — لا يفعل شيئاً ما لم
+            # يُفعَّل الربط، ويُرسل المعلّق فور عودة الإنترنت
+            try:
+                from services.fatoora import ledger as _ft
+                _ft.start_worker()
+            except Exception:
+                pass
             sb.addPermanentWidget(self._sb_hint)
             sb.addPermanentWidget(self._sb_clock)
             self._tick_clock()

@@ -4954,6 +4954,99 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("57) الفوترة الإلكترونية — المرحلة الثانية (الربط مع الهيئة)")
+    import base64 as _b57
+    from services.fatoora import ec as _ec57, ledger as _lg57, \
+        onboard as _ob57, readiness as _rd57, ubl as _ubl57
+    from services.fatoora import profile as _pf57
+    _k57 = _ec57.PrivateKey.generate()
+    _m57 = b"gold-erp"
+    check("التوقيع secp256k1 (ECDSA-SHA256): يتحقّق ويكشف أي عبث",
+          _ec57.verify(_k57.pub, _m57, _k57.sign(_m57))
+          and not _ec57.verify(_k57.pub, b"gold-erP", _k57.sign(_m57))
+          and _ec57.PrivateKey.from_pem(_k57.to_pem()).d == _k57.d)
+    _csr57 = _ec57.build_csr(
+        _k57, common_name="GoldERP-TEST", org="مصنع", org_unit="فرع",
+        vat_number="310122393500003", egs_serial="1-GoldERP|2-1|3-x",
+        invoice_types="1100", address="الرياض", category="Gold",
+        env="production")
+    _der57 = _ec57._unpem(_csr57)
+    check("طلب الشهادة بمواصفات الهيئة (القالب · الرقم الضريبي · 1100)",
+          b"ZATCA-Code-Signing" in _der57 and b"310122393500003" in _der57
+          and b"1100" in _der57)
+    _cert57 = _ec57.self_signed_certificate(_k57)
+    _seller57 = {"name": "مصنع & شركاه", "vat": "310122393500003",
+                 "crn": "1010851840", "street": "الصناعة", "building": "1234",
+                 "district": "الصناعية", "city": "الرياض", "postal": "14331"}
+    _doc57 = {"kind": "invoice", "subtype": "simplified", "number": "S-1",
+              "issue_date": "2026-09-28", "issue_time": "10:00:00", "icv": 1,
+              "pih": _ubl57.FIRST_PIH, "seller": _seller57,
+              "buyer": {"name": "عميل"},
+              "lines": [{"name": "مصنعية", "amount": 100.005}]}
+    _sd57 = _ubl57.sign_document(_doc57, _k57, _cert57)
+    _v57 = _ubl57.verify_document(_sd57["xml"])
+    _q57 = _ubl57.parse_qr(_sd57["qr"])
+    check("المستند: بصمته تطابق نصّه، وختمه صحيح، ورمزه بتسعة حقول",
+          _v57["hash_ok"] and _v57["signature_ok"]
+          and sorted(_q57) == list(range(1, 10))
+          and _q57[6].decode() == _sd57["hash"]
+          and str(_sd57["totals"]["gross"]) == "115.01")
+    _tam57 = _sd57["xml"].replace("<cbc:ID>S-1</cbc:ID>",
+                                  "<cbc:ID>S-2</cbc:ID>")
+    check("وأي تعديلٍ في نصّ المستند يُسقط بصمته",
+          not _ubl57.verify_document(_tam57)["hash_ok"])
+    with db() as conn:
+        _pf57.save(conn, {"name": "مصنع الفحص", "vat": "310122393500003",
+                          "crn": "1010851840", "street": "الصناعة",
+                          "building": "1234", "district": "الصناعية",
+                          "city": "الرياض", "postal": "14331",
+                          "env": "simulation"})
+        _before57 = _rd57.verdict(conn)[1]
+    _tok57 = _b57.b64encode(_cert57.encode()).decode()
+    _pf57.save_keys("simulation", {
+        "private_key": _k57.to_pem(), "csr": _csr57,
+        "compliance": {"token": _tok57, "secret": "s"},
+        "checks": {f"{a}:{b}": {"ok": True} for a, b in _ob57.SAMPLES},
+        "production": {"token": _tok57, "secret": "s"}})
+    with db() as conn:
+        _ob57.set_enabled(conn, True, "admin")
+        _c57 = _add9(conn, "عميل الفوترة الإلكترونية", "customer",
+                          username="admin")
+        _b9(conn, [{"wo_no": "EINV-1", "gold": 20.0,
+                    "wage_per_gram": 10.0}], "2026-09-28", "admin")
+        _w57 = conn.execute("SELECT id FROM work_orders WHERE"
+                            " work_order_no='EINV-1'").fetchone()["id"]
+    with db() as conn:
+        _s57 = _inv9.create_sale(conn, _c57, [{"work_order_id": _w57}],
+                                 "2026-09-28", "admin", apply_vat=True)
+    with db(readonly=True) as conn:
+        _d57 = _lg57.doc_for(conn, "invoices", _s57["id"])
+    check("مع التفعيل: كل فاتورة ضريبية تُصدر مستندها المختوم في معاملتها",
+          _d57 is not None and _d57["status"] == "pending"
+          and _ubl57.verify_document(_d57["xml"])["signature_ok"]
+          and _s57["qr_base64"] == _d57["qr"], _before57)
+    try:
+        with db() as conn:
+            _inv9.update_invoice(conn, _s57["id"], [{"work_order_id": _w57}],
+                                 "admin")
+        _g57 = False
+    except ValueError as _e57:
+        _g57 = "إشعار دائن" in str(_e57)
+    try:
+        with db() as conn:
+            conn.execute("DELETE FROM fatoora_documents")
+        _t57 = False
+    except Exception:
+        _t57 = True
+    check("ولا تُعدَّل الفاتورة بعد إصدار مستندها، ولا يُحذف المستند",
+          _g57 and _t57)
+    with db() as conn:
+        _r57 = _rd57.run(conn)
+        _ob57.set_enabled(conn, False, "admin")
+    check("والحكم صريح: قبل التسجيل «غير مربوط»، وفي المحاكاة «ليس ربطاً رسمياً»",
+          _before57 == "غير مربوط بالهيئة"
+          and "المحاكاة" in _r57["verdict"][1], _r57["verdict"][1])
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

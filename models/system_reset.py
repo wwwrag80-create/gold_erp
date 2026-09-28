@@ -43,6 +43,13 @@ def wipe_local(conn, keep_admin=True):
                                  ensure_internal_counterparties)
 
     cleared = []
+    # مستندات الفوترة الإلكترونية لا تُحذف نظاماً (أُبلغت للهيئة): تُؤرشف
+    # فلا تُنسب لفواتير جديدة تبدأ أرقامها من جديد بعد المسح
+    try:
+        from services.fatoora import ledger as _fatoora
+        _fatoora.archive_all(conn)
+    except Exception:
+        pass
     # لا نستخدم PRAGMA foreign_keys داخل معاملة (يُتجاهل صامتاً)،
     # بل نحذف بترتيب التبعية: الأبناء قبل الآباء.
     try:

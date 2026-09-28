@@ -71,6 +71,8 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                          (entry_id,))
         elif src == "invoices":
             from models.inventory import adjust_bulk_wo
+            from services.fatoora import ledger as _fatoora
+            _fatoora.guard_change(conn, "invoices", sid, "حذف")
             inv = conn.execute("SELECT * FROM invoices WHERE id=?", (sid,)).fetchone()
             if inv:
                 new_status = "in_stock" if inv["kind"] == "sale" else "sold"
