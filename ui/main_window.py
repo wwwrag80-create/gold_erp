@@ -400,6 +400,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tools_lay.setSpacing(6)
         sb.addWidget(self.screen_tools)
         sb.addWidget(self.btn_close)
+        # سعر الذهب: شريطٌ أفقي في أقصى يسار الشريط الفرعي — تحت أزرار
+        # «عرض» و«تحديث» — لا لوحةً تأكل من طول الشريط الجانبي
+        self.gold_bar = GoldPriceBar()
+        sb.addSpacing(8)
+        sb.addWidget(self.gold_bar)
 
         # شاشة الترحيب (الفهرس 0): مساحة يتوسّطها شعار المصنع. جُرّبت
         # مكانها شاشةُ أرقامٍ حيّة فلم تُرَد — والشعار أوضح وأسرع،
@@ -473,16 +478,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._items[self.welcome] = None
         self.switch(0)
 
-        # الشريط الجانبي ثابت على اليمين دائماً (RTL يضعه يميناً).
-        # عمود جانبي: شجرة التنقل ثم شريط سعر الأونصة الحي أسفلها
-        self.gold_bar = GoldPriceBar()
+        # الشريط الجانبي ثابت على اليمين دائماً (RTL يضعه يميناً)،
+        # كاملاً إلى أسفل النافذة — شجرة التنقل وحدها.
         self.side_panel = QtWidgets.QWidget(self)
         self.side_panel.setFixedWidth(260)
         sp = QtWidgets.QVBoxLayout(self.side_panel)
         sp.setContentsMargins(0, 0, 0, 0)
         sp.setSpacing(0)
         sp.addWidget(self.sidebar, 1)
-        sp.addWidget(self.gold_bar)
         # الحالة المحفوظة من `switch` أثناء التهيئة تُطبَّق الآن
         self.side_panel.setVisible(getattr(self, "_panel_visible", True))
 

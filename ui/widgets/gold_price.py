@@ -65,54 +65,53 @@ class _Fetcher(QtCore.QThread):
 
 
 class GoldPriceBar(QtWidgets.QFrame):
-    """شريط بارز يعرض سعر الأونصة وأسعار الجرام لكل عيار."""
+    """شريطٌ أفقيٌّ مدمج بسعر الأونصة وجرام كل عيار — في أعلى النافذة.
+
+    كان لوحةً في ذيل الشريط الجانبي تأكل من طوله. الآن سطرٌ واحد في
+    الشريط الفرعي تحت أزرار «عرض» و«تحديث»: الأونصة ثم الأعيرة الأربعة،
+    والتحديث بنقرة، ووقت آخر تحديث في التلميح — فيبقى الشريط الجانبي
+    كاملاً إلى أسفل النافذة.
+    """
 
     def __init__(self, usd_to_sar=3.75):
         super().__init__()
         self.usd_to_sar = usd_to_sar
-        self.setObjectName("goldBar")
+        self.setObjectName("goldStrip")
         self._thread = None
         self._last = None
 
         self.title = QtWidgets.QLabel("سعر الذهب العالمي")
-        self.title.setObjectName("goldBarTitle")
-        self.title.setAlignment(QtCore.Qt.AlignCenter)
-
+        self.title.setObjectName("goldStripTitle")
         self.ounce = QtWidgets.QLabel("— جارِ التحميل —")
-        self.ounce.setObjectName("goldBarValue")
-        self.ounce.setAlignment(QtCore.Qt.AlignCenter)
+        self.ounce.setObjectName("goldStripOunce")
 
-        # حقل منفصل وواضح لكل عيار
-        self.karat_labels = {}
-        self.grid = QtWidgets.QGridLayout()
-        # تباعد أوسع قليلاً: البطاقات صارت مؤطّرة فتحتاج متنفّساً
-        self.grid.setSpacing(5)
-        for i, k in enumerate((24, 22, 21, 18)):
-            cap = QtWidgets.QLabel(f"عيار {k}")
-            cap.setObjectName("goldBarSub")
-            cap.setAlignment(QtCore.Qt.AlignCenter)
-            val = QtWidgets.QLabel("—")
-            val.setObjectName("goldKarat")
-            val.setAlignment(QtCore.Qt.AlignCenter)
-            self.karat_labels[k] = val
-            self.grid.addWidget(cap, i // 2 * 2, i % 2)
-            self.grid.addWidget(val, i // 2 * 2 + 1, i % 2)
-
-        self.stamp = QtWidgets.QLabel("")
-        self.stamp.setObjectName("goldBarStamp")
-        self.stamp.setAlignment(QtCore.Qt.AlignCenter)
-
-        btn = QtWidgets.QPushButton("↻ تحديث الآن")
-        btn.setObjectName("ghost")
-        btn.clicked.connect(self.refresh)
-
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setSpacing(3)
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(10, 3, 6, 3)
+        lay.setSpacing(6)
         lay.addWidget(self.title)
         lay.addWidget(self.ounce)
-        lay.addLayout(self.grid)
-        lay.addWidget(self.stamp)
+        self.karat_labels = {}
+        for k in (24, 22, 21, 18):
+            pill = QtWidgets.QLabel("—")
+            pill.setObjectName("goldPill")
+            pill.setAlignment(QtCore.Qt.AlignCenter)
+            pill.setToolTip(f"سعر جرام عيار {k} بالريال")
+            self.karat_labels[k] = pill
+            lay.addWidget(pill)
+        # وقت آخر تحديث تلميحٌ لا نصٌّ دائم — يبقى الشريط سطراً واحداً
+        self.stamp = QtWidgets.QLabel("")
+        self.stamp.setVisible(False)
+        btn = QtWidgets.QToolButton()
+        btn.setObjectName("goldStripBtn")
+        btn.setText("↻")
+        btn.setAutoRaise(True)
+        btn.setCursor(QtCore.Qt.PointingHandCursor)
+        btn.setToolTip("تحديث السعر الآن")
+        btn.clicked.connect(self.refresh)
+        self.btn_refresh = btn
         lay.addWidget(btn)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Maximum,
+                           QtWidgets.QSizePolicy.Fixed)
 
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.refresh)
@@ -165,7 +164,7 @@ class GoldPriceBar(QtWidgets.QFrame):
         self._last = usd
         sar = usd * self.usd_to_sar
         g24 = sar / OUNCE_GRAMS
-        self.ounce.setText(f"{usd:,.2f} $   ·   {sar:,.2f} ر.س")
+        self.ounce.setText(f"الأونصة {usd:,.2f} $ · {sar:,.2f} ر.س")
         prices = {
             24: g24,
             22: g24 * 22 / 24,
@@ -175,12 +174,14 @@ class GoldPriceBar(QtWidgets.QFrame):
             18: usd * K18_FACTOR / K18_DIVISOR,
         }
         for k, lbl in self.karat_labels.items():
-            lbl.setText(f"{prices[k]:,.2f} ر.س")
+            lbl.setText(f"ع{k}  {prices[k]:,.2f}")
         self.stamp.setText(
             "آخر تحديث: "
             + QtCore.QTime.currentTime().toString("HH:mm:ss"))
+        self.setToolTip(f"الأسعار بالريال للجرام — {self.stamp.text()}")
 
     def _err(self, msg):
         if self._last is None:
             self.ounce.setText("تعذّر الاتصال")
         self.stamp.setText("محاولة الاتصال…")
+        self.setToolTip("تعذّر جلب السعر — يُعاد المحاولة تلقائياً")

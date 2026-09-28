@@ -104,13 +104,21 @@ QTableWidget, QTreeWidget, QListWidget {
   background: @surface; alternate-background-color: @surface2;
   gridline-color: @grid; border: 1px solid @line; border-radius: 10px;
   color: @ink; selection-background-color: @goldSoft; selection-color: @ink;
-  font-size: 13pt; font-weight: 500; }
-QTableWidget::item { padding: 7px 8px; }
+  font-size: 13.5pt; font-weight: 500; }
+QTableWidget::item { padding: 8px 10px; border: none; }
 QTableWidget::item:hover { background: @hover; }
-QHeaderView::section { background: @hdrBg; color: @hdrFg; padding: 9px 6px;
-  font-size: 11.5pt; font-weight: bold; border: none;
+/* ══ إطارٌ حديث (4.25) ══
+   لا مستطيل تركيزٍ منقّط حول الخلية، ورأسٌ أعلى بخطٍّ أوضح، وزاوية
+   الجدول بلون رأسه — فيبدو الجدول لوحةً واحدةً مؤطّرة لا شبكةً عارية. */
+QTableView, QTreeView { outline: 0; }
+QHeaderView { background: @hdrBg; border: none;
+  border-top-left-radius: 10px; border-top-right-radius: 10px; }
+QHeaderView::section { background: @hdrBg; color: @hdrFg; padding: 10px 8px;
+  font-size: 12pt; font-weight: bold; border: none;
   border-bottom: 2px solid @hdrLine; border-left: 1px solid @hdrLine2; }
 QHeaderView::section:first { border-left: none; }
+QTableCornerButton::section { background: @hdrBg; border: none;
+  border-bottom: 2px solid @hdrLine; }
 QHeaderView::section:hover { color: @goldDim; }
 
 /* ══ التبويبات: خط سفلي بدل الحبّات الممتلئة ══ */
@@ -318,6 +326,18 @@ QLabel#goldKarat {
   background: @goldSoft2; border: 1px solid @goldEdge;
   border-radius: 7px; padding: 5px 7px;
 }
+
+/* ══ شريط السعر الأفقي (أعلى النافذة) ══ */
+QFrame#goldStrip { background: @goldSoft2; border: 1px solid @goldEdge;
+  border-radius: 9px; }
+QLabel#goldStripTitle { color: @goldDim; font-size: 14px; font-weight: bold; }
+QLabel#goldStripOunce { color: @ink; font-size: 15px; font-weight: bold;
+  padding: 0 4px; }
+QLabel#goldPill { color: @ink; font-size: 14px; font-weight: bold;
+  background: @surface; border: 1px solid @goldEdge; border-radius: 7px;
+  padding: 2px 8px; }
+QToolButton#goldStripBtn { color: @goldDim; font-size: 16px;
+  font-weight: bold; padding: 0 4px; }
 
 /* ══ لوحات تحليل المبيعات ══ */
 QFrame#statPanel { background: @surface; border: 1px solid @line;

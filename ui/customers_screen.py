@@ -20,7 +20,7 @@ from database.database import db
 from models import customer_board as cb
 from services import karat_view as kv
 from ui import theme
-from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err,
+from ui.widgets.common import (StatChip as Card, ask, big_label, date_edit, dstr, err,
                                fill, info, load_pref, make_table, save_pref,
                                search_combo, tab_widget, title_label)
 from ui.widgets.table_fit import fit_columns
@@ -33,13 +33,13 @@ ACC_ROLE = QtCore.Qt.UserRole + 11          # معرّف الحساب في خل�
 SIDE_COLS = ["العميل", "رصيد سابق", "المبيعات", "المرتجع",
              "صافي المبيعات", "السداد", "حركات أخرى", "الباقي",
              "نسبة المرتجع", "نسبة السداد", "آخر سداد", "التقدير"]
-SIDE_W = [18, 8, 9, 8, 9, 9, 8, 10, 8, 8, 9, 8]
+SIDE_W = [22, 8, 9, 8, 9, 9, 8, 9, 8, 8, 11, 7]
 C_OPEN, C_OTHER = 1, 6
 
 OVER_COLS = ["العميل", "الجوال", "عدد الفواتير", "آخر بيع", "آخر سداد",
              "منذ آخر سداد", "الباقي ذهباً", "تقدير الذهب",
              "الباقي نقداً", "تقدير النقد"]
-OVER_W = [20, 10, 7, 9, 9, 8, 10, 8, 10, 8]
+OVER_W = [19, 10, 7, 11, 11, 8, 9, 8, 9, 8]
 
 HINTS = {
     "رصيد سابق": "الرصيد قبل بداية الفترة، ومعه الرصيد الافتتاحي للعميل: "
@@ -124,10 +124,12 @@ class CustomersScreen(QtWidgets.QWidget):
         self.c_ret = Card("المرتجع", "")
         self.c_paid = Card("السداد", "")
         self.c_rem = Card("الباقي على العملاء", "", summary=True)
+        # لوحاتٌ مدمجة بسطرٍ واحد — المساحة للجدول
         cards = QtWidgets.QHBoxLayout()
+        cards.setSpacing(6)
         for c in (self.c_count, self.c_sales, self.c_ret, self.c_paid,
                   self.c_rem):
-            cards.addWidget(c)
+            cards.addWidget(c, 1)
 
         # ── الجداول ──
         self.t_gold = self._table("customers_gold", SIDE_W)

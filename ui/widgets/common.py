@@ -325,7 +325,9 @@ def row_height(table, lines=1, tight=False):
     """
     fm = QtGui.QFontMetrics(table.font())
     line = max(16, fm.lineSpacing())
-    pad = 10 if tight else 14
+    # متنفّسٌ حول الرقم (4.25): الصفّ المريح يُقرأ بلا تحديق، والجداول
+    # الكبيرة أضيق قليلاً فيظهر منها أكثر دون أن يُقصّ النصّ
+    pad = 14 if tight else 20
     return int(max(lines, 1) * line + pad)
 
 
