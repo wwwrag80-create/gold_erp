@@ -369,6 +369,16 @@ QLabel#tableSearchCount { color: @goldDim; font-weight: bold;
 QLabel#toast { background: @tipBg; color: @tipFg; font-size: 12pt;
   font-weight: bold; border-radius: 10px; padding: 8px 18px;
   border: 1px solid @goldEdge2; }
+
+/* «ⓘ» شرح الشاشة المطويّ — وبطاقته العائمة */
+QToolButton#notesBtn { color: @goldDim; font-size: 15pt; font-weight: bold;
+  border: 1px solid transparent; border-radius: 14px; padding: 0 6px;
+  background: transparent; }
+QToolButton#notesBtn:hover { background: @goldSoft2; border-color: @goldEdge2; }
+QFrame#notesPop { background: @surface; border: 1px solid @goldEdge2;
+  border-radius: 12px; }
+QLabel#notesPopTitle { color: @goldDim; font-size: 13pt; font-weight: bold; }
+QLabel#notesPopText { color: @ink; font-size: 12pt; }
 """
 
 # نسخة جاهزة باللوحة الفاتحة — للتوافق مع أي مستدعٍ قديم يقرأ `QSS`

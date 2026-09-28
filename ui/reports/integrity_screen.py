@@ -24,6 +24,7 @@ class IntegrityScreen(QtWidgets.QWidget):
         self.state = big_label("اضغط «تحقّق الآن» لفحص السلسلة.")
         self.detail = QtWidgets.QLabel("")
         self.detail.setObjectName("cardSub")
+        self.detail.setProperty("live", True)        # نتيجةٌ لا شرح
         self.detail.setWordWrap(True)
 
         btn_check = QtWidgets.QPushButton("🔍 تحقّق الآن")

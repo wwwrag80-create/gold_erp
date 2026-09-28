@@ -538,6 +538,7 @@ class SalesScreen(QtWidgets.QWidget):
         # البائع، ويُنبَّه فوراً إن خالفها — بلا منع.
         self.wage_note = QtWidgets.QLabel("")
         self.wage_note.setObjectName("cardSub")
+        self.wage_note.setProperty("live", True)     # تنبيهٌ حيّ لا شرح
         self.wage_note.setWordWrap(True)
 
         g = QtWidgets.QGridLayout(box)
@@ -586,9 +587,11 @@ class SalesScreen(QtWidgets.QWidget):
     # ══════════════════════════════════════════════════════════════
 
     def _build_entry(self):
-        box = QtWidgets.QGroupBox(
-            "② إدخال الطقم  —  Enter ينتقل للخانة التالية · "
-            "الأسهم ← → تتنقّل · Enter على آخر خانة يضيف السطر")
+        # العنوان قصير — وشرح المفاتيح تلميحٌ عند الوقوف عليه لا سطرٌ
+        # يزاحم الجدول
+        box = QtWidgets.QGroupBox("② إدخال الطقم")
+        box.setToolTip("Enter ينتقل للخانة التالية · الأسهم ← → تتنقّل · "
+                       "Enter على آخر خانة يضيف السطر")
         # رقم الموديل أولاً: يُملأ تلقائياً من دليل الموديلات عند
         # إدخال رقم تشغيل مسجّل، ويُكتب يدوياً للأطقم الجديدة فيُسجَّل
         # في الدليل ويبقى مرتبطاً بالطقم.

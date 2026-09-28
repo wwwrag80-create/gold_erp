@@ -87,6 +87,7 @@ class AgingScreen(QtWidgets.QWidget):
         self.note = big_label()
         self.lbl_sel = QtWidgets.QLabel("المعروض: كل الجهات")
         self.lbl_sel.setObjectName("cardSub")
+        self.lbl_sel.setProperty("live", True)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)

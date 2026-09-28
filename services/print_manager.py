@@ -103,8 +103,8 @@ BASE_CSS = """
   html, body { direction: rtl; text-align: right;
                margin: 0; padding: 0; width: 100%; height: 100%;
                max-width: none; }
-  body { font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
-         font-size: 10.5pt; color: #1a1a1a; }
+  body { font-family: @FAMILY@;
+         font-size: 10.5pt; line-height: 133%; color: #1a1a1a; }
   div.doc { width: 100%; height: 100%; margin: 0; padding: 0;
              max-width: none; }
 
@@ -120,11 +120,11 @@ BASE_CSS = """
   table.items th, table.items td {
                 border: 1px solid #999; padding: 5px 4px;
                 text-align: center; vertical-align: middle; }
-  table.items th { background-color: #EFEFEF; font-weight: bold;
+  table.items th { background-color: #F1ECE0; font-weight: bold;
                    white-space: nowrap; }   /* لا تُكسر العناوين لسطرين */
   table.items td.nw { white-space: nowrap; }
   table.items td.r  { text-align: right; }
-  table.items tr.total td { background-color: #EFEFEF; font-weight: bold; }
+  table.items tr.total td { background-color: #F3EBD3; font-weight: bold; }
 
   /* جدول تخطيط بلا حدود (للترويسة والصفوف الجانبية) */
   table.plain { width: 100%; border-collapse: collapse; margin: 0; }
@@ -132,7 +132,7 @@ BASE_CSS = """
 
   /* عنوان المستند: شريط ممتد بعرض الصفحة */
   table.titlebar { width: 100%; border-collapse: collapse; margin: 6px 0; }
-  table.titlebar td { border: 1px solid #999; background-color: #EFEFEF;
+  table.titlebar td { border: 1px solid #999; background-color: #F1ECE0;
                       text-align: center; font-size: 14pt;
                       font-weight: bold; padding: 7px; white-space: nowrap; }
 
@@ -2952,7 +2952,10 @@ def build_html(doc_type, doc_id, **kw):
         '<table class="frame" width="100%" height="100%" cellspacing="0"'
         ' cellpadding="8"><tr><td class="framecell" width="100%" valign="top">'
         f'{en(html)}</td></tr></table>')
-    return (f"<html dir='rtl'><head><meta charset='utf-8'>{BASE_CSS}</head>"
+    # محرك Qt يعرف الخط المرفق بعد تسجيله في التطبيق — فالاسم يكفيه
+    from services import print_fonts
+    css = BASE_CSS.replace("@FAMILY@", print_fonts.family_css())
+    return (f"<html dir='rtl'><head><meta charset='utf-8'>{css}</head>"
             f"<body dir='rtl'><div class='doc'>{framed}</div></body></html>")
 
 

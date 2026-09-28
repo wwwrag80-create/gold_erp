@@ -122,23 +122,26 @@ def _splash_png():
         # المستخدم **شعاراً ظهر ثم اختفى** قبل أن تفتح البوابة —
         # مشهدان لا مشهد. الآن هي نفس خلفية البوابة وشعارُها وحده
         # بلا إطارٍ ولا نص: فالانتقال اتّساعُ الصورة لا تبديلُها.
-        w, h = 460, 300
-        img = QtGui.QImage(w, h, QtGui.QImage.Format_ARGB32)
+        # ══ الجيل الثاني: إطارٌ من المسرح نفسه بدقّةٍ أعلى ══
+        # الخلفية والوهج والحبيبات وخواتمُ في أول رسمها — يرسمها
+        # `GoldStage` ذاته لا نسخةٌ عنه، فالانتقال إلى البوابة
+        # استمرارٌ للمشهد نفسه. والشعار في الوسط بهالته المعدنية.
+        w, h = 600, 380
+        img = QtGui.QImage(w, h, QtGui.QImage.Format_ARGB32_Premultiplied)
         img.fill(QtGui.QColor("#17120C"))
+        from ui.widgets.gold_stage import GoldStage
+        stage = GoldStage()
+        stage.resize(w, h)
+        stage.intro = 0.34            # الخواتم تبدأ رسمها: وعدٌ بما يأتي
+        stage.t = 0.8
+        stage.logo_center = QtCore.QPointF(w / 2, h * 0.46)
+        stage.render(img)
         p = QtGui.QPainter(img)
         p.setRenderHint(QtGui.QPainter.Antialiasing, True)
-        p.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
-        g = QtGui.QRadialGradient(w / 2, h * 0.46, w * 0.62)
-        c0 = QtGui.QColor("#4A3616")
-        c0.setAlpha(120)
-        c1 = QtGui.QColor("#4A3616")
-        c1.setAlpha(0)
-        g.setColorAt(0.0, c0)
-        g.setColorAt(1.0, c1)
-        p.fillRect(0, 0, w, h, QtGui.QBrush(g))
+        p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
         from ui.gate_window import _emblem
-        em = _emblem(120)
-        p.drawPixmap(int(w / 2 - 60), int(h / 2 - 60), em)
+        em = _emblem(140)
+        p.drawPixmap(QtCore.QPointF(w / 2 - 70, h * 0.46 - 70), em)
         p.end()
         _ = QtCore
         out = Path(tempfile.mkdtemp(prefix="jadeite_splash_")) / "splash.png"

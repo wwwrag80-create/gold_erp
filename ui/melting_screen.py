@@ -123,6 +123,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         self.cycle_label = big_label()
         self.cycle_note = QtWidgets.QLabel()
         self.cycle_note.setObjectName("cardSub")
+        self.cycle_note.setProperty("live", True)    # حالةٌ لا شرح
         self.cycle_note.setWordWrap(True)
         self.close_date = date_edit()
         btn_close = QtWidgets.QPushButton(

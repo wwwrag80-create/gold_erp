@@ -117,6 +117,7 @@ class SuperAdminScreen(QtWidgets.QWidget):
         self.status = big_label("حالة المزامنة: —")
         self.qstats = QtWidgets.QLabel("")
         self.qstats.setObjectName("cardSub")
+        self.qstats.setProperty("live", True)
 
         row = QtWidgets.QHBoxLayout()
         row.addWidget(btn_save)
@@ -629,6 +630,7 @@ class SuperAdminScreen(QtWidgets.QWidget):
         row_maint.addStretch(1)
         self.maint_label = QtWidgets.QLabel("")
         self.maint_label.setObjectName("cardSub")
+        self.maint_label.setProperty("live", True)
         self.maint_label.setWordWrap(True)
 
         self.bk_table = make_table()

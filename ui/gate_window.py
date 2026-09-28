@@ -95,39 +95,88 @@ QCheckBox#gateRemember::indicator:checked {
 """
 
 
+def _screen_dpr():
+    """نسبة بكسلات الشاشة الفعلية — لرسمٍ حادٍّ على الشاشات عالية الدقة."""
+    try:
+        scr = QtWidgets.QApplication.primaryScreen()
+        return max(1.0, float(scr.devicePixelRatio())) if scr else 1.0
+    except Exception:
+        return 1.0
+
+
 def _emblem(size=104):
     """خاتمٌ بحجرٍ يُرسم رسماً — شعارٌ لا يضيع مع نقل الملفات.
 
     الملف التنفيذي قد يُنسخ وحده بلا مجلد الأصول، فيُفتح النظام
     بمربّعٍ فارغٍ مكان الشعار. هذا بديلٌ لا ملفَ له.
+
+    **يُرسم بدقّة الشاشة الفعلية** (نسبة البكسل) فيبقى حادّاً على شاشات
+    4K، والخاتم معدنٌ لا لون: تدرّجٌ مخروطيّ يصنع انعكاساً، وخطُّ ضوءٍ
+    على حافّته العليا، وهالةٌ خافتة حوله. والحجرُ مقصوصٌ أوجهاً
+    (facets) كلُّ وجهٍ بدرجة ضوء — كما يُرى الحجر الحقيقي.
     """
-    pix = QtGui.QPixmap(size, size)
+    dpr = _screen_dpr()
+    pix = QtGui.QPixmap(int(size * dpr), int(size * dpr))
+    pix.setDevicePixelRatio(dpr)
     pix.fill(QtCore.Qt.transparent)
     p = QtGui.QPainter(pix)
     p.setRenderHint(QtGui.QPainter.Antialiasing, True)
     c = size / 2.0
-    r = size * 0.34
-    ring = QtGui.QLinearGradient(c - r, c - r, c + r, c + r)
-    ring.setColorAt(0.0, QtGui.QColor("#F0D98A"))
-    ring.setColorAt(0.5, QtGui.QColor("#C9A227"))
-    ring.setColorAt(1.0, QtGui.QColor("#8A6F1E"))
-    pen = QtGui.QPen(QtGui.QBrush(ring), max(2.0, size * 0.075))
+    r = size * 0.31
+    cy = c + size * 0.06
+    band = max(2.0, size * 0.072)
+    # هالةٌ خافتة حول الخاتم — نصفُ قطرها داخل حدود الصورة كلّها،
+    # فلا تُقصّ حافّتها السفلى خطّاً مستقيماً
+    hr = size * 0.5 - (cy - c) - 1
+    halo = QtGui.QRadialGradient(c, cy, hr)
+    halo.setColorAt(0.70, QtGui.QColor(240, 217, 138, 0))
+    halo.setColorAt(0.84, QtGui.QColor(240, 217, 138, 52))
+    halo.setColorAt(1.00, QtGui.QColor(240, 217, 138, 0))
+    p.setPen(QtCore.Qt.NoPen)
+    p.setBrush(QtGui.QBrush(halo))
+    p.drawEllipse(QtCore.QPointF(c, cy), hr, hr)
+    # الخاتم: معدنٌ بانعكاسٍ مخروطيّ
+    ring = QtGui.QConicalGradient(c, cy, 120)
+    for pos, col in ((0.00, "#8A6F1E"), (0.14, "#F0D98A"), (0.22, "#FFF6DC"),
+                     (0.32, "#C9A227"), (0.55, "#7A6118"), (0.78, "#D8B23A"),
+                     (0.90, "#F0D98A"), (1.00, "#8A6F1E")):
+        ring.setColorAt(pos, QtGui.QColor(col))
+    pen = QtGui.QPen(QtGui.QBrush(ring), band)
     p.setPen(pen)
     p.setBrush(QtCore.Qt.NoBrush)
-    p.drawEllipse(QtCore.QRectF(c - r, c - r + size * 0.07,
-                                2 * r, 2 * r))
-    # الحجر: معيّنٌ صغير فوق الخاتم
-    g = QtGui.QLinearGradient(c, c - r * 1.5, c, c - r * 0.45)
-    g.setColorAt(0.0, QtGui.QColor("#FFF6DC"))
-    g.setColorAt(1.0, QtGui.QColor("#D8B23A"))
-    p.setPen(QtGui.QPen(QtGui.QColor("#8A6F1E"), max(1.0, size * 0.012)))
-    p.setBrush(QtGui.QBrush(g))
+    p.drawEllipse(QtCore.QRectF(c - r, cy - r, 2 * r, 2 * r))
+    # خطُّ الضوء على الحافّة العليا
+    hl = QtGui.QPen(QtGui.QColor(255, 250, 230, 150), max(1.0, band * 0.22))
+    hl.setCapStyle(QtCore.Qt.RoundCap)
+    p.setPen(hl)
+    rr = r + band * 0.28
+    p.drawArc(QtCore.QRectF(c - rr, cy - rr, 2 * rr, 2 * rr),
+              int(110 * 16), int(70 * 16))
+    # الحجر: معيّنٌ مقصوصٌ أربعة أوجه فوق الخاتم
     s = size * 0.15
-    p.drawPolygon(QtGui.QPolygonF([
-        QtCore.QPointF(c, c - r - s * 1.25),
-        QtCore.QPointF(c + s, c - r - s * 0.15),
-        QtCore.QPointF(c, c - r + s * 0.85),
-        QtCore.QPointF(c - s, c - r - s * 0.15)]))
+    top = QtCore.QPointF(c, cy - r - s * 1.25)
+    rgt = QtCore.QPointF(c + s, cy - r - s * 0.15)
+    bot = QtCore.QPointF(c, cy - r + s * 0.85)
+    lft = QtCore.QPointF(c - s, cy - r - s * 0.15)
+    mid = QtCore.QPointF(c, cy - r - s * 0.15)
+    edge = QtGui.QPen(QtGui.QColor("#8A6F1E"), max(1.0, size * 0.010))
+    edge.setJoinStyle(QtCore.Qt.RoundJoin)
+    for pts, col in (((top, rgt, mid), "#FFF6DC"), ((top, mid, lft), "#F3DE95"),
+                     ((lft, mid, bot), "#C9A227"), ((mid, rgt, bot), "#E0BF4E")):
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QColor(col))
+        p.drawPolygon(QtGui.QPolygonF(list(pts)))
+    p.setPen(edge)
+    p.setBrush(QtCore.Qt.NoBrush)
+    p.drawPolygon(QtGui.QPolygonF([top, rgt, bot, lft]))
+    # بريقٌ صغير على الوجه الأعلى
+    spark = QtGui.QRadialGradient(c - s * 0.25, cy - r - s * 0.7, s * 0.55)
+    spark.setColorAt(0.0, QtGui.QColor(255, 255, 255, 230))
+    spark.setColorAt(1.0, QtGui.QColor(255, 255, 255, 0))
+    p.setPen(QtCore.Qt.NoPen)
+    p.setBrush(QtGui.QBrush(spark))
+    p.drawEllipse(QtCore.QPointF(c - s * 0.25, cy - r - s * 0.7),
+                  s * 0.55, s * 0.55)
     p.end()
     return pix
 
@@ -293,8 +342,11 @@ class GateWindow(QtWidgets.QDialog):
             if path and Path(str(path)).exists():
                 cand = QtGui.QPixmap(str(path))
                 if not cand.isNull():
+                    # يُصغَّر بدقّة الشاشة الفعلية فيبقى حادّاً على 4K
+                    dpr = _screen_dpr()
                     pix = cand.scaledToWidth(
-                        168, QtCore.Qt.SmoothTransformation)
+                        int(168 * dpr), QtCore.Qt.SmoothTransformation)
+                    pix.setDevicePixelRatio(dpr)
                     break
         # بلا ملف شعار يُرسم خاتمٌ بحجرٍ: البوابة لا تظهر ناقصةً
         # لأن أصلاً لم يُنسخ بجوار الملف التنفيذي.
@@ -529,6 +581,23 @@ class GateWindow(QtWidgets.QDialog):
             self.card.move(int((self.width() - self.card.width()) / 2),
                            int(max(0.0, cy)))
             self.card.raise_()
+        self._sync_stage()
+
+    def _sync_stage(self):
+        """يُخبر المسرحَ بموضع الشعار واللوحة: أشعّته خلف الشعار،
+        وهالتُه حول اللوحة — مرسومةً تحتها لا مؤثّراً فوق حقولها."""
+        try:
+            if self.hero.isVisible():
+                c = self.logo.mapTo(self, self.logo.rect().center())
+                self.stage.logo_center = QtCore.QPointF(c)
+            card = self.card
+            if card is not None and card.isVisible():
+                self.stage.card_rect = QtCore.QRectF(card.geometry())
+                self.stage.card_k = float(getattr(self, "_card_k", 0.0))
+            else:
+                self.stage.card_k = 0.0
+        except Exception:
+            pass
 
     def _on_intro(self, v):
         self.stage.intro = float(v)
@@ -606,6 +675,7 @@ class GateWindow(QtWidgets.QDialog):
             label.setPixmap(src)
             return
         out = QtGui.QPixmap(src.size())
+        out.setDevicePixelRatio(src.devicePixelRatio())
         out.fill(QtCore.Qt.transparent)
         p = QtGui.QPainter(out)
         p.setOpacity(v)
@@ -832,6 +902,7 @@ class GateWindow(QtWidgets.QDialog):
         for w in (self.card, self.hero):
             if w is not None:
                 w.hide()
+        self.stage.card_k = 0.0         # لا هالةَ للوحةٍ غابت
         self._exit.start()
 
     def _on_exit(self, v):

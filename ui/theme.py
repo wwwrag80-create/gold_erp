@@ -212,4 +212,10 @@ def apply(app, theme=None, scale=None):
         effects.refresh_all()
     except Exception:
         pass
+    # فقرات الشرح تُطوى في الشاشات لتتّسع للجدول (`ui.widgets.declutter`)
+    try:
+        from ui.widgets import declutter
+        declutter.install(app)
+    except Exception:
+        pass
     return name, s

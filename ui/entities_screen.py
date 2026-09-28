@@ -71,6 +71,7 @@ class EntitiesScreen(QtWidgets.QWidget):
 
         self.hint = QtWidgets.QLabel()
         self.hint.setObjectName("cardSub")
+        self.hint.setProperty("note", True)     # شرح نوع الجهة — يُطوى
         self.hint.setWordWrap(True)
 
         self.form = QtWidgets.QFormLayout()
@@ -180,6 +181,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.agreed_from = date_edit()
         self.lbl_agreed_hist = QtWidgets.QLabel("")
         self.lbl_agreed_hist.setObjectName("cardSub")
+        self.lbl_agreed_hist.setProperty("live", True)
         self.lbl_agreed_hist.setWordWrap(True)
         btn_wage = QtWidgets.QPushButton("حفظ الأجرة المتفق عليها")
         btn_wage.clicked.connect(self.save_agreed_wage)

@@ -36,9 +36,16 @@ PRINT_CSS = """
     margin: 0;
     padding: 0;
     width: 100%%;
-    font-family: 'Segoe UI', 'Cairo', 'Tahoma', sans-serif;
+    font-family: %(family)s;
     font-size: 11pt;
+    /* ارتفاع سطر «Segoe UI» نفسه (1.33): الخط الحديث أطول سطراً
+       بطبعه (1.51)، فيبقى المقاس كما هو ولا تزيد الصفحات */
+    line-height: 1.33;
     color: #111;
+    /* أرقامٌ متساوية العرض: تصطفّ الأعمدة المالية منزلةً تحت منزلة */
+    font-variant-numeric: tabular-nums;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -47,7 +54,8 @@ PRINT_CSS = """
   .sheet {
     width: 100%%;
     min-height: %(minheight)s;
-    border: 1.5px solid #333;
+    border: 1.5px solid #3A342A;
+    border-radius: 6px;
     padding: 10px;
     display: flex;
     flex-direction: column;
@@ -69,20 +77,26 @@ PRINT_CSS = """
     word-wrap: break-word;
   }
   table.items th, table.titlebar td, .lbl, th {
-    background: #EFEFEF;
+    background: #F1ECE0;
     font-weight: bold;
     white-space: nowrap;
   }
   table.items td.r, table.wide td.val { text-align: right; }
   table.items tr.total td, table.items td.nw { white-space: nowrap; }
-  tr.total td { background: #EFEFEF; font-weight: bold; }
+  /* تظليلٌ خفيفٌ لسطرٍ ويُترك سطر: العين لا تقفز إلى السطر المجاور
+     في الكشوف الطويلة. يطبع رمادياً باهتاً على الطابعة الأحادية. */
+  /* أسطر البيانات وحدها — لا جداول «عنوان: قيمة» الصغيرة (فيها th) */
+  table.items tr:nth-child(even):not(:has(th)) td { background: #FAF8F3; }
+  tr.total td, table.items tr.total td { background: #F3EBD3;
+    font-weight: bold; border-top: 1.5px solid #8A6D1D; }
 
   /* الترويسة */
   table.lh { border-bottom: 2px solid #999; }
   table.lh td { border: none; padding: 4px; vertical-align: middle; }
   table.plain td { border: none; padding: 2px; vertical-align: top; }
   table.sig td { border: none; padding: 8px; text-align: center; }
-  table.titlebar td { font-size: 15pt; }
+  table.titlebar td { font-size: 15pt; letter-spacing: 0.2px;
+                      border-bottom: 2px solid #B99B33; }
 
   .co     { font-size: 14pt; font-weight: bold; white-space: nowrap; }
   .co-sub { font-size: 9.5pt; white-space: nowrap; }
@@ -125,14 +139,20 @@ PRINT_CSS = """
 
   /* شريط الأدوات على الشاشة فقط */
   .toolbar {
-    background: #8A6D1D; color: #fff; padding: 10px;
-    text-align: center; font-size: 13pt; margin-bottom: 8px;
+    background: linear-gradient(180deg, #A8872A, #7E6317); color: #fff;
+    padding: 10px; text-align: center; font-size: 13pt; margin-bottom: 8px;
+    border-radius: 0 0 10px 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.18);
   }
   .toolbar button {
+    font-family: inherit;
     font-size: 13pt; padding: 7px 22px; margin: 0 6px; cursor: pointer;
-    border: none; border-radius: 5px; background: #fff; color: #8A6D1D;
-    font-weight: bold;
+    border: none; border-radius: 8px; background: #fff; color: #7E6317;
+    font-weight: bold; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    transition: transform .12s ease, box-shadow .12s ease;
   }
+  .toolbar button:hover { transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(0,0,0,.25); }
 </style>
 """
 
@@ -162,6 +182,8 @@ def build_page(doc_type, doc_id, auto_print=True, **kw):
     finally:
         print_manager.RTL_ORDER_OVERRIDE = prev
     setup = _page_setup(doc_type)
+    from services import print_fonts
+    setup["family"] = print_fonts.family_css()
     toolbar = ""
     script = ""
     if auto_print:
@@ -177,6 +199,7 @@ def build_page(doc_type, doc_id, auto_print=True, **kw):
         "<!DOCTYPE html>\n"
         "<html dir='rtl' lang='ar'><head><meta charset='utf-8'>"
         f"<title>{config.COMPANY_NAME}</title>"
+        + print_fonts.style_block()
         + (PRINT_CSS % setup) +
         f"</head><body dir='rtl'>{toolbar}"
         f"<div class='sheet'><div class='sheet-body'>{inner}</div></div>"

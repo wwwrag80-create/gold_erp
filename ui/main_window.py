@@ -377,6 +377,15 @@ class MainWindow(QtWidgets.QMainWindow):
         sb = QtWidgets.QHBoxLayout(subbar)
         sb.setContentsMargins(16, 6, 16, 6)
         sb.addWidget(self.crumb)
+        # «ⓘ» — شرح الشاشة المطويّ، يظهر عند الطلب لا فوق الجدول
+        self.btn_notes = QtWidgets.QToolButton()
+        self.btn_notes.setObjectName("notesBtn")
+        self.btn_notes.setText("ⓘ")
+        self.btn_notes.setAutoRaise(True)
+        self.btn_notes.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_notes.clicked.connect(self.show_screen_notes)
+        self.btn_notes.setVisible(False)
+        sb.addWidget(self.btn_notes)
         sb.addStretch(1)
         # مساحة أدوات تخصّ الشاشة الحالية: تضع كل شاشة أزرارها العامة
         # هنا بجوار «إغلاق الشاشة» بدل ازدحام مساحة العمل بها.
@@ -410,6 +419,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sidebar.setHeaderHidden(True)
         self.sidebar.setIndentation(14)
         self.stack = QtWidgets.QStackedWidget()
+        # اسمٌ يعرف به مرشّح فقرات الشرح أن الملصق داخل شاشة لا حوار
+        self.stack.setObjectName("screenHost")
         self._current_row = 0
         self.screens = [self.welcome]     # Index 0 = شاشة الترحيب
         self.stack.addWidget(self.welcome)
@@ -809,6 +820,14 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._panel_visible = not is_sub
         self.btn_close.setVisible(is_sub)      # زر الإغلاق في كل شاشة فرعية
+        # ══ شريط الحالة في الرئيسية وحدها ══
+        # داخل الشاشة كل سطرٍ للجدول: الشريط السفلي يُطوى ويعود
+        # عند الرجوع إلى الرئيسية.
+        if getattr(self, "_sb_user", None) is not None:
+            self.statusBar().setVisible(not is_sub)
+        self.btn_notes.setVisible(False)
+        if is_sub:
+            QtCore.QTimer.singleShot(250, self._update_notes_btn)
         # التحديث مؤجَّل لدورة أحداث لاحقة: يظهر التبديل فورياً
         # ثم تُحمَّل البيانات — فلا تتجمّد الواجهة أثناء الاستعلام.
         QtCore.QTimer.singleShot(0, lambda: self._mount_screen_tools(screen))
@@ -1006,6 +1025,77 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
 
+    # ══════════ شرح الشاشة المطويّ ══════════
+    def _current_notes(self):
+        from ui.widgets import declutter
+        row = getattr(self, "_current_row", 0)
+        if not (0 < row < len(self.screens)):
+            return []
+        return declutter.notes_in(self.screens[row])
+
+    def _update_notes_btn(self):
+        """يُظهر «ⓘ» حين يكون للشاشة شرحٌ مطويّ، وتلميحُه أوّلُه."""
+        try:
+            from ui.widgets import declutter
+            notes = [] if declutter.showing() else self._current_notes()
+            self.btn_notes.setVisible(bool(notes))
+            if notes:
+                self.btn_notes.setToolTip(
+                    "شرح الشاشة — انقر لعرضه كاملاً\n\n" + notes[0])
+        except Exception:
+            pass
+
+    def show_screen_notes(self):
+        """يعرض شرح الشاشة كله في بطاقةٍ عائمة تُغلق بأي نقرة."""
+        try:
+            notes = self._current_notes()
+            if not notes:
+                return
+            pop = QtWidgets.QFrame(self, QtCore.Qt.Popup)
+            pop.setObjectName("notesPop")
+            pop.setLayoutDirection(QtCore.Qt.RightToLeft)
+            lay = QtWidgets.QVBoxLayout(pop)
+            lay.setContentsMargins(16, 12, 16, 12)
+            lay.setSpacing(8)
+            from ui.widgets import declutter
+            row = getattr(self, "_current_row", 0)
+            head = declutter.title_in(self.screens[row]) or self.crumb.text()
+            title = QtWidgets.QLabel("ⓘ  " + head)
+            title.setWordWrap(True)
+            title.setObjectName("notesPopTitle")
+            lay.addWidget(title)
+            for t in notes:
+                lbl = QtWidgets.QLabel("•  " + t)
+                lbl.setObjectName("notesPopText")
+                lbl.setWordWrap(True)
+                lbl.setTextInteractionFlags(
+                    QtCore.Qt.TextSelectableByMouse)
+                lay.addWidget(lbl)
+            width = min(560, max(360, self.width() // 2))
+            pop.setFixedWidth(width)
+            lay.activate()
+            pop.setFixedHeight(max(lay.heightForWidth(width),
+                                   lay.minimumSize().height()))
+            btn = self.btn_notes
+            at = btn.mapToGlobal(QtCore.QPoint(btn.width() - pop.width(),
+                                               btn.height() + 4))
+            scr = QtWidgets.QApplication.desktop().availableGeometry(btn)
+            at.setX(max(scr.left() + 8,
+                        min(at.x(), scr.right() - pop.width() - 8)))
+            pop.move(at)
+            pop.show()
+            self._notes_pop = pop
+        except Exception as e:
+            err(self, e)
+
+    def _set_show_notes(self, on):
+        try:
+            from ui.widgets import declutter
+            declutter.set_showing(bool(on), self.user.get("username"))
+            self._update_notes_btn()
+        except Exception as e:
+            err(self, e)
+
     def _refresh_current(self):
         """يحدّث الشاشة الظاهرة حالياً، بحماية من أي استثناء."""
         try:
@@ -1175,6 +1265,11 @@ class MainWindow(QtWidgets.QMainWindow):
         a_fx.setCheckable(True)
         a_fx.setChecked(_fx.enabled())
         a_fx.toggled.connect(self._set_effects)
+        from ui.widgets import declutter as _dc
+        a_notes = menu.addAction("📝 إظهار العناوين والملاحظات التوضيحية")
+        a_notes.setCheckable(True)
+        a_notes.setChecked(_dc.showing())
+        a_notes.toggled.connect(self._set_show_notes)
 
         # ══ وجهة رمز QR على الفاتورة ══
         # القرار ليس تجميلياً: الرابط السحابي يفتحه العميل من بيته،
@@ -1563,6 +1658,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._clock = QtCore.QTimer(self)
             self._clock.timeout.connect(self._tick_clock)
             self._clock.start(20_000)
+            # بُني بعد `switch(0)`: يأخذ حالة الشاشة الحالية
+            sb.setVisible(getattr(self, "_current_row", 0) == 0)
         except Exception:
             pass
 

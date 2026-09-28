@@ -29,6 +29,8 @@ sys.path.insert(0, ROOT)
 QT_INHERITED = {
     # حدود الخانات الرقمية (QDoubleSpinBox) — الحقل الذكي يقصّ بها
     "minimum", "maximum",
+    # المسرح الذهبي (QWidget): موضع الفأرة للمنظور، ونسبة البكسل للدقّة
+    "mapFromGlobal", "devicePixelRatioF",
     # توابع الجداول الموروثة (QTableWidget) — تظهر في الأصناف المشتقة
     "state", "setCurrentCell", "currentRow", "currentColumn", "rowCount",
     "indexWidget", "commitData", "closeEditor", "currentIndex",

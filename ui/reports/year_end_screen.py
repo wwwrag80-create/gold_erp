@@ -51,6 +51,7 @@ class YearEndScreen(QtWidgets.QWidget):
         # ══ قفل الفترات ══
         self.lock_state = QtWidgets.QLabel("—")
         self.lock_state.setObjectName("cardSub")
+        self.lock_state.setProperty("live", True)
         self.lock_date = QtWidgets.QDateEdit()
         self.lock_date.setCalendarPopup(True)
         self.lock_date.setDisplayFormat("yyyy-MM-dd")

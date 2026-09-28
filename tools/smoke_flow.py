@@ -4873,6 +4873,72 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("56) مساحةٌ للجدول: لا شريط حالة ولا فقرات شرح داخل الشاشات · "
+         "خط الطباعة · المسرح")
+    from services import browser_print as _bp56, print_fonts as _pf56
+    _css56 = _pf56.face_css()
+    check("خط الطباعة مضمَّنٌ في الورقة نفسها (وزنان) لا رابطاً لملف",
+          _css56.count("@font-face") == 2
+          and "data:font/ttf;base64," in _css56
+          and "file:" not in _css56)
+    with db() as _c56:
+        _inv56 = _c56.execute(
+            "SELECT id FROM invoices ORDER BY id LIMIT 1").fetchone()
+    if _inv56:
+        _h56 = _bp56.build_page("invoices", _inv56[0], auto_print=False)
+        check("وورقة الطباعة بالخط الحديث وارتفاع سطر Segoe — فلا تزيد صفحاتها",
+              "IBM Plex Sans Arabic" in _h56 and "line-height: 1.33" in _h56
+              and "font-size: 11pt" in _h56)
+    try:
+        from PyQt5 import QtCore as _QC56, QtWidgets as _QW56
+        _app56 = _QW56.QApplication.instance() or _QW56.QApplication([])
+        from ui.widgets import declutter as _dc56
+        _dc56.install(_app56)
+        from ui.main_window import MainWindow as _MW56
+        _w56 = _MW56({"id": 1, "username": "admin", "full_name": "م",
+                      "role": "admin", "role_local": "accountant"})
+        _w56.resize(1300, 800)
+        _w56.show()
+        for _ in range(6):
+            _app56.processEvents()
+        check("الرئيسية: شريط الحالة ظاهر", _w56.statusBar().isVisible())
+        _idx56 = [k for k, v in _w56._screen_keys.items()
+                  if v.startswith("العملاء")][0]
+        _w56.switch(_idx56)
+        for _ in range(12):
+            _app56.processEvents()
+        _scr56 = _w56.screens[_idx56]
+        _lbls56 = _scr56.findChildren(_QW56.QLabel)
+        check("داخل الشاشة: شريط الحالة مطويّ للجدول",
+              not _w56.statusBar().isVisible())
+        check("وفقرات الشرح وعنوانُ الشاشة المكرّر مطويّة",
+              not any(_dc56.foldable(l) and l.isVisible() for l in _lbls56)
+              and any(l.property("_note_folded") for l in _lbls56))
+        _w56._update_notes_btn()        # يُنادى بعد ربع ثانية من الفتح
+        check("والشرح لا يضيع: زرّ ⓘ يعرضه عند الطلب",
+              _w56.btn_notes.isVisible() and bool(_w56._current_notes()))
+        _w56.switch(0)
+        for _ in range(4):
+            _app56.processEvents()
+        check("والعودة للرئيسية تُعيد شريط الحالة",
+              _w56.statusBar().isVisible())
+        _w56.close()
+
+        from ui.widgets import gold_stage as _gs56
+        _st56 = _gs56.GoldStage()
+        _st56.resize(640, 400)
+        _st56.intro = 1.0
+        from PyQt5 import QtGui as _QG56
+        _img56 = _QG56.QImage(640, 400, _QG56.QImage.Format_ARGB32)
+        _st56.render(_img56)
+        _st56.exit = 0.6
+        _st56.render(_img56)
+        check("المسرح: ثلاث طبقات عمق وإيقاعٌ ستّيني ينزل وحده عند الثقل",
+              len({d["d"] for d in _st56._dust}) == 3 and _gs56.FPS == 60
+              and _gs56.LOW_FPS == 30 and _st56._bg is not None)
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
