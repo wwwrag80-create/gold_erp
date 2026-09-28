@@ -29,6 +29,7 @@ STATUS_LABELS = {
     "rejected": "مرفوضة ✘", "error": "تعذّر الإرسال — سيُعاد",
 }
 ACCEPTED = ("reported", "cleared", "warning")
+QR_TABLES = ("invoices", "tax_sales")      # جداولٌ تُطبع برمز QR المستند
 KIND_LABELS = {"invoice": "فاتورة", "credit": "إشعار دائن",
                "debit": "إشعار مدين"}
 SUB_LABELS = {"standard": "ضريبية (B2B)", "simplified": "مبسطة (B2C)"}
@@ -238,9 +239,9 @@ def issue(conn, source_table, source_id, doc, username=None):
          signed["uuid"], doc["icv"], pih, signed["hash"], signed["qr"],
          signed["xml"], doc["issue_date"], doc["issue_time"],
          float(t["net"]), float(t["vat"]), float(t["gross"]), env, username))
-    if source_table == "invoices":
+    if source_table in QR_TABLES:
         # الرمز المطبوع على الفاتورة يصير رمز المرحلة الثانية
-        conn.execute("UPDATE invoices SET qr_base64=? WHERE id=?",
+        conn.execute(f"UPDATE {source_table} SET qr_base64=? WHERE id=?",
                      (signed["qr"], source_id))
     kick()
     return {"icv": doc["icv"], "uuid": signed["uuid"],
@@ -282,9 +283,9 @@ def _apply_result(conn, doc_id, status, payload, error=""):
     if fields.get("cleared_qr"):
         d = conn.execute("SELECT source_table, source_id FROM"
                          " fatoora_documents WHERE id=?", (doc_id,)).fetchone()
-        if d and d["source_table"] == "invoices":
-            conn.execute("UPDATE invoices SET qr_base64=? WHERE id=?",
-                         (fields["cleared_qr"], d["source_id"]))
+        if d and d["source_table"] in QR_TABLES:
+            conn.execute(f"UPDATE {d['source_table']} SET qr_base64=?"
+                         " WHERE id=?", (fields["cleared_qr"], d["source_id"]))
 
 
 def submit_one(doc_row, env):

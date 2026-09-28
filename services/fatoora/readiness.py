@@ -201,6 +201,15 @@ def run(conn, deep=True):
             " EXISTS (SELECT 1 FROM fatoora_documents d WHERE"
             " d.source_table='invoices' AND d.source_id=i.id AND"
             " d.archived=0)", (act,)).fetchone()[0]
+        try:        # المبيعات الضريبية خارج المخزون — ضريبيةٌ كلّها
+            missing += conn.execute(
+                "SELECT COUNT(*) FROM tax_sales s WHERE s.is_deleted=0"
+                " AND s.created_at>=? AND NOT EXISTS (SELECT 1 FROM"
+                " fatoora_documents d WHERE d.source_table='tax_sales'"
+                " AND d.source_id=s.id AND d.archived=0)",
+                (act,)).fetchone()[0]
+        except Exception:
+            pass
         _item(items, sec, "كل فاتورة ضريبية بعد التفعيل لها مستند إلكتروني",
               FAIL if missing else OK,
               f"{missing} فاتورة بلا مستند (صدرت من جهازٍ آخر؟)" if missing

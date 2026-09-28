@@ -27,6 +27,7 @@ DOC_TYPES = [
     ("كل المستندات", "all"),
     ("فواتير ومرتجعات", "invoices"),
     ("سندات قبض وصرف", "vouchers"),
+    ("المبيعات الضريبية وإشعاراتها", "tax_sales"),
     ("فواتير مشتريات", "purchases"),
     ("صب وتصفية", "melting_ops"),
     ("تسكير", "fixing_ops"),
@@ -59,6 +60,14 @@ QUERIES = {
                (COALESCE(p.amount,0)+COALESCE(p.vat_amount,0)) cash,
                0 gold, p.is_deleted, 'فاتورة مشتريات' label
         FROM purchases p LEFT JOIN entities e ON e.id=p.supplier_id""",
+    "tax_sales": """
+        SELECT t.id, t.doc_no doc_no, t.doc_date d,
+               COALESCE(e.name,'—') party,
+               CASE t.kind WHEN 'credit' THEN -t.total ELSE t.total END cash,
+               0 gold, t.is_deleted,
+               CASE t.kind WHEN 'credit' THEN 'إشعار دائن ضريبي'
+                           ELSE 'فاتورة ضريبية' END label
+        FROM tax_sales t LEFT JOIN entities e ON e.id=t.customer_id""",
     "melting_ops": """
         SELECT m.id, m.op_no doc_no, m.op_date d, '—' party, 0 cash,
                m.equiv18 gold, m.is_deleted,

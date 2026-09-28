@@ -96,6 +96,18 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                 _mark(conn, "invoices", sid, username)
         elif src == "tax_debit_notes":
             _mark(conn, "tax_debit_notes", sid, username)
+        elif src == "tax_sales":
+            # الفاتورة الضريبية لا تُحذف بعد إصدار مستندها الإلكتروني،
+            # ولا فاتورةٌ عليها إشعارٌ دائنٌ قائم قبل حذف إشعارها
+            from services.fatoora import ledger as _fatoora
+            _fatoora.guard_change(conn, "tax_sales", sid, "حذف")
+            dep = conn.execute(
+                "SELECT doc_no FROM tax_sales WHERE ref_id=? AND"
+                " is_deleted=0", (sid,)).fetchone()
+            if dep:
+                raise ValueError(f"على الفاتورة إشعارٌ دائن قائم "
+                                 f"({dep['doc_no']}) — احذفه أولاً")
+            _mark(conn, "tax_sales", sid, username)
         elif src == "vouchers":
             conn.execute("UPDATE scrap_moves SET is_deleted=1"
                          " WHERE ref_table='vouchers' AND ref_id=?", (sid,))

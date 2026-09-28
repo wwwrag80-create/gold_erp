@@ -54,6 +54,7 @@ OP_LABELS = {
     "shrinkage_ops": "تسوية فاقد", "stocktakes": "جرد",
     "purchases": "مشتريات", "entities": "رصيد افتتاحي",
     "payroll_ledger": "راتب", "tax_debit_notes": "إشعار ضريبي",
+    "tax_sales": "مبيعات ضريبية",
     None: "قيد يومي",
 }
 
@@ -63,6 +64,7 @@ DOC_NO_COL = {
     "purchases": "purchase_no", "melting_ops": "op_no",
     "fixing_ops": "op_no", "shrinkage_ops": "op_no",
     "work_orders": "work_order_no", "tax_debit_notes": "note_no",
+    "tax_sales": "doc_no",
 }
 
 
@@ -91,6 +93,12 @@ def _doc_info(conn, src, sid, cache):
         r = conn.execute("SELECT kind FROM invoices WHERE id=?", (sid,)).fetchone()
         if r:
             label = "مرتجع" if r["kind"] == "sale_return" else "مبيعات"
+    elif src == "tax_sales":
+        r = conn.execute("SELECT kind FROM tax_sales WHERE id=?",
+                         (sid,)).fetchone()
+        if r:
+            label = ("إشعار دائن ضريبي" if r["kind"] == "credit"
+                     else "مبيعات ضريبية")
     cache[key] = (no, label)
     return no, label
 

@@ -51,6 +51,7 @@ def validate_lines(lines):
 _DOC_PREFIX = {
     "invoices": "INV", "vouchers": "VCH", "work_orders": "PRD",
     "melting_ops": "MLT", "fixing_ops": "FIX", "purchases": "PUR",
+    "tax_sales": "TAX",
     "payroll_ledger": "PAY", "mfg_salaries": "WSL", "shrinkage_ops": "SHR",
 }
 

@@ -252,7 +252,8 @@ def delete_account(conn, account_id, username):
         qs = ",".join("?" * len(dead))
         for tbl in ("invoices", "vouchers", "purchases", "melting_ops",
                     "fixing_ops", "work_orders", "workshop_losses",
-                    "payroll_ledger", "mfg_salaries", "shrinkage_ops"):
+                    "payroll_ledger", "mfg_salaries", "shrinkage_ops",
+                    "tax_sales"):
             try:
                 conn.execute(f"UPDATE {tbl} SET entry_id=NULL"
                              f" WHERE entry_id IN ({qs})", dead)
@@ -404,7 +405,8 @@ def purge_account_tree(conn, account_id, username, confirm_text=""):
         eq = ",".join("?" * len(entries))
         # المستندات المصدرية تُعلَّم محذوفة فلا تبقى بلا قيد
         for tbl in ("invoices", "vouchers", "purchases", "melting_ops",
-                    "fixing_ops", "work_orders", "workshop_losses"):
+                    "fixing_ops", "work_orders", "workshop_losses",
+                    "tax_sales"):
             try:
                 cur = conn.execute(
                     f"UPDATE {tbl} SET is_deleted=1"
@@ -416,7 +418,8 @@ def purge_account_tree(conn, account_id, username, confirm_text=""):
         # المرجعي (FOREIGN KEY) الحذف.
         for tbl in ("invoices", "vouchers", "purchases", "melting_ops",
                     "fixing_ops", "work_orders", "workshop_losses",
-                    "payroll_ledger", "mfg_salaries", "shrinkage_ops"):
+                    "payroll_ledger", "mfg_salaries", "shrinkage_ops",
+                    "tax_sales"):
             try:
                 conn.execute(f"UPDATE {tbl} SET entry_id=NULL"
                              f" WHERE entry_id IN ({eq})", entries)
@@ -435,6 +438,7 @@ def purge_account_tree(conn, account_id, username, confirm_text=""):
         for tbl, col in (("invoice_items", None), ("invoices", "customer_id"),
                          ("voucher_lines", None), ("vouchers", "customer_id"),
                          ("purchases", "supplier_id"),
+                         ("tax_sales", "customer_id"),
                          ("fixing_ops", "customer_id")):
             try:
                 if col:
@@ -449,6 +453,11 @@ def purge_account_tree(conn, account_id, username, confirm_text=""):
                         conn.execute(
                             f"DELETE FROM voucher_lines WHERE voucher_id IN"
                             f" (SELECT id FROM vouchers"
+                            f"  WHERE {col} IN ({eq2}))", ent_ids)
+                    elif tbl == "tax_sales":
+                        conn.execute(
+                            f"DELETE FROM tax_sale_lines WHERE sale_id IN"
+                            f" (SELECT id FROM tax_sales"
                             f"  WHERE {col} IN ({eq2}))", ent_ids)
                     conn.execute(f"DELETE FROM {tbl}"
                                  f" WHERE {col} IN ({eq2})", ent_ids)

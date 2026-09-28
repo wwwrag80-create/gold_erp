@@ -31,6 +31,9 @@ QT_INHERITED = {
     "minimum", "maximum",
     # المسرح الذهبي (QWidget): موضع الفأرة للمنظور، ونسبة البكسل للدقّة
     "mapFromGlobal", "devicePixelRatioF",
+    # معاينة القيد (QTableWidget مشتق): جدولٌ للقراءة بارتفاعٍ ثابت
+    "setSelectionMode", "setFocusPolicy", "setVerticalScrollBarPolicy",
+    "setTextElideMode", "setFixedHeight",
     # توابع الجداول الموروثة (QTableWidget) — تظهر في الأصناف المشتقة
     "state", "setCurrentCell", "currentRow", "currentColumn", "rowCount",
     "indexWidget", "commitData", "closeEditor", "currentIndex",
@@ -91,6 +94,7 @@ SCREENS = [
     ("ui.opening_stock_screen", "OpeningStockScreen"),
     ("ui.production_screen", "ProductionScreen"),
     ("ui.sales_screen", "SalesScreen"),
+    ("ui.tax_sales_screen", "TaxSalesScreen"),
     ("ui.coa_screen", "CoaScreen"),
     ("ui.entities_screen", "EntitiesScreen"),
     ("ui.subledger_screen", "SubLedgerScreen"),

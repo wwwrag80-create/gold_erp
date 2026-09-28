@@ -51,6 +51,7 @@ from ui.item_history_screen import ItemHistoryScreen
 from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
 from ui.sales_screen import SalesScreen
+from ui.tax_sales_screen import TaxSalesScreen
 from ui.shrinkage_screen import ShrinkageScreen
 from ui.reports.stock_report import StockReportScreen
 from ui.workshop_accounts_screen import WorkshopAccountsScreen
@@ -75,7 +76,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 5
+NAV_VERSION = 6
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -115,6 +116,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.stocktake_screen = Lazy(lambda: StocktakeScreen(user), "stocktake_screen")
             self.fixing_screen = Lazy(lambda: FixingScreen(user), "fixing_screen")
             self.purchases_screen = Lazy(lambda: PurchasesScreen(user), "purchases_screen")
+            self.tax_sales_screen = Lazy(lambda: TaxSalesScreen(user),
+                                         "tax_sales_screen")
             self.payroll_screen = Lazy(lambda: PayrollScreen(user), "payroll_screen")
             self.journal_screen = Lazy(lambda: JournalScreen(user), "journal_screen")
             self.txlog_screen = Lazy(lambda: TransactionLogScreen(user), "txlog_screen")
@@ -141,6 +144,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("كشف حساب", self.gl_screen),
                     ("الوارد من التصنيع", self.production_screen),
                     ("مبيعات/مرتجعات", self.sales_screen),
+                    # فواتير ضريبية بالريال — لا ذهب ولا مخزون
+                    ("المبيعات الضريبية", self.tax_sales_screen),
                     ("سندات قبض/صرف", self.vouchers_screen),
                     # من يسدّد ومن يتأخّر — بعد البيع والقبض مباشرةً
                     ("العملاء — المبيعات والسداد", Lazy(

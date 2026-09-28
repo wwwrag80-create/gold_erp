@@ -187,6 +187,7 @@ def vat_return(conn, date_from, date_to):
     p = conn.execute(
         "SELECT COALESCE(SUM(amount),0) base, COALESCE(SUM(vat_amount),0) vat,"
         " COUNT(*) n FROM purchases WHERE is_deleted=0 AND vat_amount>0"
+        " AND COALESCE(tax_treatment,'standard')='standard'"
         " AND purchase_date BETWEEN ? AND ?", (date_from, date_to)).fetchone()
     # ملاحظة: إشعارات المدين الضريبي (تسوية لاحقة) تُقيَّد مباشرة على
     # حساب 2100 فتدخل تلقائياً ضمن output_vat أعلاه دون ازدواج — نعرضها
@@ -196,8 +197,21 @@ def vat_return(conn, date_from, date_to):
         " FROM tax_debit_notes WHERE is_deleted=0"
         " AND note_date BETWEEN ? AND ?", (date_from, date_to)).fetchone()
 
+    # المبيعات الضريبية (خارج المخزون): فواتير − إشعارات دائنة. قيدها على
+    # 2100 مباشرةً فهي داخل output_vat أصلاً — هنا تفصيلٌ للوعاء وحده.
+    try:
+        from models import tax_sales as _ts
+        ts = _ts.totals(conn, date_from, date_to)
+    except Exception:
+        ts = {"net": 0.0, "vat": 0.0, "invoices": {"n": 0},
+              "credits": {"n": 0}}
+
     net = round(output_vat - input_vat, 2)
     return {"date_from": date_from, "date_to": date_to,
+            "tax_sales_base": round(ts["net"], 2),
+            "tax_sales_vat": round(ts["vat"], 2),
+            "tax_sales_count": ts["invoices"]["n"],
+            "tax_sales_credits": ts["credits"]["n"],
             "sales_base": round(s["base"], 2), "sales_vat": round(s["vat"], 2),
             "sales_count": s["n"], "output_vat": output_vat,
             "purchases_base": round(p["base"], 2),

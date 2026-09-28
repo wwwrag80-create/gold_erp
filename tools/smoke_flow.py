@@ -1039,13 +1039,13 @@ def main():
         check("لكل بند مفتاح ثابت",
               all(it.data(0, _KEY) for it, _p in w1._iter_nav()))
 
-        # ══ الترتيب المعتمد: ثلاث عشرة شاشة يومية ثم مجموعة واحدة ══
+        # ══ الترتيب المعتمد: أربع عشرة شاشة يومية ثم مجموعة واحدة ══
         from ui.main_window import NAV_VERSION as _NAVV
         top = [w1.sidebar.topLevelItem(i).text(0)
                for i in range(w1.sidebar.topLevelItemCount())]
         want = ["لوحة التحكم", "دليل الموديلات", "حركة الطقم",
                 "كشف حساب", "الوارد من التصنيع", "مبيعات/مرتجعات",
-                "سندات قبض/صرف", "العملاء — المبيعات والسداد",
+                "المبيعات الضريبية", "سندات قبض/صرف", "العملاء — المبيعات والسداد",
                 "التسكيرات", "المشتريات",
                 "القيود اليومية", "تقارير مبيعات وإنتاج المصنع",
                 "الإدارة والتقارير"]
@@ -1056,7 +1056,7 @@ def main():
                     if w1.sidebar.topLevelItem(i).text(0)
                     == "الإدارة والتقارير"), None)
         check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
-              grp is not None and grp.childCount() == len(base) - 12,
+              grp is not None and grp.childCount() == len(base) - 13,
               f"{grp.childCount() if grp else 0} بنداً")
         check("لا شاشة خارج الترتيب المعتمد",
               len(top) == len(want), str(top[len(want):]))
@@ -5046,6 +5046,95 @@ def main():
     check("والحكم صريح: قبل التسجيل «غير مربوط»، وفي المحاكاة «ليس ربطاً رسمياً»",
           _before57 == "غير مربوط بالهيئة"
           and "المحاكاة" in _r57["verdict"][1], _r57["verdict"][1])
+
+    # ══════════════════════════════════════════════════════════════
+    step("58) المبيعات الضريبية (بلا مخزون) والمشتريات الضريبية")
+    from models import purchases as _pu58
+    from models import tax_sales as _ts58
+    from models.entities import add_entity as _add58
+    from models.reports import vat_return as _vr58
+    from services.accounting_engine import account_balance as _ab58
+    with db() as conn:
+        _c58 = _add58(conn, "عميل المبيعات الضريبية", "customer",
+                      username="admin")
+        _s58 = _add58(conn, "مورد ضريبي", "supplier",
+                      vat_number="300000000000003", username="admin")
+        _wo0 = conn.execute("SELECT COUNT(*), COALESCE(SUM(CASE WHEN"
+                            " status='in_stock' THEN 1 END),0)"
+                            " FROM work_orders").fetchone()
+        _g0 = conn.execute("SELECT COALESCE(SUM(gold_debit+gold_credit),0)"
+                           " FROM journal_lines").fetchone()[0]
+        _vb58 = _vr58(conn, "2026-10-01", "2026-10-31")
+        _t58 = _ts58.create_invoice(conn, _c58, "2026-10-02", [
+            {"description": "خدمة تصميم", "qty": 2, "unit_price": 500,
+             "discount": 50}], "admin", pay_mode="cash")
+    with db(readonly=True) as conn:
+        _wo1 = conn.execute("SELECT COUNT(*), COALESCE(SUM(CASE WHEN"
+                            " status='in_stock' THEN 1 END),0)"
+                            " FROM work_orders").fetchone()
+        _g1 = conn.execute("SELECT COALESCE(SUM(gold_debit+gold_credit),0)"
+                           " FROM journal_lines").fetchone()[0]
+        _j58 = {r["code"]: (r["d"], r["c"]) for r in conn.execute(
+            "SELECT a.code, l.cash_debit d, l.cash_credit c FROM"
+            " journal_lines l JOIN accounts a ON a.id=l.account_id"
+            " WHERE l.entry_id=?", (_t58["entry_id"],))}
+    check("فاتورة ضريبية بالريال: 1400 / 4130 / 2100 — بلا ذهبٍ ولا مخزون",
+          _t58["net"] == 950.0 and _t58["vat"] == 142.5
+          and _j58 == {"1400": (1092.5, 0.0), "4130": (0.0, 950.0),
+                       "2100": (0.0, 142.5)}
+          and tuple(_wo0) == tuple(_wo1) and _g0 == _g1, str(_j58))
+    with db(readonly=True) as conn:
+        _l58 = list(_ts58.remaining(conn, _t58["id"]))[0]
+    try:
+        with db() as conn:
+            _ts58.create_credit_note(conn, _t58["id"], "2026-10-03",
+                                     [{"src_line_id": _l58, "qty": 3}],
+                                     "مرتجع", "admin")
+        _x58 = False
+    except ValueError:
+        _x58 = True
+    with db() as conn:
+        _n58 = _ts58.create_credit_note(conn, _t58["id"], "2026-10-03",
+                                        [{"src_line_id": _l58, "qty": 1}],
+                                        "خدمة لم تكتمل", "admin")
+    check("الإشعار الدائن لا يتجاوز المباع، ويعكس بنسبة الكمية (475 + 71.25)",
+          _x58 and _n58["net"] == 475.0 and _n58["vat"] == 71.25)
+    try:
+        from services.audit import soft_delete_entry as _sd58
+        _sd58(_t58["entry_id"], "admin")
+        _y58 = False
+    except Exception:
+        _y58 = True
+    check("ولا تُحذف فاتورةٌ عليها إشعارٌ دائن قائم", _y58)
+    with db() as conn:
+        _net58, _vat58 = _pu58.split_amount(1150, "gross")
+        _p58 = _pu58.create_purchase(
+            conn, "expense", _s58, "صيانة", _net58, _vat58, "2026-10-04",
+            "admin", supplier_invoice_no="S-1", account_code="5830",
+            price_mode="gross")
+    try:
+        with db() as conn:
+            _pu58.create_purchase(conn, "expense", _s58, "مكرّر", 10, 1.5,
+                                  "2026-10-05", "admin",
+                                  supplier_invoice_no="S-1")
+        _z58 = False
+    except ValueError:
+        _z58 = True
+    with db(readonly=True) as conn:
+        _va58 = _vr58(conn, "2026-10-01", "2026-10-31")
+        _in58 = _ab58(conn, acc_id(conn, "1900"), "2026-10-01",
+                      "2026-10-31")[1]
+    check("مشتريات شاملة 1150 ⇒ 1000 على 5830 و150 مدخلات، ولا تُقيَّد "
+          "فاتورة المورد مرتين",
+          (_net58, _vat58) == (1000.0, 150.0) and _z58
+          and round(_in58, 2) == 150.0)
+    check("الإقرار: مخرجات المبيعات الضريبية ومدخلات المشتريات في الفترة",
+          round(_va58["output_vat"] - _vb58["output_vat"], 2) == 71.25
+          and _va58["tax_sales_vat"] == 71.25
+          and _va58["input_vat"] == 150.0
+          and _va58["purchases_vat"] == 150.0,
+          f"{_va58['output_vat']} {_va58['tax_sales_vat']} "
+          f"{_va58['input_vat']}")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

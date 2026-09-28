@@ -817,26 +817,149 @@ def _tpl_melting(conn, op_id):
 
 
 def _tpl_purchase(conn, pid):
-    p = conn.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
+    """فاتورة المورد كما قُيّدت: رقمها لدى المورد ورقمه الضريبي،
+    والمعالجة الضريبية، والحساب المحمَّل، والصافي والضريبة والإجمالي."""
+    from models import purchases as _pu
+    p = conn.execute(
+        "SELECT p.*, a.code acc_code, a.name acc_name FROM purchases p"
+        " LEFT JOIN accounts a ON a.id=p.account_id WHERE p.id=?",
+        (pid,)).fetchone()
     if not p:
         raise ValueError("الفاتورة غير موجودة")
-    sup = conn.execute("SELECT name, phone FROM entities WHERE id=?",
-                       (p["supplier_id"],)).fetchone()
-    rows = [(p["description"] or "—", _w(p["amount"], 2),
-             _w(p["vat_amount"], 2),
-             _w((p["amount"] or 0) + (p["vat_amount"] or 0), 2))]
+    sup = conn.execute("SELECT name, phone, vat_number FROM entities"
+                       " WHERE id=?", (p["supplier_id"],)).fetchone()
+    keys = p.keys()
+    tr = (p["tax_treatment"] if "tax_treatment" in keys else "") \
+        or "standard"
+    inv_no = (p["supplier_invoice_no"] if "supplier_invoice_no" in keys
+              else "") or "—"
+    amount = float(p["amount"] or 0)
+    vat = float(p["vat_amount"] or 0)
+    claim = tr == "standard" and vat > 0
+    acc = (f"{p['acc_code']} — {p['acc_name']}" if p["acc_code"] else
+           ("1700 — الأصول الثابتة" if p["asset_id"]
+            else "5500 — مصروفات تشغيلية"))
+    info = [("المورد", sup["name"] if sup else "—"),
+            ("الرقم الضريبي للمورد", en((sup["vat_number"] if sup else "")
+                                        or "—")),
+            ("رقم فاتورة المورد", en(inv_no)),
+            ("المعالجة الضريبية", dict(_pu.TAX_TREATMENTS).get(tr, tr)),
+            ("يُحمَّل على حساب", acc)]
+    trs = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in info)
+    rows = "<tr>" + cells(
+        tdw(p["description"] or "—", align="right"), tdw(_w(amount, 2)),
+        tdw(_w(vat, 2)), tdw(_w(amount + vat, 2))) + "</tr>"
+    head = cells(thw("البيان"), thw("الصافي قبل الضريبة"), thw("الضريبة"),
+                 thw("الإجمالي"))
     body = f"""
-    <div class="party">المورد:
-      <span class="party-name">{sup['name'] if sup else '—'}</span></div><br/>
-    <table class="items">
-      <tr><th>البيان</th><th>المبلغ</th><th>الضريبة</th><th>الإجمالي</th></tr>
-      {_rows(rows)}
-    </table><br/>
-    <div class="tafqeet">فقط: {tafqeet((p['amount'] or 0) + (p['vat_amount'] or 0))}</div>
+    {TBL}{trs}</table><br/>
+    {TBL}<tr>{head}</tr>{rows}</table>
+    {TBL}
+      <tr><th width="70%">ضريبة المدخلات القابلة للخصم (حساب 1900)</th>
+          <td>{_w(vat if claim else 0, 2)}</td></tr>
+      <tr><th>المستحق للمورد (آجل)</th>
+          <td><b>{_w(amount + vat, 2)}</b></td></tr>
+    </table>
+    <div class="tafqeet">فقط: {tafqeet(amount + vat)}</div>
     """
     kind = "فاتورة مشتريات (أصل ثابت)" if p["asset_id"] else "فاتورة مشتريات"
     return (_header(kind, p["purchase_no"] or f"#{pid}", p["purchase_date"])
             + body + _footer(""))
+
+
+def _tpl_tax_sale(conn, sid):
+    """الفاتورة الضريبية / المبسطة / الإشعار الدائن — من شاشة المبيعات
+    الضريبية. عنوانها ومحتواها بما تشترطه الهيئة: الرقمان الضريبيان،
+    عنوان المشتري للضريبية، الأسطر بصافيها وضريبتها، الإجماليات، ورمز
+    QR (الموقّع إن صدر مستندٌ إلكتروني، وإلا رمز المرحلة الأولى)."""
+    from models import tax_sales
+    from services import photo_qr
+    from services.fatoora import ledger as _ft
+    from services.fatoora import profile as _pf
+    s, lines = tax_sales.get(conn, sid)
+    if not s:
+        raise ValueError("المستند غير موجود")
+    prof = _pf.load(conn)
+    b = _pf.buyer(conn, s["customer_id"]) or {}
+    std = _pf.buyer_is_b2b(b)
+    edoc = None
+    try:
+        edoc = _ft.doc_for(conn, "tax_sales", sid)
+    except Exception:
+        edoc = None
+    if edoc is not None:
+        std = edoc["subtype"] == "standard"
+    if s["kind"] == "credit":
+        title = "إشعار دائن — مرتجع مبيعات ضريبية"
+    else:
+        title = "فاتورة ضريبية" if std else "فاتورة ضريبية مبسطة"
+    qr = (edoc["cleared_qr"] or edoc["qr"]) if edoc is not None else (
+        s["qr_base64"] or "")
+    uri = photo_qr.qr_png_data_uri(qr, box_size=3, border=1) if qr else ""
+    img = (f'<img src="{uri}" style="width:40mm; height:40mm;'
+           f' max-height:none;" width="150" height="150"/>' if uri else "")
+    pay = dict(tax_sales.PAY_MODES).get(s["pay_mode"], s["pay_mode"])
+    time_str = (s["created_at"] or "")[11:19] or "—"
+    meta = [("رقم المستند", en(s["doc_no"])),
+            ("تاريخ الإصدار", en(s["doc_date"])),
+            ("الوقت", en(time_str)),
+            ("طريقة الدفع", pay.split(" — ")[0])]
+    if s["kind"] == "credit":
+        meta += [("إشعارٌ على الفاتورة", en(s["ref_no"] or "—")),
+                 ("سبب الإشعار", s["reason"] or "—")]
+    seller = [("البائع", prof.get("name") or config.COMPANY_NAME),
+              ("الرقم الضريبي للبائع",
+               en(prof.get("vat") or config.COMPANY_VAT_NUMBER or "—")),
+              ("السجل التجاري", en(prof.get("crn") or config.COMPANY_CR))]
+    buyer = [("المشتري", s["customer_name"])]
+    if std:
+        buyer += [("الرقم الضريبي للمشتري", en(b.get("vat", ""))),
+                  ("عنوان المشتري",
+                   f"{en(b.get('building', ''))} {b.get('street', '')}، "
+                   f"{b.get('district', '')}، {b.get('city', '')} "
+                   f"{en(b.get('postal', ''))}".strip(" ،"))]
+    if edoc is not None:
+        buyer += [("عدّاد الفاتورة (ICV)", en(str(edoc["icv"]))),
+                  ("حالتها لدى الهيئة",
+                   _ft.STATUS_LABELS.get(edoc["status"], edoc["status"]))]
+
+    def _kv(rows):
+        return "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
+
+    info = f'''
+    {TBL_PLAIN}<tr>
+      <td width="36%" valign="top">{TBL}{_kv(meta)}</table></td>
+      <td width="38%" valign="top">{TBL}{_kv(seller + buyer)}</table></td>
+      <td width="26%" align="center" valign="middle"
+          style="text-align:center;">{img}</td>
+    </tr></table>'''
+    rate = float(s["vat_rate"] or 0) * 100
+    body_rows = ""
+    for li in lines:
+        body_rows += "<tr>" + cells(
+            tdw(en(li["line_no"])), tdw(li["description"], align="right"),
+            tdw(_w(li["qty"], 2)), tdw(_w(li["unit_price"], 2)),
+            tdw(_w(li["discount"], 2)), tdw(_w(li["net"], 2)),
+            tdw(en(f"{rate:g}%")), tdw(_w(li["vat"], 2)),
+            tdw(_w(li["total"], 2))) + "</tr>"
+    head = cells(thw("م"), thw("البيان"), thw("الكمية"), thw("سعر الوحدة"),
+                 thw("الخصم"), thw("الصافي (الخاضع)"), thw("النسبة"),
+                 thw("الضريبة"), thw("الإجمالي"))
+    totals = f'''
+    {TBL}
+      <tr><th width="70%">الإجمالي الخاضع للضريبة (غير شامل)</th>
+          <td>{_w(s['net'], 2)}</td></tr>
+      <tr><th>ضريبة القيمة المضافة ({en(f"{rate:g}")}%)</th>
+          <td>{_w(s['vat'], 2)}</td></tr>
+      <tr><th>الإجمالي شامل الضريبة</th>
+          <td><b>{_w(s['total'], 2)}</b></td></tr>
+    </table>
+    <div class="tafqeet">فقط: {tafqeet(s['total'])}</div>'''
+    body = f'''{info}
+    {TBL}<tr>{head}</tr>{body_rows}</table>
+    {totals}'''
+    return (_header(title, s["doc_no"], s["doc_date"], show_meta=False)
+            + body + _footer(s["notes"] or ""))
 
 
 def _tpl_fixing(conn, op_id):
@@ -2941,6 +3064,7 @@ BUILDERS = {
     "journal": _tpl_journal, "manual": _tpl_journal,
     "melting": _tpl_melting, "melting_ops": _tpl_melting,
     "purchase": _tpl_purchase, "purchases": _tpl_purchase,
+    "tax_sale": _tpl_tax_sale, "tax_sales": _tpl_tax_sale,
     "fixing": _tpl_fixing, "fixing_ops": _tpl_fixing,
     "work_orders": _tpl_work_order, "wo_supply": _tpl_work_order,
     "wo_adjust": _tpl_work_order,
@@ -2964,7 +3088,8 @@ BUILDERS = {
 
 DOC_LABELS = {
     "invoices": "فاتورة/مرتجع", "vouchers": "سند قبض/صرف",
-    "purchases": "فاتورة مشتريات", "melting_ops": "صب وتصفية",
+    "purchases": "فاتورة مشتريات", "tax_sales": "فاتورة ضريبية/إشعار دائن",
+    "melting_ops": "صب وتصفية",
     "fixing_ops": "تسكير", "manual": "قيد يومية",
     "work_orders": "سند توريد", "workshop_losses": "سند فاقد ورشة",
 }

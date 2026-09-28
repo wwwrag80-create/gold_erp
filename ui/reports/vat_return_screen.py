@@ -104,8 +104,10 @@ class VatReturnScreen(QtWidgets.QWidget):
                               dstr(self.d_to))
             self.last = r
             self.c_out.set_value(f"{r['output_vat']:,.2f}",
-                                f"وعاء خاضع: {r['sales_base']:,.2f} ريال "
-                                f"({r['sales_count']} فاتورة ضريبية)")
+                                f"وعاء خاضع: "
+                                f"{r['sales_base'] + r['tax_sales_base']:,.2f}"
+                                f" ريال ({r['sales_count'] + r['tax_sales_count']}"
+                                " فاتورة ضريبية)")
             self.c_in.set_value(f"{r['input_vat']:,.2f}",
                                f"وعاء خاضع: {r['purchases_base']:,.2f} ريال "
                                f"({r['purchases_count']} فاتورة مشتريات)")
@@ -115,6 +117,8 @@ class VatReturnScreen(QtWidgets.QWidget):
                 ("إجمالي مبيعات الأجور الخاضعة للضريبة", f"{r['sales_base']:,.2f}", ""),
                 ("الضريبة المحصلة من العملاء (من الفواتير)",
                  "", f"{r['sales_vat']:,.2f}"),
+                ("المبيعات الضريبية خارج المخزون (بعد الإشعارات الدائنة)",
+                 f"{r['tax_sales_base']:,.2f}", f"{r['tax_sales_vat']:,.2f}"),
                 ("رصيد حساب 2100 — ضريبة المخرجات (دفتر الأستاذ)",
                  "", f"{r['output_vat']:,.2f}"),
                 ("— ضريبة المدخلات —", "", ""),
@@ -151,6 +155,8 @@ class VatReturnScreen(QtWidgets.QWidget):
                 w.writerow(["الإقرار الضريبي", r["date_from"], r["date_to"]])
                 w.writerow(["البند", "الوعاء الخاضع", "الضريبة"])
                 w.writerow(["مبيعات خاضعة (مخرجات)", r["sales_base"], r["sales_vat"]])
+                w.writerow(["مبيعات ضريبية خارج المخزون", r["tax_sales_base"],
+                           r["tax_sales_vat"]])
                 w.writerow(["مشتريات خاضعة (مدخلات)", r["purchases_base"],
                            r["purchases_vat"]])
                 w.writerow(["صافي الضريبة", "", r["net"]])

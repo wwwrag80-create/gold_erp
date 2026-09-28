@@ -7,7 +7,7 @@ from PyQt5 import QtCore, QtWidgets
 from database.database import db
 from services import karat_view as kv
 from models import fixing, inventory, invoices, journal, melting, payroll
-from models import purchases, shrinkage, stocktake, vouchers
+from models import purchases, shrinkage, stocktake, tax_sales, vouchers
 from services.audit import soft_delete_entry
 from ui.widgets.common import (ask, date_edit, dstr, err, fill, info, make_table, title_label)
 
@@ -91,6 +91,15 @@ DOC_TYPES = [
      lambda r: (r["purchase_no"], "أصل" if r["kind"] == "asset" else "مصروف",
                r["supplier_name"] or "—", r["description"], r["amount"],
                r["vat_amount"], r["total"], r["purchase_date"], r["entry_id"])),
+
+    ("tax_sales", "المبيعات الضريبية (خارج المخزون)",
+     ["الرقم", "النوع", "العميل", "الصافي", "الضريبة", "الإجمالي",
+      "على الفاتورة", "التاريخ", "رقم القيد"],
+     lambda conn, q, f, t: tax_sales.search(conn, q, f, t),
+     lambda r: (r["doc_no"], "إشعار دائن" if r["kind"] == "credit"
+               else "فاتورة ضريبية", r["customer_name"], r["net"],
+               r["vat"], r["total"], r["ref_no"] or "—", r["doc_date"],
+               r["entry_id"])),
 
 
     ("shrinkage", "تسويات فاقد التصنيع (يدوية)",

@@ -1407,6 +1407,22 @@ def migrate_schema() -> None:
         except Exception:
             pass
 
+        # 27) المبيعات الضريبية (خارج المخزون) وأسطرها — models/tax_sales
+        #     والمشتريات الضريبية: رقم فاتورة المورد والمعالجة والحساب
+        try:
+            from models import tax_sales as _ts
+            _ts.ensure_tables(conn)
+        except Exception:
+            pass
+        pcols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(purchases)")]
+        for col, ddl in (("supplier_invoice_no", "TEXT DEFAULT ''"),
+                         ("tax_treatment", "TEXT DEFAULT 'standard'"),
+                         ("account_id", "INTEGER"),
+                         ("price_mode", "TEXT DEFAULT 'net'")):
+            if pcols and col not in pcols:
+                conn.execute(f"ALTER TABLE purchases ADD COLUMN {col} {ddl}")
+
 
 def run_migrations_files():
     """ينفّذ ملفات الهجرة المرقّمة مرة واحدة لكل إصدار.
