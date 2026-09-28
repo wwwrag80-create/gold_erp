@@ -64,7 +64,7 @@ from ui.customers_screen import CustomersScreen
 from services import karat_view as kv
 from ui import theme
 from ui.widgets.common import (ElidedLabel, ask, busy, err, info, run_bg,
-                               search_combo, warn)
+                               save_pref, search_combo, warn)
 
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
 NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
@@ -379,6 +379,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_close.setVisible(False)
         subbar = QtWidgets.QFrame()
         subbar.setObjectName("subbar")
+        # الشريط الفرعي لا يفرض عرضاً على النافذة أبداً: ما زاد عن
+        # عرضها يُضغط داخله بدل أن تتّسع النافذة خارج الشاشة
+        subbar.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                             QtWidgets.QSizePolicy.Fixed)
         sb = QtWidgets.QHBoxLayout(subbar)
         sb.setContentsMargins(16, 6, 16, 6)
         sb.addWidget(self.crumb)
@@ -831,6 +835,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # سعر الذهب في الواجهة الرئيسية وحدها — داخل الشاشة لا يزاحمها
         gb = getattr(self, "gold_bar", None)
         if gb is not None:
+            if not is_sub:
+                # أدوات الشاشة المغلقة تُفرَّغ **قبل** ظهور شريط السعر:
+                # لو اجتمعا لحظةً لطلب الشريط الفرعي عرضهما معاً فتتّسع
+                # النافذة خارج الشاشة وينزاح الشريط الجانبي عن مكانه
+                self._mount_screen_tools(None)
             gb.setVisible(not is_sub)
         # ══ شريط الحالة في الرئيسية وحدها ══
         # داخل الشاشة كل سطرٍ للجدول: الشريط السفلي يُطوى ويعود
@@ -1230,6 +1239,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.karat_box.blockSignals(False)
                 return
             kv.set_active(k, self.user.get("username"))
+            # الوحدة الجديدة للنظام كله: عيار صندوق الكسر في المبيعات
+            # والتوريد يتبعها من الآن (يُنسى آخر اختيارٍ بالعيار القديم)
+            for _pref in ("sales_scrap_karat", "supply_scrap_karat"):
+                save_pref(_pref, "", self.user.get("username"))
             try:
                 with db() as conn:
                     log_action(conn, self.user.get("username"), "update",

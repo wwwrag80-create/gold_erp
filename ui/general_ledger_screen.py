@@ -19,6 +19,21 @@ from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err,
 from models.editing import EDITABLE
 
 
+def _doc_target(r, builders):
+    """(نوع القالب، رقمه) لمعاينة حركةٍ من الكشف.
+
+    مستندها الأصلي إن كان له قالب (فاتورة · سند · مشتريات · تسكير…)،
+    وإلا قيدها نفسه بقالب «قيد يومية» — فلا تبقى حركةٌ بلا معاينة.
+    """
+    src, sid = r.get("src"), r.get("sid")
+    if src and sid and src in builders and src != "manual":
+        return src, sid
+    eid = r.get("eid")
+    if eid:
+        return "manual", eid
+    return None
+
+
 class GeneralLedgerScreen(QtWidgets.QWidget):
     def __init__(self, user, on_edit_doc=None):
         super().__init__()
@@ -209,11 +224,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         """زر «معاينة العملية» داخل كل صف من كشف الحساب: يلتقط نوع
         المستند ورقمه ويفتح المستند الأصلي (فاتورة/سند/قيد) الذي أنتج
         هذه الحركة، للمراجعة والتدقيق السريع."""
-        src, sid = r.get("src"), r.get("sid")
-        if src == "manual" or (src is None and r.get("eid")):
-            src, sid = "manual", r.get("eid")
-        if not src or not sid or src not in print_manager.BUILDERS:
+        target = _doc_target(r, print_manager.BUILDERS)
+        if target is None:
             return None
+        src, sid = target
         b = QtWidgets.QPushButton("👁")
         b.setObjectName("ghost")
         b.setToolTip("فتح المستند في المتصفح للمعاينة والطباعة")
@@ -363,8 +377,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                         num_item(self._g(r["gbal"])),
                         num_item(r["cd"] or ""), num_item(r["cc"] or ""),
                         num_item(r["cbal"]),
-                        text_item("👁" if (r.get("src") and r.get("sid"))
-                                  else "", _C),
+                        # كل حركةٍ لها معاينة: مستندها إن كان له قالب،
+                        # وإلا قيدها نفسه (القيد اليومي والرواتب والجرد…)
+                        text_item("👁" if (r.get("eid") or (
+                            r.get("src") and r.get("sid"))) else "", _C),
                     ]
                     for c, it in enumerate(cellv):
                         self.table.setItem(i, c, it)
@@ -574,11 +590,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             rows = getattr(self, "rows", [])
             if not (0 <= i < len(rows)):
                 return
-            r = rows[i]
-            src, sid = r.get("src"), r.get("sid")
-            if not src or not sid or src not in print_manager.BUILDERS:
+            target = _doc_target(rows[i], print_manager.BUILDERS)
+            if target is None:
                 return
-            print_manager.preview_document(self, src, sid)
+            print_manager.preview_document(self, *target)
         except Exception as e:
             err(self, e)
 

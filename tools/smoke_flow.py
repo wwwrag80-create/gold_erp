@@ -3262,7 +3262,7 @@ def main():
           and "مشترٍ من دفعة اليوم" in _html8
           and "pgrid" in _html8, f"{len(_html8)} حرفاً")
     check("وخليةُ الصورة ثابتة الارتفاع فلا تُزيح أختها لصفحةٍ أخرى",
-          "height: 116mm" in _html8 and "height: 110mm" in _html8
+          "height: 128mm" in _html8 and "height: 122mm" in _html8
           and _pm.PHOTO_ROWS == 6)
 
     step("40) لوحة أرقام التشغيل المتاحة للبيع")
@@ -4716,7 +4716,7 @@ def main():
         _tpl_model_photos as _tp53
     def _side53(n, c):
         r = -(-n // c)
-        return min(190.0 / c, 232.0 / r - 14.0)
+        return min(190.0 / c, 258.0 / r - 14.0)
     _best53 = all(
         abs(min(_pg53(n)[2], _pg53(n)[3] - 14.0)
             - max(_side53(n, c) for c in range(1, n + 1))) < 0.01
@@ -5264,6 +5264,67 @@ def main():
           f"{_fmb.horizontalAdvance(_t61.item(4, 2).text())} · "
           f"{_t61.font().pointSizeF()} vp={_t61.viewport().width()}")
     _t61.close()
+
+    # ══════════════════════════════════════════════════════════════
+    step("62) الرصيد بعد العملية في القيد والتسكير والمشتريات · معاينة كل حركة")
+    from services import print_manager as _pm62
+    from ui.general_ledger_screen import _doc_target as _dt62
+    with db() as conn:
+        _a62 = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                            (_c52,)).fetchone()[0]
+        _e62 = post_entry(conn, "2026-10-20", "قيد يدوي للمعاينة", [
+            {"account_id": _a62, "cash_debit": 70},
+            {"account_id": acc_id(conn, "1400"), "cash_credit": 70}],
+            source_table="manual", username="admin")
+        _f62 = _fx52(conn, _c52, 2.0, 300.0, "2026-10-21",
+                             "admin")["id"]
+        _p62 = _pu58.create_purchase(
+            conn, "expense", _s58, "قرطاسية", 100, 15, "2026-10-22",
+            "admin", supplier_invoice_no="S-62", account_code="5830")["id"]
+        _bal62 = conn.execute(
+            "SELECT ROUND(SUM(cash_debit-cash_credit),2) FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id WHERE e.is_deleted=0"
+            " AND l.account_id=? AND e.id<=?", (_a62, _e62)).fetchone()[0]
+    _hj = _pm62.build_html("manual", _e62)
+    _hf = _pm62.build_html("fixing_ops", _f62)
+    _hp = _pm62.build_html("purchases", _p62)
+    check("قالب القيد اليومي يعرض الرصيد بعد العملية لحساب الجهة",
+          "الرصيد بعد العملية" in _hj and "عميل التسكير" in _hj
+          and f"{_bal62:,.2f}" in _hj, str(_bal62))
+    check("وقالبا التسكير والمشتريات كذلك",
+          "رصيد الذهب في حساب" in _hf and "رصيد النقد في حساب" in _hp)
+    check("كل حركة في الكشف لها معاينة — القيد اليدوي بقالب «قيد يومية»",
+          _dt62({"src": None, "sid": None, "eid": 5}, _pm62.BUILDERS)
+          == ("manual", 5)
+          and _dt62({"src": "fixing_ops", "sid": 3, "eid": 9},
+                    _pm62.BUILDERS) == ("fixing_ops", 3)
+          and _dt62({"src": "no_such_tpl", "sid": 3, "eid": 9},
+                    _pm62.BUILDERS) == ("manual", 9))
+    _hm = _pm62.build_html("model_photos", 0, min_count=1)
+    _hc = _pm62.build_html("models_catalog", 0)
+    check("قوالب دليل الموديلات بلا ترويسة المصنع وشعاره",
+          'class="lh"' not in _hm and 'class="lh"' not in _hc
+          and "الموديلات" in _hc)
+    try:
+        from PyQt5 import QtWidgets as _QW62
+        _QW62.QApplication.instance() or _QW62.QApplication([])
+        import ui.sales_screen as _ssm62
+        from ui.widgets.common import save_pref as _sp62
+        _sp62("sales_scrap_karat", "", "admin")
+        _kv.set_active(21, "admin")
+        try:
+            _s62 = _ssm62.SalesScreen({"id": 1, "username": "admin",
+                                       "role": "admin",
+                                       "role_local": "accountant"})
+            _s62.refresh()
+            _k62 = _s62.scrap_karat.currentData()
+            _s62.close()
+        finally:
+            _kv.set_active(18, "admin")
+        check("صندوق الكسر يتبع العيار المختار أعلى النافذة (21)",
+              _k62 == 21, str(_k62))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

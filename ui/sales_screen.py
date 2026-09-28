@@ -358,10 +358,10 @@ class _Panel(QtWidgets.QFrame):
         row.addStretch(1)
         row.addWidget(self.value)
         lay.addLayout(row)
-        self.sub = QtWidgets.QLabel(sub)
+        self.sub = QtWidgets.QLabel(sub, self)
         self.sub.setObjectName("chipSub")
-        self.sub.setVisible(bool(sub))
         lay.addWidget(self.sub)
+        self.sub.setVisible(bool(sub))
         self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
                            QtWidgets.QSizePolicy.Maximum)
 
@@ -801,7 +801,9 @@ class SalesScreen(QtWidgets.QWidget):
         if idx >= 0:
             self.source.setCurrentIndex(idx)
         self.source.blockSignals(False)
-        k = str(load_pref("sales_scrap_karat", "")).strip()
+        # عيار الكسر: آخر ما اختاره المستخدم، وإلا عيار المصنع المختار
+        # في أعلى النافذة — فتبديل العيار إلى 21 يجعل الصندوق بمكافئ 21
+        k = str(load_pref("sales_scrap_karat", "") or kv.active()).strip()
         if k.isdigit():
             i = self.scrap_karat.findData(int(k))
             if i >= 0:

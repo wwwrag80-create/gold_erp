@@ -756,6 +756,57 @@ def _tpl_voucher(conn, voucher_id):
                     v["voucher_date"], show_meta=False) + body)
 
 
+def _balances_after(conn, entry_id, account_ids, title="الرصيد بعد العملية"):
+    """جدول «الرصيد بعد العملية» — كما في فاتورة المبيعات والمرتجعات.
+
+    الرصيد **حتى هذا القيد بعينه** لا رصيد اليوم: الورقة تُطبع بعد شهر
+    فتبقى تقول ما كان بعد العملية نفسها. والترتيب بالتاريخ ثم بمفتاح
+    الترتيب — كما يُحسب كشف الحساب — فيطابق رقمُ الورقة رقمَ الكشف.
+    """
+    if not entry_id or not account_ids:
+        return ""
+    e = conn.execute("SELECT entry_date, COALESCE(sort_key, id) k FROM"
+                     " journal_entries WHERE id=?", (entry_id,)).fetchone()
+    if not e:
+        return ""
+    u = _kunit()
+    rows = ""
+    for aid in list(dict.fromkeys(account_ids))[:4]:
+        acc = conn.execute(
+            "SELECT a.code, a.name, e.name ename FROM accounts a"
+            " LEFT JOIN entities e ON e.account_id=a.id AND e.is_deleted=0"
+            " WHERE a.id=?", (aid,)).fetchone()
+        if not acc:
+            continue
+        b = conn.execute(
+            "SELECT COALESCE(SUM(l.gold_debit-l.gold_credit),0) g,"
+            " COALESCE(SUM(l.cash_debit-l.cash_credit),0) c"
+            " FROM journal_lines l JOIN journal_entries j ON j.id=l.entry_id"
+            " WHERE l.account_id=? AND j.is_deleted=0 AND (j.entry_date<?"
+            " OR (j.entry_date=? AND COALESCE(j.sort_key, j.id)<=?))",
+            (aid, e["entry_date"], e["entry_date"], e["k"])).fetchone()
+        name = acc["ename"] or f"{acc['code']} — {acc['name']}"
+        rows += (f'<tr><td {TH} width="70%">رصيد الذهب في حساب {name}'
+                 f' ({u})</td><td>{_gw(b["g"])}</td></tr>'
+                 f'<tr><th>رصيد النقد في حساب {name}</th>'
+                 f'<td>{_w(b["c"], 2)}</td></tr>')
+    if not rows:
+        return ""
+    return (f'<div class="note" style="margin-top:6px"><b>{title}</b></div>'
+            f'{TBL}{rows}</table>')
+
+
+def _party_accounts(conn, entry_id):
+    """حسابات جهات التعامل في القيد — وإلا كل حساباته."""
+    ids = [r[0] for r in conn.execute(
+        "SELECT DISTINCT l.account_id FROM journal_lines l WHERE"
+        " l.entry_id=? ORDER BY l.id", (entry_id,))]
+    party = {r[0] for r in conn.execute(
+        "SELECT account_id FROM entities WHERE is_deleted=0")}
+    mine = [a for a in ids if a in party]
+    return mine or ids
+
+
 def _tpl_journal(conn, entry_id):
     e = conn.execute("SELECT * FROM journal_entries WHERE id=?",
                      (entry_id,)).fetchone()
@@ -771,24 +822,27 @@ def _tpl_journal(conn, entry_id):
         tg_d += l["gold_debit"]; tg_c += l["gold_credit"]
         tc_d += l["cash_debit"]; tc_c += l["cash_credit"]
         rows.append((f"{l['code']} — {l['name']}",
-                     _w(l["gold_debit"]) if l["gold_debit"] else "",
-                     _w(l["gold_credit"]) if l["gold_credit"] else "",
+                     _gw(l["gold_debit"]) if l["gold_debit"] else "",
+                     _gw(l["gold_credit"]) if l["gold_credit"] else "",
                      _w(l["cash_debit"], 2) if l["cash_debit"] else "",
                      _w(l["cash_credit"], 2) if l["cash_credit"] else ""))
     balanced = (abs(tg_d - tg_c) < 0.011 and abs(tc_d - tc_c) < 0.011)
     body = f"""
     <table class="items">
-      <tr><th>الحساب</th><th>مدين ذهب</th><th>دائن ذهب</th>
+      <tr><th>الحساب</th><th>مدين ذهب ({_kunit()})</th>
+          <th>دائن ذهب ({_kunit()})</th>
           <th>مدين نقد</th><th>دائن نقد</th></tr>
       {_rows(rows)}
       <tr class="total"><td class="num">الإجمالي</td>
-        <td class="num">{_w(tg_d)}</td><td class="num">{_w(tg_c)}</td>
+        <td class="num">{_gw(tg_d)}</td><td class="num">{_gw(tg_c)}</td>
         <td class="num">{_w(tc_d, 2)}</td><td class="num">{_w(tc_c, 2)}</td></tr>
     </table><br/>
     <div class="note">حالة التوازن:
       <b>{'متوازن — الميزانان الوزني والنقدي متطابقان' if balanced else 'غير متوازن'}</b></div>
+    {_balances_after(conn, entry_id, _party_accounts(conn, entry_id))}
     """
-    return (_header("قيد يومية", f"#{entry_id}", e["entry_date"])
+    return (_header("قيد يومية", e["doc_no"] or f"#{entry_id}",
+                    e["entry_date"])
             + body + _footer(e["user_note"] or ""))
 
 
@@ -814,6 +868,19 @@ def _tpl_melting(conn, op_id):
     """
     return (_header(label, op["op_no"] or f"#{op_id}", op["op_date"])
             + body + _footer(op["notes"] or ""))
+
+
+def _purchase_party(conn, p):
+    """المورد للآجل، والصندوق أو البنك للمدفوع — ما تغيّر رصيده بالفاتورة."""
+    mode = (p["pay_mode"] if "pay_mode" in p.keys() else "") or "credit"
+    if mode == "credit":
+        r = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                         (p["supplier_id"],)).fetchone()
+        return [r[0]] if r else []
+    code = {"cash": "1400", "bank": "1500"}.get(mode)
+    r = conn.execute("SELECT id FROM accounts WHERE code=?",
+                     (code,)).fetchone()
+    return [r[0]] if r else []
 
 
 def _tpl_purchase(conn, pid):
@@ -871,6 +938,7 @@ def _tpl_purchase(conn, pid):
           <td><b>{_w(amount + vat, 2)}</b></td></tr>
     </table>
     <div class="tafqeet">فقط: {tafqeet(amount + vat)}</div>
+    {_balances_after(conn, p["entry_id"], _purchase_party(conn, p))}
     """
     kind = "فاتورة مشتريات (أصل ثابت)" if p["asset_id"] else "فاتورة مشتريات"
     return (_header(kind, p["purchase_no"] or f"#{pid}", p["purchase_date"])
@@ -1109,15 +1177,20 @@ def _tpl_fixing(conn, op_id):
         raise ValueError("العملية غير موجودة")
     ent = conn.execute("SELECT name FROM entities WHERE id=?",
                        (f["customer_id"],)).fetchone()
-    rows = [(_w(f["weight"]), _w(f["price"], 2), _w(f["amount"], 2))]
+    rows = [(_gw(f["weight"]), _w(_krate(f["price"]), 2),
+             _w(f["amount"], 2))]
+    cacc = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                        (f["customer_id"],)).fetchone()
     body = f"""
     <div class="party">الجهة:
       <span class="party-name">{ent['name'] if ent else '—'}</span></div><br/>
     <table class="items">
-      <tr><th>الوزن (جم 18)</th><th>سعر الجرام</th><th>القيمة (ريال)</th></tr>
+      <tr><th>الوزن ({_kunit()})</th><th>سعر الجرام</th>
+          <th>القيمة (ريال)</th></tr>
       {_rows(rows)}
     </table><br/>
     <div class="tafqeet">فقط: {tafqeet(f['amount'])}</div>
+    {_balances_after(conn, f["entry_id"], [cacc[0]] if cacc else [])}
     """
     return (_header("سند تسكير (تسعير ذهب)", f["op_no"] or f"#{op_id}",
                     f["op_date"]) + body + _footer(""))
@@ -2029,7 +2102,7 @@ def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
             f' &nbsp;·&nbsp; المعروض موسّعاً: '
             f'<b>{en(len(expanded))}</b> موديل</div>')
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
-    return (_header("دليل الموديلات", "—", today, show_meta=False)
+    return (_slim_title("دليل الموديلات", today)
             + meta + table)
 
 
@@ -2110,7 +2183,7 @@ def _tpl_models_received(conn, _id=0, date_from=None, date_to=None,
     meta = (f'<div {WIDE}>الوارد من التصنيع في: <b>{en(span)}</b>'
             f' &nbsp;·&nbsp; العرض: <b>{labels.get(mode, mode)}</b></div>')
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
-    return (_header("الوارد من التصنيع بتاريخ", "—", today, show_meta=False)
+    return (_slim_title("الوارد من التصنيع بتاريخ", today)
             + meta + table)
 
 
@@ -2144,14 +2217,14 @@ RECV_PHOTO_CSS = """
   table.pgrid { table-layout: fixed; width: 100%;
                 border-collapse: separate; }
   table.pgrid td.cell {
-    width: 50%; height: 116mm; vertical-align: top; padding: 2mm;
+    width: 50%; height: 128mm; vertical-align: top; padding: 2mm;
   }
   /* البطاقة عمودٌ مرن: الجدول يأخذ ما يحتاجه، والصورةُ تبتلع ما
      بقي. فالموديل ذو القطعتين تكبر صورتُه بدل أن يُترك أسفلَه
      بياضٌ، والذو ستٍّ تصغر قليلاً — والارتفاع الخارجي واحدٌ في
      الحالين فتبقى الشبكة منتظمة. */
   .card { border: 1px solid #D8CDB4; border-radius: 5px;
-          padding: 2mm; background: #FFFFFF; height: 110mm;
+          padding: 2mm; background: #FFFFFF; height: 122mm;
           display: flex; flex-direction: column; }
   .imgbox { flex: 1 1 auto; min-height: 42mm; width: 100%;
             display: flex; align-items: center; justify-content: center;
@@ -2209,8 +2282,7 @@ def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
     span = (en(res["date_from"]) if res["date_from"] == res["date_to"]
             else f'{en(res["date_from"])} ← {en(res["date_to"])}')
     if not picked:
-        return (_header("صور الوارد من التصنيع", "—", today,
-                        show_meta=False)
+        return (_slim_title("صور الوارد من التصنيع", today)
                 + f'<div style="text-align:center;padding:40px">'
                   f'لا وارد من التصنيع في {span}</div>')
 
@@ -2277,7 +2349,7 @@ def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
             f' &nbsp;·&nbsp; <b>{en(len(picked))}</b> موديل · '
             f'<b>{en(n)}</b> قطعة · <b>{_gw(w)}</b> جم'
             f' &nbsp;·&nbsp; الصفحات: <b>{en(total_pages)}</b></div>')
-    return (_header("صور الوارد من التصنيع", "—", today, show_meta=False)
+    return (_slim_title("صور الوارد من التصنيع", today)
             + RECV_PHOTO_CSS + meta + pages)
 
 
@@ -2405,7 +2477,22 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
                     show_meta=False) + span + table + extra)
 
 
-def photo_grid(n, width_mm=190.0, height_mm=232.0, caption_mm=14.0):
+def _slim_title(title, date):
+    """سطرُ عنوانٍ رفيع لقوالب دليل الموديلات — بلا ترويسة المصنع وشعاره.
+
+    ورقة الموديلات للصور والأرقام: الترويسة الكاملة كانت تأكل ربع
+    الصفحة الأولى. سطرٌ واحد يكفي ليُعرف ما في الورقة وتاريخها، ويرتفع
+    ما تحته ليأخذ المساحة.
+    """
+    return (
+        '<table width="100%" cellspacing="0" cellpadding="2" style="'
+        'border-bottom:1.5px solid #C9A227;margin-bottom:2mm"><tr>'
+        f'<td style="text-align:right;font-size:12pt;font-weight:bold">'
+        f'{title}</td><td style="text-align:left;font-size:9.5pt;'
+        f'color:#6B5A2E">{en(date)}</td></tr></table>')
+
+
+def photo_grid(n, width_mm=190.0, height_mm=258.0, caption_mm=14.0):
     """أنسب شبكةٍ لـ`n` صورة في صفحة: (أعمدة، صفوف، عرض الخلية، ارتفاعها).
 
     **الأنسب = أكبر صورة**: لكل عددِ أعمدةٍ ممكن تُحسب مساحة الصورة
@@ -2471,8 +2558,7 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
         body = ('<div style="text-align:center;padding:40px">'
                 'لا توجد موديلات بصور تبلغ الحدّ المطلوب '
                 f'({en(min_count)} قطع فأكثر)</div>')
-        return (_header("صور الموديلات", "—", today, show_meta=False)
-                + body)
+        return _slim_title("صور الموديلات", today) + body
 
     def _data_uri(path):
         try:
@@ -2549,7 +2635,7 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
             + ') &nbsp;·&nbsp; موديلات مطبوعة: <b>'
             + en(len(cells_html)) + '</b> &nbsp;·&nbsp; الصفحات: <b>'
             + en(total_pages) + "</b></div>")
-    return (_header("صور الموديلات", "—", today, show_meta=False)
+    return (_slim_title("صور الموديلات", today)
             + css + meta + pages)
 
 

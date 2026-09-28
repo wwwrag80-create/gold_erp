@@ -65,10 +65,12 @@ class StatChip(QtWidgets.QFrame):
         row.addStretch(1)
         row.addWidget(self.value_lbl)
         v.addLayout(row)
-        self.sub_lbl = QtWidgets.QLabel(sub)
+        # بأبٍ منذ إنشائه: إخفاءُ أو إظهارُ widget بلا أب يجعله نافذةً
+        # مستقلّة تومض على الشاشة قبل أن تُضمّ الشاشة إلى مكانها
+        self.sub_lbl = QtWidgets.QLabel(sub, self)
         self.sub_lbl.setObjectName("chipSub")
-        self.sub_lbl.setVisible(bool(sub))
         v.addWidget(self.sub_lbl)
+        self.sub_lbl.setVisible(bool(sub))
         self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
                            QtWidgets.QSizePolicy.Maximum)
 

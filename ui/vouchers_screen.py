@@ -65,6 +65,9 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             self.g_karat.addItem(f"عيار {k}", k)
         self.g_equiv = big_label(f"المكافئ بـ{kv.label()}: 0.00 جم")
         self.g_weight.valueChanged.connect(self.recalc_equiv)
+        _ki = self.g_karat.findData(kv.active())
+        if _ki >= 0:
+            self.g_karat.setCurrentIndex(_ki)
         self.g_karat.currentIndexChanged.connect(self.recalc_equiv)
         self.g_note = QtWidgets.QLineEdit()
         self.g_note.setPlaceholderText("بيان السطر (اختياري)")

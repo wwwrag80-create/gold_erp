@@ -443,7 +443,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         if idx >= 0:
             self.dest.setCurrentIndex(idx)
         self.dest.blockSignals(False)
-        k = str(load_pref("supply_scrap_karat", "")).strip()
+        # عيار الكسر: آخر ما اختاره المستخدم، وإلا عيار المصنع المختار
+        # في أعلى النافذة — فتبديل العيار إلى 21 يجعل الصندوق بمكافئ 21
+        k = str(load_pref("supply_scrap_karat", "") or kv.active()).strip()
         if k.isdigit():
             i = self.scrap_karat.findData(int(k))
             if i >= 0:
