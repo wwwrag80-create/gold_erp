@@ -33,6 +33,12 @@ ACC_ROLE = QtCore.Qt.UserRole + 11          # معرّف الحساب في خل�
 SIDE_COLS = ["العميل", "رصيد سابق", "المبيعات", "المرتجع",
              "صافي المبيعات", "السداد", "حركات أخرى", "الباقي",
              "نسبة المرتجع", "نسبة السداد", "آخر سداد", "التقدير"]
+# الأقسام المنقولة من «التحليل والدراسات» (4.31)
+SECTIONS = [
+    ("ملف الجهة", "ui.reports.dossier_screen", "DossierScreen"),
+    ("أعمار الديون", "ui.reports.aging_screen", "AgingScreen"),
+]
+
 SIDE_W = [22, 8, 9, 8, 9, 9, 8, 9, 8, 8, 11, 7]
 C_OPEN, C_OTHER = 1, 6
 
@@ -184,10 +190,13 @@ class CustomersScreen(QtWidgets.QWidget):
         self.detail = big_label("اختر عميلاً لترى تفاصيله.")
         self.detail.setWordWrap(True)
 
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(6, 4, 6, 4)
+        # ══ أقسام الشاشة (4.31) ══ «المبيعات والسداد» كما كانت، ومعها
+        # «ملف الجهة» و«أعمار الديون» — نُقلا من التحليل والدراسات:
+        # من يسأل «كم على فلان» يسأل بعدها «منذ متى» و«ماذا أخذ».
+        self._main_page = QtWidgets.QWidget()
+        lay = QtWidgets.QVBoxLayout(self._main_page)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
-        lay.addWidget(title_label("العملاء — المبيعات والسداد"))
         intro = QtWidgets.QLabel(
             "لكل عميلٍ ما اشترى وما أرجع وما سدّد وما بقي عليه — الذهب "
             "وحده والنقد وحده، ونسبتان تقولان من يسدّد ومن يتأخّر. "
@@ -209,6 +218,46 @@ class CustomersScreen(QtWidgets.QWidget):
         note.setObjectName("cardSub")
         note.setWordWrap(True)
         lay.addWidget(note)
+
+        self._built = {}
+        self.sections = tab_widget()
+        self.sections.addTab(self._main_page, "المبيعات والسداد")
+        for label, _m, _c in SECTIONS:
+            holder = QtWidgets.QWidget()
+            QtWidgets.QVBoxLayout(holder).setContentsMargins(0, 0, 0, 0)
+            self.sections.addTab(holder, label)
+        self.sections.currentChanged.connect(self._ensure_section)
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(6, 4, 6, 4)
+        outer.setSpacing(4)
+        outer.addWidget(title_label("العملاء — المبيعات والسداد"))
+        outer.addWidget(self.sections, 1)
+
+    # ══════════ الأقسام المنقولة ══════════
+    def _ensure_section(self, index):
+        """يبني «ملف الجهة» أو «أعمار الديون» عند أول فتح — لا قبله."""
+        k = index - 1
+        if index == 0 or k in self._built or not (0 <= k < len(SECTIONS)):
+            return
+        label, mod_name, cls_name = SECTIONS[k]
+        holder = self.sections.widget(index)
+        try:
+            mod = __import__(mod_name, fromlist=[cls_name])
+            w = getattr(mod, cls_name)(self.user, embedded=True)
+        except Exception as e:                       # noqa: BLE001
+            w = QtWidgets.QLabel(f"تعذّر فتح «{label}»:\n{e}")
+            w.setObjectName("warn")
+            w.setWordWrap(True)
+        holder.layout().addWidget(w)
+        self._built[k] = w
+
+    def open_section(self, label):
+        """يفتح قسماً باسمه — لمن يوجّه إليه من شاشةٍ أخرى."""
+        for i in range(self.sections.count()):
+            if self.sections.tabText(i) == label:
+                self.sections.setCurrentIndex(i)
+                return self._built.get(i - 1)
+        return None
 
     # ══════════ بناء ══════════
     def _table(self, key, weights):
@@ -263,6 +312,17 @@ class CustomersScreen(QtWidgets.QWidget):
 
     # ══════════ البيانات ══════════
     def refresh(self):
+        # قسمٌ منقول مفتوح: يُحدَّث هو — لا لوحة السداد المخفية
+        i = self.sections.currentIndex() if hasattr(self, "sections") else 0
+        if i > 0:
+            self._ensure_section(i)
+            fn = getattr(self._built.get(i - 1), "refresh", None)
+            if callable(fn):
+                try:
+                    fn()
+                except Exception as e:                # noqa: BLE001
+                    err(self, e)
+            return
         try:
             d_from = None if self.since_start.isChecked() else dstr(self.d_from)
             with db(readonly=True) as conn:

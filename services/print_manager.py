@@ -1758,6 +1758,10 @@ def build_body(doc_type, doc_id, **kw):
                                            kw.get("date_to"),
                                            kw.get("mode", "all"),
                                            kw.get("sort", "az")))
+        if doc_type == "dossier_models":
+            return en(_tpl_dossier_models(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("per_page", 4)))
         if doc_type == "models_received_photos":
             return en(_tpl_models_received_photos(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
@@ -2414,6 +2418,141 @@ def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
             f' &nbsp;·&nbsp; الصفحات: <b>{en(total_pages)}</b></div>')
     return (_slim_title("صور الوارد من التصنيع", today)
             + RECV_PHOTO_CSS + meta + pages)
+
+
+def _model_photo_pages(models, per_page=4):
+    """شبكة صور الموديلات: خليةٌ لكل رقم موديل — صورته، وتحتها أرقام
+    التشغيل بوزنها وحركتها. تُعيد (الصفحات، عددها)."""
+    from models import models_catalog as mc
+    cards = []
+    for m in models:
+        uri = _img_uri(mc.image_path(m["model"]) or "")
+        img = (f'<img src="{uri}" />' if uri
+               else '<span class="noimg">لا صورة لهذا الموديل</span>')
+        shown = m["items"][:PHOTO_ROWS]
+        rows = "".join(
+            "<tr>" + f'<td class="h">{en(i["wo"])}</td>'
+            + f'<td>{_gw(i["weight"])}</td>'
+            + f'<td class="h">{i["kind"]}</td>'
+            + f'<td>{en(i["date"])}</td></tr>'
+            for i in shown)
+        extra = len(m["items"]) - len(shown)
+        more = (f'<div class="more">+ {en(extra)} قطعة أخرى</div>'
+                if extra > 0 else "")
+        sub = f'خرج {en(m["sold"])}'
+        if m["returned"]:
+            sub += f'  ·  رجع {en(m["returned"])}'
+        cards.append(
+            '<td class="cell"><div class="card">'
+            f'<div class="imgbox">{img}</div>'
+            f'<div class="cap">الموديل {m["model"]}  ·  '
+            f'{en(m["net_count"])} قطعة  ·  {_gw(m["weight"])} {_kunit()}'
+            f'</div><div class="sub">{sub}</div>'
+            '<table class="wos"><tr>'
+            '<th style="width:30%">رقم التشغيل</th>'
+            '<th style="width:22%">الوزن</th>'
+            '<th style="width:20%">الحركة</th>'
+            '<th style="width:28%">التاريخ</th></tr>'
+            f'{rows}</table>{more}</div></td>')
+    per_page = max(2, int(per_page or 4))
+    cols = 2
+    pages = ""
+    total_pages = (len(cards) + per_page - 1) // per_page
+    for pg in range(total_pages):
+        chunk = cards[pg * per_page:(pg + 1) * per_page]
+        while len(chunk) % cols:
+            chunk.append('<td class="cell"></td>')
+        trs = "".join("<tr>" + "".join(chunk[i:i + cols]) + "</tr>"
+                      for i in range(0, len(chunk), cols))
+        brk = ' style="page-break-before:always"' if pg else ""
+        pages += ('<table class="pgrid" width="100%" cellspacing="0"'
+                  ' cellpadding="0"' + brk + ">" + trs + "</table>")
+    return pages, total_pages
+
+
+def _group_models(rows):
+    """أسطرٌ (موديل، رقم تشغيل، وزن، نوع، تاريخ) ← موديلات بقطعها."""
+    out = {}
+    for r in rows:
+        m = out.setdefault(r["m"], {"model": r["m"], "items": [],
+                                    "sold": 0, "returned": 0,
+                                    "weight": 0.0})
+        sale = r["k"] == "sale"
+        wt = float(r["wt"] or 0.0)
+        m["items"].append({"wo": r["wo"] or "—", "weight": wt,
+                           "kind": "بيع" if sale else "مرتجع",
+                           "date": r["d"]})
+        m["sold" if sale else "returned"] += 1
+        m["weight"] += wt if sale else -wt
+    res = list(out.values())
+    for m in res:
+        m["weight"] = round(m["weight"], 3)
+        m["net_count"] = m["sold"] - m["returned"]
+    return res
+
+
+def _tpl_dossier_models(conn, entity_id=0, date_from=None, date_to=None,
+                        per_page=4):
+    """صور موديلات الجهة في الفترة: صورةٌ لكل رقم موديل، وتحتها أرقام
+    التشغيل بوزنها وحركتها (بيع/مرتجع) — على شبكة ورقة الوارد نفسها."""
+    from models import dossier as ds
+    from models import models_catalog as mc
+    ent = conn.execute("SELECT name FROM entities WHERE id=?",
+                       (entity_id,)).fetchone()
+    if not ent:
+        raise ValueError("الجهة غير موجودة")
+    today = _qd(QtCore.QDate.currentDate())
+    models = ds.model_items(conn, entity_id, date_from, date_to)
+    models.sort(key=lambda m: mc.model_key(m["model"]))
+    span = (f'{en(date_from or "—")} ← {en(date_to or "—")}')
+    title = f"موديلات {ent['name']}"
+    if not models:
+        return (_slim_title(title, today)
+                + f'<div style="text-align:center;padding:40px">'
+                  f'لا موديلات لهذه الجهة في {span}</div>')
+    pages, _n = _model_photo_pages(models, per_page)
+    n = sum(m["net_count"] for m in models)
+    w = round(sum(m["weight"] for m in models), 3)
+    meta = (f'<div {WIDE}>الفترة: <b>{span}</b> &nbsp;·&nbsp; '
+            f'<b>{en(len(models))}</b> موديل · صافي <b>{en(n)}</b> قطعة · '
+            f'<b>{_gw(w)}</b> {_kunit()}</div>')
+    return _slim_title(title, today) + RECV_PHOTO_CSS + meta + pages
+
+
+def _tpl_invoice_models(conn, invoice_id=0, per_page=4):
+    """صور موديلات فاتورةٍ واحدة — صورةٌ لكل رقم موديل وتحتها أرقام
+    تشغيله في الفاتورة بوزنها. تُفتح من معاينة كشف الحساب."""
+    from models import models_catalog as mc
+    inv = conn.execute(
+        "SELECT i.invoice_no, i.invoice_date, i.kind, e.name"
+        " FROM invoices i LEFT JOIN entities e ON e.id=i.customer_id"
+        " WHERE i.id=?", (invoice_id,)).fetchone()
+    if not inv:
+        raise ValueError("الفاتورة غير موجودة")
+    rows = conn.execute(
+        "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') m,"
+        " w.work_order_no wo, it.registered_weight wt, i.kind k,"
+        " i.invoice_date d FROM invoice_items it"
+        " JOIN invoices i ON i.id=it.invoice_id"
+        " LEFT JOIN work_orders w ON w.id=it.work_order_id"
+        " WHERE it.invoice_id=? ORDER BY m, w.work_order_no",
+        (invoice_id,)).fetchall()
+    models = _group_models(rows)
+    models.sort(key=lambda m: mc.model_key(m["model"]))
+    kind = "فاتورة مبيعات" if inv["kind"] == "sale" else "فاتورة مرتجع"
+    title = f"موديلات {kind} {inv['invoice_no'] or ''}"
+    if not models:
+        return (_slim_title(title, inv["invoice_date"])
+                + '<div style="text-align:center;padding:40px">'
+                  'لا أصناف في هذه الفاتورة</div>')
+    pages, _n = _model_photo_pages(models, per_page)
+    n = sum(len(m["items"]) for m in models)
+    w = round(sum(abs(m["weight"]) for m in models), 3)
+    meta = (f'<div {WIDE}>الجهة: <b>{inv["name"] or "—"}</b> &nbsp;·&nbsp; '
+            f'<b>{en(len(models))}</b> موديل · <b>{en(n)}</b> قطعة · '
+            f'<b>{_gw(w)}</b> {_kunit()}</div>')
+    return (_slim_title(title, inv["invoice_date"]) + RECV_PHOTO_CSS
+            + meta + pages)
 
 
 def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
@@ -3127,13 +3266,13 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
 
     # ── موديلاته ──
     mdl = ""
-    for x in (d["models_life"] or [])[:10]:
+    for x in (d["models"] or [])[:20]:        # موديلات الفترة — كالشاشة
         mdl += "<tr>" + cells(
             tdw(x["model"], align="right"), tdw(en(f"{x['sold']:,}")),
             tdw(en(f"{x['returned']:,}")), tdw(en(f"{x['net_count']:,}")),
             tdw(_g(x["weight"])), tdw(_m(x["wages"]))) + "</tr>"
     if not mdl:
-        mdl = f'<tr><td {TD} colspan="6">لا مبيعات مسجّلة</td></tr>'
+        mdl = f'<tr><td {TD} colspan="6">لا مبيعات في الفترة</td></tr>'
 
     fl, flife = d["flow"], d["flow_life"]
 
@@ -3374,6 +3513,8 @@ BUILDERS = {
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
     "models_received_photos": _tpl_models_received_photos,
+    "dossier_models": _tpl_dossier_models,
+    "invoice_models": _tpl_invoice_models,
     "dash_panel": _tpl_dash_panel,
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,
@@ -3424,6 +3565,10 @@ def build_html(doc_type, doc_id, **kw):
             html = fn(conn, doc_id, kw.get("date_from"), kw.get("date_to"))
         elif doc_type == "day_close":
             html = _tpl_day_close(conn, doc_id, kw.get("date"))
+        elif doc_type == "dossier_models":
+            html = _tpl_dossier_models(conn, doc_id, kw.get("date_from"),
+                                       kw.get("date_to"),
+                                       kw.get("per_page", 4))
         elif doc_type == "customer_board":
             html = _tpl_customer_board(conn, doc_id, kw.get("date_from"),
                                        kw.get("date_to"),

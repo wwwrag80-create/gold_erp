@@ -90,7 +90,25 @@ class DossierScreen(QtWidgets.QWidget):
         self.tabs = tab_widget()
         self.tabs.addTab(self.t_bridge, "الفترة")
         self.tabs.addTab(self.t_aging, "أعمار دينه")
-        self.tabs.addTab(self.t_models, "موديلاته")
+        # موديلاته: الفترة وحدها، وزرٌّ يعرض صور الموديلات — صورةٌ لكل
+        # رقم موديل وتحتها أرقام التشغيل بوزنها
+        models_page = QtWidgets.QWidget()
+        mp = QtWidgets.QVBoxLayout(models_page)
+        mp.setContentsMargins(0, 4, 0, 0)
+        mp.setSpacing(4)
+        mrow = QtWidgets.QHBoxLayout()
+        self.models_span = QtWidgets.QLabel("")
+        self.models_span.setObjectName("cardSub")
+        self.btn_photos = QtWidgets.QPushButton("🖼 عرض صور الموديلات")
+        self.btn_photos.setToolTip(
+            "صورةٌ لكل رقم موديل أخذته الجهة في الفترة، وتحتها أرقام "
+            "التشغيل بوزنها — للمعاينة والطباعة")
+        self.btn_photos.clicked.connect(self.show_model_photos)
+        mrow.addWidget(self.models_span, 1)
+        mrow.addWidget(self.btn_photos, 0)
+        mp.addLayout(mrow)
+        mp.addWidget(self.t_models, 1)
+        self.tabs.addTab(models_page, "موديلاته")
         self.tabs.addTab(self.t_wage, "حركته")
 
         lay = QtWidgets.QVBoxLayout(self)
@@ -240,19 +258,33 @@ class DossierScreen(QtWidgets.QWidget):
         self._mark(self.t_aging, marks)
 
     def _fill_models(self, d, u, w, m):
-        rows = []
-        for src, tag in ((d["models"], "الفترة"),
-                         (d["models_life"], "من البداية")):
-            for x in src:
-                rows.append((tag, x["model"], f"{x['sold']:,}",
-                             f"{x['returned']:,}", f"{x['net_count']:,}",
-                             w(x["weight"]), m(x["wages"])))
+        """موديلات الفترة وحدها — والصور من زرّ «عرض صور الموديلات»."""
+        rows = [(x["model"], f"{x['sold']:,}", f"{x['returned']:,}",
+                 f"{x['net_count']:,}", w(x["weight"]), m(x["wages"]))
+                for x in d["models"]]
         fill(self.t_models,
-             ["النطاق", "الموديل", "خرج", "رجع", "الصافي",
+             ["الموديل", "خرج", "رجع", "الصافي",
               f"الوزن الصافي ({u})", "الأجور (ريال)"], rows)
-        fit_columns(self.t_models, [14, 24, 10, 10, 11, 16, 15])
-        ledger_rows(self.t_models, wrap_cols=(1,))
-        self.tabs.setTabText(2, f"موديلاته ({len(d['models_life'])})")
+        fit_columns(self.t_models, [30, 11, 11, 12, 18, 18])
+        ledger_rows(self.t_models, wrap_cols=(0,))
+        self.models_span.setText(
+            f"الفترة: {dstr(self.d_from)} ← {dstr(self.d_to)}  ·  "
+            f"{len(d['models'])} موديل")
+        self.tabs.setTabText(2, f"موديلاته ({len(d['models'])})")
+
+    def show_model_photos(self):
+        """ورقة صور موديلات الجهة في الفترة — تُعاين وتُطبع."""
+        eid = self.party.currentData()
+        if not eid:
+            err(self, "اختر الجهة أولاً")
+            return
+        try:
+            from services import print_manager
+            print_manager.preview_document(
+                self, "dossier_models", eid,
+                date_from=dstr(self.d_from), date_to=dstr(self.d_to))
+        except Exception as e:                        # noqa: BLE001
+            err(self, e)
 
     def _fill_wage(self, d, u, w, m):
         """حركته: ما كان عنده، وما رجع، وما سدّد — والنسب عليها.

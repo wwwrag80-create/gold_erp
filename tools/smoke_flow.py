@@ -5564,14 +5564,80 @@ def main():
         _mid = _QG65.QColor.fromRgba(_ov.pixel(200, 140)).alpha()
         check("حواف الشاشة: تعتيمٌ على الأطراف وصفاءٌ في الوسط",
               _edge > 25 and _mid == 0, f"{_edge}/{_mid}")
-        _card = _gf65.GoldCard()
+        _card = _gf65.GlassCard()
         _card.resize(420, 300)
-        _img = _card.grab().toImage()
-        _fr = _card.frame_rect()
-        _px = _QG65.QColor(_img.pixel(int(_fr.center().x()),
-                                      int(_fr.top() + 2)))
-        check("إطار اللوحة معدنٌ ذهبي (أحمر > أزرق بوضوح)",
-              _px.red() > _px.blue() + 60, _px.name())
+        check("لوحة الدخول هادئة: بلا إطارٍ ذهبي مصقول ولا لمعةٍ تمرّ",
+              not hasattr(_card, "_sweep") and not hasattr(_gf65, "METAL")
+              and _card.start_shine() is None)
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    # ══════════════════════════════════════════════════════════════
+    step("66) شاشات محذوفة · ملف الجهة وأعمار الديون في العملاء · 1350")
+    from models import dossier as _ds66
+    from models import reports as _rp66
+    with db(readonly=True) as conn:
+        _cust66 = conn.execute(
+            "SELECT i.customer_id, i.id FROM invoices i WHERE i.kind='sale'"
+            " AND i.is_deleted=0 ORDER BY i.id LIMIT 1").fetchone()
+        _mi66 = _ds66.model_items(conn, _cust66[0])
+    _src66 = pathlib.Path(_rp66.__file__).read_text(encoding="utf-8")
+    check("قائمة الدخل: الصب والتصفية (1350) بدل الفاقد الفني (5120)",
+          '_period_account_gold(conn, "1350"' in _src66
+          and '_period_account_gold(conn, "5120"' not in _src66)
+    check("موديلات الجهة: كل موديلٍ بأرقام تشغيله وأوزانها",
+          _mi66 and all(m["items"] and all("wo" in i and "weight" in i
+                                            for i in m["items"])
+                        for m in _mi66), str(len(_mi66 or [])))
+    _hd66 = _pm65.build_html("dossier_models", _cust66[0],
+                             date_from="2000-01-01", date_to="2100-01-01")
+    _hi66 = _pm65.build_html("invoice_models", _cust66[1])
+    check("ورقتا الصور: موديلات الجهة وموديلات الفاتورة",
+          "رقم التشغيل" in _hd66 and "رقم التشغيل" in _hi66
+          and _mi66[0]["items"][0]["wo"] in _hd66)
+    try:
+        from PyQt5 import QtWidgets as _QW66
+        _QW66.QApplication.instance() or _QW66.QApplication([])
+        from ui.main_window import MainWindow as _MW66
+        _w66 = _MW66({"id": 1, "username": "admin", "role": "admin",
+                      "role_local": "accountant", "full_name": "م"})
+        _names66 = [it.text(0) for it, _p in _w66._iter_nav()]
+        _gone66 = ("الصب والتصفية", "المطابقة وتسوية الفروقات",
+                   "أرصدة المخازن (جرد لحظي)", "الرواتب والموظفون",
+                   "تسوية فاقد التصنيع الشهري")
+        check("الشاشات الخمس حُذفت من القائمة",
+              not any(n in _names66 for n in _gone66))
+        from ui.reports.analysis_hub_screen import SECTIONS as _hub66
+        from ui.customers_screen import CustomersScreen as _CS66
+        _c66 = _CS66({"id": 1, "username": "admin"})
+        _tabs66 = [_c66.sections.tabText(i)
+                   for i in range(_c66.sections.count())]
+        check("ملف الجهة وأعمار الديون: في شاشة العملاء لا التحليل",
+              _tabs66 == ["المبيعات والسداد", "ملف الجهة", "أعمار الديون"]
+              and all(x[0] not in ("ملف الجهة", "أعمار الديون")
+                      for x in _hub66))
+        _dz = _c66.open_section("ملف الجهة")
+        check("وقسم «موديلاته» بزرّ عرض الصور",
+              _dz is not None and hasattr(_dz, "btn_photos"))
+        _c66.close()
+        _w66.show()
+        _QW66.QApplication.processEvents()
+        _hdr_home = _w66._header_bar.isVisible()
+        from PyQt5 import QtCore as _QC66
+        for it, _p in _w66._iter_nav():
+            _ix = it.data(0, _QC66.Qt.UserRole)
+            if _ix:                       # أول شاشةٍ فرعية في القائمة
+                _w66.switch(_ix)
+                break
+        _QW66.QApplication.processEvents()
+        _hdr_sub = _w66._header_bar.isVisible()
+        _w66._close_screen()
+        _QW66.QApplication.processEvents()
+        check("الشريط العلوي يُطوى داخل الشاشات ويعود في الرئيسية",
+              _hdr_home and not _hdr_sub
+              and _w66._header_bar.isVisible(),
+              f"{_hdr_home}/{_hdr_sub}/{_w66._header_bar.isVisible()}")
+        _w66.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

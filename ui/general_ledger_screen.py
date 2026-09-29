@@ -236,9 +236,22 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         return b
 
     def _preview(self, src, sid):
+        """معاينة الحركة. حركة فاتورة: قائمةٌ صغيرة — الفاتورة نفسها أو
+        صور موديلاتها (صورةٌ لكل رقم موديل وتحتها أرقام تشغيله بوزنها)."""
         from services import print_manager
         try:
-                        print_manager.preview_document(self, src, sid)
+            if src in ("invoices", "invoice"):
+                menu = QtWidgets.QMenu(self)
+                a_inv = menu.addAction("📄 معاينة الفاتورة")
+                a_mdl = menu.addAction("🖼 صور موديلات الفاتورة")
+                picked = menu.exec_(QtGui.QCursor.pos())
+                if picked is a_mdl:
+                    print_manager.preview_document(self, "invoice_models",
+                                                   sid)
+                elif picked is a_inv:
+                    print_manager.preview_document(self, src, sid)
+                return
+            print_manager.preview_document(self, src, sid)
         except Exception as e:
             err(self, e)
 
@@ -593,7 +606,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             target = _doc_target(rows[i], print_manager.BUILDERS)
             if target is None:
                 return
-            print_manager.preview_document(self, *target)
+            self._preview(*target)
         except Exception as e:
             err(self, e)
 

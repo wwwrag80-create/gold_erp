@@ -23,7 +23,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 import config
 from services import login_flow
-from ui.widgets.gold_frame import GoldCard, screen_overlay
+from ui.widgets.gold_frame import GlassCard, screen_overlay
 from ui.widgets.gold_stage import GoldStage, ShineLabel, animations_on
 
 # اسمُ النظام كما يُخاطَب به صاحبه — لا العنوان التقني
@@ -42,7 +42,7 @@ GATE_QSS = """
    الفاتح لرأى المستخدم ومضةً بيضاء قبل الليل. فيُصبغ هنا بلون
    المسرح نفسه — فما يُرى أولاً هو ما يبقى. */
 QDialog#gateWindow { background: #17120C; }
-/* اللوحة تُرسم بيدها (GoldCard): زجاجٌ داكن في إطارٍ ذهبي مصقول */
+/* اللوحة تُرسم بيدها (GlassCard): زجاجٌ داكن في إطارٍ مزدوج رفيع */
 QWidget#gateCard { background: transparent; border: none; }
 QWidget#gateHero { background: transparent; }
 QLabel#gateWelcome { color: #F6E7B6; font-size: 30px; font-weight: bold; }
@@ -57,45 +57,38 @@ QLineEdit#gateInput {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                 stop:0 rgba(0, 0, 0, 95), stop:0.35 rgba(12, 9, 5, 70),
                 stop:1 rgba(255, 246, 220, 16));
-    border: 1px solid rgba(201, 162, 39, 95);
-    border-top: 1px solid rgba(0, 0, 0, 170);
-    border-bottom: 1px solid rgba(255, 232, 170, 70);
-    border-radius: 9px; padding: 11px 13px;
+    border: 1px solid rgba(214, 192, 140, 70);
+    border-top: 1px solid rgba(0, 0, 0, 150);
+    border-bottom: 1px solid rgba(255, 240, 205, 50);
+    border-radius: 10px; padding: 11px 13px;
     color: #FFF6DC; font-size: 15px;
     selection-background-color: #C9A227; selection-color: #17120C;
 }
 QLineEdit#gateInput:focus {
-    border: 1px solid #E9C96A;
+    border: 1px solid rgba(230, 208, 150, 200);
     border-top: 1px solid rgba(90, 64, 14, 220);
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                 stop:0 rgba(0, 0, 0, 80), stop:1 rgba(255, 240, 200, 28));
 }
-/* زرّ ذهبٍ مصقول: وميضٌ في الحافة العليا، وعمقٌ في الوسط، وانعكاسٌ
-   سفلي — ثلاث طبقاتٍ تصنع المعدن لا لونٌ واحد */
+/* زرٌّ شمبانيّ مطفأ: تدرّجٌ هادئ وحافةٌ رفيعة — بلا بريقٍ معدني */
 QPushButton#gateEnter {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFF3C4, stop:0.07 #F4D576, stop:0.42 #D8AD3C,
-                stop:0.52 #B98B22, stop:0.80 #CFA23A, stop:1 #EBC862);
-    color: #241804; border: 1px solid #6E500F;
-    border-top: 1px solid #FFF6D2; border-bottom: 1px solid #4E380A;
-    border-radius: 11px;
+                stop:0 #E6CF98, stop:1 #C4A25C);
+    color: #241A0A; border: 1px solid rgba(255, 244, 214, 120);
+    border-radius: 12px;
     padding: 13px 34px; font-size: 17px; font-weight: bold;
 }
 QPushButton#gateEnter:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFF8DA, stop:0.07 #FADF8A, stop:0.42 #E6BD4C,
-                stop:0.52 #C99A2C, stop:0.80 #DDB248, stop:1 #F6D676);
+                stop:0 #EFDBA8, stop:1 #CFAE68);
 }
 QPushButton#gateEnter:pressed {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #9E7419, stop:0.5 #C0922A, stop:1 #E3BD55);
-    border-top: 1px solid #4E380A; border-bottom: 1px solid #FFF0C0;
-    padding-top: 14px; padding-bottom: 12px;
+                stop:0 #BF9D57, stop:1 #D9BE82);
 }
 QPushButton#gateEnter:disabled {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #6E5C33, stop:1 #4A3D21);
-    color: #A6946A; border: 1px solid #3A2F18;
+    background: #4E4431; color: #A6987A;
+    border: 1px solid rgba(255, 244, 214, 40);
 }
 QPushButton#gateQuit {
     background: transparent; color: #A2916A; border: none;
@@ -306,6 +299,7 @@ class GateWindow(QtWidgets.QDialog):
 
         # ── المسرح: يملأ الشاشة، وكل شيءٍ بعده فوقه ──
         self.stage = GoldStage(self)
+        self.stage.calm = True          # هادئ: بلا أشعّةٍ ولا لمعاتٍ تدور
         self.stage.lower()
 
         # ══ الترحيب أولاً، ولوحةُ الدخول **لا تُبنى** إلا في وقتها ══
@@ -414,6 +408,7 @@ class GateWindow(QtWidgets.QDialog):
         lay.addWidget(self.hello)
 
         self.welcome = ShineLabel(WELCOME)
+        self.welcome.start = lambda: None     # بلا لمعةٍ تعبر العنوان
         self.welcome.setObjectName("gateWelcome")
         self.welcome.setWordWrap(True)
         lay.addWidget(self.welcome)
@@ -425,10 +420,10 @@ class GateWindow(QtWidgets.QDialog):
 
     def _build_card(self):
         """لوحة الدخول — تُبنى عند أوانها لا قبله."""
-        # زجاجٌ داكن في إطارٍ ذهبي مصقول بزخارف أركان — يُرسم بيده
-        self.card = GoldCard(self)
+        # زجاجٌ داكن في إطارٍ مزدوج رفيع — هادئٌ ساكن، يُرسم بيده
+        self.card = GlassCard(self)
         self.card.setObjectName("gateCard")
-        m = GoldCard.MARGIN
+        m = GlassCard.MARGIN
         self.card.setFixedWidth(540 + 2 * m)
         lay = QtWidgets.QVBoxLayout(self.card)
         lay.setContentsMargins(46 + m, 32 + m, 46 + m, 26 + m)
@@ -698,7 +693,11 @@ class GateWindow(QtWidgets.QDialog):
                 self.stage.logo_center = QtCore.QPointF(c)
             card = self.card
             if card is not None and card.isVisible():
-                self.stage.card_rect = QtCore.QRectF(card.geometry())
+                # هالة المسرح حول الإطار نفسه لا حول هامش الظلّ — وإلا
+                # وقع حدّها الداخلي على حافة الودجت فيُرى مستطيلاً حادّاً
+                m = float(getattr(card, "MARGIN", 0))
+                self.stage.card_rect = QtCore.QRectF(
+                    card.geometry()).adjusted(m, m, -m, -m)
                 self.stage.card_k = float(getattr(self, "_card_k", 0.0))
             else:
                 self.stage.card_k = 0.0
@@ -741,10 +740,6 @@ class GateWindow(QtWidgets.QDialog):
         if self.card is not None:
             try:
                 self.card.setGraphicsEffect(None)
-            except Exception:
-                pass
-            try:
-                self.card.start_shine()      # لمعةٌ تمرّ على الإطار
             except Exception:
                 pass
             # النافذة نشطةٌ فعلاً قبل أن تُطلب الكتابة: بعد شاشة البدء قد

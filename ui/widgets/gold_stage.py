@@ -169,6 +169,10 @@ class GoldStage(QtWidgets.QWidget):
         self.logo_center = None         # QPointF
         self.card_rect = None           # QRectF
         self.card_k = 0.0               # ظهور اللوحة 0←1
+        # ══ الوضع الهادئ (4.31) ══ بلا أشعّة، ولا مذنّبٍ يطوف اللوحة،
+        # ولا لمعةٍ تدور على الخواتم ولا وميض نجوم — حلقاتٌ رفيعة ساكنة
+        # الضوء وغبارٌ بطيء فقط. شاشةٌ تُفتح كل صباح: تُريح ولا تُبهر.
+        self.calm = False
         self._par = QtCore.QPointF(0.0, 0.0)     # إزاحة المنظور الحالية
         self._dust = []
         self._seed()
@@ -395,7 +399,7 @@ class GoldStage(QtWidgets.QWidget):
         أثقل طبقات المسرح إلى أخفّها.
         """
         fade = _smooth(self.intro) * (1.0 - self.exit)
-        if fade <= 0.01:
+        if fade <= 0.01 or self.calm:
             return
         c = self._center(w, h) + self._par * 5
         key = (int(self.t * 6), int(c.x()), int(c.y()), w, h)
@@ -464,6 +468,20 @@ class GoldStage(QtWidgets.QWidget):
             ang = self.t * 6.0 * speed          # ستّ درجاتٍ في الثانية
             p.save()
             p.rotate(ang)
+            if self.calm:
+                # خيطٌ شمبانيّ ساكن الضوء — بلا لمعةٍ تدور ولا أحجار
+                pen = QtGui.QPen(_ink(GOLD_HI, alpha * 0.30 * fade),
+                                 max(1.0, base * 0.0016))
+                p.setPen(pen)
+                p.setBrush(QtCore.Qt.NoBrush)
+                rect = QtCore.QRectF(-r, -r, 2 * r, 2 * r)
+                span = draw * 360.0
+                if span >= 359.5:
+                    p.drawEllipse(rect)
+                else:
+                    p.drawArc(rect, 90 * 16, int(-span * 16))
+                p.restore()
+                continue
             # قلمٌ معدنيّ: تدرّجٌ مخروطيّ يدور فيلمع جانبٌ ويخبو آخر
             cg = QtGui.QConicalGradient(0, 0, -ang * 2.0 + self.t * 20)
             cg.setColorAt(0.00, _ink(GOLD_DIM, alpha * 0.45 * fade))
@@ -530,10 +548,14 @@ class GoldStage(QtWidgets.QWidget):
             self._halo_key = key
         pad = self._halo_pad
         p.save()
-        p.setOpacity(k * (0.75 + 0.25 * math.sin(self.t * 0.9)))
+        # الهادئ: هالةٌ خافتة ثابتة لا تتنفّس
+        p.setOpacity(k * 0.38 if self.calm
+                     else k * (0.75 + 0.25 * math.sin(self.t * 0.9)))
         p.drawPixmap(QtCore.QPointF(rect.x() - pad, rect.y() - pad),
                      self._halo)
         p.restore()
+        if self.calm:
+            return          # الهالة وحدها — بلا نقطة ضوءٍ تطوف الحافّة
         # المذنّب: رأسٌ ساطع وذيلٌ يخبو على مسار الحافّة
         path = QtGui.QPainterPath()
         path.addRoundedRect(rect.adjusted(-1, -1, 1, 1), 16, 16)

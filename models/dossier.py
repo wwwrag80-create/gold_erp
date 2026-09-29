@@ -90,6 +90,53 @@ def _top_models(conn, entity_id, date_from=None, date_to=None, limit=8):
              "wages": float(r["net_wages"] or 0.0)} for r in rows]
 
 
+def model_items(conn, entity_id, date_from=None, date_to=None):
+    """موديلات الجهة بقطعها — لورقة الصور: صورةٌ واحدة لكل رقم موديل
+    وتحتها أرقام التشغيل التي أخذتها (أو أرجعتها) في الفترة بوزنها.
+
+    رقم الموديل الواحد قد يتكرّر في عشرات أرقام التشغيل؛ فالصورة للموديل
+    والقائمة تحته لأرقام التشغيل — لا صورةٌ مكرّرة لكل قطعة.
+    """
+    p = [entity_id]
+    c = ""
+    if date_from:
+        c += " AND i.invoice_date>=?"
+        p.append(date_from)
+    if date_to:
+        c += " AND i.invoice_date<=?"
+        p.append(date_to)
+    rows = conn.execute(
+        "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') m,"
+        " w.work_order_no wo, it.registered_weight wt, i.kind k,"
+        " i.invoice_date d, i.invoice_no no"
+        " FROM invoice_items it"
+        " JOIN invoices i ON i.id=it.invoice_id"
+        " LEFT JOIN work_orders w ON w.id=it.work_order_id"
+        " WHERE i.is_deleted=0 AND i.customer_id=?" + c +
+        " ORDER BY m, i.invoice_date, i.id", p).fetchall()
+    out = {}
+    for r in rows:
+        m = out.setdefault(r["m"], {"model": r["m"], "items": [],
+                                    "sold": 0, "returned": 0,
+                                    "weight": 0.0})
+        sale = r["k"] == "sale"
+        wt = float(r["wt"] or 0.0)
+        m["items"].append({"wo": r["wo"] or "—", "weight": wt,
+                           "kind": "بيع" if sale else "مرتجع",
+                           "date": r["d"], "no": r["no"]})
+        if sale:
+            m["sold"] += 1
+            m["weight"] += wt
+        else:
+            m["returned"] += 1
+            m["weight"] -= wt
+    res = list(out.values())
+    for m in res:
+        m["weight"] = round(m["weight"], 3)
+        m["net_count"] = m["sold"] - m["returned"]
+    return res
+
+
 def _flow(conn, entity_id, date_from=None, date_to=None):
     """ما خرج وما رجع وزناً وأجوراً — ومنه تُشتقّ نسبة المرتجع."""
     p = [entity_id]
@@ -234,7 +281,8 @@ def build(conn, entity_id, date_from=None, date_to=None):
         "limit": _limit_state(lim_c, lim_g, cash, gold),
         "aging": age,
         "bridge": bridge, "bridge_life": bridge_life,
-        "models": _top_models(conn, entity_id, d1, as_of),
+        # موديلات الفترة كلها لا الثمانية الأولى — الجدول يعرض الفترة وحدها
+        "models": _top_models(conn, entity_id, d1, as_of, limit=500),
         "models_life": _top_models(conn, entity_id),
         "flow": flow, "flow_life": flow_life,
         "last_receipt": _last_voucher(conn, entity_id, "receipt", as_of),

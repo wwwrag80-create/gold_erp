@@ -143,7 +143,7 @@ class IncomeStatementScreen(QtWidgets.QWidget):
              "—", g(r["net_gold_sold"])),
             ("", "", ""),
             ("═══ ثانياً: خسائر التشغيل العينية (الذهب) ═══", "", ""),
-            ("    الفاقد الفني — قسم الصب (5120)", "—", g(r["casting_loss"])),
+            ("    الصب والتصفية (1350)", "—", g(r["casting_loss"])),
             ("    الفاقد التشغيلي — قسم التصنيع (5110)", "—",
              g(r["manufacturing_loss"])),
             ("    إجمالي فاقد الذهب", "—", g(r["total_gold_loss"])),

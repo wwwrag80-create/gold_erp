@@ -22,13 +22,13 @@ from ui.widgets.common import tab_widget, title_label
 # (العنوان، الوحدة، الصنف) — ترتيبُ العرض ترتيبُ الاستعمال
 SECTIONS = [
     ("حركة الرصيد", "ui.reports.movement_screen", "MovementScreen"),
-    ("ملف الجهة", "ui.reports.dossier_screen", "DossierScreen"),
     ("أعمار الموديلات", "ui.reports.stock_aging_screen",
      "StockAgingScreen"),
     ("ربحية الموديل", "ui.reports.model_profit_screen",
      "ModelProfitScreen"),
-    ("أعمار الديون", "ui.reports.aging_screen", "AgingScreen"),
 ]
+# «ملف الجهة» و«أعمار الديون» انتقلا إلى شاشة العملاء — المبيعات
+# والسداد (4.31): هما سؤالان عن العميل لا عن المصنع.
 
 
 class AnalysisHubScreen(QtWidgets.QWidget):

@@ -19,14 +19,11 @@ from ui.document_archive_screen import DocumentArchiveScreen
 from ui.welcome_screen import WelcomeScreen
 from ui.widgets.gold_price import GoldPriceBar
 from ui.dashboard_screen import DashboardScreen
-from ui.reconciliation_screen import ReconciliationScreen
 from ui.entities_screen import EntitiesScreen
 from ui.fixing_screen import FixingScreen
 from ui.general_ledger_screen import GeneralLedgerScreen
 from ui.journal_screen import JournalScreen
-from ui.melting_screen import MeltingScreen
 from ui.payroll_run_screen import PayrollRunScreen
-from ui.payroll_screen import PayrollScreen
 from ui.opening_balances_screen import OpeningBalancesScreen
 from ui.mfg_costs_screen import MfgCostsScreen
 from ui.operations_screen import OperationsScreen
@@ -52,8 +49,6 @@ from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
 from ui.sales_screen import SalesScreen
 from ui.tax_sales_screen import TaxSalesScreen
-from ui.shrinkage_screen import ShrinkageScreen
-from ui.reports.stock_report import StockReportScreen
 from ui.workshop_accounts_screen import WorkshopAccountsScreen
 from ui.workshop_losses_screen import WorkshopLossesScreen
 from ui.stocktake_screen import StocktakeScreen
@@ -76,7 +71,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 7
+NAV_VERSION = 8
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -112,17 +107,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.opening_screen = Lazy(lambda: OpeningStockScreen(user), "opening_screen")
             self.production_screen = Lazy(lambda: ProductionScreen(user), "production_screen")
             self.vouchers_screen = Lazy(lambda: VouchersScreen(user), "vouchers_screen")
-            self.melting_screen = Lazy(lambda: MeltingScreen(user), "melting_screen")
             self.stocktake_screen = Lazy(lambda: StocktakeScreen(user), "stocktake_screen")
             self.fixing_screen = Lazy(lambda: FixingScreen(user), "fixing_screen")
             self.purchases_screen = Lazy(lambda: PurchasesScreen(user), "purchases_screen")
             self.tax_sales_screen = Lazy(lambda: TaxSalesScreen(user),
                                          "tax_sales_screen")
-            self.payroll_screen = Lazy(lambda: PayrollScreen(user), "payroll_screen")
             self.journal_screen = Lazy(lambda: JournalScreen(user), "journal_screen")
             self.txlog_screen = Lazy(lambda: TransactionLogScreen(user), "txlog_screen")
-            self.recon_screen = Lazy(lambda: ReconciliationScreen(
-                user, on_open_entry=self.open_entry_in_ledger), "recon_screen")
             self.archive_screen = Lazy(lambda: DocumentArchiveScreen(
                 user, on_open_ledger=self.open_ledger), "archive_screen")
 
@@ -165,7 +156,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("التكويد الموحّد لجهات التعامل", self.entities_screen),
                     ("أرصدة الأستاذ المساعد", self.subledger_screen),
                     ("الأرصدة الافتتاحية المخزنية", self.opening_screen),
-                    ("الصب والتصفية", self.melting_screen),
                     ("تسوية فواقد الورشة", Lazy(lambda: WorkshopLossesScreen(user), "تسوية فواقد الورشة")),
                     ("حسابات الورشة", Lazy(lambda: WorkshopAccountsScreen(user), "حسابات الورشة")),
                     ("الجرد الفعلي", self.stocktake_screen),
@@ -176,7 +166,6 @@ class MainWindow(QtWidgets.QMainWindow):
                           "سلامة السجل (بصمة القيود)")),
                     ("صحة النظام",
                      Lazy(lambda: DiagnosticsScreen(user), "صحة النظام")),
-                    ("المطابقة وتسوية الفروقات", self.recon_screen),
                     # مطابقة الدفتر بكشف المصرف — كانت تُعمل بورقةٍ
                     # وقلمٍ خارج النظام، والورقة لا تُدقَّق ولا تُؤرشَف
                     ("مطابقة كشف البنك",
@@ -187,9 +176,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     # وربحيةُ الموديل أسئلةٌ متجاورة — كانت أربعة
                     # بنودٍ لكلٍّ عنوانه، فضاع نصفُ الارتفاع في
                     # عناوين تتكرّر. صارت أقساماً أعلى شاشةٍ واحدة.
-                    ("التحليل والدراسات (٥ أقسام)",
+                    ("التحليل والدراسات (٣ أقسام)",
                      Lazy(lambda: AnalysisHubScreen(user),
-                          "التحليل والدراسات (٥ أقسام)")),
+                          "التحليل والدراسات (٣ أقسام)")),
                     # التعديل مشروع؛ المقصود أن يكون مرئياً —
                     # فتعديلٌ يُرى يُسأل عنه، ولا يُرى لا يُسأل
                     ("من عدّل ماذا بعد الترحيل",
@@ -197,7 +186,6 @@ class MainWindow(QtWidgets.QMainWindow):
                           "من عدّل ماذا بعد الترحيل")),
                     # الأصول الثابتة والإهلاك صارت تبويباً في شاشة
                     # المشتريات: الأصل يُشترى هناك، فإهلاكُه بجانبه
-                    ("الرواتب والموظفون", self.payroll_screen),
                     ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
                     ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
                     ("الإقرار الضريبي (VAT)", Lazy(lambda: VatReturnScreen(user), "الإقرار الضريبي (VAT)")),
@@ -211,16 +199,10 @@ class MainWindow(QtWidgets.QMainWindow):
                      Lazy(lambda: IncomeStatementScreen(user),
                           "قائمة الدخل (الأرباح والخسائر)")),
                     ("الميزانية العمومية", Lazy(lambda: BalanceSheetScreen(user), "الميزانية العمومية")),
-                    ("أرصدة المخازن (جرد لحظي)",
-                     Lazy(lambda: StockReportScreen(user),
-                          "أرصدة المخازن (جرد لحظي)")),
                     ("تحليل مبيعات العملاء", self.analytics_screen),
                     ("إنتاج خزينة التصنيع (مطابقة)",
                      Lazy(lambda: KhazinaReportScreen(user),
                           "إنتاج خزينة التصنيع (مطابقة)")),
-                    ("تسوية فاقد التصنيع الشهري",
-                     Lazy(lambda: ShrinkageScreen(user),
-                          "تسوية فاقد التصنيع الشهري")),
                     ("تهيئة أرصدة أول المدة (تاريخ القطع)", Lazy(lambda: OpeningBalancesScreen(user), "تهيئة أرصدة أول المدة (تاريخ القطع)")),
                     ("الإقفال السنوي", Lazy(lambda: YearEndScreen(user), "الإقفال السنوي")),
                 ]),
@@ -230,7 +212,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.edit_targets = {
                 "invoices": (self.sales_screen, "load_invoice"),
                 "vouchers": (self.vouchers_screen, "load_document"),
-                "melting_ops": (self.melting_screen, "load_document"),
                 "wo_supply": (self.production_screen, "load_document"),
                 "wo_adjust": (self.dashboard_screen, "load_document"),
                 "mfg_costs": (self.mfg_screen, "refresh"),
@@ -263,6 +244,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ══════════════════════════════════════════════════════════
         header = QtWidgets.QFrame()
         header.setObjectName("header")
+        self._header_bar = header
         h = QtWidgets.QHBoxLayout(header)
         h.setContentsMargins(14, 8, 14, 8)
         h.setSpacing(10)
@@ -838,6 +820,14 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._panel_visible = not is_sub
         self.btn_close.setVisible(is_sub)      # زر الإغلاق في كل شاشة فرعية
+        # ══ الشريط الأسود العلوي في الرئيسية وحدها (4.31) ══
+        # العنوان والبحث والعيار و«تحديث» و«عرض» أدوات الواجهة، لا
+        # الشاشة: داخلها يُطوى الشريط فترتفع الشاشة وتأخذ جداولها
+        # الارتفاع كله. ويعود فور الرجوع إلى الرئيسية.
+        # (بلا أب بعدُ أثناء التهيئة: إظهارُه حينها يجعله نافذةً تومض)
+        hb = getattr(self, "_header_bar", None)
+        if hb is not None and hb.parentWidget() is not None:
+            hb.setVisible(not is_sub)
         # سعر الذهب في الواجهة الرئيسية وحدها — داخل الشاشة لا يزاحمها
         gb = getattr(self, "gold_bar", None)
         if gb is not None:
