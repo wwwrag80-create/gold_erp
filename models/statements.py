@@ -45,8 +45,8 @@ _EPS = {"cash": 0.005, "gold": 0.0005}
 
 def _tree(conn):
     rows = [dict(r) for r in conn.execute(
-        "SELECT id, code, name, type, parent_id, is_postable"
-        " FROM accounts ORDER BY code")]
+        "SELECT id, code, name, type, parent_id, is_postable, nature,"
+        " COALESCE(is_active,1) is_active FROM accounts ORDER BY code")]
     by_id = {r["id"]: r for r in rows}
     for r in rows:
         r["children"] = []
@@ -203,15 +203,18 @@ LINES = [
     ("ca_other", "أصول متداولة أخرى", "ca"),
     # حقوق الملكية
     ("capital", "رأس المال", "eq"),
+    ("reserve", "الاحتياطيات", "eq"),
     ("partners", "جاري الشركاء", "eq"),
     ("retained", "الأرباح المبقاة (المرحّلة)", "eq"),
     ("opening_susp", "حساب تسوية الأرصدة الافتتاحية", "eq"),
     ("eq_other", "حقوق ملكية أخرى", "eq"),
     ("profit", "صافي ربح (خسارة) الفترة", "eq"),
     # المطلوبات غير المتداولة
+    ("loans_lt", "قروض طويلة الأجل", "ncl"),
     ("eosb", "مخصص مكافأة نهاية الخدمة للموظفين", "ncl"),
     ("ncl_other", "مطلوبات غير متداولة أخرى", "ncl"),
     # المطلوبات المتداولة
+    ("loans_st", "قروض قصيرة الأجل والجزء المتداول من القروض", "cl"),
     ("payables", "الذمم الدائنة — الموردون", "cl"),
     ("customer_adv", "دفعات مقدّمة وأمانات العملاء", "cl"),
     ("accruals", "مستحقات الموظفين والرواتب", "cl"),
@@ -242,6 +245,10 @@ _MAP = {
     # تسويات نهاية الفترة (4.36)
     "1680": "ecl", "1980": "prepaid", "2280": "accrued",
     "2400": "zakat", "2600": "eosb",
+    # مراجعة الدليل (4.37): القروض والاحتياطيات والتأمينات، وما يُضاف
+    # لاحقاً تحت «غير المتداولة» يُقرأ غير متداول لا متداولاً
+    "2350": "loans_st", "2700": "loans_lt", "3300": "reserve",
+    "2290": "accruals", "1690": "nca_other", "2500": "ncl_other",
 }
 _PARTY_ASSET = ("1600", "1650")      # عملاء وجهات
 _PARTY_SUPPLIER = ("2300",)          # موردون
@@ -340,9 +347,13 @@ def _position_dim(conn, as_of, dim, rows, by_id):
             add(kind, b, node)
         elif kind in ("ppe_cost", "cash", "inventory", "staff", "prepaid"):
             add(kind, b, node)
-        elif kind in ("accruals", "accrued", "zakat", "eosb"):
+        elif kind in ("accruals", "accrued", "zakat", "eosb", "loans_st",
+                      "loans_lt", "ncl_other"):
             add(kind, -b, node)
-        elif kind in ("capital", "partners", "retained", "opening_susp"):
+        elif kind == "nca_other":
+            add(kind, b, node)
+        elif kind in ("capital", "partners", "retained", "opening_susp",
+                      "reserve"):
             add(kind, -b, node)
         elif rtype == "asset":
             add("ca_other", b, node)
@@ -532,6 +543,7 @@ _IS_MAP = {
     "5100": "cos_gold", "5700": "cos_labor", "5710": "cos_labor",
     "5050": "cos_other", "5860": "depr", "5800": "admin",
     "5900": "other_exp", "5880": "ecl_exp", "5950": "zakat",
+    "4400": "other_income",
 }
 
 
@@ -715,7 +727,8 @@ CF_DIRECT = [
 ]
 CF_INVESTING = [("i_ppe", "(شراء) بيع ممتلكات وآلات ومعدات"),
                 ("i_other", "تدفقات استثمارية أخرى")]
-CF_FINANCING = [("f_capital", "رأس المال المدفوع (المسحوب)"),
+CF_FINANCING = [("f_loans", "القروض — المحصَّل (المسدَّد)"),
+                ("f_capital", "رأس المال المدفوع (المسحوب)"),
                 ("f_partners", "جاري الشركاء — إيداعات (مسحوبات)"),
                 ("f_retained", "توزيعات أرباح وتسويات الأرباح المبقاة"),
                 ("f_opening", "حساب تسوية الأرصدة الافتتاحية"),
@@ -741,7 +754,8 @@ def _cf_class(node, by_id, rows_type):
     if kind in ("party_customer", "party_supplier", "inventory", "staff",
                 "accruals", "vat", "ppe_cost", "ppe_dep", "capital",
                 "partners", "retained", "opening_susp", "ecl", "prepaid",
-                "accrued", "zakat", "eosb"):
+                "accrued", "zakat", "eosb", "loans_st", "loans_lt",
+                "reserve", "nca_other", "ncl_other"):
         return kind
     if rtype == "equity":
         return "eq_other"
@@ -770,6 +784,11 @@ _CF_ROUTE = {
     "other_wc": ("d_other", "wc_other", "op"),
     "ppe_dep": ("d_other", "dep", "op"),
     "ppe_cost": ("i_ppe", None, "inv"),
+    "nca_other": ("i_other", None, "inv"),
+    "loans_st": ("f_loans", None, "fin"),
+    "loans_lt": ("f_loans", None, "fin"),
+    "ncl_other": ("f_other", None, "fin"),
+    "reserve": ("f_other", None, "fin"),
     "capital": ("f_capital", None, "fin"),
     "partners": ("f_partners", None, "fin"),
     "retained": ("f_retained", None, "fin"),
@@ -939,7 +958,8 @@ def cf_layout(cf, method="indirect"):
 # لم يمرّ عليها قيد الإقفال) — فمجموع العمود يطابق حقوق الملكية في
 # قائمة المركز المالي، ويبقى صحيحاً قبل الإقفال السنوي وبعده.
 
-EQ_COLS = [("capital", "رأس المال"), ("partners", "جاري الشركاء"),
+EQ_COLS = [("capital", "رأس المال"), ("reserve", "الاحتياطيات"),
+           ("partners", "جاري الشركاء"),
            ("retained", "الأرباح المبقاة"),
            ("opening_susp", "تسوية الأرصدة الافتتاحية"),
            ("eq_other", "حقوق ملكية أخرى")]
@@ -947,10 +967,12 @@ EQ_ROWS = [("profit", "صافي ربح (خسارة) الفترة"),
            ("r_capital", "زيادة (تخفيض) رأس المال"),
            ("r_partners", "إيداعات (مسحوبات) الشركاء"),
            ("r_dividends", "توزيعات أرباح وتسويات على الأرباح المبقاة"),
+           ("r_reserve", "المحوَّل إلى الاحتياطيات"),
            ("transfer", "تحويل نتيجة السنة عند الإقفال السنوي"),
            ("r_opening_adj", "تسويات حساب الأرصدة الافتتاحية"),
            ("r_other", "حركات أخرى على حقوق الملكية")]
 _EQ_ROW_OF = {"capital": "r_capital", "partners": "r_partners",
+              "reserve": "r_reserve",
               "retained": "r_dividends", "opening_susp": "r_opening_adj",
               "eq_other": "r_other"}
 
@@ -963,7 +985,7 @@ def _eq_class(node, by_id, rtype):
         return None
     k = _classify(node, by_id)
     return k if k in ("capital", "partners", "retained",
-                      "opening_susp") else "eq_other"
+                      "opening_susp", "reserve") else "eq_other"
 
 
 def _eq_period(conn, d1, d2, dim, rows, by_id):

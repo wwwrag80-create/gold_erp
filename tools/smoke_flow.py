@@ -5927,7 +5927,7 @@ def main():
         _mw69 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
             encoding="utf-8")
         check("شاشة التدفقات النقدية في القائمة وتعرض القائمة",
-              "CashFlowScreen(user)" in _mw69
+              "FinancialStatementsScreen(user)" in _mw69
               and _w69.table.rowCount() > 8
               and _w69.method.count() == 2)
         _w69.close()
@@ -5996,7 +5996,7 @@ def main():
         _mw70 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
             encoding="utf-8")
         check("شاشة حقوق الملكية في القائمة وتعرض القائمة",
-              "EquityChangesScreen(user)" in _mw70
+              "FinancialStatementsScreen(user)" in _mw70
               and _w70.table.rowCount() > 6
               and _w70.table.columnCount() >= 3)
         _w70.close()
@@ -6127,8 +6127,108 @@ def main():
             encoding="utf-8")
         check("شاشة تسويات نهاية الفترة: 5 تبويبات وفي القائمة",
               _w71.tabs.count() == 5 and _w71.chk.rowCount() >= 7
-              and "PeriodEndScreen(user)" in _mw71)
+              and "FinancialStatementsScreen(user)" in _mw71)
         _w71.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("72) دليل الحسابات للمراجع · شاشة «القوائم المالية»")
+    from models import coa_audit as _ca72
+    from database.seed import CONTRA_NATURE as _cn72
+    with db(readonly=True) as conn:
+        _acc72 = {r["code"]: dict(r) for r in conn.execute(
+            "SELECT a.code, a.nature, a.is_postable, a.type, p.code pc"
+            " FROM accounts a LEFT JOIN accounts p ON p.id=a.parent_id")}
+        _kids72 = {r[0] for r in conn.execute(
+            "SELECT DISTINCT p.code FROM accounts a JOIN accounts p"
+            " ON p.id=a.parent_id")}
+        _moved72 = {r[0] for r in conn.execute(
+            "SELECT DISTINCT a.code FROM journal_lines l JOIN accounts a"
+            " ON a.id=l.account_id")}
+        _au72 = _ca72.summary(conn)
+    check("الحسابات المقابلة بطبيعتها: مجمّع الإهلاك والمخصص دائنان،"
+          " والمردودات مدينة",
+          all(_acc72[c]["nature"] == n for c, n in _cn72.items()
+              if c in _acc72))
+    check("مستوى المتداول / غير المتداول في الشجرة",
+          _acc72["1010"]["pc"] == "1005" and _acc72["1030"]["pc"] == "1005"
+          and _acc72["1700"]["pc"] == "1690"
+          and _acc72["1900"]["pc"] == "1030"
+          and _acc72["2020"]["pc"] == "2010"
+          and _acc72["2600"]["pc"] == "2500"
+          and _acc72["2700"]["pc"] == "2500")
+    check("المجموعات لا تقبل الترحيل ما لم تكن عليها حركة تاريخية",
+          all(not _acc72[c]["is_postable"] or c in _moved72
+              or c in ("1950", "1960", "1970")
+              for c in _kids72 if c in _acc72),
+          str([c for c in _kids72 if c in _acc72
+               and _acc72[c]["is_postable"] and c not in _moved72]))
+    check("حسابات المراجع: التأمينات · القروض · الاحتياطي · مصروفات بنكية",
+          all(c in _acc72 for c in ("2290", "2350", "2700", "3300", "5805",
+                                    "5806", "5890", "4400", "5910")))
+    check("فحص سلامة الدليل: لا أخطاء (القيود متوازنة والأنواع صحيحة)",
+          _au72["errors"] == 0, str([i[:2] for i in _au72["items"]]))
+    from models import day_close as _dc72
+    check("الإغلاق اليومي: «ذمم الموردين» من 2300 لا من جذر الخصوم 2000",
+          any(c == "2300" for c, _n, _d in _dc72.KEY_ACCOUNTS)
+          and not any(c == "2000" for c, _n, _d in _dc72.KEY_ACCOUNTS))
+    from models import purchases as _pu72
+    check("شراء الأصل الثابت على فرعٍ من المعدات لا على المجموعة",
+          _pu72.DEFAULT_ACCOUNT["asset"] == "1710")
+    # قرضٌ واحتياطيٌّ يظهران في بنودهما من القوائم
+    with db() as conn:
+        post_entry(conn, date.today().isoformat(), "قرض بنكي", [
+            {"account_id": acc_id(conn, "1500"), "cash_debit": 50000},
+            {"account_id": acc_id(conn, "2700"), "cash_credit": 40000},
+            {"account_id": acc_id(conn, "2350"), "cash_credit": 10000}],
+            username="admin")
+        post_entry(conn, date.today().isoformat(), "تجنيب احتياطي", [
+            {"account_id": acc_id(conn, "3200"), "cash_debit": 1000},
+            {"account_id": acc_id(conn, "3300"), "cash_credit": 1000}],
+            username="admin")
+    with db(readonly=True) as conn:
+        _fp72 = _st67.financial_position(conn, _p69[1])
+        _cf72 = _st67.cash_flow(conn, *_p69)
+        _eq72 = _st67.equity_changes(conn, *_p69)
+    _v72 = _fp72["cash"]["values"]
+    check("القرض: طويل الأجل غير متداول، وقصيره متداول، وتمويليٌّ في"
+          " التدفقات",
+          _v72["loans_lt"] >= 40000 - 0.01 and _v72["loans_st"] >= 10000 - 0.01
+          and _cf72["cur"]["values"]["f_loans"] >= 50000 - 0.01
+          and _fp72["balanced_cash"] and _cf72["balanced"])
+    check("الاحتياطي عمودٌ في حقوق الملكية وصفُّ «المحوَّل إلى الاحتياطيات»",
+          _v72["reserve"] >= 1000 - 0.01 and _eq72["balanced"]
+          and any(k == "reserve" for k, _t in _eq72["columns"])
+          and _eq72["cur"]["rows"]["r_reserve"]["reserve"] >= 1000 - 0.01)
+    _hc72 = _pm65.build_html("coa_list", 0)
+    check("طباعة دليل الحسابات مع خلاصة فحص السلامة",
+          "دليل الحسابات" in _hc72 and "فحص سلامة الدليل" in _hc72
+          and "مجمّع إهلاك" in _hc72)
+    try:
+        from PyQt5 import QtWidgets as _QW72
+        _QW72.QApplication.instance() or _QW72.QApplication([])
+        from ui.reports.financial_statements_screen import (
+            FinancialStatementsScreen as _F72)
+        from ui.coa_screen import CoaScreen as _C72
+        _f72 = _F72({"id": 1, "username": "admin"})
+        _tabs72 = [_f72.tabs.tabText(i) for i in range(_f72.tabs.count())]
+        for _i in range(_f72.tabs.count()):
+            _f72.tabs.setCurrentIndex(_i)
+        _mw72 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
+            encoding="utf-8")
+        check("«القوائم المالية»: ستة تبويبات تُبنى عند فتحها · بندٌ واحد",
+              _tabs72 == ["ميزان المراجعة", "قائمة المركز المالي",
+                          "قائمة الدخل", "التغيرات في حقوق الملكية",
+                          "التدفقات النقدية",
+                          "تسويات نهاية الفترة والقوائم الختامية"]
+              and len(_f72.screens) == 6
+              and "FinancialStatementsScreen(user)" in _mw72
+              and "TrialBalanceScreen(user)" not in _mw72, str(_tabs72))
+        _c72 = _C72({"id": 1, "username": "admin"})
+        check("شاشة الدليل: زرّا فحص السلامة والطباعة",
+              hasattr(_c72, "run_audit") and hasattr(_c72, "print_coa"))
+        _f72.close()
+        _c72.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

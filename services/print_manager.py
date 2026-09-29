@@ -2571,6 +2571,69 @@ def _tpl_zakat_calc(conn, _id=0, date_from=None, date_to=None,
             "</table>" + note + _sign_block())
 
 
+def _tpl_coa_list(conn, _id=0):
+    """دليل الحسابات للمراجع — الشجرة كاملةً بنوعها وطبيعتها ورصيدها،
+    وخلاصة فحص سلامتها."""
+    from models import coa_audit, statements
+    rows, by_id, roots = statements._tree(conn)
+    cash = statements._balances(conn, "9999-12-31", "cash")
+    gold = statements._balances(conn, "9999-12-31", "gold")
+    types = {"asset": "أصول", "liability": "خصوم", "equity": "حقوق ملكية",
+             "revenue": "إيرادات", "expense": "مصروفات", "bridge": "وسيطة"}
+
+    def total(node, dct):
+        return dct.get(node["id"], 0.0) + sum(total(c, dct)
+                                               for c in node["children"])
+
+    body = ""
+
+    def walk(node, level):
+        nonlocal body
+        grp = bool(node["children"])
+        b0, b1 = ("<b>", "</b>") if grp else ("", "")
+        bg = ' style="background-color:#EFE9DC"' if level == 1 else ""
+        c = total(node, cash)
+        g = total(node, gold)
+        body += "<tr>" + cells(
+            f"<td{bg}>{b0}{en(node['code'])}{b1}</td>",
+            f'<td class="r" style="padding-right:{6 + 12 * (level - 1)}px">'
+            f"{b0}{node['name']}{b1}</td>",
+            f"<td{bg}>{types.get(node['type'], node['type'])}</td>",
+            f"<td{bg}>{'دائن' if node.get('nature') == 'credit' else 'مدين'}"
+            "</td>",
+            f"<td{bg}>{'—' if grp else ('نعم' if node['is_postable'] else 'لا')}"
+            "</td>",
+            f'<td class="num"{bg}>{_fp_money(c)}</td>',
+            f'<td class="num"{bg}>{_fp_money(g, True)}</td>') + "</tr>"
+        for ch in node["children"]:
+            walk(ch, level + 1)
+
+    for r in roots:
+        walk(r, 1)
+    head = "<tr>" + cells(thw("الكود"), thw("اسم الحساب"), thw("النوع"),
+                          thw("الطبيعة"), thw("يقبل الحركة"),
+                          thw("الرصيد — ريال"),
+                          thw(f"الرصيد — ذهب ({_kunit()})")) + "</tr>"
+    s = coa_audit.summary(conn)
+    items = "".join(
+        "<tr>" + cells(f"<td>{sev}</td>", f'<td class="r">{t}</td>',
+                       f'<td class="r">{en(d)}'
+                       + (f" — {en('، '.join(c))}" if c else "")
+                       + "</td>") + "</tr>"
+        for sev, t, d, c in s["items"])
+    audit = (f'<br/><div class="note"><b>فحص سلامة الدليل: {s["errors"]}'
+             f' خطأ · {s["warnings"]} تنبيه</b></div>'
+             + (f"{TBL}<tr>{cells(thw('الخطورة'), thw('البند'), thw('التفصيل'))}"
+                f"</tr>{items}</table>" if items else
+                '<div class="note">✔ لا ملاحظات.</div>'))
+    meta = _entity_meta([("عدد الحسابات", en(len(rows))),
+                         ("الحسابات التفصيلية",
+                          en(sum(1 for r in rows if not r["children"])))])
+    return (_header("دليل الحسابات", "—", _qd(QtCore.QDate.currentDate()),
+                    show_meta=False) + meta
+            + f"{TBL}{head}{body}</table>" + audit + _sign_block())
+
+
 def _tpl_financial_position(conn, _id=0, as_of=None, compare_to=None):
     """قائمة المركز المالي (الميزانية العمومية) بترتيب IAS 1 — بمقارنة.
 
@@ -4083,6 +4146,7 @@ BUILDERS = {
     "fs_notes": _tpl_fs_notes,
     "fs_full": _tpl_fs_full,
     "zakat_calc": _tpl_zakat_calc,
+    "coa_list": _tpl_coa_list,
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
     "models_received_photos": _tpl_models_received_photos,

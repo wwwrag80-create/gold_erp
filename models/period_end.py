@@ -142,13 +142,15 @@ def zakat_compute(conn, d1, d2, extra_add=0.0, extra_ded=0.0):
 
     additions = [
         ("رأس المال (آخر الفترة)", fp_close["capital"]),
+        ("الاحتياطيات", fp_close.get("reserve", 0.0)),
         ("جاري الشركاء الدائن (آخر الفترة)", max(fp_close["partners"], 0.0)),
         ("الأرباح المبقاة / الخسائر المتراكمة أول الفترة",
          fp_open["retained"] + fp_open["profit"]),
         ("حساب تسوية الأرصدة الافتتاحية", fp_close["opening_susp"]),
         ("حقوق ملكية أخرى", fp_close["eq_other"]),
         ("مخصص مكافأة نهاية الخدمة أول الفترة", fp_open["eosb"]),
-        ("مطلوبات طويلة الأجل", fp_close["ncl_other"]),
+        ("قروض ومطلوبات طويلة الأجل",
+         fp_close["ncl_other"] + fp_close.get("loans_lt", 0.0)),
         ("صافي الربح المعدّل للفترة", adjusted),
     ]
     if abs(extra_add) >= EPS:

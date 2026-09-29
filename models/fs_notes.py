@@ -17,7 +17,7 @@ NOTES = [
     (6, "المخزون"),
     (7, "المصروفات المدفوعة مقدماً والأرصدة المدينة الأخرى"),
     (8, "الممتلكات والآلات والمعدات"),
-    (9, "الذمم الدائنة والمستحقات"),
+    (9, "الذمم الدائنة والمستحقات والقروض"),
     (10, "ضريبة القيمة المضافة"),
     (11, "الزكاة"),
     (12, "مخصص مكافأة نهاية الخدمة للموظفين"),
@@ -34,7 +34,8 @@ NOTE_REF = {
     "prepaid": 7, "staff": 7, "supplier_adv": 7, "ca_other": 7,
     "ppe_cost": 8, "ppe_dep": 8, "nca_other": 8,
     "payables": 9, "customer_adv": 9, "accruals": 9, "accrued": 9,
-    "cl_other": 9, "vat_asset": 10, "vat_liab": 10, "zakat": 11,
+    "cl_other": 9, "loans_st": 9, "loans_lt": 9, "ncl_other": 9,
+    "reserve": 13, "vat_asset": 10, "vat_liab": 10, "zakat": 11,
     "eosb": 12, "capital": 13, "partners": 13, "retained": 13,
     "opening_susp": 13, "eq_other": 13, "profit": 13,
     # قائمة الدخل
@@ -228,7 +229,9 @@ def build(conn, date_from, date_to, compare=True):
         notes[8]["moves"].append(("حركة مجمّع الإهلاك", m,
                                   "إهلاك الفترة", "استبعادات"))
     notes[9]["tables"] = [_table("", det("payables", "customer_adv",
-                                         "accruals", "accrued", "cl_other"),
+                                         "accruals", "accrued", "cl_other",
+                                         "loans_st", "loans_lt",
+                                         "ncl_other"),
                                  sign=1)]
     vat_rows = []
     a = st._balances(conn, date_to, "cash")

@@ -501,7 +501,8 @@ def balance_sheet(conn, date_to=None, date_from=None):
     accr_g, accr_c = bal(["2200", "2900"])
     vat_out_g, vat_out_c = bal(["2100", "2150"])
     # 4.36: مصروفات مستحقة · مخصص الزكاة · مخصص نهاية الخدمة
-    acd_g, acd_c = bal(["2280"])
+    acd_g, acd_c = bal(["2280", "2290"])
+    loan_g, loan_c = bal(["2350", "2700"])
     zak_g, zak_c = bal(["2400"])
     eos_g, eos_c = bal(["2600"])
 
@@ -513,6 +514,7 @@ def balance_sheet(conn, date_to=None, date_from=None):
         ("مصروفات مستحقة", round(-acd_c, 2), round(-acd_g, 3)),
         ("مخصص الزكاة", round(-zak_c, 2), round(-zak_g, 3)),
         ("مخصص مكافأة نهاية الخدمة", round(-eos_c, 2), round(-eos_g, 3)),
+        ("القروض", round(-loan_c, 2), round(-loan_g, 3)),
     ]
     tl_c = round(sum(x[1] for x in liabilities), 2)
     tl_g = round(sum(x[2] for x in liabilities), 3)
@@ -523,6 +525,7 @@ def balance_sheet(conn, date_to=None, date_from=None):
     ret_g, ret_c = bal(["3200"])
     cur_g, cur_c = bal(["3210"])
     susp_g, susp_c = bal(["3900"])
+    rsv_g, rsv_c = bal(["3300"])
 
     # صافي نتيجة النشاط من حسابات الإيراد والمصروف الفعلية
     rev_g, rev_c = bal(["4000"])
@@ -536,6 +539,7 @@ def balance_sheet(conn, date_to=None, date_from=None):
         ("الأرباح المحتجزة", round(-ret_c, 2), round(-ret_g, 3)),
         ("أرباح وخسائر العام الحالي", round(-cur_c, 2), round(-cur_g, 3)),
         ("الأرصدة الافتتاحية", round(-susp_c, 2), round(-susp_g, 3)),
+        ("الاحتياطيات", round(-rsv_c, 2), round(-rsv_g, 3)),
         ("صافي نتيجة النشاط (إيرادات − مصروفات)", net_c, net_g),
     ]
     te_c = round(sum(x[1] for x in equity), 2)

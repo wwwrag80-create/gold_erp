@@ -122,12 +122,49 @@ ACCOUNTS = [
      "cash"),
     # الزكاة بندٌ مستقل بعد «الربح قبل الزكاة» — لا مصروفاً تشغيلياً
     ("5950", "الزكاة", "expense", "5000", 1, "cash"),
+    # ═══ مراجعة دليل الحسابات (4.37) ═══
+    # مستوى «متداول / غير متداول» الذي يقرأ به المراجع الميزانية (IAS 1.60)
+    ("1005", "الأصول المتداولة", "asset", "1000", 0, "both"),
+    ("1690", "الأصول غير المتداولة", "asset", "1000", 0, "cash"),
+    ("2500", "الخصوم غير المتداولة", "liability", "2000", 0, "cash"),
+    # حساباتٌ يتوقعها المراجع ولم تكن في الشجرة
+    ("2290", "التأمينات الاجتماعية المستحقة (GOSI)", "liability", "2010",
+     1, "cash"),
+    ("2350", "قروض قصيرة الأجل والجزء المتداول من القروض", "liability",
+     "2010", 1, "cash"),
+    ("2700", "قروض طويلة الأجل", "liability", "2500", 1, "cash"),
+    ("3300", "الاحتياطيات (النظامي والاتفاقي)", "equity", "3000", 1,
+     "cash"),
+    ("4400", "أرباح بيع واستبعاد أصول ثابتة", "revenue", "4000", 1, "cash"),
+    ("5805", "رواتب وأجور الإدارة", "expense", "5800", 1, "cash"),
+    ("5806", "مصروف التأمينات الاجتماعية (GOSI)", "expense", "5800", 1,
+     "cash"),
+    ("5825", "الاتصالات والإنترنت", "expense", "5800", 1, "cash"),
+    ("5835", "التأمين", "expense", "5800", 1, "cash"),
+    ("5845", "النقل والمواصلات", "expense", "5800", 1, "cash"),
+    ("5855", "الدعاية والتسويق", "expense", "5800", 1, "cash"),
+    ("5890", "مصروفات ورسوم بنكية", "expense", "5800", 1, "cash"),
+    ("5910", "خسائر بيع واستبعاد أصول ثابتة", "expense", "5900", 1, "cash"),
 ]
 
 CREDIT_TYPES = ("liability", "equity", "revenue")
 
+# ══ الحسابات المقابلة (Contra) — طبيعتها عكس نوعها ══
+# مجمّع الإهلاك ومخصص الخسائر الائتمانية أصلان رصيدهما دائن (يُطرحان
+# من الأصل)، ومردودات المبيعات إيرادٌ رصيده مدين (يُطرح من المبيعات).
+# كانت تُسجَّل بطبيعة نوعها، فيقرأ المراجع «مجمّع إهلاك مدين» خطأً.
+CONTRA_NATURE = {"1790": "credit", "1680": "credit",
+                 "4900": "debit", "4910": "debit", "4920": "debit",
+                 "4930": "debit"}
 
-def _nature(acc_type):
+
+# مجموعاتٌ تبقى تقبل الترحيل: ترحيلٌ احتياطي عليها من الرواتب
+KEEP_POSTABLE_GROUPS = ("1950", "1960", "1970")
+
+
+def _nature(acc_type, code=None):
+    if code in CONTRA_NATURE:
+        return CONTRA_NATURE[code]
     return "credit" if acc_type in CREDIT_TYPES else "debit"
 
 
@@ -146,7 +183,8 @@ def seed_initial_data() -> None:
             cur = conn.execute(
                 "INSERT INTO accounts(code,name,type,parent_id,is_postable,"
                 "nature,balance_type) VALUES(?,?,?,?,?,?,?)",
-                (code, name, typ, ids.get(parent), postable, _nature(typ), bal))
+                (code, name, typ, ids.get(parent), postable,
+                 _nature(typ, code), bal))
             ids[code] = cur.lastrowid
         for u, p, full, role in USERS:
             conn.execute(
@@ -164,6 +202,10 @@ REPARENT = {
     "2300": "2010", "2200": "2010", "2100": "2020", "2150": "2020",
     "5100": "5050", "5500": "5050", "5510": "5050", "5700": "5050",
     "5200": "5900", "5300": "5900", "5600": "5900",
+    # 4.37: مستوى المتداول / غير المتداول، وضريبة المدخلات مع الأرصدة
+    # المدينة المتداولة، والالتزامات الضريبية مع الخصوم المتداولة
+    "1010": "1005", "1020": "1005", "1030": "1005", "1900": "1030",
+    "1700": "1690", "2020": "2010", "2600": "2500",
 }
 
 RENAMES = {
@@ -187,6 +229,13 @@ RENAMES = {
     "5110": "فواقد الورشة",
     "5120": "فاقد فني — قسم الصب (تبخير)",
     "5130": "خسائر فروقات الجرد — الذهب المشغول",
+    # 4.37: أسماء المجموعات بعد مستوى المتداول / غير المتداول
+    "1010": "النقد وما في حكمه",
+    "1020": "المخزون — الذهب والفصوص والمشغولات",
+    "1030": "الذمم المدينة والأرصدة المدينة الأخرى",
+    "1700": "الممتلكات والآلات والمعدات",
+    "2010": "الخصوم المتداولة",
+    "2020": "الالتزامات الضريبية والزكوية",
 }
 
 
@@ -263,12 +312,13 @@ def ensure_new_accounts() -> None:
             if code in ids:
                 conn.execute(
                     "UPDATE accounts SET nature=?, balance_type=? WHERE code=?",
-                    (_nature(typ), bal, code))
+                    (_nature(typ, code), bal, code))
                 continue
             cur = conn.execute(
                 "INSERT INTO accounts(code,name,type,parent_id,is_postable,"
                 "nature,balance_type) VALUES(?,?,?,?,?,?,?)",
-                (code, name, typ, ids.get(parent), postable, _nature(typ), bal))
+                (code, name, typ, ids.get(parent), postable,
+                 _nature(typ, code), bal))
             ids[code] = cur.lastrowid
 
         ensure_system_tags(conn)
@@ -288,6 +338,21 @@ def ensure_new_accounts() -> None:
                 conn.execute(
                     "UPDATE accounts SET name=? WHERE code=?"
                     " AND COALESCE(name_locked,0)=0", (name, code))
+
+        # 4.37: الحساب الذي له فروع مجموعةٌ لا يُرحَّل عليها — ما لم تكن
+        # عليه حركةٌ تاريخية (تحميه الضمانة التالية). كان «الأصول
+        # الثابتة» 1700 يقبل الترحيل وله فروع، فتتوزّع أصولٌ بين المجموعة
+        # وفروعها ولا يعرف المراجع ما في المجموعة نفسها.
+        # مستثنى: سلف الموظفين والعهد وسلف العمال — الرواتب ترحّل على
+        # الحساب الأب نفسه لموظفٍ ليس له حسابٌ فرعي بعد (models.payroll).
+        conn.execute(
+            "UPDATE accounts SET is_postable=0 WHERE is_postable=1"
+            " AND code NOT IN (" + ",".join(
+                f"'{c}'" for c in KEEP_POSTABLE_GROUPS) + ")"
+            " AND id IN (SELECT DISTINCT parent_id FROM accounts"
+            "            WHERE parent_id IS NOT NULL)"
+            " AND id NOT IN (SELECT DISTINCT account_id FROM journal_lines)")
+        recompute_levels(conn)
 
         # ضمانة عامة: أي حساب له حركة فعلية في دفتر الأستاذ يبقى قابلاً
         # للترحيل مهما تغيّرت هيكلة الشجرة — حتى لا يختفي من القوائم

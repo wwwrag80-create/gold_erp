@@ -483,3 +483,70 @@ def purge_account_tree(conn, account_id, username, confirm_text=""):
                f"{len(entries)} قيد · {docs} مستند")
     return {"root": acc["name"], "accounts": len(ids),
             "entries": len(entries), "docs": docs}
+
+
+def group_own_balance(conn, account_id):
+    """رصيد الحركة المباشرة على حسابٍ (دون فروعه) — (نقد، ذهب)."""
+    r = conn.execute(
+        "SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0) c,"
+        " COALESCE(SUM(l.gold_debit-l.gold_credit),0) g"
+        " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+        " AND e.is_deleted=0 WHERE l.account_id=?", (account_id,)).fetchone()
+    return round(r["c"] or 0.0, 2), round(r["g"] or 0.0, 3)
+
+
+def reclass_group_balance(conn, group_id, child_id, entry_date, username):
+    """ينقل الرصيد المباشر لحسابٍ تجميعي إلى أحد فروعه بقيد تسوية.
+
+    علاجُ ما يُنبّه إليه فحص السلامة («حساب تجميعي عليه حركة مباشرة»):
+    رصيد المجموعة يختلط بفروعها فلا يعرف المراجع ما فيها. القيد: مدين
+    الفرع / دائن المجموعة (أو العكس) بالنقد والذهب معاً — فيصير رصيد
+    المجموعة المباشر صفراً ويظهر كلّه في الفرع. وسجلّ الأصول الثابتة
+    المسجَّل على المجموعة يُنقل إلى الفرع معه.
+    """
+    from services.accounting_engine import post_entry
+    from services.audit import log_action
+    grp = get_account(conn, group_id)
+    child = get_account(conn, child_id)
+    if not grp or not child:
+        raise ValueError("الحساب غير موجود")
+    if child["parent_id"] != grp["id"]:
+        raise ValueError("اختر فرعاً مباشراً من فروع المجموعة")
+    if not child["is_postable"]:
+        raise ValueError("الفرع المختار تجميعي — اختر حساباً يقبل الحركة")
+    c, g = group_own_balance(conn, group_id)
+    if abs(c) < 0.005 and abs(g) < 0.0005:
+        raise ValueError("لا رصيد مباشر على المجموعة لنقله")
+    desc = f"إعادة تبويب: نقل رصيد {grp['code']} إلى فرعه {child['code']}"
+    to_child = {"account_id": child_id, "line_desc": desc}
+    from_grp = {"account_id": group_id, "line_desc": desc}
+    for amt, dr, cr in ((c, "cash_debit", "cash_credit"),
+                        (g, "gold_debit", "gold_credit")):
+        if abs(amt) < (0.005 if dr.startswith("cash") else 0.0005):
+            continue
+        if amt > 0:
+            to_child[dr] = abs(amt)
+            from_grp[cr] = abs(amt)
+        else:
+            to_child[cr] = abs(amt)
+            from_grp[dr] = abs(amt)
+    eid = post_entry(conn, entry_date, desc, [to_child, from_grp],
+                     source_table="manual", username=username, note=desc)
+    try:
+        conn.execute("UPDATE fixed_assets SET account_id=? WHERE account_id=?",
+                     (child_id, group_id))
+    except Exception:
+        pass
+    log_action(conn, username, "update", "accounts", group_id,
+               f"reclass {grp['code']} → {child['code']}: {c} / {g}")
+    return eid
+
+
+def child_count_safe(account_id):
+    """عدد فروع حساب — باتصال قراءةٍ خاص (لقائمة الفأرة)."""
+    from database.database import db
+    try:
+        with db(readonly=True) as conn:
+            return child_count(conn, account_id)
+    except Exception:
+        return 0

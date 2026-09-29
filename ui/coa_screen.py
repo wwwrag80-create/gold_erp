@@ -88,11 +88,22 @@ class CoaScreen(QtWidgets.QWidget):
         btn_collapse.setObjectName("ghost")
         btn_collapse.clicked.connect(self.tree.collapseAll)
 
+        btn_audit = QtWidgets.QPushButton("🔍 فحص سلامة الدليل")
+        btn_audit.setObjectName("homeBtn")
+        btn_audit.setToolTip("ما يسأل عنه المراجع: قيود غير متوازنة، حركة على"
+                             " مجموعات، أرصدة على خلاف طبيعتها، حسابات"
+                             " وسيطة لم تُصفَّر…")
+        btn_audit.clicked.connect(self.run_audit)
+        btn_print = QtWidgets.QPushButton("🖨 طباعة الدليل")
+        btn_print.clicked.connect(self.print_coa)
+
         top = QtWidgets.QHBoxLayout()
         top.addWidget(self.search, 2)
         top.addWidget(self.show_frozen)
         top.addWidget(btn_expand)
         top.addWidget(btn_collapse)
+        top.addWidget(btn_audit)
+        top.addWidget(btn_print)
 
         self.summary = big_label()
         lay = QtWidgets.QVBoxLayout(self)
@@ -209,6 +220,104 @@ class CoaScreen(QtWidgets.QWidget):
         cells[0].setData(r["id"], QtCore.Qt.UserRole)
         return cells
 
+    def reclass(self, aid):
+        """ينقل الرصيد المباشر للمجموعة إلى فرعٍ يختاره المستخدم."""
+        try:
+            with db(readonly=True) as conn:
+                grp = coa.get_account(conn, aid)
+                c, g = coa.group_own_balance(conn, aid)
+                kids = [dict(r) for r in conn.execute(
+                    "SELECT id, code, name FROM accounts WHERE parent_id=?"
+                    " AND is_postable=1 AND is_active=1 ORDER BY code",
+                    (aid,))]
+            if abs(c) < 0.005 and abs(g) < 0.0005:
+                info(self, "لا رصيد مباشر على هذه المجموعة — لا شيء يُنقل.")
+                return
+            if not kids:
+                raise ValueError("لا فرع يقبل الحركة تحت هذه المجموعة —"
+                                 " أضف حساباً فرعياً أولاً")
+            labels = [f"{k['code']} — {k['name']}" for k in kids]
+            choice, ok = QtWidgets.QInputDialog.getItem(
+                self, "نقل الرصيد إلى فرع",
+                f"رصيد «{grp['code']} {grp['name']}» المباشر:"
+                f" نقد {c:,.2f} · ذهب {g:,.3f}\nإلى الفرع:", labels, 0, False)
+            if not ok:
+                return
+            child = kids[labels.index(choice)]
+            from datetime import date
+            with db() as conn:
+                coa.reclass_group_balance(conn, aid, child["id"],
+                                          date.today().isoformat(),
+                                          self.user["username"])
+            info(self, f"نُقل الرصيد إلى {choice} بقيد تسوية.")
+            self.refresh(force=True)
+        except Exception as e:
+            err(self, e)
+
+    def run_audit(self):
+        """فحص سلامة دليل الحسابات — في نافذةٍ بجدول الملاحظات."""
+        try:
+            from models import coa_audit
+            with db(readonly=True) as conn:
+                s = coa_audit.summary(conn)
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle("فحص سلامة دليل الحسابات")
+            dlg.setLayoutDirection(QtCore.Qt.RightToLeft)
+            dlg.resize(980, 520)
+            head = QtWidgets.QLabel(
+                ("✔ الدليل سليم — لا أخطاء" if s["ok"] else
+                 f"✘ {s['errors']} خطأ يجب إصلاحه")
+                + f"   ·   {s['warnings']} تنبيه")
+            head.setStyleSheet(
+                "font-weight:bold;color:%s" % ("#0F5A24" if s["ok"]
+                                                else "#9A0018"))
+            t = QtWidgets.QTableWidget(len(s["items"]), 4)
+            t.setHorizontalHeaderLabels(["الخطورة", "البند", "التفصيل",
+                                         "الحسابات"])
+            colors = {"خطأ": "#9A0018", "تنبيه": "#8A5A00",
+                      "ملاحظة": "#3A4A5A"}
+            for i, (sev, title, detail, codes) in enumerate(s["items"]):
+                for c, v in enumerate((sev, title, detail,
+                                       "، ".join(codes))):
+                    it = QtWidgets.QTableWidgetItem(v)
+                    if c == 0:
+                        it.setForeground(QtGui.QColor(colors.get(sev,
+                                                                 "#222")))
+                    t.setItem(i, c, it)
+            t.setWordWrap(True)
+            t.horizontalHeader().setStretchLastSection(True)
+            t.setColumnWidth(0, 70)
+            t.setColumnWidth(1, 260)
+            t.setColumnWidth(2, 420)
+            t.resizeRowsToContents()
+            lay = QtWidgets.QVBoxLayout(dlg)
+            lay.addWidget(head)
+            lay.addWidget(t, 1)
+            if not s["items"]:
+                lay.addWidget(QtWidgets.QLabel("لا ملاحظات."))
+            row = QtWidgets.QHBoxLayout()
+            b_print = QtWidgets.QPushButton("🖨 طباعة الدليل مع الفحص")
+            b_print.clicked.connect(self.print_coa)
+            b_close = QtWidgets.QPushButton("إغلاق")
+            b_close.clicked.connect(dlg.reject)
+            row.addWidget(b_print)
+            row.addStretch(1)
+            row.addWidget(b_close)
+            lay.addLayout(row)
+            self._audit_dlg = dlg
+            dlg.exec_()
+        except Exception as e:
+            from ui.widgets.common import err
+            err(self, e)
+
+    def print_coa(self):
+        try:
+            from services import print_manager
+            print_manager.preview_document(self, "coa_list", 0)
+        except Exception as e:
+            from ui.widgets.common import err
+            err(self, e)
+
     def apply_filter(self, text):
         text = (text or "").strip()
 
@@ -258,6 +367,9 @@ class CoaScreen(QtWidgets.QWidget):
         m.addAction("❄ تجميد الحساب" if acc["is_active"] else "✔ تنشيط الحساب",
                     lambda: self.toggle_active(aid, not acc["is_active"]))
         m.addAction("🏷 تعديل الوسم النظامي", lambda: self.edit_tag(aid))
+        if coa.child_count_safe(aid):
+            m.addAction("↘ نقل رصيدها المباشر إلى فرع…",
+                        lambda: self.reclass(aid))
         m.addSeparator()
         m.addAction("🗑 حذف الحساب", lambda: self.delete(aid))
         m.addAction("🗑 حذف الحساب وكل فروعه",

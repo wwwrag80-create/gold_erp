@@ -31,13 +31,8 @@ from ui.super_admin_screen import SuperAdminScreen
 from ui.opening_stock_screen import OpeningStockScreen
 from ui.production_screen import ProductionScreen
 from ui.purchases_screen import PurchasesScreen
-from ui.reports.balance_sheet_screen import BalanceSheetScreen
-from ui.reports.cash_flow_screen import CashFlowScreen
-from ui.reports.equity_changes_screen import EquityChangesScreen
-from ui.reports.period_end_screen import PeriodEndScreen
-from ui.reports.trial_balance_screen import TrialBalanceScreen
+from ui.reports.financial_statements_screen import FinancialStatementsScreen
 from ui.reports.factory_reports_screen import FactoryReportsScreen
-from ui.reports.income_statement import IncomeStatementScreen
 from ui.reports.khazina_report_screen import KhazinaReportScreen
 from ui.reports.vat_return_screen import VatReturnScreen
 from ui.reports.year_end_screen import YearEndScreen
@@ -74,7 +69,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 11
+NAV_VERSION = 12
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -192,25 +187,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
                     ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
                     ("الإقرار الضريبي (VAT)", Lazy(lambda: VatReturnScreen(user), "الإقرار الضريبي (VAT)")),
-                    ("ميزان المراجعة", Lazy(lambda: TrialBalanceScreen(user), "ميزان المراجعة")),
-                    # ══ خمس شاشات كانت مبنيّةً ولا باب لها ══
-                    # كانت تُبنى وتُختبر ولا تظهر في القائمة، فكان
-                    # النظام يُسلَّم بلا **قائمة دخل** — وهي أول ما
-                    # يسأل عنه محاسب. أُلحقت هنا بترتيبها المحاسبي:
-                    # الميزانية ثم قائمة الدخل، ثم أرصدة المخازن.
-                    ("قائمة الدخل (الأرباح والخسائر)",
-                     Lazy(lambda: IncomeStatementScreen(user),
-                          "قائمة الدخل (الأرباح والخسائر)")),
-                    ("الميزانية العمومية", Lazy(lambda: BalanceSheetScreen(user), "الميزانية العمومية")),
-                    ("قائمة التدفقات النقدية",
-                     Lazy(lambda: CashFlowScreen(user),
-                          "قائمة التدفقات النقدية")),
-                    ("قائمة التغيرات في حقوق الملكية",
-                     Lazy(lambda: EquityChangesScreen(user),
-                          "قائمة التغيرات في حقوق الملكية")),
-                    ("تسويات نهاية الفترة والقوائم الختامية",
-                     Lazy(lambda: PeriodEndScreen(user),
-                          "تسويات نهاية الفترة والقوائم الختامية")),
+                    # ══ القوائم المالية في بندٍ واحد (4.37) ══
+                    # ميزان المراجعة والقوائم الأربع وتسويات نهاية
+                    # الفترة كانت ستة بنودٍ متفرّقة — صارت تبويباتٍ
+                    # بترتيبها المحاسبي في شاشةٍ واحدة يسهل الوصول إليها.
+                    ("القوائم المالية",
+                     Lazy(lambda: FinancialStatementsScreen(user),
+                          "القوائم المالية")),
                     ("تحليل مبيعات العملاء", self.analytics_screen),
                     ("إنتاج خزينة التصنيع (مطابقة)",
                      Lazy(lambda: KhazinaReportScreen(user),

@@ -34,6 +34,9 @@ FP_CONCEPTS = [
     ("ppe", "ifrs-full:PropertyPlantAndEquipment", ("ppe_cost", "ppe_dep")),
     ("nca_other", "ifrs-full:OtherNoncurrentAssets", ("nca_other",)),
     ("capital", "ifrs-full:IssuedCapital", ("capital",)),
+    ("reserve", "ifrs-full:StatutoryReserve", ("reserve",)),
+    ("loans_st", "ifrs-full:ShorttermBorrowings", ("loans_st",)),
+    ("loans_lt", "ifrs-full:LongtermBorrowings", ("loans_lt",)),
     ("retained", "ifrs-full:RetainedEarnings", ("retained", "profit")),
     ("other_equity", "ifrs-full:OtherEquityInterest",
      ("partners", "opening_susp", "eq_other")),
@@ -253,6 +256,12 @@ def readiness(conn, date_from, date_to):
     """قائمة التحقق قبل الرفع — (البند، جاهز؟، تفصيل)."""
     from models import fiscal, period_end as pe
     out = []
+    from models import coa_audit
+    ca = coa_audit.summary(conn)
+    out.append(("دليل الحسابات سليم (لا أخطاء)", ca["ok"],
+                f"{ca['errors']} خطأ · {ca['warnings']} تنبيه — التفصيل في"
+                " «دليل الحسابات ← فحص السلامة»"
+                if ca["errors"] or ca["warnings"] else ""))
     tb = st.trial_balance(conn, date_from, date_to, "cash")
     out.append(("ميزان المراجعة متوازن", tb["totals"]["balanced"], ""))
     fp = st.financial_position(conn, date_to, "")
