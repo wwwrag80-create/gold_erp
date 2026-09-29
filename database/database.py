@@ -1429,6 +1429,11 @@ def migrate_schema() -> None:
             if pcols and col not in pcols:
                 conn.execute(f"ALTER TABLE purchases ADD COLUMN {col} {ddl}")
 
+        # 4.36: تسويات نهاية الفترة — تاريخ التعيين وأجر نهاية الخدمة
+        # للموظفين، وجدول المصروفات المدفوعة مقدماً
+        from models.period_end import ensure_schema as _pe_schema
+        _pe_schema(conn)
+
 
 def run_migrations_files():
     """ينفّذ ملفات الهجرة المرقّمة مرة واحدة لكل إصدار.

@@ -195,8 +195,10 @@ LINES = [
     ("cash", "النقد وما في حكمه", "ca"),
     ("inventory", "المخزون — الذهب والفصوص والمشغولات", "ca"),
     ("receivables", "الذمم المدينة — العملاء والجهات", "ca"),
+    ("ecl", "يُطرح: مخصص الخسائر الائتمانية المتوقعة", "ca"),
     ("supplier_adv", "دفعات مقدّمة للموردين", "ca"),
     ("staff", "سلف وعهد الموظفين والعمال", "ca"),
+    ("prepaid", "مصروفات مدفوعة مقدماً", "ca"),
     ("vat_asset", "ضريبة القيمة المضافة المستردّة (صافي)", "ca"),
     ("ca_other", "أصول متداولة أخرى", "ca"),
     # حقوق الملكية
@@ -207,11 +209,14 @@ LINES = [
     ("eq_other", "حقوق ملكية أخرى", "eq"),
     ("profit", "صافي ربح (خسارة) الفترة", "eq"),
     # المطلوبات غير المتداولة
-    ("ncl_other", "مطلوبات غير متداولة", "ncl"),
+    ("eosb", "مخصص مكافأة نهاية الخدمة للموظفين", "ncl"),
+    ("ncl_other", "مطلوبات غير متداولة أخرى", "ncl"),
     # المطلوبات المتداولة
     ("payables", "الذمم الدائنة — الموردون", "cl"),
     ("customer_adv", "دفعات مقدّمة وأمانات العملاء", "cl"),
     ("accruals", "مستحقات الموظفين والرواتب", "cl"),
+    ("accrued", "مصروفات مستحقة", "cl"),
+    ("zakat", "مخصص الزكاة", "cl"),
     ("vat_liab", "ضريبة القيمة المضافة المستحقة (صافي)", "cl"),
     ("cl_other", "مطلوبات متداولة أخرى", "cl"),
 ]
@@ -234,6 +239,9 @@ _MAP = {
     "3110": "capital", "3120": "partners",
     "3200": "retained", "3210": "retained",
     "3900": "opening_susp",
+    # تسويات نهاية الفترة (4.36)
+    "1680": "ecl", "1980": "prepaid", "2280": "accrued",
+    "2400": "zakat", "2600": "eosb",
 }
 _PARTY_ASSET = ("1600", "1650")      # عملاء وجهات
 _PARTY_SUPPLIER = ("2300",)          # موردون
@@ -326,13 +334,14 @@ def _position_dim(conn, as_of, dim, rows, by_id):
         elif kind == "vat":
             vat_net += b
             vat_rows.append((node["code"], node["name"], b))
-        elif kind == "ppe_dep":
-            # دائنٌ بطبيعته: يبقى سالباً في جانب الأصول فيُطرح من التكلفة
-            add("ppe_dep", b, node)
-        elif kind in ("ppe_cost", "cash", "inventory", "staff"):
+        elif kind in ("ppe_dep", "ecl"):
+            # دائنان بطبيعتهما: يبقيان سالبين في جانب الأصول فيُطرحان
+            # من التكلفة ومن الذمم
             add(kind, b, node)
-        elif kind == "accruals":
-            add("accruals", -b, node)
+        elif kind in ("ppe_cost", "cash", "inventory", "staff", "prepaid"):
+            add(kind, b, node)
+        elif kind in ("accruals", "accrued", "zakat", "eosb"):
+            add(kind, -b, node)
         elif kind in ("capital", "partners", "retained", "opening_susp"):
             add(kind, -b, node)
         elif rtype == "asset":
@@ -499,26 +508,30 @@ IS_LINES = [
     ("cos_other", "مواد ومصروفات تشغيل مباشرة", "cos"),
     ("admin", "المصاريف الإدارية والعمومية", "opex"),
     ("depr", "إهلاك الأصول الثابتة", "opex"),
+    ("ecl_exp", "الخسائر الائتمانية المتوقعة", "opex"),
     ("other_income", "إيرادات أخرى", "other"),
     ("other_exp", "مصروفات أخرى", "other"),
+    ("zakat", "الزكاة", "zakat"),
 ]
 IS_SUBTOTALS = [
     # (بعد القسم، المفتاح، العنوان)
     ("rev", "net_revenue", "صافي الإيرادات"),
     ("cos", "gross", "مجمل الربح (الخسارة)"),
     ("opex", "operating", "الربح (الخسارة) التشغيلي"),
-    ("other", "net", "صافي ربح (خسارة) الفترة"),
+    ("other", "before_zakat", "صافي الربح (الخسارة) قبل الزكاة"),
+    ("zakat", "net", "صافي ربح (خسارة) الفترة"),
 ]
 IS_SECTIONS = {"rev": "الإيرادات", "cos": "تكلفة الإيرادات",
                "opex": "المصاريف التشغيلية",
-               "other": "الإيرادات والمصروفات الأخرى"}
+               "other": "الإيرادات والمصروفات الأخرى",
+               "zakat": "الزكاة"}
 
 _IS_MAP = {
     "4900": "returns", "4200": "other_income", "4300": "other_income",
     "5200": "discounts", "5300": "discounts",
     "5100": "cos_gold", "5700": "cos_labor", "5710": "cos_labor",
     "5050": "cos_other", "5860": "depr", "5800": "admin",
-    "5900": "other_exp",
+    "5900": "other_exp", "5880": "ecl_exp", "5950": "zakat",
 }
 
 
@@ -682,6 +695,8 @@ CF_INDIRECT = [
     ("wc_payables", "الزيادة (النقص) في ذمم الموردين"),
     ("wc_accruals", "الزيادة (النقص) في مستحقات الموظفين"),
     ("wc_vat", "الزيادة (النقص) في صافي ضريبة القيمة المضافة"),
+    ("wc_prepaid", "التغير في المصروفات المقدمة والمستحقة"),
+    ("provisions", "يُضاف: صافي المخصصات (زكاة · نهاية خدمة · ائتمانية)"),
     ("wc_other", "التغير في أصول ومطلوبات تشغيلية أخرى"),
     ("noncash", "يُستبعد: أثر معاملات استثمارية وتمويلية غير نقدية"),
 ]
@@ -695,6 +710,7 @@ CF_DIRECT = [
     ("d_staff", "المدفوع للموظفين والعمال"),
     ("d_expenses", "المصروفات التشغيلية المدفوعة"),
     ("d_vat", "ضريبة القيمة المضافة المسددة (المستردة)"),
+    ("d_zakat", "الزكاة المسددة"),
     ("d_other", "متحصلات ومدفوعات تشغيلية أخرى"),
 ]
 CF_INVESTING = [("i_ppe", "(شراء) بيع ممتلكات وآلات ومعدات"),
@@ -724,7 +740,8 @@ def _cf_class(node, by_id, rows_type):
         return "cash"
     if kind in ("party_customer", "party_supplier", "inventory", "staff",
                 "accruals", "vat", "ppe_cost", "ppe_dep", "capital",
-                "partners", "retained", "opening_susp"):
+                "partners", "retained", "opening_susp", "ecl", "prepaid",
+                "accrued", "zakat", "eosb"):
         return kind
     if rtype == "equity":
         return "eq_other"
@@ -742,6 +759,11 @@ _CF_ROUTE = {
     "accruals": ("d_staff", "wc_accruals", "op"),
     "exp_staff": ("d_staff", "profit", "op"),
     "vat": ("d_vat", "wc_vat", "op"),
+    "prepaid": ("d_expenses", "wc_prepaid", "op"),
+    "accrued": ("d_expenses", "wc_prepaid", "op"),
+    "zakat": ("d_zakat", "provisions", "op"),
+    "eosb": ("d_staff", "provisions", "op"),
+    "ecl": ("d_customers", "provisions", "op"),
     "rev": ("d_revenue", "profit", "op"),
     "exp": ("d_expenses", "profit", "op"),
     "bridge": ("d_fixing", "wc_other", "op"),

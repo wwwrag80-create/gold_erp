@@ -6003,6 +6003,135 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("71) تسويات نهاية الفترة: زكاة · نهاية خدمة · خسائر ائتمانية ·"
+         " مقدمة ومستحقة · إيضاحات · حزمة")
+    from models import period_end as _pe71, fs_notes as _fn71
+    from services import fs_package as _pk71
+    _d1, _d2 = _p69
+    with db(readonly=True) as conn:
+        _codes71 = {r[0] for r in conn.execute(
+            "SELECT code FROM accounts WHERE code IN"
+            " ('1680','1980','2280','2400','2600','5870','5880','5950')")}
+    check("حسابات التسويات مضافة للشجرة (8 حسابات)", len(_codes71) == 8,
+          str(sorted(_codes71)))
+    check("المادة 84: نصف شهر للخمس الأولى وشهرٌ عمّا بعدها",
+          _pe71.eos_award(6000, 3) == 9000.0
+          and _pe71.eos_award(6000, 8) == 15000.0 + 18000.0)
+    check("نسبة الزكاة لسنة ميلادية 2.5777% (2.5% × 365 ÷ 354)",
+          abs(_pe71.zakat_rate(f"{_y69}-01-01", f"{_y69}-12-31") * 100
+              - 2.5 * (366 if _y69 % 4 == 0 else 365) / 354) < 1e-9)
+    with db() as conn:
+        conn.execute("INSERT INTO employees(name, basic_salary)"
+                     " VALUES('موظف نهاية الخدمة', 5000)")
+        _emp71 = conn.execute("SELECT MAX(id) FROM employees").fetchone()[0]
+        _pe71.eos_update(conn, _emp71, f"{_y69 - 7}-01-01", 8000, None,
+                         "admin")
+        _e1 = _pe71.eos_post(conn, _d2, "admin")
+        _e2 = _pe71.eos_post(conn, _d2, "admin")
+        _c1 = _pe71.ecl_post(conn, _d2, "admin", [1, 5, 10, 50])
+        _c2 = _pe71.ecl_post(conn, _d2, "admin", [1, 5, 10, 50])
+        _pid = _pe71.prepaid_add(conn, "تأمين سنوي", "5840", 3650,
+                                 f"{_y69}-07-02", 12, "admin", mode="paid",
+                                 cash_code="1500")
+        _am1 = _pe71.prepaid_amortize(conn, _d2, "admin")
+        _am2 = _pe71.prepaid_amortize(conn, _d2, "admin")
+        _acc, _rev = _pe71.accrue_expense(conn, "5820", 700, _d2, "admin",
+                                          note="كهرباء آخر الفترة")
+        _z1 = _pe71.zakat_post(conn, _d1, _d2, "admin")
+        _z2 = _pe71.zakat_post(conn, _d1, _d2, "admin")
+    _mine = [r for r in _e1["rows"] if r["id"] == _emp71][0]
+    import datetime as _dt71
+    _yrs = ((_dt71.date.fromisoformat(_d2)
+             - _dt71.date(_y69 - 7, 1, 1)).days + 1) / 365.0
+    check("مكافأة نهاية الخدمة: تُحسب من تاريخ التعيين وتُقيَّد بالفرق مرةً",
+          abs(_mine["award"] - _pe71.eos_award(8000, _yrs)) < 0.01
+          and _e1["entry_id"] and _e2["entry_id"] is None,
+          f"{_mine['years']} سنة = {_mine['award']}")
+    check("الخسائر الائتمانية بمصفوفة الأعمار · لا تكرار للقيد",
+          _c1["required"] >= 0 and _c2["entry_id"] is None
+          and abs(_c2["current"] - _c1["required"]) < 0.01)
+    check("المصروف المقدّم يُطفأ يوماً بيوم مرةً واحدة",
+          len(_am1) == 1 and not _am2
+          and abs(_am1[0][1] - round(3650 * 183 / 365, 2)) < 0.02,
+          str(_am1))
+    with db(readonly=True) as conn:
+        _ra = conn.execute(
+            "SELECT entry_date FROM journal_entries WHERE id=?",
+            (_rev,)).fetchone()[0]
+    check("الاستحقاق يُعكس أول يوم في الفترة التالية",
+          bool(_acc) and _ra == f"{_y69 + 1}-01-01")
+    check("الزكاة: الوعاء والنسبة والقيد بالفرق مرةً واحدة",
+          _z1["zakat"] >= 0 and abs(_z2["due"]) < 0.01
+          and _z2["entry_id"] is None
+          and abs(_z1["rate"] - _pe71.zakat_rate(_d1, _d2)) < 1e-12,
+          f"وعاء {_z1['base']} · زكاة {_z1['zakat']}")
+    with db(readonly=True) as conn:
+        _fp71 = _st67.financial_position(conn, _d2)
+        _is71 = _st67.income_statement(conn, _d1, _d2)
+        _cf71 = _st67.cash_flow(conn, _d1, _d2)
+        _eq71 = _st67.equity_changes(conn, _d1, _d2)
+        _nb71 = _fn71.build(conn, _d1, _d2)
+        _rd71 = _pk71.readiness(conn, _d1, _d2)
+    _v71 = _fp71["cash"]["values"]
+    check("القوائم الأربع متوازنة ومترابطة بعد التسويات",
+          _fp71["balanced_cash"] and _cf71["balanced"] and _eq71["balanced"]
+          and abs(_eq71["cur"]["closing"]["total"]
+                  - _fp71["cash"]["totals"]["eq"]) < 0.02
+          and abs(_is71["cash"]["totals"]["net"]
+                  - _fp71["cash"]["values"]["profit"]) < 0.02)
+    check("المركز المالي: مخصص الزكاة متداول · نهاية الخدمة غير متداول ·"
+          " الخسائر الائتمانية تُطرح من الذمم",
+          _v71["zakat"] > 0 and _v71["eosb"] > 0 and _v71["ecl"] <= 0
+          and _v71["prepaid"] > 0 and _v71["accrued"] >= 700 - 0.01)
+    _t71 = _is71["cash"]["totals"]
+    check("قائمة الدخل: الربح قبل الزكاة ثم الزكاة ثم صافي الربح",
+          abs(_t71["before_zakat"] + _is71["cash"]["values"]["zakat"]
+              - _t71["net"]) < 0.02
+          and _is71["cash"]["values"]["zakat"] < 0)
+    check("الإيضاحات: 17 إيضاحاً بأرقام ثابتة وجداول من الدفاتر",
+          [n["no"] for n in _nb71["notes"]] == list(range(1, 18))
+          and _nb71["notes"][10]["moves"] and _nb71["notes"][11]["moves"])
+    _rdm = {t: (ok, d) for t, ok, d in _rd71}
+    check("قائمة التحقق: الزكاة والإطفاء جاهزان · تُنبّه لموظفٍ بلا تاريخ"
+          " تعيين ولنسبٍ لم تُحفظ",
+          _rdm["مخصص الزكاة مقيَّد للفترة"][0]
+          and _rdm["المصروفات المقدمة مُطفأة حتى نهاية الفترة"][0]
+          and not _rdm["مخصص مكافأة نهاية الخدمة محدَّث"][0]
+          and "تاريخ تعيين" in _rdm["مخصص مكافأة نهاية الخدمة محدَّث"][1]
+          and not _rdm["مخصص الخسائر الائتمانية محدَّث"][0], str(_rd71))
+    _hf71 = _pm65.build_html("fs_full", 0, date_from=_d1, date_to=_d2)
+    _hp71 = _pm65.build_html("financial_position", 0, as_of=_d2)
+    check("القوائم الكاملة: الغلاف والقوائم الأربع والإيضاحات · عمود إيضاح",
+          all(x in _hf71 for x in (
+              "قائمة المركز المالي", "قائمة الدخل",
+              "قائمة التغيرات في حقوق الملكية", "قائمة التدفقات النقدية",
+              "الإيضاحات المتممة", "مخصص مكافأة نهاية الخدمة"))
+          and "إيضاح" in _hp71)
+    import zipfile as _zf71
+    import json as _js71
+    _zp = pathlib.Path(_TMP) / "pkg71.zip"
+    _names71 = _pk71.export(str(_zp), _d1, _d2)
+    _j71 = _js71.loads(_zf71.ZipFile(_zp).read(
+        "ifrs_mapping.json").decode("utf-8"))
+    check("حزمة المحاسب القانوني: القوائم CSV والمستند الكامل ومسمّيات IFRS",
+          "القوائم_المالية_الكاملة.html" in _names71
+          and "5_trial_balance.csv" in _names71 and _j71["balanced"]
+          and any(f["concept"] == "ifrs-full:Assets" for f in _j71["facts"]),
+          str(len(_j71["facts"])))
+    try:
+        from PyQt5 import QtWidgets as _QW71
+        _QW71.QApplication.instance() or _QW71.QApplication([])
+        from ui.reports.period_end_screen import PeriodEndScreen as _P71
+        _w71 = _P71({"id": 1, "username": "admin"})
+        _mw71 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
+            encoding="utf-8")
+        check("شاشة تسويات نهاية الفترة: 5 تبويبات وفي القائمة",
+              _w71.tabs.count() == 5 and _w71.chk.rowCount() >= 7
+              and "PeriodEndScreen(user)" in _mw71)
+        _w71.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -1811,6 +1811,19 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "financial_position":
             return en(_tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                               kw.get("compare_to")))
+        if doc_type == "fs_notes":
+            return en(_tpl_fs_notes(conn, doc_id, kw.get("date_from"),
+                                    kw.get("date_to"),
+                                    kw.get("compare", True)))
+        if doc_type == "fs_full":
+            return en(_tpl_fs_full(conn, doc_id, kw.get("date_from"),
+                                   kw.get("date_to"), kw.get("compare", True),
+                                   kw.get("method", "indirect")))
+        if doc_type == "zakat_calc":
+            return en(_tpl_zakat_calc(conn, doc_id, kw.get("date_from"),
+                                      kw.get("date_to"),
+                                      kw.get("extra_add", 0.0),
+                                      kw.get("extra_ded", 0.0)))
         if doc_type == "equity_changes":
             return en(_tpl_equity_changes(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
@@ -2189,7 +2202,8 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
     st = statements.income_statement(conn, d1, d2, bool(compare))
     rows = statements.is_layout(st, bool(show_accounts))
     has_cmp = bool(st["compare_from"])
-    ncol = 5 if has_cmp else 3
+    ncol = 6 if has_cmp else 4
+    from models.fs_notes import NOTE_REF
 
     body = ""
     for r in rows:
@@ -2209,30 +2223,34 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
             lbl = (f'<td class="r" style="padding-right:18px">'
                    f'{r["label"]}</td>')
             tds = [f'<td class="num">{v}</td>' for v in vals]
+            tds.insert(0, f'<td>{en(NOTE_REF.get(r.get("key"), ""))}</td>')
         elif k == "acct":
             st_ = ' style="font-size:8pt;color:#555"'
             lbl = (f'<td class="r" style="padding-right:34px;font-size:8pt;'
                    f'color:#555">{en(r["label"])}</td>')
             tds = [f'<td class="num"{st_}>{v}</td>' for v in vals]
+            tds.insert(0, "<td></td>")
         else:
             sty = (' style="background-color:#F2EEE4;border-top:2px solid'
                    ' #333;border-bottom:3px double #333"' if k == "grand"
                    else ' style="border-top:1.5px solid #333"')
             lbl = f'<td class="r"{sty}><b>{r["label"]}</b></td>'
             tds = [f'<td class="num"{sty}><b>{v}</b></td>' for v in vals]
+            tds.insert(0, f'<td{sty}></td>')
         body += "<tr>" + cells(lbl, *tds) + "</tr>"
 
     p1 = _nowrap(f"من {en(st['date_from'])} إلى {en(st['date_to'])}")
     p2 = _nowrap(f"من {en(st['compare_from'])} إلى {en(st['compare_to'])}")
     if has_cmp:
         head1 = cells(thspan("البيان", rowspan=2),
+                      thspan("إيضاح", rowspan=2),
                       thspan("النقد — ريال سعودي", 2),
                       thspan(f"الذهب — وزناً ({_kunit()})", 2))
         head2 = cells(thw("الفترة الحالية"), thw("فترة المقارنة"),
                       thw("الفترة الحالية"), thw("فترة المقارنة"))
         head = f"<tr>{head1}</tr><tr>{head2}</tr>"
     else:
-        head = ("<tr>" + cells(thw("البيان"), thw("ريال"),
+        head = ("<tr>" + cells(thw("البيان"), thw("إيضاح"), thw("ريال"),
                                thw(f"ذهب ({_kunit()})")) + "</tr>")
     meta = _entity_meta([
         ("الفترة الحالية", p1),
@@ -2392,6 +2410,167 @@ def _tpl_equity_changes(conn, _id=0, date_from=None, date_to=None,
             + meta + table + verdict + _sign_block())
 
 
+def _notes_html(nb):
+    """جسم الإيضاحات — مشترك بين طباعتها وحدها وضمن القوائم الكاملة."""
+    has_cmp = bool(nb.get("compare_to"))
+    h_cur = f"كما في / للفترة المنتهية في {en(nb['date_to'])}"
+    h_cmp = (f"المقارنة {en(nb['compare_to'])}" if has_cmp else "")
+    out = ""
+    for n in nb["notes"]:
+        out += (f'<div style="margin-top:12px"><b>{en(n["no"])}. '
+                f'{n["title"]}</b></div>')
+        for p in n["paras"]:
+            out += f'<div class="note" style="color:#222">{en(p)}</div>'
+        empty = True
+        for t in n["tables"]:
+            gold = t.get("gold")
+            single = t.get("single")
+            fmt = ((lambda v: _gw(v, 3)) if gold
+                   else (lambda v: _fp_money(v)))
+            if not t["rows"] and not (t["total"][1] or t["total"][2]):
+                continue
+            empty = False
+            hd = [thw("البيان"), thw(h_cur)]
+            if has_cmp and not single:
+                hd.append(thw(h_cmp))
+            rows = ""
+            for code, name, a, b in t["rows"]:
+                lbl = f"{en(code)} — {name}" if code else name
+                tds = [f'<td class="r">{lbl}</td>',
+                       f'<td class="num">{fmt(a)}</td>']
+                if has_cmp and not single:
+                    tds.append(f'<td class="num">{fmt(b)}</td>')
+                rows += "<tr>" + cells(*tds) + "</tr>"
+            tl, ta, tb = t["total"]
+            sty = ' style="background-color:#F2EEE4;border-top:1.5px solid #333"'
+            tds = [f'<td class="r"{sty}><b>{tl}</b></td>',
+                   f'<td class="num"{sty}><b>{fmt(ta)}</b></td>']
+            if has_cmp and not single:
+                tds.append(f'<td class="num"{sty}><b>{fmt(tb)}</b></td>')
+            rows += "<tr>" + cells(*tds) + "</tr>"
+            cap = (f'<div class="note">{t["title"]}</div>'
+                   if t.get("title") else "")
+            out += f"{cap}{TBL}<tr>{cells(*hd)}</tr>{rows}</table>"
+        for title, m, add_lbl, less_lbl in n["moves"]:
+            empty = False
+            rows = "".join(
+                "<tr>" + cells(f'<td class="r">{l}</td>',
+                               f'<td class="num">{_fp_money(v)}</td>')
+                + "</tr>"
+                for l, v in (("الرصيد أول الفترة", m["opening"]),
+                             (add_lbl, m["add"]), (less_lbl, -m["less"])))
+            sty = ' style="background-color:#F2EEE4;border-top:1.5px solid #333"'
+            rows += ("<tr>" + cells(
+                f'<td class="r"{sty}><b>الرصيد آخر الفترة</b></td>',
+                f'<td class="num"{sty}><b>{_fp_money(m["closing"])}</b></td>')
+                + "</tr>")
+            out += (f'<div class="note">{title}</div>{TBL}<tr>'
+                    f'{cells(thw("البيان"), thw("ريال"))}</tr>{rows}</table>')
+        if empty and not n["paras"]:
+            out += '<div class="note">لا توجد أرصدة.</div>'
+    return out
+
+
+def _tpl_fs_notes(conn, _id=0, date_from=None, date_to=None, compare=True):
+    """الإيضاحات المتممة للقوائم المالية — مولَّدة من الدفاتر."""
+    from models import fs_notes
+    today = _qd(QtCore.QDate.currentDate())
+    d1 = date_from or f"{today[:4]}-01-01"
+    d2 = date_to or today
+    nb = fs_notes.build(conn, d1, d2, bool(compare))
+    meta = _entity_meta([
+        ("الفترة", _nowrap(f"من {en(d1)} إلى {en(d2)}")),
+        ("العملة", "ريال سعودي")])
+    return (_header("الإيضاحات المتممة للقوائم المالية", "—", d2,
+                    show_meta=False) + meta + _notes_html(nb)
+            + _sign_block())
+
+
+def _tpl_fs_full(conn, _id=0, date_from=None, date_to=None, compare=True,
+                 method="indirect"):
+    """القوائم المالية الكاملة: غلاف · المركز المالي · الدخل · التغيرات في
+    حقوق الملكية · التدفقات النقدية · الإيضاحات — مستندٌ واحد للتسليم."""
+    from models import fs_notes
+    today = _qd(QtCore.QDate.currentDate())
+    d1 = date_from or f"{today[:4]}-01-01"
+    d2 = date_to or today
+    brk = '<div style="page-break-before:always"></div>'
+    cover = (
+        f'{letterhead()}<div style="text-align:center;padding-top:120px">'
+        f'<div style="font-size:24pt;font-weight:bold">{config.COMPANY_NAME}'
+        '</div><div style="font-size:18pt;margin-top:18px">القوائم المالية'
+        '</div><div style="font-size:14pt;margin-top:10px">للفترة من '
+        f'{en(d1)} إلى {en(d2)}</div>'
+        '<div style="font-size:12pt;margin-top:30px">مع الإيضاحات المتممة'
+        '</div><div style="margin-top:60px;font-size:11pt">'
+        '<table class="items" width="60%" cellspacing="0" cellpadding="6"'
+        ' align="center">'
+        + "".join("<tr>" + cells(f'<td class="r">{t}</td>',
+                                 f'<td>{p}</td>') + "</tr>"
+                  for t, p in (("قائمة المركز المالي", "1"),
+                               ("قائمة الدخل", "2"),
+                               ("قائمة التغيرات في حقوق الملكية", "3"),
+                               ("قائمة التدفقات النقدية", "4"),
+                               ("الإيضاحات المتممة", "5")))
+        + '</table></div></div>')
+    nb = fs_notes.build(conn, d1, d2, bool(compare))
+    parts = [
+        cover,
+        _tpl_financial_position(conn, 0, d2,
+                                _day_before_iso(d1) if compare else ""),
+        _tpl_income_statement(conn, 0, d1, d2, compare, False),
+        _tpl_equity_changes(conn, 0, d1, d2, compare, "cash"),
+        _tpl_cash_flow(conn, 0, d1, d2, compare, method),
+        (_header("الإيضاحات المتممة للقوائم المالية", "—", d2,
+                 show_meta=False) + _notes_html(nb) + _sign_block()),
+    ]
+    return brk.join(parts)
+
+
+def _day_before_iso(d):
+    import datetime as _dtm
+    return (_dtm.date.fromisoformat(d) - _dtm.timedelta(days=1)).isoformat()
+
+
+def _tpl_zakat_calc(conn, _id=0, date_from=None, date_to=None,
+                    extra_add=0.0, extra_ded=0.0):
+    """احتساب الوعاء الزكوي والزكاة التقديرية للفترة."""
+    from models import period_end as pe
+    today = _qd(QtCore.QDate.currentDate())
+    d1 = date_from or f"{today[:4]}-01-01"
+    d2 = date_to or today
+    z = pe.zakat_compute(conn, d1, d2, float(extra_add or 0),
+                         float(extra_ded or 0))
+    rows = ""
+    for sign, items in (("+", z["additions"]), ("−", z["deductions"])):
+        for l, v in items:
+            rows += ("<tr>" + cells(f'<td class="r">{sign} {l}</td>',
+                                    f'<td class="num">{_fp_money(v)}</td>')
+                     + "</tr>")
+    sty = ' style="background-color:#F2EEE4;border-top:2px solid #333"'
+    for l, v in (("الوعاء الزكوي", z["base"]),
+                 (f"النسبة ({z['rate'] * 100:.4f}%)", None),
+                 ("الزكاة المحتسبة", z["zakat"]),
+                 ("المقيَّد سابقاً في الفترة", z["booked"]),
+                 ("المطلوب قيده", z["due"])):
+        rows += ("<tr>" + cells(f'<td class="r"{sty}><b>{en(l)}</b></td>',
+                                f'<td class="num"{sty}><b>'
+                                f'{"" if v is None else _fp_money(v)}'
+                                '</b></td>') + "</tr>")
+    meta = _entity_meta([
+        ("الفترة", _nowrap(f"من {en(d1)} إلى {en(d2)}")),
+        ("العملة", "ريال سعودي")])
+    note = (f'<div {WIDE} style="margin-top:6px">احتسابٌ تقديري بطريقة'
+            ' المصادر والاستخدامات؛ الإقرار النهائي يُقدَّم عبر بوابة هيئة'
+            ' الزكاة والضريبة والجمارك ويُعتمد بالربط.'
+            + (' رُفع الوعاء إلى صافي الربح المعدّل لأنه أقل منه.'
+               if z["base_floor"] else "") + '</div>')
+    return (_header("احتساب الوعاء الزكوي والزكاة", "—", d2,
+                    show_meta=False) + meta
+            + f"{TBL}<tr>{cells(thw('البيان'), thw('ريال'))}</tr>{rows}"
+            "</table>" + note + _sign_block())
+
+
 def _tpl_financial_position(conn, _id=0, as_of=None, compare_to=None):
     """قائمة المركز المالي (الميزانية العمومية) بترتيب IAS 1 — بمقارنة.
 
@@ -2404,7 +2583,8 @@ def _tpl_financial_position(conn, _id=0, as_of=None, compare_to=None):
     fp = statements.financial_position(conn, as_of or today, compare_to)
     rows = statements.layout(fp)
     has_cmp = bool(fp["compare_to"])
-    ncol = 5 if has_cmp else 3
+    ncol = 6 if has_cmp else 4
+    from models.fs_notes import NOTE_REF
 
     body = ""
     for r in rows:
@@ -2426,24 +2606,29 @@ def _tpl_financial_position(conn, _id=0, as_of=None, compare_to=None):
             lbl = (f'<td class="r" style="padding-right:18px">'
                    f'{i0}{r["label"]}{i1}</td>')
             tds = [f'<td class="num">{i0}{v}{i1}</td>' for v in vals]
+            ref = NOTE_REF.get(r.get("key"), "") if k == "line" else ""
+            tds.insert(0, f'<td>{en(ref)}</td>')
         else:
             st = (' style="background-color:#F2EEE4;border-top:2px solid'
                   ' #333;border-bottom:3px double #333"' if k == "grand"
                   else ' style="border-top:1.5px solid #333"')
             lbl = f'<td class="r"{st}><b>{r["label"]}</b></td>'
             tds = [f'<td class="num"{st}><b>{v}</b></td>' for v in vals]
+            tds.insert(0, f'<td{st}></td>')
         body += "<tr>" + cells(lbl, *tds) + "</tr>"
 
     d1, d2 = en(fp["as_of"]), en(fp["compare_to"])
     if has_cmp:
         head1 = cells(thspan("البيان", rowspan=2),
+                      thspan("إيضاح", rowspan=2),
                       thspan("النقد — ريال سعودي", 2),
                       thspan(f"الذهب — وزناً ({_kunit()})", 2))
         head2 = cells(thw(f"كما في {d1}"), thw(f"كما في {d2}"),
                       thw(f"كما في {d1}"), thw(f"كما في {d2}"))
         head = f"<tr>{head1}</tr><tr>{head2}</tr>"
     else:
-        head = ("<tr>" + cells(thw("البيان"), thw(f"ريال — كما في {d1}"),
+        head = ("<tr>" + cells(thw("البيان"), thw("إيضاح"),
+                               thw(f"ريال — كما في {d1}"),
                                thw(f"ذهب ({_kunit()}) — كما في {d1}"))
                 + "</tr>")
     meta = _entity_meta([
@@ -3895,6 +4080,9 @@ BUILDERS = {
     "income_statement": _tpl_income_statement,
     "cash_flow": _tpl_cash_flow,
     "equity_changes": _tpl_equity_changes,
+    "fs_notes": _tpl_fs_notes,
+    "fs_full": _tpl_fs_full,
+    "zakat_calc": _tpl_zakat_calc,
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
     "models_received_photos": _tpl_models_received_photos,
@@ -3963,6 +4151,18 @@ def build_html(doc_type, doc_id, **kw):
         elif doc_type == "financial_position":
             html = _tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                            kw.get("compare_to"))
+        elif doc_type == "fs_notes":
+            html = _tpl_fs_notes(conn, doc_id, kw.get("date_from"),
+                                 kw.get("date_to"), kw.get("compare", True))
+        elif doc_type == "fs_full":
+            html = _tpl_fs_full(conn, doc_id, kw.get("date_from"),
+                                kw.get("date_to"), kw.get("compare", True),
+                                kw.get("method", "indirect"))
+        elif doc_type == "zakat_calc":
+            html = _tpl_zakat_calc(conn, doc_id, kw.get("date_from"),
+                                   kw.get("date_to"),
+                                   kw.get("extra_add", 0.0),
+                                   kw.get("extra_ded", 0.0))
         elif doc_type == "equity_changes":
             html = _tpl_equity_changes(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),

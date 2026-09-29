@@ -446,6 +446,9 @@ def balance_sheet(conn, date_to=None, date_from=None):
     # سلامة القيود، فيُدرج ضمن الأصول بإشارته الطبيعية.
     bridge_g, bridge_c = bal(["6100"])
     vat_in_g, vat_in_c = bal(["1900"])
+    # 4.36: مصروفات مقدمة، ومخصص الخسائر الائتمانية (رصيده دائن فيُطرح)
+    pre_g, pre_c = bal(["1980"])
+    ecl_g, ecl_c = bal(["1680"])
 
     # ── حسابات الجهات: تُقسَّم بحسب إشارة رصيد كل حساب فرعي ──
     def split_parties(parent_codes):
@@ -489,18 +492,27 @@ def balance_sheet(conn, date_to=None, date_from=None):
         ("الأصول الثابتة", fixed_c, fixed_g),
         ("ضريبة المدخلات", vat_in_c, vat_in_g),
         ("مركز التسكير (ذهب ↔ نقد)", bridge_c, bridge_g),
+        ("مصروفات مدفوعة مقدماً", pre_c, pre_g),
+        ("يُطرح: مخصص الخسائر الائتمانية المتوقعة", ecl_c, ecl_g),
     ]
     ta_c = round(sum(x[1] for x in assets), 2)
     ta_g = round(sum(x[2] for x in assets), 3)
 
     accr_g, accr_c = bal(["2200", "2900"])
     vat_out_g, vat_out_c = bal(["2100", "2150"])
+    # 4.36: مصروفات مستحقة · مخصص الزكاة · مخصص نهاية الخدمة
+    acd_g, acd_c = bal(["2280"])
+    zak_g, zak_c = bal(["2400"])
+    eos_g, eos_c = bal(["2600"])
 
     liabilities = [
         ("أرصدة الموردين الدائنة", sup_cc, sup_cg),
         ("أرصدة العملاء الدائنة (ذهب/نقد لدينا لهم)", cust_cc, cust_cg),
         ("مستحقات وتسويات", round(-accr_c, 2), round(-accr_g, 3)),
         ("الالتزامات الضريبية", round(-vat_out_c, 2), round(-vat_out_g, 3)),
+        ("مصروفات مستحقة", round(-acd_c, 2), round(-acd_g, 3)),
+        ("مخصص الزكاة", round(-zak_c, 2), round(-zak_g, 3)),
+        ("مخصص مكافأة نهاية الخدمة", round(-eos_c, 2), round(-eos_g, 3)),
     ]
     tl_c = round(sum(x[1] for x in liabilities), 2)
     tl_g = round(sum(x[2] for x in liabilities), 3)
