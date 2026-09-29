@@ -10,6 +10,8 @@
     python build.py               # بناء كامل
     python build.py --clean       # حذف مخلفات البناء أولاً
     python build.py --onefile     # ملف واحد (أبطأ إقلاعاً)
+    python build.py --console     # نسخة تشخيص بنافذة سوداء تُظهر أي خطأ
+                                  # (gold_erp_debug.exe)
 """
 import shutil
 import subprocess
@@ -17,6 +19,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# ══ جذر المشروع في مسار الاستيراد ══
+# `MAKE_EXE.bat` يشغّل `python core\build.py`، فيكون مسار الاستيراد
+# الأول هو مجلد core/ لا جذر المشروع — فيفشل `from ui…` في رسم صورة
+# شاشة البدء («No module named 'ui'») ويُبنى الـexe **بلا شاشة بدء**.
+# وملف onefile يفكّ نفسه ثوانيَ قبل أن يبدأ بايثون، فينقر المستخدم ولا
+# يرى شيئاً ويظنّ البرنامج لا يعمل.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 OUT = DIST / "gold_erp"
@@ -59,8 +69,10 @@ def _clean():
     print("✔ نُظّفت مخلفات البناء السابقة")
 
 
-def _common_args(onefile):
-    args = ["--noconfirm", "--clean", "--windowed",
+def _common_args(onefile, console=False):
+    # نسخة التشخيص بنافذة سوداء: أي خطأ يمنع الإقلاع يُقرأ فيها مباشرة
+    args = ["--noconfirm", "--clean",
+            "--console" if console else "--windowed",
             "--distpath", str(DIST), "--workpath", str(BUILD),
             "--specpath", str(ROOT)]
     args.append("--onefile" if onefile else "--onedir")
@@ -183,10 +195,11 @@ def _splash_png():
         return None
 
 
-def build_app(onefile=False):
+def build_app(onefile=False, console=False):
     print("── بناء التطبيق الرئيسي ──")
+    name = APP_NAME + ("_debug" if console else "")
     args = [sys.executable, "-m", "PyInstaller",
-            "--name", APP_NAME] + _common_args(onefile)
+            "--name", name] + _common_args(onefile, console)
     for src, dst in DATA:
         p = ROOT / src
         if p.exists():
@@ -196,6 +209,8 @@ def build_app(onefile=False):
         args += ["--add-data", f"{env_file}{_sep()}."]
     for h in HIDDEN:
         args += ["--hidden-import", h]
+    # الوحدة الجديدة تُضمّ صراحةً — هي التي تُظهر أي عطل إقلاع
+    args += ["--hidden-import", "services.crash_guard"]
     # ضمّ كل حزم المشروع كاملةً — أضمن من الاعتماد على الاكتشاف
     for pkg in ("services", "models", "ui", "database", "core", "tools"):
         if (ROOT / pkg).is_dir():
@@ -222,10 +237,11 @@ def build_app(onefile=False):
 
 def main():
     onefile = "--onefile" in sys.argv
+    console = "--console" in sys.argv
     if "--clean" in sys.argv:
         _clean()
     try:
-        build_app(onefile)
+        build_app(onefile, console)
     except FileNotFoundError:
         print("")
         print("  [ERROR] PyInstaller is NOT installed.")
@@ -238,8 +254,9 @@ def main():
         print(f"  [ERROR] Build failed (code {e.returncode})")
         print("")
         return 1
-    exe = DIST / (f"{APP_NAME}.exe" if sys.platform.startswith("win")
-                  else APP_NAME)
+    name = APP_NAME + ("_debug" if console else "")
+    exe = DIST / (f"{name}.exe" if sys.platform.startswith("win")
+                  else name)
     print("")
     print("=" * 52)
     if exe.exists():

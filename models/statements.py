@@ -254,6 +254,17 @@ def _classify(node, by_id):
     return None
 
 
+# قيدا «الإغلاق الدفتري» و«فتح السنة» متعاكسان ويقعان في يومين: فالمركز
+# المالي بتاريخ 31-12 يرى الإغلاق وحده فيُصفّر الأصول والحقوق. فيُهملان
+# معاً — وقيد إقفال النتيجة (يمسّ الإيراد والمصروف) يبقى.
+# COALESCE: قيدٌ بلا مصدر (NULL) يجعل الشرط NULL فيسقط القيد كلّه
+_BOOK_PAIR = ("(COALESCE(e.source_table,'')='year_open'"
+              " OR (COALESCE(e.source_table,'')='year_close'"
+              " AND NOT EXISTS(SELECT 1 FROM journal_lines x"
+              " JOIN accounts xa ON xa.id=x.account_id"
+              " WHERE x.entry_id=e.id AND xa.type IN ('revenue','expense'))))")
+
+
 def _balances(conn, as_of, dim):
     col_d, col_c = f"{dim}_debit", f"{dim}_credit"
     out = {}
@@ -261,7 +272,8 @@ def _balances(conn, as_of, dim):
             f"SELECT l.account_id aid, COALESCE(SUM(l.{col_d}-l.{col_c}),0) b"
             " FROM journal_lines l"
             " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
-            " WHERE e.entry_date<=? GROUP BY l.account_id", (as_of,)):
+            f" WHERE e.entry_date<=? AND NOT {_BOOK_PAIR}"
+            " GROUP BY l.account_id", (as_of,)):
         out[r["aid"]] = r["b"] or 0.0
     return out
 
@@ -889,4 +901,172 @@ def cf_layout(cf, method="indirect"):
                    tot=True))
     out.append(row("grand", "النقد وما في حكمه آخر الفترة", "closing",
                    tot=True))
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════
+#  5) قائمة التغيرات في حقوق الملكية (IAS 1.106)
+# ══════════════════════════════════════════════════════════════════
+#
+# عمودٌ لكل مكوّن من حقوق الملكية ومجموعٌ لها، وصفوفٌ تفسّر الانتقال
+# من رصيد أول الفترة إلى آخرها: صافي ربح الفترة، ثم المعاملات مع
+# الملاك (رأس المال · جاري الشركاء · التوزيعات)، ثم تحويل النتيجة عند
+# الإقفال السنوي — للفترة الحالية وفترة المقارنة معاً كما يطلب المعيار.
+#
+# «الأرباح المبقاة» تشمل النتائج التي لم تُقفل بعد (إيرادات ومصروفات
+# لم يمرّ عليها قيد الإقفال) — فمجموع العمود يطابق حقوق الملكية في
+# قائمة المركز المالي، ويبقى صحيحاً قبل الإقفال السنوي وبعده.
+
+EQ_COLS = [("capital", "رأس المال"), ("partners", "جاري الشركاء"),
+           ("retained", "الأرباح المبقاة"),
+           ("opening_susp", "تسوية الأرصدة الافتتاحية"),
+           ("eq_other", "حقوق ملكية أخرى")]
+EQ_ROWS = [("profit", "صافي ربح (خسارة) الفترة"),
+           ("r_capital", "زيادة (تخفيض) رأس المال"),
+           ("r_partners", "إيداعات (مسحوبات) الشركاء"),
+           ("r_dividends", "توزيعات أرباح وتسويات على الأرباح المبقاة"),
+           ("transfer", "تحويل نتيجة السنة عند الإقفال السنوي"),
+           ("r_opening_adj", "تسويات حساب الأرصدة الافتتاحية"),
+           ("r_other", "حركات أخرى على حقوق الملكية")]
+_EQ_ROW_OF = {"capital": "r_capital", "partners": "r_partners",
+              "retained": "r_dividends", "opening_susp": "r_opening_adj",
+              "eq_other": "r_other"}
+
+
+def _eq_class(node, by_id, rtype):
+    """مكوّن حقوق الملكية للحساب — أو «pl» للإيراد والمصروف."""
+    if rtype in ("revenue", "expense"):
+        return "pl"
+    if rtype != "equity":
+        return None
+    k = _classify(node, by_id)
+    return k if k in ("capital", "partners", "retained",
+                      "opening_susp") else "eq_other"
+
+
+def _eq_period(conn, d1, d2, dim, rows, by_id):
+    from models import opening as _op
+    eps = _EPS[dim]
+    cls = {n["id"]: _eq_class(n, by_id, _root_of(n, by_id)["type"])
+           for n in rows}
+    rel = [a for a, c in cls.items() if c]
+    if not rel:
+        rel = [-1]
+    pl_ids = [a for a, c in cls.items() if c == "pl"] or [-1]
+    col_d, col_c = f"{dim}_debit", f"{dim}_credit"
+    ph = ",".join("?" * len(rel))
+    plh = ",".join("?" * len(pl_ids))
+    op_cond, op_params = _op.sql(conn, "e")
+    # قيود دفترية متعاكسة تُهمل: فتح السنة، وإغلاق أرصدة الميزانية
+    # (قيد إقفالٍ لا يمسّ إيراداً ولا مصروفاً)
+    ignore = ("(COALESCE(e.source_table,'')='year_open'"
+              " OR (COALESCE(e.source_table,'')='year_close'"
+              f" AND NOT EXISTS(SELECT 1 FROM journal_lines x WHERE"
+              f" x.entry_id=e.id AND x.account_id IN ({plh}))))")
+    base = (f"SELECT l.account_id aid, e.id eid, e.entry_date d,"
+            f" COALESCE(e.source_table,'') src,"
+            f" SUM(l.{col_d}-l.{col_c}) m, {op_cond} is_open"
+            " FROM journal_lines l JOIN journal_entries e"
+            " ON e.id=l.entry_id AND e.is_deleted=0"
+            f" WHERE l.account_id IN ({ph}) AND NOT {ignore}")
+    params_head = op_params + rel + pl_ids
+
+    def comp_of(aid):
+        c = cls.get(aid)
+        return "retained" if c == "pl" else c
+
+    keys = [k for k, _t in EQ_COLS]
+    opening = {k: 0.0 for k in keys}
+    closing = {k: 0.0 for k in keys}
+    mov = {r: {k: 0.0 for k in keys} for r, _t in EQ_ROWS}
+    for r in conn.execute(
+            base + " AND e.entry_date<=? GROUP BY l.account_id, e.id",
+            params_head + [d2]):
+        m = r["m"] or 0.0
+        comp = comp_of(r["aid"])
+        amt = -m                              # دائنٌ = زيادة في الحقوق
+        closing[comp] += amt
+        if r["d"] < d1 or r["is_open"]:
+            opening[comp] += amt              # الافتتاحي يُضمّ لأول الفترة
+            continue
+        c = cls.get(r["aid"])
+        if r["src"] == "year_close":
+            mov["transfer"][comp] += amt
+        elif c == "pl":
+            mov["profit"]["retained"] += amt
+        else:
+            mov[_EQ_ROW_OF[c]][comp] += amt
+    rnd = 3 if dim == "gold" else 2
+
+    def fin(dct):
+        out = {k: round(v, rnd) for k, v in dct.items()}
+        out["total"] = round(sum(out[k] for k in keys), rnd)
+        return out
+
+    res = {"opening": fin(opening), "closing": fin(closing),
+           "rows": {r: fin(v) for r, v in mov.items()}}
+    diff = {k: round(res["opening"][k]
+                     + sum(res["rows"][r][k] for r, _t in EQ_ROWS)
+                     - res["closing"][k], rnd) for k in keys + ["total"]}
+    res["diff"] = diff
+    res["balanced"] = all(abs(v) <= eps * 2 for v in diff.values())
+    return res
+
+
+def equity_changes(conn, date_from, date_to, compare=True, dim="cash"):
+    """قائمة التغيرات في حقوق الملكية للفترة، وقبلها فترة المقارنة."""
+    dim = "gold" if dim == "gold" else "cash"
+    rows, by_id, _roots = _tree(conn)
+    if compare is True:
+        c1, c2 = _shift_year(date_from), _shift_year(date_to)
+    elif compare:
+        c1, c2 = compare
+    else:
+        c1 = c2 = ""
+    out = {"date_from": date_from, "date_to": date_to, "dim": dim,
+           "compare_from": c1, "compare_to": c2,
+           "cur": _eq_period(conn, date_from, date_to, dim, rows, by_id)}
+    if c1:
+        out["cmp"] = _eq_period(conn, c1, c2, dim, rows, by_id)
+    periods = [out["cur"]] + ([out["cmp"]] if c1 else [])
+    eps = _EPS[dim]
+    out["columns"] = [(k, t) for k, t in EQ_COLS
+                      if any(abs(p[s][k]) > eps
+                             for p in periods for s in ("opening", "closing"))
+                      or any(abs(p["rows"][r][k]) > eps
+                             for p in periods for r, _t in EQ_ROWS)]
+    out["balanced"] = all(p["balanced"] for p in periods)
+    return out
+
+
+def eq_layout(eq):
+    """صفوف القائمة: فترة المقارنة ثم الحالية — كلٌّ من رصيدٍ إلى رصيد."""
+    eps = _EPS[eq["dim"]]
+    keys = [k for k, _t in eq["columns"]] + ["total"]
+
+    def block(p, d1, d2):
+        out = [{"kind": "bal", "label": f"الرصيد كما في {_day_before(d1)}",
+                "values": p["opening"]}]
+        for r, t in EQ_ROWS:
+            v = p["rows"][r]
+            if r == "profit" or any(abs(v[k]) > eps for k in keys):
+                out.append({"kind": "line", "label": t, "key": r,
+                            "values": v})
+            if r == "profit":
+                out.append({"kind": "sub",
+                            "label": "إجمالي الدخل الشامل للفترة",
+                            "key": "tci", "values": v})
+        out.append({"kind": "grand", "label": f"الرصيد كما في {d2}",
+                    "values": p["closing"]})
+        return out
+
+    out = []
+    if eq.get("cmp"):
+        out.append({"kind": "sec", "label":
+                    f"فترة المقارنة: من {eq['compare_from']} إلى "
+                    f"{eq['compare_to']}"})
+        out += block(eq["cmp"], eq["compare_from"], eq["compare_to"])
+    out.append({"kind": "sec", "label":
+                f"الفترة الحالية: من {eq['date_from']} إلى {eq['date_to']}"})
+    out += block(eq["cur"], eq["date_from"], eq["date_to"])
     return out

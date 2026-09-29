@@ -118,6 +118,7 @@ SCREENS = [
     ("ui.item_history_screen", "ItemHistoryScreen"),
     ("ui.reports.balance_sheet_screen", "BalanceSheetScreen"),
     ("ui.reports.cash_flow_screen", "CashFlowScreen"),
+    ("ui.reports.equity_changes_screen", "EquityChangesScreen"),
     ("ui.reports.trial_balance_screen", "TrialBalanceScreen"),
     ("ui.reports.factory_reports_screen", "FactoryReportsScreen"),
     ("ui.reports.stock_report", "StockReportScreen"),

@@ -22,13 +22,17 @@ def _close_splash():
 
 
 def main():
+    from services import crash_guard
+    crash_guard.trace("بدء التشغيل")
     try:
         from PyQt5 import QtCore, QtWidgets
     except ImportError:
         print("يلزم تثبيت PyQt5 أولاً:  pip install PyQt5")
         return
+    crash_guard.trace("حُمّلت Qt")
     from ui import styles
     from ui.gate_window import GateWindow
+    crash_guard.trace("حُمّلت البوابة")
     # هوية المصنع قبل أول رسم: البوابة تظهر بشعار هذا المصنع واسمه
     try:
         from services import branding
@@ -37,6 +41,7 @@ def main():
         pass
 
     app = QtWidgets.QApplication(sys.argv)
+    crash_guard.trace("أُنشئ التطبيق")
     # تناسب تلقائي مع حجم شاشة المستخدم: الخطوط والحشو تصغر على
     # الأجهزة الصغيرة وتكبر على الكبيرة — فيبدو النظام متناسقاً
     # على أي جهاز بلا ضبط يدوي.
@@ -60,6 +65,7 @@ def main():
     # معطّلاً — وهي أسوأ ثوانٍ في عمر أي برنامج. الآن تظهر البوابة في
     # أول لحظة ويجري التجهيز وهو يقرأ سطر الحالة يتقدّم.
     gate = GateWindow()
+    crash_guard.trace("بُنيت البوابة")
     # ══ تسليمٌ بلا فجوة ولا تداخل ══
     # شاشة بدء الـexe تُغلق على **أول رسمٍ فعلي** للبوابة لا على
     # `show()`: بينهما على ويندوز عشراتُ ثانيةٍ يرى فيها المستخدم
@@ -71,12 +77,16 @@ def main():
     # سطحُ المكتب ولا شعارٌ ينبثق ثم يختفي. والمؤقّت حارسٌ إن لم تصل
     # الإشارة (بيئةٌ بلا عرض): لا تبقى البطاقة فوق البوابة بحال.
     gate.revealed.connect(_close_splash)
+    gate.revealed.connect(lambda: crash_guard.trace("ظهرت البوابة"))
     QtCore.QTimer.singleShot(3000, _close_splash)
     gate.showFullScreen()
     app.processEvents()
-    gate.prepare(prepare_steps())
+    crash_guard.trace("عُرضت البوابة")
+    gate.prepare([(lbl, crash_guard.traced(lbl, fn))
+                  for lbl, fn in prepare_steps()])
 
     wire_gate(app, gate)
+    crash_guard.trace("حلقة الأحداث")
     sys.exit(app.exec_())
 
 
@@ -152,12 +162,21 @@ def wire_gate(app, gate, main_window_factory=None):
         كل شيء ثم يدخل». الآن تنتهي الموجة إلى مشهدٍ ساكنٍ بطبعه (ليلٌ
         وتحيّة)، والبناء يجري عليه فلا يُرى توقّف، ثم يظهر النظام.
         """
+        from services import crash_guard
+        crash_guard.trace("بناء النافذة الرئيسية")
         try:
             win = main_window_factory(session)
         except Exception as e:                   # noqa: BLE001
             # فشلُ البناء يُقال على البوابة — ويعود مشهدها كما كان
+            crash_guard.trace(f"تعذّر بناء النافذة: {e}")
+            try:
+                from services.health import log_error
+                log_error("main_window", e)
+            except Exception:
+                pass
             gate.fail(f"تعذّر فتح النظام: {e}")
             return
+        crash_guard.trace("بُنيت النافذة الرئيسية")
         holder["win"] = win
         # تُعرض مخفيّةَ الشفافية خلف البوابة، ثم تتمازجان
         win.setWindowOpacity(0.0 if fade_ok() else 1.0)
@@ -294,5 +313,23 @@ def start_background_workers():
                 pass
 
 
+def run():
+    """التشغيل من الملف التنفيذي أو `START.bat`: بحارس الأعطال.
+
+    أي عطلٍ يمنع الإقلاع يُغلق شاشة البدء أولاً ثم يُقال في رسالة
+    ويُكتب في `logs/crash.log` — بدل أن يختفي البرنامج بلا أثر.
+    """
+    from services import crash_guard
+    crash_guard.install()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as e:                   # noqa: BLE001
+        _close_splash()
+        crash_guard.fatal(e)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    main()
+    run()

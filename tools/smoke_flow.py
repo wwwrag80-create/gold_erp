@@ -5934,6 +5934,75 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("70) قائمة التغيرات في حقوق الملكية · حارس الإقلاع")
+    with db() as conn:
+        post_entry(conn, date.today().isoformat(), "مسحوبات شريك", [
+            {"account_id": acc_id(conn, "3120"), "cash_debit": 1200},
+            {"account_id": acc_id(conn, "1400"), "cash_credit": 1200}],
+            username="admin")
+        post_entry(conn, date.today().isoformat(), "زيادة رأس المال", [
+            {"account_id": acc_id(conn, "1500"), "cash_debit": 20000},
+            {"account_id": acc_id(conn, "3110"), "cash_credit": 20000}],
+            username="admin")
+    with db(readonly=True) as conn:
+        _eq70 = _st67.equity_changes(conn, *_p69)
+        _eg70 = _st67.equity_changes(conn, *_p69, dim="gold")
+        _fp70 = _st67.financial_position(conn, _p69[1])
+        _is70 = _st67.income_statement(conn, *_p69)
+    _cur70 = _eq70["cur"]
+    check("كل عمود: رصيد أول الفترة + الحركات = رصيد آخرها (نقد وذهب)",
+          _eq70["balanced"] and _eg70["balanced"])
+    check("رصيد آخر الفترة = حقوق الملكية في المركز المالي",
+          abs(_cur70["closing"]["total"]
+              - _fp70["cash"]["totals"]["eq"]) < 0.02,
+          f"{_cur70['closing']['total']} / {_fp70['cash']['totals']['eq']}")
+    check("صافي الربح من قائمة الدخل · رأس المال والمسحوبات صفوفٌ منفصلة",
+          abs(_cur70["rows"]["profit"]["total"]
+              - _is70["cash"]["totals"]["net"]) < 0.02
+          and _cur70["rows"]["r_capital"]["capital"] >= 20000 - 0.01
+          and _cur70["rows"]["r_partners"]["partners"] <= -1200 + 0.01)
+    _el70 = _st67.eq_layout(_eq70)
+    check("فترة المقارنة ثم الحالية — كلٌّ من رصيدٍ إلى رصيد",
+          [x["kind"] for x in _el70 if x["kind"] == "sec"] == ["sec", "sec"]
+          and _el70[-1]["kind"] == "grand"
+          and ("المجموع" not in [t for _k, t in _eq70["columns"]]))
+    _h70 = _pm65.build_html("equity_changes", 0, date_from=_p69[0],
+                            date_to=_p69[1])
+    check("قالب القائمة: أعمدة المكوّنات والمجموع والتوقيعات",
+          "رأس المال" in _h70 and "المجموع" in _h70 and "اعتمده" in _h70)
+    # حارس الإقلاع: لا يختفي البرنامج صامتاً
+    from services import crash_guard as _cg70
+    _old_hook = sys.excepthook
+    _cg70.install()
+    check("حارس الأعطال مركَّب: خطأ الواجهة لا يُنهي البرنامج",
+          sys.excepthook is _cg70._hook)
+    sys.excepthook = _old_hook
+    _cg70.trace("اختبار الدخان")
+    check("سجلّ الإقلاع يُكتب في مجلد السجلات",
+          "اختبار الدخان" in (_cg70.log_dir() / "startup.log").read_text(
+              encoding="utf-8"))
+    _bsrc = pathlib.Path(ROOT, "core", "build.py").read_text(encoding="utf-8")
+    _msrc = pathlib.Path(ROOT, "main.py").read_text(encoding="utf-8")
+    check("البناء: جذر المشروع في المسار (شاشة البدء) ونسخة تشخيص",
+          "sys.path.insert(0, str(ROOT))" in _bsrc and "--console" in _bsrc
+          and "crash_guard.install()" in _msrc
+          and pathlib.Path(ROOT, "MAKE_EXE_DEBUG.bat").exists())
+    try:
+        from PyQt5 import QtWidgets as _QW70
+        _QW70.QApplication.instance() or _QW70.QApplication([])
+        from ui.reports.equity_changes_screen import (
+            EquityChangesScreen as _E70)
+        _w70 = _E70({"id": 1, "username": "admin"})
+        _mw70 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
+            encoding="utf-8")
+        check("شاشة حقوق الملكية في القائمة وتعرض القائمة",
+              "EquityChangesScreen(user)" in _mw70
+              and _w70.table.rowCount() > 6
+              and _w70.table.columnCount() >= 3)
+        _w70.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -1811,6 +1811,10 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "financial_position":
             return en(_tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                               kw.get("compare_to")))
+        if doc_type == "equity_changes":
+            return en(_tpl_equity_changes(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("compare", True), kw.get("dim", "cash")))
         if doc_type == "cash_flow":
             return en(_tpl_cash_flow(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
@@ -2323,6 +2327,67 @@ def _tpl_cash_flow(conn, _id=0, date_from=None, date_to=None, compare=True,
         ' القوسين تدفقٌ خارج.</div>')
     table = f"{TBL}{head}{body}</table>"
     return (_header("قائمة التدفقات النقدية", "—", cf["date_to"],
+                    show_meta=False)
+            + meta + table + verdict + _sign_block())
+
+
+def _tpl_equity_changes(conn, _id=0, date_from=None, date_to=None,
+                        compare=True, dim="cash"):
+    """قائمة التغيرات في حقوق الملكية (IAS 1.106) — مكوّنٌ لكل عمود."""
+    from models import statements
+    today = _qd(QtCore.QDate.currentDate())
+    d1 = date_from or f"{today[:4]}-01-01"
+    d2 = date_to or today
+    eq = statements.equity_changes(conn, d1, d2, bool(compare), dim)
+    rows = statements.eq_layout(eq)
+    gold = eq["dim"] == "gold"
+    keys = [k for k, _t in eq["columns"]] + ["total"]
+    ncol = len(keys) + 1
+
+    body = ""
+    for r in rows:
+        k = r["kind"]
+        if k == "sec":
+            body += (f'<tr><td class="r" colspan="{ncol}"'
+                     f' style="background-color:#2b2723;color:#ffffff">'
+                     f'<b>{en(r["label"])}</b></td></tr>')
+            continue
+        vals = [_fp_money(r["values"].get(c, 0.0), gold) for c in keys]
+        if k == "line":
+            lbl = (f'<td class="r" style="padding-right:18px">'
+                   f'{r["label"]}</td>')
+            tds = [f'<td class="num">{v}</td>' for v in vals[:-1]]
+            tds.append(f'<td class="num"><b>{vals[-1]}</b></td>')
+        else:
+            sty = {"grand": ' style="background-color:#F2EEE4;border-top:2px'
+                            ' solid #333;border-bottom:3px double #333"',
+                   "sub": ' style="border-top:1.5px solid #333"',
+                   "bal": ' style="background-color:#EFE9DC"'}.get(k, "")
+            lbl = f'<td class="r"{sty}><b>{en(r["label"])}</b></td>'
+            tds = [f'<td class="num"{sty}><b>{v}</b></td>' for v in vals]
+        body += "<tr>" + cells(lbl, *tds) + "</tr>"
+
+    head = ("<tr>" + cells(thw("البيان"),
+                           *[thw(t) for _k, t in eq["columns"]],
+                           thw("المجموع")) + "</tr>")
+    p1 = _nowrap(f"من {en(eq['date_from'])} إلى {en(eq['date_to'])}")
+    p2 = (_nowrap(f"من {en(eq['compare_from'])} إلى {en(eq['compare_to'])}")
+          if eq["compare_from"] else "—")
+    meta = _entity_meta([
+        ("الفترة الحالية", p1), ("فترة المقارنة", p2),
+        ("العملة", f"الذهب وزناً ({_kunit()})" if gold else "ريال سعودي")])
+    head_v = ("✔ كل عمود: رصيد أول الفترة + الحركات = رصيد آخرها، ويطابق"
+              " حقوق الملكية في قائمة المركز المالي" if eq["balanced"]
+              else "✘ فرقٌ بين الحركات والأرصدة — راجع القيود")
+    verdict = (
+        f'<div {WIDE} style="margin-top:6px"><b>{head_v}</b><br/>'
+        'أُعدّت وفق معيار المحاسبة الدولي 1 (الفقرة 106): عمودٌ لكل مكوّن'
+        ' من حقوق الملكية، وصافي ربح الفترة من قائمة الدخل، والمعاملات مع'
+        ' الملاك (رأس المال · جاري الشركاء · التوزيعات) منفصلةً عن الدخل؛'
+        ' والأرباح المبقاة تشمل نتائج لم يمرّ عليها الإقفال السنوي بعد.'
+        ' الأرقام بين القوسين سالبة.</div>')
+    table = f"{TBL}{head}{body}</table>"
+    return (_header("قائمة التغيرات في حقوق الملكية", "—", eq["date_to"],
                     show_meta=False)
             + meta + table + verdict + _sign_block())
 
@@ -3829,6 +3894,7 @@ BUILDERS = {
     "financial_position": _tpl_financial_position,
     "income_statement": _tpl_income_statement,
     "cash_flow": _tpl_cash_flow,
+    "equity_changes": _tpl_equity_changes,
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
     "models_received_photos": _tpl_models_received_photos,
@@ -3897,6 +3963,10 @@ def build_html(doc_type, doc_id, **kw):
         elif doc_type == "financial_position":
             html = _tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                            kw.get("compare_to"))
+        elif doc_type == "equity_changes":
+            html = _tpl_equity_changes(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("compare", True), kw.get("dim", "cash"))
         elif doc_type == "cash_flow":
             html = _tpl_cash_flow(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
@@ -3994,7 +4064,8 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     wide = doc_type in ("statement", "journal", "manual", "balances",
                         "customer_analytics", "turnover", "aging",
                         "day_close", "mfg_target", "mfg_salary",
-                        "customer_board", "trial_balance")
+                        "customer_board", "trial_balance",
+                        "equity_changes")
     printer = _printer(wide if landscape is None else landscape)
     dlg = QtPrintSupport.QPrintPreviewDialog(printer, parent)
     dlg.setWindowTitle("معاينة قبل الطباعة")

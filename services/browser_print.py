@@ -163,7 +163,8 @@ def _page_setup(doc_type):
                         "customer_analytics", "turnover", "balance_tree",
                         "dash_panel", "aging", "day_close", "customer_board",
                         "mfg_target", "mfg_salary", "tax_sales_register",
-                        "purchases_register", "trial_balance")
+                        "purchases_register", "trial_balance",
+                        "equity_changes")
     if wide:
         # تقارير التصنيع عريضة الأعمدة — هوامش أضيق لتتسع الصفحة
         margin = "5mm" if doc_type in ("mfg_target", "mfg_salary") else "8mm"

@@ -33,6 +33,7 @@ from ui.production_screen import ProductionScreen
 from ui.purchases_screen import PurchasesScreen
 from ui.reports.balance_sheet_screen import BalanceSheetScreen
 from ui.reports.cash_flow_screen import CashFlowScreen
+from ui.reports.equity_changes_screen import EquityChangesScreen
 from ui.reports.trial_balance_screen import TrialBalanceScreen
 from ui.reports.factory_reports_screen import FactoryReportsScreen
 from ui.reports.income_statement import IncomeStatementScreen
@@ -72,7 +73,7 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 9
+NAV_VERSION = 10
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -203,6 +204,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("قائمة التدفقات النقدية",
                      Lazy(lambda: CashFlowScreen(user),
                           "قائمة التدفقات النقدية")),
+                    ("قائمة التغيرات في حقوق الملكية",
+                     Lazy(lambda: EquityChangesScreen(user),
+                          "قائمة التغيرات في حقوق الملكية")),
                     ("تحليل مبيعات العملاء", self.analytics_screen),
                     ("إنتاج خزينة التصنيع (مطابقة)",
                      Lazy(lambda: KhazinaReportScreen(user),
