@@ -1811,6 +1811,10 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "financial_position":
             return en(_tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                               kw.get("compare_to")))
+        if doc_type == "cash_flow":
+            return en(_tpl_cash_flow(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("compare", True), kw.get("method", "indirect")))
         if doc_type == "income_statement":
             return en(_tpl_income_statement(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
@@ -2054,6 +2058,11 @@ def _sign_block():
             + "</tr></table>")
 
 
+def _nowrap(text):
+    """فترةٌ لا تنكسر عند شرطة التاريخ."""
+    return f'<span style="white-space:nowrap">{text}</span>'
+
+
 def _entity_meta(pairs):
     """بيانات القائمة: المنشأة والسجل والرقم الضريبي ثم ما يُمرَّر."""
     items = [("المنشأة", config.COMPANY_NAME)]
@@ -2063,9 +2072,9 @@ def _entity_meta(pairs):
         items.append(("الرقم الضريبي", en(config.COMPANY_VAT_NUMBER)))
     items += list(pairs)
     rows = ""
-    for i in range(0, len(items), 4):
+    for i in range(0, len(items), 3):
         tds = []
-        for k, v in items[i:i + 4]:
+        for k, v in items[i:i + 3]:
             tds += [thw(k), f"<td>{v}</td>"]
         rows += f"<tr>{cells(*tds)}</tr>"
     return f"{TBL}{rows}</table><br/>"
@@ -2209,8 +2218,8 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
             tds = [f'<td class="num"{sty}><b>{v}</b></td>' for v in vals]
         body += "<tr>" + cells(lbl, *tds) + "</tr>"
 
-    p1 = f"من {en(st['date_from'])} إلى {en(st['date_to'])}"
-    p2 = f"من {en(st['compare_from'])} إلى {en(st['compare_to'])}"
+    p1 = _nowrap(f"من {en(st['date_from'])} إلى {en(st['date_to'])}")
+    p2 = _nowrap(f"من {en(st['compare_from'])} إلى {en(st['compare_to'])}")
     if has_cmp:
         head1 = cells(thspan("البيان", rowspan=2),
                       thspan("النقد — ريال سعودي", 2),
@@ -2244,6 +2253,76 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
         '</div>')
     table = f"{TBL}{head}{body}</table>"
     return (_header("قائمة الدخل (الأرباح والخسائر)", "—", st["date_to"],
+                    show_meta=False)
+            + meta + table + verdict + _sign_block())
+
+
+def _tpl_cash_flow(conn, _id=0, date_from=None, date_to=None, compare=True,
+                   method="indirect"):
+    """قائمة التدفقات النقدية (IAS 7) — تشغيلية · استثمارية · تمويلية."""
+    from models import statements
+    today = _qd(QtCore.QDate.currentDate())
+    d1 = date_from or f"{today[:4]}-01-01"
+    d2 = date_to or today
+    cf = statements.cash_flow(conn, d1, d2, bool(compare))
+    rows = statements.cf_layout(cf, method or "indirect")
+    has_cmp = bool(cf["compare_from"])
+    ncol = 3 if has_cmp else 2
+
+    body = ""
+    for r in rows:
+        k = r["kind"]
+        if k == "sec":
+            body += (f'<tr><td class="r" colspan="{ncol}"'
+                     f' style="background-color:#EFE9DC">'
+                     f'<b>{r["label"]}</b></td></tr>')
+            continue
+        vals = [_fp_money(r["cash"])]
+        if has_cmp:
+            vals.append(_fp_money(r["cash_cmp"]))
+        if k == "line":
+            lbl = (f'<td class="r" style="padding-right:18px">'
+                   f'{r["label"]}</td>')
+            tds = [f'<td class="num">{v}</td>' for v in vals]
+        elif k == "bal":
+            lbl = f'<td class="r">{r["label"]}</td>'
+            tds = [f'<td class="num">{v}</td>' for v in vals]
+        else:
+            sty = (' style="background-color:#F2EEE4;border-top:2px solid'
+                   ' #333;border-bottom:3px double #333"' if k == "grand"
+                   else ' style="border-top:1.5px solid #333"')
+            lbl = f'<td class="r"{sty}><b>{r["label"]}</b></td>'
+            tds = [f'<td class="num"{sty}><b>{v}</b></td>' for v in vals]
+        body += "<tr>" + cells(lbl, *tds) + "</tr>"
+
+    p1 = _nowrap(f"من {en(cf['date_from'])} إلى {en(cf['date_to'])}")
+    p2 = _nowrap(f"من {en(cf['compare_from'])} إلى {en(cf['compare_to'])}")
+    hd = [thw("البيان"), thw("الفترة الحالية — ريال")]
+    if has_cmp:
+        hd.append(thw("فترة المقارنة — ريال"))
+    head = "<tr>" + cells(*hd) + "</tr>"
+    meth = ("الطريقة غير المباشرة" if (method or "indirect") == "indirect"
+            else "الطريقة المباشرة")
+    meta = _entity_meta([
+        ("الفترة الحالية", p1), ("فترة المقارنة", p2 if has_cmp else "—"),
+        ("العملة", "ريال سعودي"), ("طريقة العرض", meth)])
+    t = cf["cur"]["totals"]
+    head_v = ("✔ النقد آخر الفترة = أولها + صافي التدفقات، ويطابق رصيد"
+              " الصندوق والبنوك في الدفتر" if cf["balanced"] else
+              f"✘ فرق {_w(t['diff'], 2)} ريال بين التدفقات والرصيد الدفتري")
+    noncash = ""
+    if abs(t["noncash"]) >= 0.005:
+        noncash = (f"<br/><b>معاملات غير نقدية (IAS 7.43):</b> أصول ثابتة"
+                   f" اشتُريت بالأجل ولم يُسدَّد ثمنها في الفترة"
+                   f" {_w(t['noncash'], 2)} ريال — لا تظهر تدفقاً.")
+    verdict = (
+        f'<div {WIDE} style="margin-top:6px"><b>{head_v}</b>{noncash}<br/>'
+        'أُعدّت وفق معيار المحاسبة الدولي 7: النقد وما في حكمه هو الصندوق'
+        ' والبنوك؛ والتحويل بينهما ليس تدفقاً؛ وثمن الأصول الثابتة استثماري'
+        ' ولو سُدِّد عبر حساب المورّد؛ والذهب مخزونٌ لا نقد. الأرقام بين'
+        ' القوسين تدفقٌ خارج.</div>')
+    table = f"{TBL}{head}{body}</table>"
+    return (_header("قائمة التدفقات النقدية", "—", cf["date_to"],
                     show_meta=False)
             + meta + table + verdict + _sign_block())
 
@@ -3749,6 +3828,7 @@ BUILDERS = {
     "trial_balance": _tpl_trial_balance,
     "financial_position": _tpl_financial_position,
     "income_statement": _tpl_income_statement,
+    "cash_flow": _tpl_cash_flow,
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
     "models_received_photos": _tpl_models_received_photos,
@@ -3817,6 +3897,10 @@ def build_html(doc_type, doc_id, **kw):
         elif doc_type == "financial_position":
             html = _tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                            kw.get("compare_to"))
+        elif doc_type == "cash_flow":
+            html = _tpl_cash_flow(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("compare", True), kw.get("method", "indirect"))
         elif doc_type == "income_statement":
             html = _tpl_income_statement(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),

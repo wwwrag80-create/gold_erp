@@ -634,3 +634,259 @@ def _is_accounts(st, key):
                                       "gold": 0.0, "gold_cmp": 0.0})
             e[dim] += amt
     return [acc[k] for k in sorted(acc)]
+
+
+# ══════════════════════════════════════════════════════════════════
+#  4) قائمة التدفقات النقدية (IAS 7)
+# ══════════════════════════════════════════════════════════════════
+#
+# النقد وما في حكمه = حسابات الصندوق والبنوك (بند «النقد» في المركز
+# المالي). والذهب مخزونٌ لا نقد — فالقائمة بالريال وحده.
+#
+# تُبنى من القيود نفسها لا من السندات: كل قيدٍ متوازن، فتغيّر النقد في
+# أي قيد = سالب مجموع حركة حساباته الأخرى. فيُنسب كل ريالٍ دخل الصندوق
+# أو خرج منه إلى نشاط الحساب المقابل له (تشغيلي · استثماري · تمويلي)
+# — وهذه الطريقة المباشرة. والطريقة غير المباشرة تبدأ بصافي الربح ثم
+# تسوّي البنود غير النقدية وتغيّرات رأس المال العامل، وتنتهي إلى الرقم
+# نفسه. والتحويل بين الصندوق والبنك ليس تدفقاً (صافيه صفر).
+#
+# قيود الإقفال السنوي وفتح السنة تُهمل (دفتريةٌ متعاكسة)، والأرصدة
+# الافتتاحية تُضمّ إلى رصيد أول الفترة لا إلى التدفقات.
+
+CF_SECTIONS = [("op", "التدفقات النقدية من الأنشطة التشغيلية",
+                "صافي النقد من (المستخدم في) الأنشطة التشغيلية"),
+               ("inv", "التدفقات النقدية من الأنشطة الاستثمارية",
+                "صافي النقد من (المستخدم في) الأنشطة الاستثمارية"),
+               ("fin", "التدفقات النقدية من الأنشطة التمويلية",
+                "صافي النقد من (المستخدم في) الأنشطة التمويلية")]
+
+# غير المباشرة — الأنشطة التشغيلية
+CF_INDIRECT = [
+    ("profit", "صافي ربح (خسارة) الفترة"),
+    ("dep", "يُضاف: الإهلاك"),
+    ("wc_receivables", "(الزيادة) النقص في ذمم العملاء والجهات"),
+    ("wc_inventory", "(الزيادة) النقص في المخزون"),
+    ("wc_staff", "(الزيادة) النقص في سلف وعهد الموظفين"),
+    ("wc_payables", "الزيادة (النقص) في ذمم الموردين"),
+    ("wc_accruals", "الزيادة (النقص) في مستحقات الموظفين"),
+    ("wc_vat", "الزيادة (النقص) في صافي ضريبة القيمة المضافة"),
+    ("wc_other", "التغير في أصول ومطلوبات تشغيلية أخرى"),
+    ("noncash", "يُستبعد: أثر معاملات استثمارية وتمويلية غير نقدية"),
+]
+# المباشرة — الأنشطة التشغيلية
+CF_DIRECT = [
+    ("d_customers", "المتحصلات من العملاء والجهات"),
+    ("d_revenue", "إيرادات مقبوضة مباشرة"),
+    ("d_fixing", "تسكير الذهب نقداً (بيع/شراء الذهب)"),
+    ("d_suppliers", "المدفوع للموردين"),
+    ("d_inventory", "مشتريات ذهب ومواد نقداً"),
+    ("d_staff", "المدفوع للموظفين والعمال"),
+    ("d_expenses", "المصروفات التشغيلية المدفوعة"),
+    ("d_vat", "ضريبة القيمة المضافة المسددة (المستردة)"),
+    ("d_other", "متحصلات ومدفوعات تشغيلية أخرى"),
+]
+CF_INVESTING = [("i_ppe", "(شراء) بيع ممتلكات وآلات ومعدات"),
+                ("i_other", "تدفقات استثمارية أخرى")]
+CF_FINANCING = [("f_capital", "رأس المال المدفوع (المسحوب)"),
+                ("f_partners", "جاري الشركاء — إيداعات (مسحوبات)"),
+                ("f_retained", "توزيعات أرباح وتسويات الأرباح المبقاة"),
+                ("f_opening", "حساب تسوية الأرصدة الافتتاحية"),
+                ("f_other", "تدفقات تمويلية أخرى")]
+
+_CF_IGNORE = ("year_close", "year_open")
+
+
+def _cf_class(node, by_id, rows_type):
+    """(نوع الحساب في التدفقات) — مفتاحٌ واحد لكل حساب."""
+    rtype = rows_type
+    if rtype in ("revenue", "expense"):
+        cur, seen = node, 0
+        while cur is not None and seen < 20:
+            if cur["code"] in ("5700", "5710"):
+                return "exp_staff"
+            cur = by_id.get(cur["parent_id"])
+            seen += 1
+        return "rev" if rtype == "revenue" else "exp"
+    kind = _classify(node, by_id)
+    if kind == "cash":
+        return "cash"
+    if kind in ("party_customer", "party_supplier", "inventory", "staff",
+                "accruals", "vat", "ppe_cost", "ppe_dep", "capital",
+                "partners", "retained", "opening_susp"):
+        return kind
+    if rtype == "equity":
+        return "eq_other"
+    if rtype == "bridge":
+        return "bridge"
+    return "other_wc"          # أصول ومطلوبات أخرى: تشغيلية
+
+
+# الحساب ← (سطر المباشرة/الاستثمار/التمويل، سطر غير المباشرة، النشاط)
+_CF_ROUTE = {
+    "party_customer": ("d_customers", "wc_receivables", "op"),
+    "party_supplier": ("d_suppliers", "wc_payables", "op"),
+    "inventory": ("d_inventory", "wc_inventory", "op"),
+    "staff": ("d_staff", "wc_staff", "op"),
+    "accruals": ("d_staff", "wc_accruals", "op"),
+    "exp_staff": ("d_staff", "profit", "op"),
+    "vat": ("d_vat", "wc_vat", "op"),
+    "rev": ("d_revenue", "profit", "op"),
+    "exp": ("d_expenses", "profit", "op"),
+    "bridge": ("d_fixing", "wc_other", "op"),
+    "other_wc": ("d_other", "wc_other", "op"),
+    "ppe_dep": ("d_other", "dep", "op"),
+    "ppe_cost": ("i_ppe", None, "inv"),
+    "capital": ("f_capital", None, "fin"),
+    "partners": ("f_partners", None, "fin"),
+    "retained": ("f_retained", None, "fin"),
+    "opening_susp": ("f_opening", None, "fin"),
+    "eq_other": ("f_other", None, "fin"),
+}
+
+
+def _cf_period(conn, d1, d2, rows, by_id):
+    from models import opening as _op
+    cls = {}
+    for n in rows:
+        cls[n["id"]] = _cf_class(n, by_id, _root_of(n, by_id)["type"])
+    cash_ids = [a for a, c in cls.items() if c == "cash"]
+    ign = ",".join("?" * len(_CF_IGNORE))
+    op_cond, op_params = _op.sql(conn, "e")
+    base = (" FROM journal_lines l JOIN journal_entries e"
+            " ON e.id=l.entry_id AND e.is_deleted=0"
+            f" WHERE COALESCE(e.source_table,'') NOT IN ({ign})")
+    # (1) الأرصدة: أول الفترة يشمل الأرصدة الافتتاحية المُدخلة داخلها
+    cq = ",".join("?" * len(cash_ids)) or "NULL"
+
+    def cash_sum(extra, params):
+        r = conn.execute(
+            "SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0) b" + base
+            + f" AND l.account_id IN ({cq}) AND " + extra,
+            list(_CF_IGNORE) + cash_ids + params).fetchone()
+        return r["b"] or 0.0
+
+    opening_bal = (cash_sum("e.entry_date<?", [d1])
+                   + cash_sum(f"e.entry_date BETWEEN ? AND ? AND {op_cond}",
+                              [d1, d2] + op_params))
+    closing_bal = cash_sum("e.entry_date<=?", [d2])
+    # (2) الحركة: كل قيدٍ غير افتتاحي داخل الفترة
+    ent = {}
+    for r in conn.execute(
+            "SELECT l.entry_id eid, l.account_id aid,"
+            " SUM(l.cash_debit-l.cash_credit) m" + base
+            + f" AND e.entry_date BETWEEN ? AND ? AND NOT {op_cond}"
+            " GROUP BY l.entry_id, l.account_id",
+            list(_CF_IGNORE) + [d1, d2] + op_params):
+        if abs(r["m"] or 0.0) > 1e-9:
+            ent.setdefault(r["eid"], []).append((r["aid"], r["m"]))
+    keys = ([k for k, _t in CF_INDIRECT] + [k for k, _t in CF_DIRECT]
+            + [k for k, _t in CF_INVESTING] + [k for k, _t in CF_FINANCING])
+    v = {k: 0.0 for k in keys}
+    act = {"op": 0.0, "inv": 0.0, "fin": 0.0}
+    for lines in ent.values():
+        d_cash = sum(m for a, m in lines if cls.get(a) == "cash")
+        touches = abs(d_cash) > 0.0005
+        for a, m in lines:
+            c = cls.get(a, "other_wc")
+            if c == "cash":
+                continue
+            direct, indirect, sec = _CF_ROUTE.get(c, _CF_ROUTE["other_wc"])
+            eff = -m                       # أثره على النقد
+            if indirect:
+                v[indirect] += eff         # غير المباشرة: كل القيود
+            if touches:
+                v[direct] += eff           # المباشرة/الاستثمار/التمويل
+                act[sec] += eff
+    # ══ أصلٌ اشتُري بالأجل ثم سُدِّد ثمنه ══
+    # السداد يمرّ بحساب المورّد فيُقرأ «مدفوعاً للموردين» (تشغيلياً)،
+    # وهو في حقيقته ثمن أصلٍ ثابت ⇒ استثماري (IAS 7.16). فيُعاد تصنيف
+    # ما سُدِّد لكل مورّد في حدود ما نشأ عليه من شراء أصولٍ في الفترة.
+    ppe_payable, paid = {}, {}
+    for lines in ent.values():
+        ppe_dr = sum(m for a, m in lines if cls.get(a) == "ppe_cost"
+                     and m > 0)
+        d_cash = sum(m for a, m in lines if cls.get(a) == "cash")
+        for a, m in lines:
+            if cls.get(a) != "party_supplier":
+                continue
+            if ppe_dr > 0 and m < 0 and abs(d_cash) <= 0.0005:
+                ppe_payable[a] = ppe_payable.get(a, 0.0) + min(ppe_dr, -m)
+            if abs(d_cash) > 0.0005 and m > 0:
+                paid[a] = paid.get(a, 0.0) + m
+    reclass = 0.0
+    for a, amt in ppe_payable.items():
+        reclass += min(amt, paid.get(a, 0.0))
+    if reclass > 0.0005:
+        v["d_suppliers"] += reclass
+        v["i_ppe"] -= reclass
+        act["op"] += reclass
+        act["inv"] -= reclass
+    noncash_inv = sum(ppe_payable.values()) - reclass
+
+    # غير المباشرة تنتهي إلى صافي التشغيل نفسه — والفرق أثر معاملاتٍ
+    # استثمارية/تمويلية لم يمرّ فيها نقد (أصلٌ اشتُري بالأجل مثلاً)
+    ind_sum = sum(v[k] for k, _t in CF_INDIRECT if k != "noncash")
+    v["noncash"] = act["op"] - ind_sum
+    net = act["op"] + act["inv"] + act["fin"]
+    rnd = {k: round(x, 2) for k, x in v.items()}
+    return {"values": rnd,
+            "totals": {"op": round(act["op"], 2), "inv": round(act["inv"], 2),
+                       "fin": round(act["fin"], 2), "net": round(net, 2),
+                       "opening": round(opening_bal, 2),
+                       "closing": round(closing_bal, 2),
+                       "noncash": round(noncash_inv, 2),
+                       "diff": round(opening_bal + net - closing_bal, 2)}}
+
+
+def cash_flow(conn, date_from, date_to, compare=True):
+    """قائمة التدفقات النقدية للفترة، ومقارنةً بالمماثلة من السنة السابقة."""
+    rows, by_id, _roots = _tree(conn)
+    if compare is True:
+        c1, c2 = _shift_year(date_from), _shift_year(date_to)
+    elif compare:
+        c1, c2 = compare
+    else:
+        c1 = c2 = ""
+    out = {"date_from": date_from, "date_to": date_to,
+           "compare_from": c1, "compare_to": c2,
+           "cur": _cf_period(conn, date_from, date_to, rows, by_id)}
+    if c1:
+        out["cmp"] = _cf_period(conn, c1, c2, rows, by_id)
+    out["balanced"] = abs(out["cur"]["totals"]["diff"]) < 0.011
+    return out
+
+
+def cf_layout(cf, method="indirect"):
+    """صفوف القائمة للعرض والطباعة — sec · line · sub · grand · bal."""
+    cur, cmp_ = cf["cur"], cf.get("cmp")
+
+    def row(kind, label, key, tot=False):
+        src = "totals" if tot else "values"
+        return {"kind": kind, "label": label, "key": key,
+                "cash": cur[src].get(key, 0.0),
+                "cash_cmp": cmp_[src].get(key, 0.0) if cmp_ else 0.0}
+
+    def lines(spec):
+        out_ = [row("line", t, k) for k, t in spec]
+        return [r for r in out_
+                if abs(r["cash"]) >= 0.005 or abs(r["cash_cmp"]) >= 0.005]
+
+    out = []
+    spec = {"op": CF_INDIRECT if method == "indirect" else CF_DIRECT,
+            "inv": CF_INVESTING, "fin": CF_FINANCING}
+    for sec, title, total in CF_SECTIONS:
+        out.append({"kind": "sec", "label": title, "key": sec})
+        body = lines(spec[sec])
+        if sec == "op" and method == "indirect":
+            # صافي الربح يظهر دائماً ولو صفراً — منه تبدأ القائمة
+            if not any(r["key"] == "profit" for r in body):
+                body.insert(0, row("line", CF_INDIRECT[0][1], "profit"))
+        out.extend(body)
+        out.append(row("sub", total, sec, tot=True))
+    out.append(row("grand", "صافي الزيادة (النقص) في النقد وما في حكمه",
+                   "net", tot=True))
+    out.append(row("bal", "النقد وما في حكمه أول الفترة", "opening",
+                   tot=True))
+    out.append(row("grand", "النقد وما في حكمه آخر الفترة", "closing",
+                   tot=True))
+    return out

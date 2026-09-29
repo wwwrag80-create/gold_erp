@@ -326,8 +326,9 @@ class StandardIncomeTab(QtWidgets.QWidget):
                 if k == "sec":
                     vals = [r["label"]] + [""] * (len(heads) - 1)
                 else:
-                    pad = {"line": " ", "acct": "   "}
-                    vals = [pad.get(k, "") + r["label"]] + self._values(r)
+                    pad = {"line": "\u2003", "acct": "\u2003" * 3}
+                    vals = (["\u200f" + pad.get(k, "") + r["label"]]
+                            + self._values(r))
                 for c, v in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(v)
                     it.setTextAlignment(

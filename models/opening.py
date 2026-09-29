@@ -59,8 +59,11 @@ def sql(conn, alias="e", by_counter=True):
     مبيعات، لا كلّه رصيداً سابقاً.
     """
     acc = opening_account_ids(conn) if by_counter else []
-    parts = [f"{alias}.source_table IN ({','.join('?' * len(OPENING_SOURCES))})",
-             f"{alias}.description LIKE ?"]
+    # COALESCE: قيدٌ بلا مصدر أو بيان يجعل الشرط NULL لا «خطأ» —
+    # و `NOT NULL` تبقى NULL، فيسقط القيد من «الافتتاحي» ومن «غيره» معاً
+    parts = [f"COALESCE({alias}.source_table,'') IN "
+             f"({','.join('?' * len(OPENING_SOURCES))})",
+             f"COALESCE({alias}.description,'') LIKE ?"]
     params = list(OPENING_SOURCES) + [f"%{OPENING_TEXT}%"]
     if acc:
         parts.append(

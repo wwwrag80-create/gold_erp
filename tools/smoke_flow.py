@@ -5851,6 +5851,89 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("69) قائمة التدفقات النقدية (IAS 7)")
+    _y69 = date.today().year
+    _p69 = (f"{_y69}-01-01", f"{_y69}-12-31")
+
+    def _cf69():
+        with db(readonly=True) as conn:
+            return _st67.cash_flow(conn, *_p69)
+
+    _a69 = _cf69()
+    with db() as conn:
+        from models.entities import add_entity as _ae69
+        _sup69 = _ae69(conn, "مورد المكائن 69", "supplier",
+                       vat_number="300000000000003", username="admin")
+        _sacc = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                             (_sup69,)).fetchone()[0]
+        _today = date.today().isoformat()
+        # أصلٌ ثابت بالأجل ثم سداد ثمنه نقداً
+        post_entry(conn, _today, "شراء مكينة بالأجل", [
+            {"account_id": acc_id(conn, "1710"), "cash_debit": 8000},
+            {"account_id": _sacc, "cash_credit": 8000}], username="admin")
+        post_entry(conn, _today, "سداد ثمن المكينة", [
+            {"account_id": _sacc, "cash_debit": 5000},
+            {"account_id": acc_id(conn, "1400"), "cash_credit": 5000}],
+            username="admin")
+    _b69 = _cf69()
+    with db() as conn:
+        # تحويلٌ من الصندوق إلى البنك: ليس تدفقاً
+        post_entry(conn, date.today().isoformat(), "إيداع في البنك", [
+            {"account_id": acc_id(conn, "1500"), "cash_debit": 3000},
+            {"account_id": acc_id(conn, "1400"), "cash_credit": 3000}],
+            username="admin")
+    _c69 = _cf69()
+    with db(readonly=True) as conn:
+        _fp69 = _st67.financial_position(conn, _p69[1])
+        _is69 = _st67.income_statement(conn, *_p69)
+    _t69 = _c69["cur"]["totals"]
+    _v69 = _c69["cur"]["values"]
+    check("آخر الفترة = أولها + صافي التدفقات = النقد في المركز المالي",
+          _c69["balanced"]
+          and abs(_t69["closing"] - _fp69["cash"]["values"]["cash"]) < 0.02,
+          f"{_t69['opening']} + {_t69['net']} = {_t69['closing']}")
+    _dir = sum(_v69[k] for k, _t in _st67.CF_DIRECT)
+    _ind = sum(_v69[k] for k, _t in _st67.CF_INDIRECT)
+    check("الطريقتان المباشرة وغير المباشرة تنتهيان إلى صافي التشغيل نفسه",
+          abs(_dir - _t69["op"]) < 0.02 and abs(_ind - _t69["op"]) < 0.02
+          and abs(_v69["profit"] - _is69["cash"]["totals"]["net"]) < 0.02,
+          f"{_dir} / {_ind} / {_t69['op']}")
+    _bi, _ai = _b69["cur"]["totals"], _a69["cur"]["totals"]
+    check("ثمن الأصل المسدَّد عبر المورّد: استثماري لا تشغيلي",
+          abs((_bi["inv"] - _ai["inv"]) + 5000) < 0.02
+          and abs(_bi["op"] - _ai["op"]) < 0.02
+          and abs((_bi["noncash"] - _ai["noncash"]) - 3000) < 0.02,
+          f"{_bi['inv'] - _ai['inv']} · غير نقدي {_bi['noncash']}")
+    _ct = _c69["cur"]["totals"]
+    check("التحويل بين الصندوق والبنك ليس تدفقاً",
+          all(abs(_ct[k] - _bi[k]) < 0.02
+              for k in ("op", "inv", "fin", "net", "closing")))
+    _lay69 = _st67.cf_layout(_c69)
+    check("ترتيب IAS 7: تشغيلية ثم استثمارية ثم تمويلية ثم النقد آخر الفترة",
+          [x["key"] for x in _lay69 if x["kind"] == "sec"]
+          == ["op", "inv", "fin"]
+          and _lay69[-1]["label"] == "النقد وما في حكمه آخر الفترة"
+          and "compare_from" in _c69 and "cmp" in _c69)
+    _h69 = _pm65.build_html("cash_flow", 0, date_from=_p69[0],
+                            date_to=_p69[1], method="direct")
+    check("قالب القائمة: الأنشطة الثلاثة والطريقة والتوقيعات",
+          "الأنشطة الاستثمارية" in _h69 and "الطريقة المباشرة" in _h69
+          and "اعتمده" in _h69)
+    try:
+        from PyQt5 import QtWidgets as _QW69
+        _QW69.QApplication.instance() or _QW69.QApplication([])
+        from ui.reports.cash_flow_screen import CashFlowScreen as _C69
+        _w69 = _C69({"id": 1, "username": "admin"})
+        _mw69 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
+            encoding="utf-8")
+        check("شاشة التدفقات النقدية في القائمة وتعرض القائمة",
+              "CashFlowScreen(user)" in _mw69
+              and _w69.table.rowCount() > 8
+              and _w69.method.count() == 2)
+        _w69.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
