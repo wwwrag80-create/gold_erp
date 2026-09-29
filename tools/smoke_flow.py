@@ -5641,6 +5641,95 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("67) ميزان المراجعة وقائمة المركز المالي بالنهج المحاسبي")
+    from datetime import date
+    from models import statements as _st67
+    with db() as conn:
+        # عميلٌ دفع أكثر مما عليه ⇒ رصيده دائن ⇒ مطلوبٌ لا تخفيضٌ للذمم
+        _c67 = conn.execute(
+            "SELECT a.id FROM accounts a JOIN accounts p ON p.id=a.parent_id"
+            " WHERE p.code='1600' ORDER BY a.id LIMIT 1").fetchone()[0]
+        post_entry(conn, date.today().isoformat(), "دفعة مقدّمة من عميل", [
+            {"account_id": acc_id(conn, "1400"), "cash_debit": 777777},
+            {"account_id": _c67, "cash_credit": 777777}], username="admin")
+    with db(readonly=True) as conn:
+        _tbc = _st67.trial_balance(conn, None, None, "cash")
+        _tbg = _st67.trial_balance(conn, "2026-01-01", None, "gold")
+        _tb1 = _st67.trial_balance(conn, None, None, "cash", max_level=1)
+        _fp = _st67.financial_position(conn, "2100-12-31", "2025-12-31")
+        _bal = _st67._balances(conn, "2100-12-31", "cash")
+        _rows67, _byid67, _r67 = _st67._tree(conn)
+    _k6 = ("open_dr", "open_cr", "dr", "cr", "close_dr", "close_cr")
+    check("الميزان: مدين = دائن في أول المدة والحركة وآخر المدة (نقد وذهب)",
+          _tbc["totals"]["balanced"] and _tbg["totals"]["balanced"])
+    check("الميزان: كل رصيدٍ في عمودَي مدين/دائن لا رقمٌ بإشارة",
+          all(r[k] >= 0 for r in _tbc["rows"] for k in _k6)
+          and all(not (r["close_dr"] and r["close_cr"])
+                  for r in _tbc["rows"] if not r["is_group"]))
+    check("الميزان: مجاميع الأقسام الرئيسية = إجمالي الميزان",
+          all(abs(sum(s[k] for s in _tbc["sections"])
+                  - _tbc["totals"][k]) < 0.02 for k in _k6))
+    check("الميزان: المستوى 1 أقسامٌ رئيسية فقط وبنفس الإجمالي",
+          all(r["is_root"] for r in _tb1["rows"])
+          and all(abs(_tb1["totals"][k] - _tbc["totals"][k]) < 0.02
+                  for k in _k6), str(len(_tb1["rows"])))
+    _cv = _fp["cash"]["values"]
+    _pos = _neg = _vat = 0.0
+    for _n in _rows67:
+        _b = _bal.get(_n["id"], 0.0)
+        _kind = _st67._classify(_n, _byid67)
+        if _kind == "party_customer":
+            if _b > 0:
+                _pos += _b
+            else:
+                _neg -= _b
+        elif _kind == "vat":
+            _vat += _b
+    check("المركز المالي متوازن في البعدين وبالمقارنة",
+          _fp["balanced_cash"] and _fp["balanced_gold"]
+          and abs(_fp["cash"]["compare_totals"]["diff"]) < 0.011)
+    check("بلا مقاصّة: العميل الدائن في المطلوبات لا مطروحاً من الذمم",
+          abs(_cv["receivables"] - _pos) < 0.02
+          and abs(_cv["customer_adv"] - _neg) < 0.02
+          and _cv["customer_adv"] > 700000,
+          f"{_cv['receivables']} / {_cv['customer_adv']}")
+    check("الضريبة بالصافي والإهلاك مطروحٌ من التكلفة",
+          abs((_cv["vat_asset"] - _cv["vat_liab"]) - _vat) < 0.02
+          and _cv["ppe_dep"] <= 0.0001)
+    _lay = _st67.layout(_fp)
+    check("ترتيب IAS 1: الأصول ثم حقوق الملكية والمطلوبات · بلا إيراد/مصروف",
+          [x["label"] for x in _lay if x["kind"] == "head"]
+          == ["الأصول", "حقوق الملكية والمطلوبات"]
+          and not any(x["kind"] == "line" and x["label"] in
+                      ("الإيرادات", "المصروفات") for x in _lay)
+          and _lay[-1]["label"] == "مجموع حقوق الملكية والمطلوبات")
+    _ht = _pm65.build_html("trial_balance", 0, dim="gold", max_level=2)
+    _hf = _pm65.build_html("financial_position", 0, as_of="2100-12-31",
+                           compare_to="2025-12-31")
+    check("قالبا الطباعة: أزواج مدين/دائن ومقارنة وتوقيعات",
+          "رصيد أول المدة" in _ht and "أعدّه" in _ht
+          and "مجموع حقوق الملكية والمطلوبات" in _hf and "راجعه" in _hf
+          and "2025-12-31" in _hf)
+    try:
+        from PyQt5 import QtWidgets as _QW67
+        _QW67.QApplication.instance() or _QW67.QApplication([])
+        from ui.reports.balance_sheet_screen import BalanceSheetScreen as _B67
+        from ui.reports.trial_balance_screen import TrialBalanceScreen as _T67
+        _b67 = _B67({"id": 1, "username": "admin"})
+        _t67 = _T67({"id": 1, "username": "admin"})
+        _t67.all_time.setChecked(True)
+        _t67.load()
+        check("الشاشتان: تبويب القائمة وتبويب الشجرة · 8 أعمدة للميزان",
+              [_b67.tabs.tabText(i) for i in range(_b67.tabs.count())]
+              == ["قائمة المركز المالي", "تفصيل بشجرة الحسابات"]
+              and _b67.statement.table.rowCount() > 5
+              and _t67.table.columnCount() == 8
+              and "متوازن" in _t67.status.text())
+        _b67.close()
+        _t67.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

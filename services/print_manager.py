@@ -1805,7 +1805,12 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "trial_balance":
             return en(_tpl_trial_balance(conn, doc_id, kw.get("date_from"),
                                          kw.get("date_to"),
-                                         kw.get("include_zero", False)))
+                                         kw.get("include_zero", False),
+                                         kw.get("dim", "cash"),
+                                         kw.get("max_level", 9)))
+        if doc_type == "financial_position":
+            return en(_tpl_financial_position(conn, doc_id, kw.get("as_of"),
+                                              kw.get("compare_to")))
         if doc_type == "workshop_accounts":
             return en(_tpl_workshop_accounts(conn, doc_id,
                                              kw.get("rows") or [],
@@ -2027,64 +2032,206 @@ def _tpl_balance_tree(conn, _id=0, date_to=None, max_level=3,
                     show_meta=False) + meta + table + totals)
 
 
-def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
-                       include_zero=False):
-    """قالب ميزان المراجعة — أرصدة أول المدة والحركة والإقفال."""
-    from models.reports import trial_balance
-    tb = trial_balance(conn, date_from, date_to, bool(include_zero))
-    today = _qd(QtCore.QDate.currentDate())
-    types = {"asset": "أصل", "liability": "خصم", "equity": "حقوق ملكية",
-             "revenue": "إيراد", "expense": "مصروف", "bridge": "وسيط"}
+def _sign_block():
+    """توقيعات القوائم المالية: أعدّه · راجعه · اعتمده — بخاتم المصنع."""
+    stamp = getattr(config, "STAMP_PATH", None)
+    stamp_img = (f'<img src="{Path(str(stamp)).as_uri()}" height="70">'
+                 if stamp and Path(str(stamp)).exists() else "")
+    sig = ("<br/>الاسم: ......................<br/><br/>"
+           "التوقيع: ....................")
+    return ('<table class="sig" width="100%" cellspacing="0"'
+            ' cellpadding="6"><tr>'
+            + cells(f'<td width="33%" align="center"><b>أعدّه (المحاسب)</b>'
+                    f'{sig}</td>',
+                    f'<td width="33%" align="center"><b>راجعه (المراجع)</b>'
+                    f'{sig}</td>',
+                    f'<td width="34%" align="center"><b>اعتمده (المدير /'
+                    f' المالك)</b>{sig}<br/>{stamp_img}</td>')
+            + "</tr></table>")
 
+
+def _entity_meta(pairs):
+    """بيانات القائمة: المنشأة والسجل والرقم الضريبي ثم ما يُمرَّر."""
+    items = [("المنشأة", config.COMPANY_NAME)]
+    if getattr(config, "COMPANY_CR", ""):
+        items.append(("السجل التجاري", en(config.COMPANY_CR)))
+    if getattr(config, "COMPANY_VAT_NUMBER", ""):
+        items.append(("الرقم الضريبي", en(config.COMPANY_VAT_NUMBER)))
+    items += list(pairs)
+    rows = ""
+    for i in range(0, len(items), 4):
+        tds = []
+        for k, v in items[i:i + 4]:
+            tds += [thw(k), f"<td>{v}</td>"]
+        rows += f"<tr>{cells(*tds)}</tr>"
+    return f"{TBL}{rows}</table><br/>"
+
+
+def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
+                       include_zero=False, dim="cash", max_level=9):
+    """ميزان المراجعة بالأرصدة والمجاميع — الشكل الذي يطلبه المراجع.
+
+    لكل حساب ثلاثة أزواج (مدين | دائن): أول المدة · حركة الفترة · آخر
+    المدة؛ بشجرة الحسابات ومستوياتها، وبُعدٍ واحد (ريال أو ذهب).
+    """
+    from models import statements
+    tb = statements.trial_balance(conn, date_from or None, date_to or None,
+                                  dim, int(max_level or 9),
+                                  include_zero=bool(include_zero))
+    today = _qd(QtCore.QDate.currentDate())
+    gold = tb["dim"] == "gold"
+
+    def f(v):
+        if gold:
+            return _gw(v, 3) if abs(v) >= 0.0005 else ""
+        return _w(v, 2) if abs(v) >= 0.005 else ""
+
+    keys = ("open_dr", "open_cr", "dr", "cr", "close_dr", "close_cr")
     body = ""
     for r in tb["rows"]:
-        body += ("<tr>" + cells(
-            f'<td>{en(r["code"])}</td>',
-            f'<td class="r">{r["name"]}</td>',
-            f'<td>{types.get(r["type"], r["type"])}</td>',
-            f'<td>{_gw(r["open_gold"])}</td>',
-            f'<td>{_gw(r["gold_debit"])}</td>',
-            f'<td>{_gw(r["gold_credit"])}</td>',
-            f'<td>{_gw(r["close_gold"])}</td>',
-            f'<td>{_w(r["open_cash"], 2)}</td>',
-            f'<td>{_w(r["cash_debit"], 2)}</td>',
-            f'<td>{_w(r["cash_credit"], 2)}</td>',
-            f'<td>{_w(r["close_cash"], 2)}</td>') + "</tr>")
+        bold = r["is_root"] or not r["terminal"]
+        b0, b1 = ("<b>", "</b>") if bold else ("", "")
+        bg = "background-color:#EFE9DC;" if r["is_root"] else ""
+        st = f' style="{bg}"' if bg else ""
+        pad = 10 * (r["level"] - 1) + 4
+        tds = [f'<td{st}>{b0}{en(r["code"])}{b1}</td>',
+               f'<td class="r" style="{bg}padding-right:{pad}px">'
+               f'{b0}{r["name"]}{b1}</td>']
+        tds += [f'<td class="num"{st}>{b0}{f(r[k])}{b1}</td>'
+                for k in keys]
+        body += "<tr>" + cells(*tds) + "</tr>"
     if not body:
-        body = f'<tr><td {TD} colspan="11">لا توجد حركة في الفترة</td></tr>'
-
+        body = f'<tr><td {TD} colspan="8">لا توجد أرصدة ولا حركة</td></tr>'
     t = tb["totals"]
+    tot_st = ' style="background-color:#F2EEE4;border-top:2px solid #333"'
     body += ("<tr>" + cells(
-        '<td></td>', '<td class="r"><b>الإجمالي</b></td>', '<td></td>',
-        f'<td><b>{_gw(t["open_gold"])}</b></td>',
-        f'<td><b>{_gw(t["gold_debit"])}</b></td>',
-        f'<td><b>{_gw(t["gold_credit"])}</b></td>',
-        f'<td><b>{_gw(t["close_gold"])}</b></td>',
-        f'<td><b>{_w(t["open_cash"], 2)}</b></td>',
-        f'<td><b>{_w(t["cash_debit"], 2)}</b></td>',
-        f'<td><b>{_w(t["cash_credit"], 2)}</b></td>',
-        f'<td><b>{_w(t["close_cash"], 2)}</b></td>') + "</tr>")
+        f'<td{tot_st}></td>', f'<td class="r"{tot_st}><b>الإجمالي</b></td>',
+        *[f'<td class="num"{tot_st}><b>{f(t[k]) or "0"}</b></td>'
+          for k in keys]) + "</tr>")
 
-    head = cells(thw("الكود", 7), thw("الحساب", 21), thw("النوع", 8),
-                 thw("افتتاح ذهب", 8), thw("مدين ذهب", 8),
-                 thw("دائن ذهب", 8), thw("إقفال ذهب", 8),
-                 thw("افتتاح نقد", 8), thw("مدين نقد", 8),
-                 thw("دائن نقد", 8), thw("إقفال نقد", 8))
-    meta = f'''{TBL}
-      <tr>{cells(thw("من تاريخ"), f'<td>{en(date_from or "البداية")}</td>',
-                 thw("إلى تاريخ"), f'<td>{en(date_to or today)}</td>',
-                 thw("عدد الحسابات"), f'<td>{en(len(tb["rows"]))}</td>')}</tr>
-    </table><br/>'''
-    ok = t["balanced_gold"] and t["balanced_cash"]
-    verdict = f'''
-    <div {WIDE} style="margin-top:6px">
-      <b>{"✔ الميزان متوازن في البعدين — مدين الفترة = دائنها وأرصدة "
-          "الإقفال مجموعها صفر"
-          if ok else "✘ الميزان غير متوازن — راجع القيود"}</b>
-    </div>'''
-    table = f"{TBL}<tr>{head}</tr>{body}</table>"
-    return (_header("ميزان المراجعة", "—", date_to or today,
-                    show_meta=False) + meta + table + verdict)
+    head1 = cells(thspan("رقم الحساب", rowspan=2),
+                  thspan("اسم الحساب", rowspan=2),
+                  thspan("رصيد أول المدة", 2), thspan("حركة الفترة", 2),
+                  thspan("رصيد آخر المدة", 2))
+    head2 = cells(*(thw(x) for x in ("مدين", "دائن") * 3))
+
+    # ملخص الأقسام الرئيسية — ما يقرؤه المراجع أولاً
+    summ = ""
+    for s_ in tb["sections"]:
+        summ += ("<tr>" + cells(
+            f'<td>{en(s_["code"])}</td>', f'<td class="r">{s_["name"]}</td>',
+            *[f'<td class="num">{f(s_[k])}</td>' for k in keys]) + "</tr>")
+    summary = ""
+    if summ and int(max_level or 9) > 1:
+        summary = ('<br/><div class="note"><b>ملخص بحسب الأقسام الرئيسية'
+                   f'</b></div>{TBL}<tr>{head1}</tr><tr>{head2}</tr>'
+                   f'{summ}</table>')
+
+    unit = f"الذهب وزناً ({_kunit()})" if gold else "ريال سعودي"
+    lvl = "كل الحسابات" if int(max_level or 9) >= 9 else en(max_level)
+    meta = _entity_meta([
+        ("الفترة من", en(date_from or "بداية الدفاتر")),
+        ("إلى", en(date_to or today)),
+        ("العملة / الوحدة", unit), ("المستوى", lvl),
+        ("عدد الحسابات", en(tb["accounts"]))])
+    marks = (("أول المدة", t["ok_open"]), ("حركة الفترة", t["ok_period"]),
+             ("آخر المدة", t["ok_close"]))
+    per = " · ".join(f"{n}: {'مدين = دائن ✔' if ok else 'غير متوازن ✘'}"
+                     for n, ok in marks)
+    head_v = ("✔ الميزان متوازن" if t["balanced"]
+              else "✘ الميزان غير متوازن — راجع القيود")
+    verdict = (f'<div {WIDE} style="margin-top:6px"><b>{head_v}</b> — {per}.'
+               ' الأرصدة من دفتر الأستاذ بالقيد المزدوج، والقيود المحذوفة'
+               ' مستبعدة.</div>')
+    table = f"{TBL}<tr>{head1}</tr><tr>{head2}</tr>{body}</table>"
+    return (_header("ميزان المراجعة بالأرصدة والمجاميع", "—",
+                    date_to or today, show_meta=False)
+            + meta + table + verdict + summary + _sign_block())
+
+
+def _fp_money(v, gold=False):
+    """مبلغ القائمة: السالب بين قوسين والصفر شرطة — كالقوائم المدقّقة."""
+    eps = 0.0005 if gold else 0.005
+    if abs(v or 0.0) < eps:
+        return "—"
+    s = _gw(abs(v), 3) if gold else _w(abs(v), 2)
+    return f"({s})" if v < 0 else s
+
+
+def _tpl_financial_position(conn, _id=0, as_of=None, compare_to=None):
+    """قائمة المركز المالي (الميزانية العمومية) بترتيب IAS 1 — بمقارنة.
+
+    الأصول غير المتداولة ثم المتداولة؛ حقوق الملكية ثم المطلوبات؛ بلا
+    مقاصّة بين المدين والدائن من الجهات، والإهلاك مطروحاً من التكلفة،
+    وصافي ربح الفترة في حقوق الملكية. السالب بين قوسين.
+    """
+    from models import statements
+    today = _qd(QtCore.QDate.currentDate())
+    fp = statements.financial_position(conn, as_of or today, compare_to)
+    rows = statements.layout(fp)
+    has_cmp = bool(fp["compare_to"])
+    ncol = 5 if has_cmp else 3
+
+    body = ""
+    for r in rows:
+        k = r["kind"]
+        if k in ("head", "sec"):
+            st = ("background-color:#2b2723;color:#ffffff" if k == "head"
+                  else "background-color:#EFE9DC")
+            body += (f'<tr><td class="r" colspan="{ncol}" style="{st}">'
+                     f'<b>{r["label"]}</b></td></tr>')
+            continue
+        vals = [_fp_money(r["cash"])]
+        if has_cmp:
+            vals.append(_fp_money(r["cash_cmp"]))
+        vals.append(_fp_money(r["gold"], True))
+        if has_cmp:
+            vals.append(_fp_money(r["gold_cmp"], True))
+        if k in ("line", "net"):
+            i0, i1 = ("<i>", "</i>") if k == "net" else ("", "")
+            lbl = (f'<td class="r" style="padding-right:18px">'
+                   f'{i0}{r["label"]}{i1}</td>')
+            tds = [f'<td class="num">{i0}{v}{i1}</td>' for v in vals]
+        else:
+            st = (' style="background-color:#F2EEE4;border-top:2px solid'
+                  ' #333;border-bottom:3px double #333"' if k == "grand"
+                  else ' style="border-top:1.5px solid #333"')
+            lbl = f'<td class="r"{st}><b>{r["label"]}</b></td>'
+            tds = [f'<td class="num"{st}><b>{v}</b></td>' for v in vals]
+        body += "<tr>" + cells(lbl, *tds) + "</tr>"
+
+    d1, d2 = en(fp["as_of"]), en(fp["compare_to"])
+    if has_cmp:
+        head1 = cells(thspan("البيان", rowspan=2),
+                      thspan("النقد — ريال سعودي", 2),
+                      thspan(f"الذهب — وزناً ({_kunit()})", 2))
+        head2 = cells(thw(f"كما في {d1}"), thw(f"كما في {d2}"),
+                      thw(f"كما في {d1}"), thw(f"كما في {d2}"))
+        head = f"<tr>{head1}</tr><tr>{head2}</tr>"
+    else:
+        head = ("<tr>" + cells(thw("البيان"), thw(f"ريال — كما في {d1}"),
+                               thw(f"ذهب ({_kunit()}) — كما في {d1}"))
+                + "</tr>")
+    meta = _entity_meta([
+        ("كما في", d1), ("المقارنة", d2 if has_cmp else "—"),
+        ("العملة", "ريال سعودي؛ والذهب وزناً بعيار المصنع")])
+    ct, gt = fp["cash"]["totals"], fp["gold"]["totals"]
+    if fp["balanced_cash"] and fp["balanced_gold"]:
+        head_v = "✔ القائمة متوازنة: مجموع الأصول = حقوق الملكية + المطلوبات"
+    else:
+        head_v = (f"✘ فرق: نقد {_w(ct['diff'], 2)} · "
+                  f"ذهب {_gw(gt['diff'], 3)}")
+    verdict = (
+        f'<div {WIDE} style="margin-top:6px"><b>{head_v}</b><br/>'
+        'أُعدّت بترتيب معيار المحاسبة الدولي 1 «عرض القوائم المالية»'
+        ' المعتمد في المملكة: لا مقاصّة بين أرصدة الجهات المدينة والدائنة؛'
+        ' الإهلاك مطروحٌ من التكلفة؛ ونتيجة الإيرادات والمصروفات تظهر في'
+        ' حقوق الملكية وحدها (صافي ربح الفترة من بداية السنة المالية).'
+        ' الأرقام بين القوسين سالبة.</div>')
+    table = f"{TBL}{head}{body}</table>"
+    return (_header("قائمة المركز المالي (الميزانية العمومية)", "—",
+                    fp["as_of"], show_meta=False)
+            + meta + table + verdict + _sign_block())
 
 
 def _tpl_models_catalog(conn, _id=0, mode="all", sort="az",
@@ -3510,6 +3657,7 @@ BUILDERS = {
     "workshop_accounts": _tpl_workshop_accounts,
     "balance_tree": _tpl_balance_tree,
     "trial_balance": _tpl_trial_balance,
+    "financial_position": _tpl_financial_position,
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
     "models_received_photos": _tpl_models_received_photos,
@@ -3569,6 +3717,15 @@ def build_html(doc_type, doc_id, **kw):
             html = _tpl_dossier_models(conn, doc_id, kw.get("date_from"),
                                        kw.get("date_to"),
                                        kw.get("per_page", 4))
+        elif doc_type == "trial_balance":
+            html = _tpl_trial_balance(conn, doc_id, kw.get("date_from"),
+                                      kw.get("date_to"),
+                                      kw.get("include_zero", False),
+                                      kw.get("dim", "cash"),
+                                      kw.get("max_level", 9))
+        elif doc_type == "financial_position":
+            html = _tpl_financial_position(conn, doc_id, kw.get("as_of"),
+                                           kw.get("compare_to"))
         elif doc_type == "customer_board":
             html = _tpl_customer_board(conn, doc_id, kw.get("date_from"),
                                        kw.get("date_to"),
@@ -3658,7 +3815,7 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     wide = doc_type in ("statement", "journal", "manual", "balances",
                         "customer_analytics", "turnover", "aging",
                         "day_close", "mfg_target", "mfg_salary",
-                        "customer_board")
+                        "customer_board", "trial_balance")
     printer = _printer(wide if landscape is None else landscape)
     dlg = QtPrintSupport.QPrintPreviewDialog(printer, parent)
     dlg.setWindowTitle("معاينة قبل الطباعة")
