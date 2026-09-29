@@ -1811,6 +1811,10 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "financial_position":
             return en(_tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                               kw.get("compare_to")))
+        if doc_type == "income_statement":
+            return en(_tpl_income_statement(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("compare", True), kw.get("show_accounts", False)))
         if doc_type == "workshop_accounts":
             return en(_tpl_workshop_accounts(conn, doc_id,
                                              kw.get("rows") or [],
@@ -2156,6 +2160,92 @@ def _fp_money(v, gold=False):
         return "—"
     s = _gw(abs(v), 3) if gold else _w(abs(v), 2)
     return f"({s})" if v < 0 else s
+
+
+def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
+                          compare=True, show_accounts=False):
+    """قائمة الدخل بطريقة وظيفة المصروف (IAS 1) — بمقارنة وإيضاحات.
+
+    من دفتر الأستاذ على أساس الاستحقاق: صافي الإيرادات ← مجمل الربح ←
+    الربح التشغيلي ← صافي ربح الفترة. السالب بين قوسين.
+    """
+    from models import statements
+    today = _qd(QtCore.QDate.currentDate())
+    d1 = date_from or f"{today[:4]}-01-01"
+    d2 = date_to or today
+    st = statements.income_statement(conn, d1, d2, bool(compare))
+    rows = statements.is_layout(st, bool(show_accounts))
+    has_cmp = bool(st["compare_from"])
+    ncol = 5 if has_cmp else 3
+
+    body = ""
+    for r in rows:
+        k = r["kind"]
+        if k == "sec":
+            body += (f'<tr><td class="r" colspan="{ncol}"'
+                     f' style="background-color:#EFE9DC">'
+                     f'<b>{r["label"]}</b></td></tr>')
+            continue
+        vals = [_fp_money(r["cash"])]
+        if has_cmp:
+            vals.append("" if k == "acct" else _fp_money(r["cash_cmp"]))
+        vals.append(_fp_money(r["gold"], True))
+        if has_cmp:
+            vals.append("" if k == "acct" else _fp_money(r["gold_cmp"], True))
+        if k == "line":
+            lbl = (f'<td class="r" style="padding-right:18px">'
+                   f'{r["label"]}</td>')
+            tds = [f'<td class="num">{v}</td>' for v in vals]
+        elif k == "acct":
+            st_ = ' style="font-size:8pt;color:#555"'
+            lbl = (f'<td class="r" style="padding-right:34px;font-size:8pt;'
+                   f'color:#555">{en(r["label"])}</td>')
+            tds = [f'<td class="num"{st_}>{v}</td>' for v in vals]
+        else:
+            sty = (' style="background-color:#F2EEE4;border-top:2px solid'
+                   ' #333;border-bottom:3px double #333"' if k == "grand"
+                   else ' style="border-top:1.5px solid #333"')
+            lbl = f'<td class="r"{sty}><b>{r["label"]}</b></td>'
+            tds = [f'<td class="num"{sty}><b>{v}</b></td>' for v in vals]
+        body += "<tr>" + cells(lbl, *tds) + "</tr>"
+
+    p1 = f"من {en(st['date_from'])} إلى {en(st['date_to'])}"
+    p2 = f"من {en(st['compare_from'])} إلى {en(st['compare_to'])}"
+    if has_cmp:
+        head1 = cells(thspan("البيان", rowspan=2),
+                      thspan("النقد — ريال سعودي", 2),
+                      thspan(f"الذهب — وزناً ({_kunit()})", 2))
+        head2 = cells(thw("الفترة الحالية"), thw("فترة المقارنة"),
+                      thw("الفترة الحالية"), thw("فترة المقارنة"))
+        head = f"<tr>{head1}</tr><tr>{head2}</tr>"
+    else:
+        head = ("<tr>" + cells(thw("البيان"), thw("ريال"),
+                               thw(f"ذهب ({_kunit()})")) + "</tr>")
+    meta = _entity_meta([
+        ("الفترة الحالية", p1),
+        ("فترة المقارنة", p2 if has_cmp else "—"),
+        ("العملة", "ريال سعودي؛ والذهب وزناً بعيار المصنع")])
+    ct = st["cash"]["totals"]
+    net = ct["net"]
+    rev = ct["net_revenue"]
+    ratios = ""
+    if abs(rev) >= 0.005:
+        gm = en(f"{ct['gross'] / rev * 100:,.1f}")
+        nm = en(f"{net / rev * 100:,.1f}")
+        ratios = f" · هامش مجمل الربح {gm}% · هامش صافي الربح {nm}%"
+    verdict = (
+        f'<div {WIDE} style="margin-top:6px"><b>صافي '
+        f'{"ربح" if net >= 0 else "خسارة"} الفترة: {_w(abs(net), 2)} ريال'
+        f'</b>{ratios}<br/>'
+        'أُعدّت بطريقة «وظيفة المصروف» وفق معيار المحاسبة الدولي 1 من دفتر'
+        ' الأستاذ على أساس الاستحقاق: الإيراد بعد المردودات والخصومات وبلا'
+        ' ضريبة القيمة المضافة؛ والمصروف ما حُمّل على حساباته لا ما دُفع'
+        ' نقداً؛ وقيد الإقفال السنوي مستبعد. الأرقام بين القوسين سالبة.'
+        '</div>')
+    table = f"{TBL}{head}{body}</table>"
+    return (_header("قائمة الدخل (الأرباح والخسائر)", "—", st["date_to"],
+                    show_meta=False)
+            + meta + table + verdict + _sign_block())
 
 
 def _tpl_financial_position(conn, _id=0, as_of=None, compare_to=None):
@@ -3658,6 +3748,7 @@ BUILDERS = {
     "balance_tree": _tpl_balance_tree,
     "trial_balance": _tpl_trial_balance,
     "financial_position": _tpl_financial_position,
+    "income_statement": _tpl_income_statement,
     "models_catalog": _tpl_models_catalog,
     "models_received": _tpl_models_received,
     "models_received_photos": _tpl_models_received_photos,
@@ -3726,6 +3817,10 @@ def build_html(doc_type, doc_id, **kw):
         elif doc_type == "financial_position":
             html = _tpl_financial_position(conn, doc_id, kw.get("as_of"),
                                            kw.get("compare_to"))
+        elif doc_type == "income_statement":
+            html = _tpl_income_statement(
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("compare", True), kw.get("show_accounts", False))
         elif doc_type == "customer_board":
             html = _tpl_customer_board(conn, doc_id, kw.get("date_from"),
                                        kw.get("date_to"),

@@ -463,3 +463,174 @@ def layout(fp):
     out.append(row("grand", "مجموع حقوق الملكية والمطلوبات", "right",
                    tot=True))
     return out
+
+
+# ══════════════════════════════════════════════════════════════════
+#  3) قائمة الدخل (الأرباح والخسائر)
+# ══════════════════════════════════════════════════════════════════
+#
+# بطريقة «وظيفة المصروف» (IAS 1.103) — الأشيع في القوائم السعودية
+# المدقّقة: الإيراد، ثم تكلفة الإيراد ⇒ مجمل الربح، ثم المصاريف
+# الإدارية ⇒ الربح التشغيلي، ثم الإيرادات والمصروفات الأخرى ⇒ صافي
+# ربح الفترة. من دفتر الأستاذ نفسه (أساس الاستحقاق) لا من الفواتير ولا
+# من سندات الصرف: فالسداد لمورّد ليس مصروفاً، والضريبة ليست إيراداً.
+#
+# القيم «بأثرها على الربح»: الإيراد موجب والمصروف سالب — فالمجاميع
+# جمعٌ مباشر، والسالب يُطبع بين قوسين.
+
+IS_LINES = [
+    ("sales", "المبيعات والإيرادات التشغيلية", "rev"),
+    ("returns", "يُطرح: مردودات المبيعات", "rev"),
+    ("discounts", "يُطرح: الخصم المسموح به", "rev"),
+    ("cos_gold", "تكلفة الذهب المباع وفواقد التشغيل", "cos"),
+    ("cos_labor", "رواتب وأجور التشغيل", "cos"),
+    ("cos_other", "مواد ومصروفات تشغيل مباشرة", "cos"),
+    ("admin", "المصاريف الإدارية والعمومية", "opex"),
+    ("depr", "إهلاك الأصول الثابتة", "opex"),
+    ("other_income", "إيرادات أخرى", "other"),
+    ("other_exp", "مصروفات أخرى", "other"),
+]
+IS_SUBTOTALS = [
+    # (بعد القسم، المفتاح، العنوان)
+    ("rev", "net_revenue", "صافي الإيرادات"),
+    ("cos", "gross", "مجمل الربح (الخسارة)"),
+    ("opex", "operating", "الربح (الخسارة) التشغيلي"),
+    ("other", "net", "صافي ربح (خسارة) الفترة"),
+]
+IS_SECTIONS = {"rev": "الإيرادات", "cos": "تكلفة الإيرادات",
+               "opex": "المصاريف التشغيلية",
+               "other": "الإيرادات والمصروفات الأخرى"}
+
+_IS_MAP = {
+    "4900": "returns", "4200": "other_income", "4300": "other_income",
+    "5200": "discounts", "5300": "discounts",
+    "5100": "cos_gold", "5700": "cos_labor", "5710": "cos_labor",
+    "5050": "cos_other", "5860": "depr", "5800": "admin",
+    "5900": "other_exp",
+}
+
+
+def _is_classify(node, by_id, root_type):
+    cur, seen = node, 0
+    while cur is not None and seen < 20:
+        if cur["code"] in _IS_MAP:
+            return _IS_MAP[cur["code"]]
+        cur = by_id.get(cur["parent_id"])
+        seen += 1
+    return "sales" if root_type == "revenue" else "other_exp"
+
+
+def _is_period(conn, d1, d2, dim, rows, by_id):
+    """بنود قائمة الدخل لفترة وبُعد — بأثرها على الربح."""
+    eps = _EPS[dim]
+    col_d, col_c = f"{dim}_debit", f"{dim}_credit"
+    bal = {}
+    for r in conn.execute(
+            f"SELECT l.account_id aid, COALESCE(SUM(l.{col_d}-l.{col_c}),0) b"
+            " FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
+            " WHERE e.entry_date BETWEEN ? AND ?"
+            # قيد الإقفال السنوي يصفّر النتيجة — ليس حركة تشغيل
+            " AND COALESCE(e.source_table,'')<>'year_close'"
+            " GROUP BY l.account_id", (d1, d2)):
+        bal[r["aid"]] = r["b"] or 0.0
+    v = {k: 0.0 for k, _t, _s in IS_LINES}
+    detail = {k: [] for k, _t, _s in IS_LINES}
+    for node in rows:
+        b = bal.get(node["id"], 0.0)
+        if abs(b) <= eps:
+            continue
+        rtype = _root_of(node, by_id)["type"]
+        if rtype not in ("revenue", "expense"):
+            continue
+        key = _is_classify(node, by_id, rtype)
+        v[key] += -b                        # أثرها على الربح
+        detail[key].append((node["code"], node["name"], -b))
+    rnd = 3 if dim == "gold" else 2
+    v = {k: round(x, rnd) for k, x in v.items()}
+    t, run = {}, 0.0
+    for sec, key, _title in IS_SUBTOTALS:
+        run += sum(v[k] for k, _t, s in IS_LINES if s == sec)
+        t[key] = round(run, rnd)
+    t["revenue_gross"] = v["sales"]
+    t["cos"] = round(sum(v[k] for k, _t, s in IS_LINES if s == "cos"), rnd)
+    t["opex"] = round(sum(v[k] for k, _t, s in IS_LINES if s == "opex"), rnd)
+    return v, t, detail
+
+
+def _shift_year(d, years=-1):
+    y, m, dd = int(d[:4]) + years, int(d[5:7]), int(d[8:10])
+    if m == 2 and dd == 29:
+        dd = 28
+    return f"{y:04d}-{m:02d}-{dd:02d}"
+
+
+def income_statement(conn, date_from, date_to, compare=True):
+    """قائمة الدخل للفترة، ومقارنةً بالفترة نفسها من السنة السابقة.
+
+    `compare`: True (الفترة المماثلة من السنة السابقة) أو (من، إلى)
+    صريحان أو False.
+    """
+    rows, by_id, _roots = _tree(conn)
+    if compare is True:
+        c1, c2 = _shift_year(date_from), _shift_year(date_to)
+    elif compare:
+        c1, c2 = compare
+    else:
+        c1 = c2 = ""
+    out = {"date_from": date_from, "date_to": date_to,
+           "compare_from": c1, "compare_to": c2,
+           "lines": IS_LINES, "subtotals": IS_SUBTOTALS}
+    for dim in ("cash", "gold"):
+        v, t, det = _is_period(conn, date_from, date_to, dim, rows, by_id)
+        out[dim] = {"values": v, "totals": t, "detail": det}
+        if c1:
+            cv, ct, _d = _is_period(conn, c1, c2, dim, rows, by_id)
+            out[dim]["compare"] = cv
+            out[dim]["compare_totals"] = ct
+    return out
+
+
+def is_layout(st, accounts=False):
+    """قائمة الدخل صفوفاً للعرض والطباعة: sec · line · acct · sub · grand.
+
+    `accounts`: يُدرج تحت كل بندٍ حساباته (إيضاح البند) للفترة الحالية.
+    """
+    c, g = st["cash"], st["gold"]
+    has_cmp = "compare" in c
+
+    def row(kind, label, key, tot=False):
+        src = "totals" if tot else "values"
+        csrc = "compare_totals" if tot else "compare"
+        return {"kind": kind, "label": label, "key": key,
+                "cash": c[src].get(key, 0.0),
+                "cash_cmp": c[csrc].get(key, 0.0) if has_cmp else 0.0,
+                "gold": g[src].get(key, 0.0),
+                "gold_cmp": g[csrc].get(key, 0.0) if has_cmp else 0.0}
+
+    out = []
+    for sec, key, title in IS_SUBTOTALS:
+        lines = [row("line", t, k) for k, t, s in IS_LINES if s == sec]
+        lines = [r for r in lines if not _hidden(
+            (r["cash"], r["cash_cmp"], r["gold"], r["gold_cmp"]))]
+        if lines:
+            out.append({"kind": "sec", "label": IS_SECTIONS[sec], "key": sec})
+            for ln in lines:
+                out.append(ln)
+                if accounts:
+                    out.extend(_is_accounts(st, ln["key"]))
+        out.append(row("grand" if key == "net" else "sub", title, key,
+                       tot=True))
+    return out
+
+
+def _is_accounts(st, key):
+    acc = {}
+    for dim in ("cash", "gold"):
+        for code, name, amt in st[dim]["detail"].get(key, []):
+            e = acc.setdefault(code, {"kind": "acct", "key": key,
+                                      "label": f"{code} — {name}",
+                                      "cash": 0.0, "cash_cmp": 0.0,
+                                      "gold": 0.0, "gold_cmp": 0.0})
+            e[dim] += amt
+    return [acc[k] for k in sorted(acc)]

@@ -5730,6 +5730,127 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("68) قائمة الدخل بالنهج المحاسبي · فاتورة مبيعات من مرتجع")
+    _y68 = date.today().year
+    with db(readonly=True) as conn:
+        _is = _st67.income_statement(conn, f"{_y68}-01-01",
+                                     date.today().isoformat())
+        _pl68 = _st67._pl(conn, f"{_y68}-01-01", date.today().isoformat(),
+                          "cash")
+        _fp68 = _st67.financial_position(conn, date.today().isoformat())
+    _t68 = _is["cash"]["totals"]
+    check("قائمة الدخل من الدفتر: صافيها = نتيجة الإيراد والمصروف",
+          abs(_t68["net"] - _pl68) < 0.02
+          and abs(_t68["net"] - _fp68["cash"]["values"]["profit"]) < 0.02,
+          f"{_t68['net']} / {_pl68}")
+    _v68 = _is["cash"]["values"]
+    check("المجاميع المرحلية: صافي الإيراد ← مجمل الربح ← التشغيلي ← الصافي",
+          abs(_t68["net_revenue"] - (_v68["sales"] + _v68["returns"]
+                                     + _v68["discounts"])) < 0.02
+          and abs(_t68["gross"] - _t68["net_revenue"] - _t68["cos"]) < 0.02
+          and abs(_t68["operating"] - _t68["gross"] - _t68["opex"]) < 0.02
+          and _v68["returns"] <= 0.001 and "compare" in _is["cash"])
+    _li68 = _st67.is_layout(_is, accounts=True)
+    check("قائمة الدخل: أقسامها وإيضاح حساباتها · بلا ضريبة ولا سداد",
+          _li68[-1]["label"] == "صافي ربح (خسارة) الفترة"
+          and any(x["kind"] == "acct" for x in _li68)
+          and not any(x["kind"] == "acct" and x["label"][:4] in
+                      ("2100", "1900", "1400", "2300") for x in _li68))
+    _hi68 = _pm65.build_html("income_statement", 0,
+                             date_from=f"{_y68}-01-01",
+                             date_to=date.today().isoformat(),
+                             show_accounts=True)
+    check("قالب قائمة الدخل: مقارنة ومجمل الربح وتوقيعات",
+          "مجمل الربح" in _hi68 and "فترة المقارنة" in _hi68
+          and "اعتمده" in _hi68)
+
+    from models import operations as _op68
+    from models.invoices import create_sale_return as _csr68
+    from models.invoices import create_sale as _cs68
+    from models.inventory import create_work_orders_batch as _b68
+    _d68 = date.today().isoformat()
+    with db() as conn:
+        _b68(conn, [{"wo_no": "RS-1", "gold": 12.0, "wage_per_gram": 30.0},
+                    {"wo_no": "RS-2", "gold": 8.0, "wage_per_gram": 25.0}],
+            _d68, "admin")
+        from models.entities import add_entity as _ae68
+        _ali = _ae68(conn, "علي المرتجع", "customer", username="admin")
+        _moh = _ae68(conn, "محمد المشتري", "customer", username="admin")
+        _ws = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no IN ('RS-1','RS-2')"
+            " ORDER BY work_order_no")]
+        _s68 = _cs68(conn, _ali, [{"work_order_id": w} for w in _ws],
+                           _d68, "admin", apply_vat=True)
+        _r68 = _csr68(conn, _ali, [{"work_order_id": w} for w in _ws],
+                      _d68, "admin", apply_vat=True)
+        _ali_before = conn.execute(
+            "SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0) c"
+            " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+            " AND e.is_deleted=0 JOIN entities en ON en.account_id=l.account_id"
+            " WHERE en.id=?", (_ali,)).fetchone()["c"]
+        _n68 = _op68.resell_return(conn, _r68["id"], _moh, "admin", _d68)
+    with db(readonly=True) as conn:
+        _new = conn.execute("SELECT * FROM invoices WHERE id=?",
+                            (_n68["new_id"],)).fetchone()
+        _old = conn.execute("SELECT is_deleted FROM invoices WHERE id=?",
+                            (_r68["id"],)).fetchone()
+        _st68 = {r["status"] for r in conn.execute(
+            "SELECT status FROM work_orders WHERE id IN (?,?)", _ws)}
+        _ali_after = conn.execute(
+            "SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0) c"
+            " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+            " AND e.is_deleted=0 JOIN entities en ON en.account_id=l.account_id"
+            " WHERE en.id=?", (_ali,)).fetchone()["c"]
+        _g68, _c68, _gv68, _cv68 = ledger_balanced(conn)
+        from models.journal import statement as _stm68
+        _macc = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                             (_moh,)).fetchone()[0]
+        _ml68 = _stm68(conn, _macc)
+    check("فاتورة مبيعات جديدة لمحمد بنفس بنود مرتجع علي وقيمته",
+          _new["kind"] == "sale" and _new["customer_id"] == _moh
+          and abs(_new["total_weight"] - _r68["total_weight"]) < 0.001
+          and _n68["items"] == 2,
+          f"{_n68['new_no']}")
+    check("البيان: «مرتجع من علي — فاتورة المرتجع رقم …»",
+          _new["description"].startswith(
+              f"مرتجع من علي المرتجع — فاتورة المرتجع رقم "
+              f"{_r68['invoice_no']}"), _new["description"])
+    _ml68 = _ml68["rows"] if isinstance(_ml68, dict) else _ml68
+    check("كشف حساب محمد: البيان «مرتجع من علي …»",
+          any("مرتجع من علي المرتجع" in str(r.get("desc", ""))
+              for r in _ml68))
+    check("المرتجع يبقى كما هو ورصيد علي لا يتغيّر · القطع صارت مباعة",
+          _old["is_deleted"] == 0 and abs(_ali_before - _ali_after) < 0.01
+          and _st68 == {"sold"})
+    check("الدفتر متوازن بعد فاتورة المرتجع", _g68 and _c68,
+          f"{_gv68} · {_cv68}")
+
+    def _twice68():
+        with db() as conn:
+            _op68.resell_return(conn, _r68["id"], _moh, "admin", _d68)
+    expect_error("لا يُصدر المرتجع نفسه مرتين", _twice68, "صدرت")
+
+    def _not_return68():
+        with db() as conn:
+            _op68.resell_return(conn, _s68["id"], _moh, "admin", _d68)
+    expect_error("الخيار للمرتجع وحده", _not_return68, "المرتجع")
+    try:
+        from PyQt5 import QtWidgets as _QW68
+        _QW68.QApplication.instance() or _QW68.QApplication([])
+        from ui.operations_screen import OperationsScreen as _O68
+        from ui.reports.income_statement import IncomeStatementScreen as _I68
+        _o68 = _O68({"id": 1, "username": "admin"})
+        _i68 = _I68({"id": 1, "username": "admin"})
+        check("الشاشتان: زر فاتورة من مرتجع · تبويبا قائمة الدخل",
+              hasattr(_o68, "btn_resell") and hasattr(_o68, "do_resell")
+              and [_i68.tabs.tabText(i) for i in range(_i68.tabs.count())]
+              == ["قائمة الدخل", "نموذج التصريف (نقد ووزن)"]
+              and _i68.standard.table.rowCount() > 3)
+        _o68.close()
+        _i68.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

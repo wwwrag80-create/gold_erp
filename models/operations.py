@@ -116,6 +116,58 @@ def transfer_invoice(conn, invoice_id, new_entity_id, username, notes=""):
             "items": len(cart)}
 
 
+def resale_marker(inv, party_name):
+    """بيان الفاتورة المُصدَرة من مرتجع — يُكتب فيها ويُبحث به."""
+    return f"مرتجع من {party_name} — فاتورة المرتجع رقم {inv['invoice_no']}"
+
+
+def resell_return(conn, return_id, new_entity_id, username,
+                  invoice_date=None, notes=""):
+    """يُصدر **فاتورة مبيعات جديدة** بنفس بنود فاتورة مرتجع لجهةٍ أخرى.
+
+    مثال: علي أرجع البضاعة بالمرتجع R-1، ثم بيعت نفس القطع لمحمد ⇒
+    فاتورة مبيعات جديدة لمحمد بنفس أرقام التشغيل وأوزانها وأجورها،
+    وبيانها «مرتجع من علي — فاتورة المرتجع رقم R-1».
+
+    **المرتجع يبقى كما هو** (علي دائنٌ بما أرجع) — فهذه عمليتان حقيقيتان
+    لا تصحيح خطأ: مرتجعٌ من جهة ثم بيعٌ لجهة أخرى. والبيع الجديد يمرّ
+    بكل ضوابط البيع: لا تُباع قطعة ليست في المخزون (أي بيعت بعد
+    المرتجع)، ولا يُصدر المرتجع نفسه مرتين.
+    """
+    inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
+                       (return_id,)).fetchone()
+    if not inv:
+        raise ValueError("الفاتورة غير موجودة أو محذوفة")
+    if inv["kind"] != "sale_return":
+        raise ValueError("هذا الخيار لفواتير المرتجع فقط — اختر فاتورة مرتجع")
+    if not new_entity_id:
+        raise ValueError("اختر الجهة التي تُصدَر لها الفاتورة الجديدة")
+    cart = _invoice_cart(conn, return_id)
+    if not cart:
+        raise ValueError("فاتورة المرتجع بلا بنود")
+    old_name = _entity_name(conn, inv["customer_id"])
+    new_name = _entity_name(conn, new_entity_id)
+    marker = resale_marker(inv, old_name)
+    dup = conn.execute(
+        "SELECT invoice_no FROM invoices WHERE kind='sale' AND is_deleted=0"
+        " AND description LIKE ?", (f"%{marker}%",)).fetchone()
+    if dup:
+        raise ValueError(f"صدرت من هذا المرتجع فاتورة مبيعات من قبل: "
+                         f"{dup['invoice_no']}")
+    desc = marker + (f" — {notes}" if notes else "")
+    res = invoices.create_sale(
+        conn, new_entity_id, cart, invoice_date or inv["invoice_date"],
+        username, bool(inv["vat_applied"]), desc,
+        **_invoice_source(conn, inv))
+    log_action(conn, username, "resell", "invoices", return_id,
+               f"{inv['invoice_no']} ({old_name}) ⇒ مبيعات "
+               f"{res['invoice_no']} ({new_name})"
+               + (f" | {notes}" if notes else ""))
+    return {"return_no": inv["invoice_no"], "new_no": res["invoice_no"],
+            "new_id": res["id"], "from": old_name, "to": new_name,
+            "items": len(cart), "description": desc}
+
+
 # ══════════════════════════════════════════════════════════════════
 # 2) تعديل بنود فاتورة (إضافة/حذف أرقام تشغيل)
 # ══════════════════════════════════════════════════════════════════
@@ -228,7 +280,7 @@ def transfer_voucher(conn, voucher_id, new_entity_id, username, notes=""):
 AUDIT_ACTIONS = {
     "transfer": "تحويل", "edit_items": "تعديل بنود", "void": "عكس قيد",
     "create": "إنشاء", "update": "تعديل", "soft_delete": "حذف",
-    "edit": "تعديل شامل",
+    "edit": "تعديل شامل", "resell": "فاتورة من مرتجع",
 }
 
 

@@ -102,6 +102,25 @@ class OperationsScreen(QtWidgets.QWidget):
         act.addWidget(btn_edit)
         act.addWidget(btn_flip)
 
+        # ══ فاتورة مبيعات جديدة من مرتجع ══
+        # مرتجعٌ من جهة ثم بيعُ القطع نفسها لجهةٍ أخرى: المرتجع يبقى،
+        # وتُصدر فاتورة مبيعات جديدة بنفس البنود وبيانها «مرتجع من …».
+        self.resell_date = date_edit()
+        btn_resell = QtWidgets.QPushButton(
+            "🧾 إصدار فاتورة مبيعات من هذا المرتجع للجهة المحددة")
+        btn_resell.setObjectName("homeBtn")
+        btn_resell.setToolTip(
+            "يبقى المرتجع كما هو، وتُنشأ فاتورة مبيعات جديدة للجهة المحددة"
+            " بنفس أرقام التشغيل وأوزانها وأجورها،\nوبيانها: مرتجع من"
+            " (الجهة الأصلية) — فاتورة المرتجع رقم (…)")
+        btn_resell.clicked.connect(self.do_resell)
+        self.btn_resell = btn_resell
+        act2 = QtWidgets.QHBoxLayout()
+        act2.addWidget(QtWidgets.QLabel("تاريخ الفاتورة الجديدة:"))
+        act2.addWidget(self.resell_date)
+        act2.addWidget(btn_resell)
+        act2.addStretch(1)
+
         self.picked = big_label("لم تُحدَّد عملية بعد")
 
         lay = QtWidgets.QVBoxLayout(w)
@@ -109,6 +128,7 @@ class OperationsScreen(QtWidgets.QWidget):
         lay.addWidget(self.table, 1)
         lay.addWidget(self.picked)
         lay.addLayout(act)
+        lay.addLayout(act2)
         return w
 
     # ══════════ تبويب سجل التدقيق ══════════
@@ -193,8 +213,10 @@ class OperationsScreen(QtWidgets.QWidget):
         i = self.table.currentRow()
         if 0 <= i < len(self.docs):
             d = self.docs[i]
+            hint = ("   ·   مرتجع: يمكن إصدار فاتورة مبيعات منه لجهةٍ أخرى"
+                    if d["kind"] == "sale_return" else "")
             self.picked.setText(
-                f"المحدَّد: {d['no']} — الجهة الحالية: {d['party']}")
+                f"المحدَّد: {d['no']} — الجهة الحالية: {d['party']}{hint}")
 
     def _selected(self):
         i = self.table.currentRow()
@@ -228,6 +250,38 @@ class OperationsScreen(QtWidgets.QWidget):
                        f"الجديدة: {r['new_no']} ({r['to']})")
             self.reason.clear()
             self.load_docs()
+        except Exception as e:
+            err(self, e)
+
+    def do_resell(self):
+        """فاتورة مبيعات جديدة لجهةٍ أخرى بنفس بنود المرتجع المحدد."""
+        try:
+            d = self._selected()
+            if d["src"] != "invoices" or d["kind"] != "sale_return":
+                raise ValueError("اختر فاتورة مرتجع من الجدول أولاً")
+            new_id = self.target.currentData()
+            if new_id is None:
+                raise ValueError("اختر الجهة التي تُصدَر لها الفاتورة "
+                                 "(خانة «الجهة الجديدة»)")
+            new_name = self.target.currentText()
+            day = dstr(self.resell_date)
+            if not ask(self, f"إصدار فاتورة مبيعات جديدة لـ«{new_name}» "
+                             f"بتاريخ {day}\nبنفس بنود المرتجع {d['no']} "
+                             f"(من «{d['party']}»)؟\n\nيبقى المرتجع كما هو، "
+                             f"وبيان الفاتورة الجديدة:\n«مرتجع من "
+                             f"{d['party']} — فاتورة المرتجع رقم {d['no']}»"):
+                return
+            with db() as conn:
+                r = operations.resell_return(
+                    conn, d["id"], new_id, self.user["username"], day,
+                    self.reason.text().strip())
+            self.reason.clear()
+            self.load_docs()
+            if ask(self, f"صدرت فاتورة المبيعات {r['new_no']} لـ«{r['to']}»"
+                         f" ({r['items']} بند).\nالبيان: {r['description']}"
+                         f"\n\nمعاينة الفاتورة الجديدة وطباعتها؟"):
+                from services import print_manager
+                print_manager.preview_document(self, "invoice", r["new_id"])
         except Exception as e:
             err(self, e)
 
