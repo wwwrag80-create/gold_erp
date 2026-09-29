@@ -20,6 +20,8 @@ backups/
 *.db-shm
 *.bak
 system_errors.log
+# سجلات الإقلاع والأعطال (crash_guard) — تبقى على الجهاز
+logs/
 
 # مخرجات البناء والتحزيم
 build/
