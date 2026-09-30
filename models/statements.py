@@ -83,6 +83,12 @@ def _split(v, eps):
     return 0.0, 0.0
 
 
+def total_label(name):
+    """«إجمالي …» لمجموعة — بلا تكرار إن بدأ اسمها بها («إجمالي العملاء»)."""
+    n = (name or "").strip()
+    return n if n.startswith(("إجمالي", "مجموع")) else f"إجمالي {n}"
+
+
 def trial_balance(conn, date_from=None, date_to=None, dim="cash",
                   max_level=9, include_zero=False):
     """ميزان المراجعة بالأرصدة والمجاميع لبُعدٍ واحد (`cash` أو `gold`).
@@ -151,16 +157,26 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
                 if include_zero or not is_zero(c)]
         shows_kids = level < max_level and bool(kids)
         od, oc, dr, cr, cd, cc = node["_v"]
-        out.append({
+        vals = {"open_dr": round(od, rnd), "open_cr": round(oc, rnd),
+                "dr": round(dr, rnd), "cr": round(cr, rnd),
+                "close_dr": round(cd, rnd), "close_cr": round(cc, rnd)}
+        # مجموعةٌ تُعرض فروعها: عنوانٌ فوقها ثم «إجمالي …» بعدها (4.43)
+        # — كما في الموازين المطبوعة. أرقامها في صفّ الإجمالي، والعنوان
+        # يحملها للبرامج (`header` يُعلِم العرض والطباعة بإخفائها)
+        out.append(dict(vals, **{
             "level": level, "code": node["code"], "name": node["name"],
             "type": node["type"], "is_group": bool(node["children"]),
             "is_root": level == 1, "terminal": not shows_kids,
-            "open_dr": round(od, rnd), "open_cr": round(oc, rnd),
-            "dr": round(dr, rnd), "cr": round(cr, rnd),
-            "close_dr": round(cd, rnd), "close_cr": round(cc, rnd)})
+            "kind": "header" if shows_kids else "account",
+            "header": shows_kids}))
         if shows_kids:
             for ch in kids:
                 walk(ch, level + 1)
+            out.append(dict(vals, **{
+                "level": level, "code": node["code"],
+                "name": total_label(node["name"]), "type": node["type"],
+                "is_group": True, "is_root": level == 1, "terminal": False,
+                "kind": "total", "header": False}))
 
     for r in roots:
         walk(r, 1)
@@ -176,7 +192,7 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
     # مجموع كل قسمٍ رئيسي (للعرض وللطباعة)
     sections = [{"code": x["code"], "name": x["name"],
                  **{k: x[k] for k in keys}}
-                for x in out if x["is_root"]]
+                for x in out if x["is_root"] and x["kind"] != "total"]
     return {"rows": out, "totals": tot, "sections": sections, "dim": dim,
             "date_from": date_from or "", "date_to": date_to or "",
             "max_level": max_level,
@@ -516,8 +532,8 @@ def layout(fp):
 IS_LINES = [
     ("sales", "المبيعات والإيرادات", "rev"),
     ("returns", "يُطرح: مردودات المبيعات", "rev"),
-    # 4.42: الذهب يُباع بوزنه — فيقابل وزنَ المبيع (ناقصاً المردود)
-    # وزنُه الخارج من المخزون، وصافيهما صفرٌ وزناً: ربح المصنع أجوره
+    # الذهب يُباع بوزنه — «إيرادات مبيعات ذهب» 4110 و«مردوداتها» 4910
+    # في بندَيهما، ويقابل صافيَهما «الذهب المسلَّم من المخزون» 4950
     ("gold_out", "يُطرح: الذهب المسلَّم من المخزون (وزناً)", "rev"),
     ("discounts", "يُطرح: الخصم المسموح به", "rev"),
     ("net_diff", "يُضاف: فرق الصافي", "rev"),
@@ -549,8 +565,7 @@ _IS_MAP = {
     "5690": "labor", "5700": "labor", "5710": "labor",
     "5050": "materials",
     "5800": "admin", "5900": "admin", "5950": "zakat",
-    # بقايا زوج «الذهب المباع وزناً» (قيدٌ يدوي عليه): مع المبيعات
-    "5150": "sales",
+    "4950": "gold_out",
 }
 
 
@@ -562,33 +577,6 @@ def _is_classify(node, by_id, root_type):
         cur = by_id.get(cur["parent_id"])
         seen += 1
     return "sales" if root_type == "revenue" else "admin"
-
-
-def _gold_sales_weight(conn, d1, d2, v, detail):
-    """وزن الذهب المباع والمردود في الفترة — من الفواتير.
-
-    البيع لا يُقيَّد إيراداً وزنياً (4.40): الذهب ينتقل من المخزون إلى
-    ذمة العميل. فيُعرض في القائمة عرضاً إجمالياً: المبيعات بوزنها،
-    والمردودات بوزنها، ثم «الذهب المسلَّم من المخزون» بصافيهما مقابلاً —
-    فيرى القارئ ما بِيع من الذهب ويبقى ربح الذهب الوزني كما في الدفتر.
-    """
-    r = conn.execute(
-        "SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN total_weight END),0)"
-        " s, COALESCE(SUM(CASE WHEN kind='sale_return' THEN total_weight"
-        " END),0) r FROM invoices WHERE is_deleted=0"
-        " AND invoice_date BETWEEN ? AND ?", (d1, d2)).fetchone()
-    sold, ret = float(r["s"] or 0), float(r["r"] or 0)
-    if abs(sold) < 0.0005 and abs(ret) < 0.0005:
-        return
-    v["sales"] += sold
-    v["returns"] -= ret
-    v["gold_out"] -= sold - ret
-    detail["sales"].append(("—", "الذهب المباع وزناً (فواتير البيع)", sold))
-    if ret:
-        detail["returns"].append(("—", "الذهب المردود وزناً (فواتير"
-                                  " المرتجع)", -ret))
-    detail["gold_out"].append(("—", "الذهب الخارج من المخزون بالبيع"
-                               " (صافي المبيع والمردود)", -(sold - ret)))
 
 
 def _is_period(conn, d1, d2, dim, rows, by_id):
@@ -617,8 +605,6 @@ def _is_period(conn, d1, d2, dim, rows, by_id):
         key = _is_classify(node, by_id, rtype)
         v[key] += -b                        # أثرها على الربح
         detail[key].append((node["code"], node["name"], -b))
-    if dim == "gold":
-        _gold_sales_weight(conn, d1, d2, v, detail)
     rnd = 3 if dim == "gold" else 2
     v = {k: round(x, rnd) for k, x in v.items()}
     t, run = {}, 0.0

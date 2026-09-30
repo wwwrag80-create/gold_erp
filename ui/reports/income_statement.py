@@ -26,7 +26,7 @@ from services import karat_view as kv
 from models import statements
 from models.reports import income_statement_consignment
 from ui.widgets.common import (date_edit, dstr, err, fill, make_table,
-                               tab_widget, title_label)
+                               style_group_row, tab_widget, title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
@@ -349,8 +349,6 @@ class StandardIncomeTab(QtWidgets.QWidget):
             tbl.setColumnCount(len(heads))
             tbl.setHorizontalHeaderLabels(heads)
             tbl.setRowCount(len(self.rows))
-            sec_bg = QtGui.QColor("#EFE9DC")
-            tot_bg = QtGui.QColor("#F2EEE4")
             muted = QtGui.QColor("#5A5146")
             for i, r in enumerate(self.rows):
                 k = r["kind"]
@@ -372,11 +370,10 @@ class StandardIncomeTab(QtWidgets.QWidget):
                         f.setPointSizeF(max(7.0, f.pointSizeF() - 1))
                         it.setForeground(muted)
                     it.setFont(f)
-                    if k == "sec":
-                        it.setBackground(sec_bg)
-                    elif k in ("sub", "grand"):
-                        it.setBackground(tot_bg)
                     tbl.setItem(i, c, it)
+                # الأقسام ومجاميعها بلونٍ غامق، وصافي الربح أغمقها
+                if k in ("sec", "sub", "grand"):
+                    style_group_row(tbl, i, 1 if k == "grand" else 2)
                 if k == "sec":
                     tbl.setSpan(i, 0, 1, len(heads))
         finally:

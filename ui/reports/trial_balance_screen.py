@@ -10,13 +10,14 @@
 import csv
 from datetime import date
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import statements
 from services import karat_view as kv
 from ui.widgets.common import (big_label, date_edit, dstr, err, info,
-                               make_table, style_total_row, title_label)
+                               make_table, style_group_row, style_total_row,
+                               title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
@@ -150,23 +151,27 @@ class TrialBalanceScreen(QtWidgets.QWidget):
             tbl.setHorizontalHeaderLabels(
                 [c.replace(" — ", "\n") for c in COLS])
             tbl.setRowCount(len(rows) + 1)
-            shade = QtGui.QColor("#EFE9DC")
             for i, r in enumerate(rows):
+                kind = r.get("kind", "account")
                 name = ("\u2003\u2003" * (r["level"] - 1)) + r["name"]
-                vals = [r["code"], name] + [fmt(r[k], dim) for k in KEYS]
-                bold = r["is_root"] or not r["terminal"]
+                # عنوان المجموعة بلا أرقام — أرقامها في «إجمالي …» بعد فروعها
+                nums = ([""] * len(KEYS) if kind == "header"
+                        else [fmt(r[k], dim) for k in KEYS])
+                vals = [r["code"] if kind != "total" else "", name] + nums
                 for c, v in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(v)
                     it.setTextAlignment(
                         (QtCore.Qt.AlignRight if c == 1
                          else QtCore.Qt.AlignCenter) | QtCore.Qt.AlignVCenter)
-                    if bold:
-                        f = it.font()
-                        f.setBold(True)
-                        it.setFont(f)
-                    if r["is_root"]:
-                        it.setBackground(shade)
                     tbl.setItem(i, c, it)
+                if kind in ("header", "total"):
+                    style_group_row(tbl, i, r["level"])
+                elif r["is_group"]:
+                    # مجموعةٌ لم تُفتح فروعها (بالمستوى المختار): عريضة
+                    for c in range(tbl.columnCount()):
+                        f = tbl.item(i, c).font()
+                        f.setBold(True)
+                        tbl.item(i, c).setFont(f)
             last = len(rows)
             tot = ["", "الإجمالي"] + [fmt(t[k], dim) for k in KEYS]
             for c, v in enumerate(tot):
@@ -233,8 +238,9 @@ class TrialBalanceScreen(QtWidgets.QWidget):
                             "ريال سعودي" if dim == "cash" else kv.unit()])
                 w.writerow(["المستوى"] + COLS)
                 for r in tb["rows"]:
+                    hdr = r.get("kind") == "header"
                     w.writerow([r["level"], r["code"], r["name"]]
-                               + [conv(r[k]) for k in KEYS])
+                               + [("" if hdr else conv(r[k])) for k in KEYS])
                 w.writerow(["", "", "الإجمالي"]
                            + [conv(tb["totals"][k]) for k in KEYS])
             info(self, f"حُفظ الملف:\n{path}")

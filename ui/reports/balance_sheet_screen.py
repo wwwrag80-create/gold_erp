@@ -17,13 +17,14 @@
 import csv
 from datetime import date
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import balance_tree, statements
 from services import karat_view as kv
 from ui.widgets.common import (big_label, date_edit, dstr, err, info,
-                               make_table, tab_widget, title_label)
+                               make_table, style_group_row, tab_widget,
+                               title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
@@ -155,8 +156,9 @@ class FinancialPositionTab(QtWidgets.QWidget):
             tbl.setColumnCount(len(heads))
             tbl.setHorizontalHeaderLabels(heads)
             tbl.setRowCount(len(self.rows))
-            dark, sec_bg = QtGui.QColor("#2B2723"), QtGui.QColor("#EFE9DC")
-            tot_bg = QtGui.QColor("#F2EEE4")
+            # الحسابات الرئيسية بألوانٍ غامقة متدرّجة: العنوان الكبير
+            # والمجموع العام أغمق، والقسم ومجموعه أفتح (`style_group_row`)
+            shade = {"head": 1, "grand": 1, "sec": 2, "sub": 2, "total": 2}
             for i, r in enumerate(self.rows):
                 k = r["kind"]
                 if k in ("head", "sec"):
@@ -174,16 +176,11 @@ class FinancialPositionTab(QtWidgets.QWidget):
                         f.setBold(k != "net")
                         f.setItalic(k == "net")
                         it.setFont(f)
-                    if k == "head":
-                        it.setBackground(dark)
-                        it.setForeground(QtGui.QColor("#FFFFFF"))
-                    elif k == "sec":
-                        it.setBackground(sec_bg)
-                    elif k in ("sub", "total", "grand"):
-                        it.setBackground(tot_bg)
                     if k == "line":
                         it.setToolTip("نقرتان لعرض الحسابات المكوّنة للبند")
                     tbl.setItem(i, c, it)
+                if k in shade:
+                    style_group_row(tbl, i, shade[k])
                 if k in ("head", "sec"):
                     tbl.setSpan(i, 0, 1, len(heads))
         finally:
@@ -375,23 +372,49 @@ class AccountTreeTab(QtWidgets.QWidget):
         show_movement(self, code, name, None, dstr(self.d_to))
 
     def _render(self, b):
+        """الشجرة بعناوين المجموعات ثم «إجمالي …» بعد فروعها (4.43).
+
+        marks: (رقم الصف، مستوى اللون) — المستوى الأول (القسم) أغمق،
+        والمجموعات تحته أفتح فأفتح.
+        """
         rows, marks = [], []
+
+        def money(c, g):
+            return (f"{c:,.2f}", f"{kv.g(g):,.2f}")
+
         for sec in b["sections"]:
             if not sec["rows"] and abs(sec["gold"]) < 0.001 \
                     and abs(sec["cash"]) < 0.01:
                 continue
-            marks.append((len(rows), True, 0))
-            rows.append((f"◄ {sec['title']}", sec["code"],
-                         f"{sec['cash']:,.2f}",
-                         f"{kv.g(sec['gold']):,.2f}"))
-            for r in sec["rows"]:
-                if r["level"] == 1:
-                    continue          # الجذر معروض في العنوان
+            marks.append((len(rows), 1))
+            rows.append((f"◄ {sec['title']}", sec["code"], "", ""))
+            items = [r for r in sec["rows"] if r["level"] > 1]
+            stack = []          # مجموعاتٌ مفتوحة تنتظر صفّ إجماليها
+
+            def close_to(level):
+                while stack and stack[-1]["level"] >= level:
+                    g = stack.pop()
+                    marks.append((len(rows), min(g["level"], 3)))
+                    rows.append((("    " * (g["level"] - 1))
+                                 + statements.total_label(g["name"]), "",
+                                 *money(g["cash"], g["gold"])))
+
+            for j, r in enumerate(items):
+                close_to(r["level"])
                 indent = "    " * (r["level"] - 1)
-                marks.append((len(rows), False, r["level"]))
-                rows.append((f"{indent}{r['name']}", r["code"],
-                             f"{r['cash']:,.2f}",
-                             f"{kv.g(r['gold']):,.2f}"))
+                nxt = items[j + 1] if j + 1 < len(items) else None
+                if nxt is not None and nxt["level"] > r["level"]:
+                    # مجموعة: عنوانٌ بلا أرقام، وأرقامها في إجماليها
+                    marks.append((len(rows), min(r["level"], 3)))
+                    rows.append((f"{indent}{r['name']}", r["code"], "", ""))
+                    stack.append(r)
+                else:
+                    rows.append((f"{indent}{r['name']}", r["code"],
+                                 *money(r["cash"], r["gold"])))
+            close_to(0)
+            marks.append((len(rows), 1))
+            rows.append((statements.total_label(sec["title"]), "",
+                         *money(sec["cash"], sec["gold"])))
             rows.append(("", "", "", ""))
         self._codes = [(r[1], r[0].strip().lstrip("◄").strip())
                        for r in rows]
@@ -408,19 +431,8 @@ class AccountTreeTab(QtWidgets.QWidget):
                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
                         if c == 0 else QtCore.Qt.AlignCenter)
                     self.table.setItem(i, c, it)
-            for idx, is_sec, lvl in marks:
-                for c in range(len(COLS)):
-                    it = self.table.item(idx, c)
-                    if it is None:
-                        continue
-                    f = it.font()
-                    if is_sec:
-                        f.setBold(True)
-                        it.setFont(f)
-                        it.setBackground(QtGui.QColor("#EFE9DC"))
-                    elif lvl <= 2:
-                        f.setBold(True)
-                        it.setFont(f)
+            for idx, lvl in marks:
+                style_group_row(self.table, idx, lvl)
         finally:
             self.table.setUpdatesEnabled(True)
         try:

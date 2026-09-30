@@ -10,14 +10,14 @@
 import csv
 from datetime import date
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import statements
 from services import karat_view as kv
 from ui.reports.income_statement import PERIODS, money, period_range
 from ui.widgets.common import (date_edit, dstr, err, info, make_table,
-                               title_label)
+                               style_group_row, title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
@@ -157,9 +157,6 @@ class EquityChangesScreen(QtWidgets.QWidget):
             tbl.setColumnCount(len(heads))
             tbl.setHorizontalHeaderLabels(heads)
             tbl.setRowCount(len(self.rows))
-            sec_bg = QtGui.QColor("#2B2723")
-            tot_bg = QtGui.QColor("#F2EEE4")
-            bal_bg = QtGui.QColor("#EFE9DC")
             for i, r in enumerate(self.rows):
                 k = r["kind"]
                 if k == "sec":
@@ -179,14 +176,12 @@ class EquityChangesScreen(QtWidgets.QWidget):
                             or c == len(vals) - 1:
                         f.setBold(True)
                         it.setFont(f)
-                    if k == "sec":
-                        it.setBackground(sec_bg)
-                        it.setForeground(QtGui.QColor("#FFFFFF"))
-                    elif k in ("sub", "grand"):
-                        it.setBackground(tot_bg)
-                    elif k == "bal":
-                        it.setBackground(bal_bg)
                     tbl.setItem(i, c, it)
+                # الفترة (عنوانها) أغمق، والأرصدة والمجاميع أفتح
+                if k == "sec":
+                    style_group_row(tbl, i, 1)
+                elif k in ("sub", "grand", "bal"):
+                    style_group_row(tbl, i, 2 if k != "bal" else 3)
                 if k == "sec":
                     tbl.setSpan(i, 0, 1, len(heads))
         finally:

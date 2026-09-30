@@ -192,7 +192,11 @@ def export(path, date_from, date_to, compare=True, method="indirect"):
     rows = [["المستوى", "الكود", "اسم الحساب", "أول المدة مدين",
              "أول المدة دائن", "حركة مدين", "حركة دائن", "آخر المدة مدين",
              "آخر المدة دائن"]]
+    # ملفٌّ للبرامج: صفّ لكل حساب بأرقامه — بلا صفوف «إجمالي …» التي
+    # تُضاف للعرض (فمجموع العمود لا يتضاعف)
     for r in tb["rows"]:
+        if r.get("kind") == "total":
+            continue
         rows.append([r["level"], r["code"], r["name"], r["open_dr"],
                      r["open_cr"], r["dr"], r["cr"], r["close_dr"],
                      r["close_cr"]])

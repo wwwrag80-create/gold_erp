@@ -18,7 +18,7 @@ DEFAULTS = [
     {"key": "loss", "title": "الذهب الفاقد",
      "accounts": ["5110"]},
     {"key": "sales", "title": "المبيعات",
-     "accounts": ["4120", "1600"], "unit": "gold"},
+     "accounts": ["4110", "4120", "1600"], "unit": "gold"},
     {"key": "scrap", "title": "صندوق الكسر",
      "accounts": ["1310"], "kind": "scrap"},
     {"key": "stock_wos", "title": "أرقام التشغيل المتاحة",

@@ -16,13 +16,13 @@
 import csv
 from datetime import date
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from database.database import db
 from models import statements
 from ui.reports.income_statement import PERIODS, money, period_range
 from ui.widgets.common import (date_edit, dstr, err, info, make_table,
-                               title_label)
+                               style_group_row, title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
@@ -139,8 +139,6 @@ class CashFlowScreen(QtWidgets.QWidget):
             tbl.setColumnCount(len(heads))
             tbl.setHorizontalHeaderLabels(heads)
             tbl.setRowCount(len(self.rows))
-            sec_bg = QtGui.QColor("#EFE9DC")
-            tot_bg = QtGui.QColor("#F2EEE4")
             for i, r in enumerate(self.rows):
                 k = r["kind"]
                 if k == "sec":
@@ -161,11 +159,9 @@ class CashFlowScreen(QtWidgets.QWidget):
                         f = it.font()
                         f.setBold(True)
                         it.setFont(f)
-                    if k == "sec":
-                        it.setBackground(sec_bg)
-                    elif k in ("sub", "grand"):
-                        it.setBackground(tot_bg)
                     tbl.setItem(i, c, it)
+                if k in ("sec", "sub", "grand"):
+                    style_group_row(tbl, i, 1 if k == "grand" else 2)
                 if k == "sec":
                     tbl.setSpan(i, 0, 1, len(heads))
         finally:

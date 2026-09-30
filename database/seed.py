@@ -59,18 +59,24 @@ ACCOUNTS = [
     # ═══ 4) الإيرادات ═══
     ("4000", "الإيرادات", "revenue", None, 0, "cash"),
     ("4100", "إيرادات الأجور والمصنعية", "revenue", "4000", 1, "cash"),
-    # 4.40: لا «إيراد مبيعات ذهب وزناً» ولا «تكلفته» — الذهب يخرج من
-    # المخزون إلى ذمة العميل بوزنه (انتقال أصل)، وربح المصنع أجوره.
-    # كانت 4110 · 4910 · 5150 زوجاً متقابلاً يتضخّم به الدخل وزناً ثم
-    # يُصفَّر؛ انظر `drop_gold_sale_pair`.
+    # مبيعات الذهب وزناً (4.43): الإيراد بوزن الذهب المباع، ويقابله
+    # «الذهب المسلَّم من المخزون» 4950 — كلاهما في قسم الإيرادات، فصافي
+    # الذهب من البيع صفر وربح المصنع أجوره (الذهب يُباع بوزنه)
+    ("4110", "إيرادات مبيعات ذهب", "revenue", "4000", 1, "gold"),
     ("4120", "إيرادات مبيعات أجور", "revenue", "4000", 1, "cash"),
     # مبيعاتٌ بالريال بفواتير ضريبية — لا تمسّ الذهب ولا المخزون
     ("4130", "المبيعات الضريبية (خارج المخزون)", "revenue", "4000", 1, "cash"),
     ("4900", "مردودات المبيعات", "revenue", "4000", 0, "both"),
+    ("4910", "مردودات مبيعات ذهب", "revenue", "4900", 1, "gold"),
     ("4920", "مردودات مبيعات أجور", "revenue", "4900", 1, "cash"),
     ("4930", "مردودات المبيعات الضريبية", "revenue", "4900", 1, "cash"),
     ("4200", "إيرادات أخرى / عرضية (تصفية التراب والشفط)", "revenue", "4000", 1, "cash"),
     ("4300", "أرباح فروقات الجرد والتسويات", "revenue", "4000", 1, "both"),
+    # مقابلُ مبيعات الذهب وزناً: وزنُ ما خرج من المخزون بالبيع (مدين)،
+    # ويُعكس بالمردود. حسابٌ مقابل تحت الإيرادات — لا مصروفٌ تحت
+    # المصروفات (كان 5150 «تكلفة مبيعات الذهب» تحت خسائر التشغيل)
+    ("4950", "الذهب المسلَّم من المخزون (مقابل مبيعات الذهب وزناً)",
+     "revenue", "4000", 1, "gold"),
     # ═══ 5) المصروفات ═══
     ("5000", "المصروفات", "expense", None, 0, "both"),
     # ── فواقد الورشة (4.40): كل ما فُقد من الذهب في مكانٍ واحد، والمسترجع
@@ -174,7 +180,9 @@ CONTRA_NATURE = {"1790": "credit", "1680": "credit",
                  "4900": "debit", "4910": "debit", "4920": "debit",
                  "4930": "debit",
                  # المسترجع من التصفية يُطرح من الفواقد (رصيده دائن)
-                 "5190": "credit"}
+                 "5190": "credit",
+                 # الذهب المسلَّم مقابل مبيعات الذهب: يُطرح منها (مدين)
+                 "4950": "debit"}
 
 # ══ 4.39: ما ليس مخزون ذهب يخرج من «المخزون — الذهب» ══
 # (الكود القديم، الكود الجديد، الاسم، الأب الجديد)
@@ -233,7 +241,7 @@ REPARENT = {
     # 4.40: فواقد الورشة · رواتب وأجور التشغيل · مواد التشغيل — تحت
     # المصروفات مباشرة؛ ولا مجموعة «تكاليف التشغيل المباشرة» فوقها
     "5100": "5000", "5500": "5050", "5510": "5050",
-    "5700": "5690", "5710": "5690", "5150": "5000",
+    "5700": "5690", "5710": "5690",
     "5200": "5900", "5300": "5900", "5600": "5900",
     # 4.37: مستوى المتداول / غير المتداول، وضريبة المدخلات مع الأرصدة
     # المدينة المتداولة، والالتزامات الضريبية مع الخصوم المتداولة
@@ -293,7 +301,7 @@ SYSTEM_TAGS = {
     "1250": "WO_ADJUST_STOCK",           # مخزون تسويات أوزان الطقوم
     "4110": "SALES_GOLD", "4120": "SALES_WAGES",
     "4910": "RETURNS_GOLD", "4920": "RETURNS_WAGES",
-    "5150": "COGS_GOLD",
+    "4950": "COGS_GOLD",                 # الذهب المسلَّم (كان 5150)
     "5130": "GOLD_LOSS_STOCKTAKE",
     "5700": "SALARY_EXPENSE", "5710": "WORKER_SALARY_EXPENSE",
     "2250": "WORKER_PAYABLE", "6100": "FIXING_BRIDGE",
@@ -368,40 +376,80 @@ def move_production_accounts(conn) -> list:
     return moved
 
 
-# زوج «الذهب المباع وزناً» القديم: إيراده ومردوده وتكلفته
-GOLD_SALE_PAIR = ("4110", "4910", "5150")
+# مبيعات الذهب وزناً: الإيراد · المردود · مقابلهما (الذهب المسلَّم)
+GOLD_SALE_PAIR = ("4110", "4910", "4950")
 
 
-def drop_gold_sale_pair(conn) -> int:
-    """يحذف من كل قيدٍ سطورَ الزوج المتقابل (إيراد الذهب وزناً ↔ تكلفته).
+def restore_gold_sale_pair(conn) -> int:
+    """يُعيد قيد مبيعات الذهب وزناً إلى الفواتير (4.43).
 
-    كانت فاتورة البيع تُقيّد: دائن 4110 ومدين 5150 بالوزن نفسه، والمرتجع
-    عكسهما عبر 4910 — سطورٌ صافيها في القيد الواحد **صفر**. فلا يتغيّر
-    بحذفها رصيد أي حساب في المركز المالي ولا صافي الربح، ويبقى كل قيد
-    متوازناً بسطوره الباقية (العميل ↔ المخزون). ولا يُحذف إلا ما صافيه
-    صفرٌ داخل قيده: قيدٌ يدوي على أحدها وحده يبقى كما هو.
-    ثم يُجمَّد من الثلاثة ما لم يبقَ عليه سطر. يعيد عدد السطور المحذوفة.
+    في 4.40 أُزيل الزوج (إيراد ذهب 4110 ↔ تكلفته 5150) وجُمِّدت حساباته.
+    والصحيح أن يبقى الإيراد بوزنه في دفتره: فيُنقل 5150 إلى 4950 «الذهب
+    المسلَّم من المخزون» مقابلاً تحت الإيرادات، ويُفعَّل 4110 و4910،
+    وتُضاف لكل فاتورة بيعٍ أو مرتجعٍ ليس في قيدها الزوج سطراه:
+        بيع:    من حـ/ الذهب المسلَّم 4950   إلى حـ/ إيرادات مبيعات ذهب 4110
+        مرتجع:  من حـ/ مردودات مبيعات ذهب 4910   إلى حـ/ الذهب المسلَّم 4950
+    بوزن الفاتورة نفسه — فيبقى القيد متوازناً، ولا يتغيّر رصيدٌ في المركز
+    المالي ولا صافي ربح. والتحويل الداخلي (إعادة التشغيل) لا زوج فيه.
+    يعيد عدد القيود التي أُكملت.
     """
-    ids = [r["id"] for r in conn.execute(
-        "SELECT id FROM accounts WHERE code IN (%s)"
-        % ",".join("?" * len(GOLD_SALE_PAIR)), GOLD_SALE_PAIR)]
-    if not ids:
+    ids = {r["code"]: r["id"] for r in conn.execute(
+        "SELECT code, id FROM accounts WHERE code IN ('4110','4910','4950')")}
+    if len(ids) < 3:
         return 0
-    qs = ",".join("?" * len(ids))
-    entries = [r["entry_id"] for r in conn.execute(
-        "SELECT entry_id FROM journal_lines"
-        f" WHERE account_id IN ({qs}) GROUP BY entry_id"
-        " HAVING ABS(SUM(gold_debit-gold_credit)) < 0.0005"
-        "    AND ABS(SUM(cash_debit-cash_credit)) < 0.005", ids)]
+    conn.execute("UPDATE accounts SET is_active=1 WHERE code IN"
+                 " ('4110','4910','4950')")
+    pair = tuple(ids.values())
     n = 0
-    for eid in entries:
-        n += conn.execute(
-            f"DELETE FROM journal_lines WHERE entry_id=? AND account_id"
-            f" IN ({qs})", [eid] + ids).rowcount
-    conn.execute(
-        f"UPDATE accounts SET is_active=0 WHERE id IN ({qs}) AND id NOT IN"
-        " (SELECT DISTINCT account_id FROM journal_lines)", ids)
+    for r in conn.execute(
+            "SELECT i.kind, i.total_weight w, e.id eid FROM invoices i"
+            " JOIN entities en ON en.id=i.customer_id"
+            " JOIN journal_entries e ON e.source_table='invoices'"
+            "  AND e.source_id=i.id AND e.is_deleted=0"
+            " WHERE i.is_deleted=0 AND COALESCE(en.entity_type,'')"
+            " <> 'internal' AND i.total_weight > 0.0005").fetchall():
+        if conn.execute(
+                "SELECT 1 FROM journal_lines WHERE entry_id=? AND account_id"
+                " IN (?,?,?) LIMIT 1", (r["eid"],) + pair).fetchone():
+            continue
+        w = round(float(r["w"]), 3)
+        if r["kind"] == "sale":
+            rows = [(ids["4950"], w, 0.0, "الذهب المسلَّم من المخزون"),
+                    (ids["4110"], 0.0, w, "إيراد مبيعات ذهب (وزناً)")]
+        else:
+            rows = [(ids["4910"], w, 0.0, "مردودات مبيعات ذهب (وزناً)"),
+                    (ids["4950"], 0.0, w, "عودة الذهب إلى المخزون")]
+        for aid, gd, gc, desc in rows:
+            conn.execute(
+                "INSERT INTO journal_lines(entry_id,account_id,gold_debit,"
+                "gold_credit,line_desc) VALUES(?,?,?,?,?)",
+                (r["eid"], aid, gd, gc, desc))
+        n += 1
     return n
+
+
+def recode_gold_cost(conn) -> bool:
+    """5150 «تكلفة مبيعات الذهب» ← 4950 «الذهب المسلَّم من المخزون».
+
+    الحساب نفسه (بمعرّفه وقيوده إن بقيت) ينتقل من المصروفات إلى قسم
+    الإيرادات مقابلاً لمبيعات الذهب وزناً.
+    """
+    old = conn.execute("SELECT id FROM accounts WHERE code='5150'"
+                       ).fetchone()
+    par = conn.execute("SELECT id FROM accounts WHERE code='4000'"
+                       ).fetchone()
+    if not old or not par or conn.execute(
+            "SELECT 1 FROM accounts WHERE code='4950'").fetchone():
+        return False
+    conn.execute(
+        "UPDATE accounts SET code='4950', type='revenue', nature='debit',"
+        " parent_id=?, is_active=1, is_postable=1 WHERE id=?",
+        (par["id"], old["id"]))
+    conn.execute("UPDATE accounts SET name=? WHERE id=?"
+                 " AND COALESCE(name_locked,0)=0",
+                 ("الذهب المسلَّم من المخزون (مقابل مبيعات الذهب وزناً)",
+                  old["id"]))
+    return True
 
 
 def ensure_new_accounts() -> None:
@@ -411,7 +459,7 @@ def ensure_new_accounts() -> None:
         if not rows:
             return
         move_production_accounts(conn)
-        drop_gold_sale_pair(conn)
+        recode_gold_cost(conn)
         rows = conn.execute("SELECT code, id FROM accounts").fetchall()
         ids = {r["code"]: r["id"] for r in rows}
 
@@ -442,6 +490,7 @@ def ensure_new_accounts() -> None:
             ids[code] = cur.lastrowid
 
         ensure_system_tags(conn)
+        restore_gold_sale_pair(conn)
         from models.coa import recompute_levels
         recompute_levels(conn)
 

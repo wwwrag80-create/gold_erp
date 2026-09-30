@@ -6343,7 +6343,7 @@ def main():
         _d74.close()
 
         # ── 75) فواقد الورشة · قائمة دخل مبسّطة · المخزون في ميزان الريال
-        from database.seed import (drop_gold_sale_pair as _dp75,
+        from database.seed import (restore_gold_sale_pair as _rp75,
                                    GOLD_SALE_PAIR as _gp75)
         with db() as conn:
             _a75 = {r["code"]: r for r in conn.execute(
@@ -6365,12 +6365,24 @@ def main():
                   and not any(r["name"] in ("تكاليف التشغيل المباشرة",
                                             "خسائر تشغيل الذهب")
                               for r in _a75.values()))
-            _n75 = conn.execute(
-                "SELECT COUNT(*) FROM journal_lines l JOIN accounts a ON"
-                " a.id=l.account_id WHERE a.code IN (%s)"
-                % ",".join("?" * len(_gp75)), _gp75).fetchone()[0]
-            check("البيع لا يمرّ بزوج «إيراد ذهب وزناً ↔ تكلفته»",
-                  _n75 == 0 and _dp75(conn) == 0, _n75)
+            # 4.43: مبيعات الذهب وزناً في دفترها — 4110 · 4910 · ومقابلهما
+            # 4950 تحت الإيرادات؛ لكل فاتورةٍ غير داخلية زوجها بوزنها
+            _miss75 = conn.execute(
+                "SELECT COUNT(*) FROM invoices i JOIN entities en ON"
+                " en.id=i.customer_id JOIN journal_entries e ON"
+                " e.source_table='invoices' AND e.source_id=i.id AND"
+                " e.is_deleted=0 WHERE i.is_deleted=0 AND i.total_weight>0"
+                " AND COALESCE(en.entity_type,'')<>'internal' AND NOT EXISTS"
+                "(SELECT 1 FROM journal_lines l JOIN accounts a ON"
+                " a.id=l.account_id WHERE l.entry_id=e.id AND a.code IN"
+                " ('4110','4910'))").fetchone()[0]
+            check("البيع يُقيّد إيرادَ الذهب وزناً (4110/4910) ومقابلَه"
+                  " 4950 تحت الإيرادات — لكل فاتورة",
+                  _miss75 == 0 and _rp75(conn) == 0
+                  and _a75["4950"]["pcode"] == "4000"
+                  and _a75["4950"]["nature"] == "debit"
+                  and all(_a75[c]["is_active"] for c in _gp75)
+                  and "5150" not in _a75, _miss75)
             _is75 = _st74.income_statement(conn, "2026-01-01", "2026-12-31",
                                            compare=False)
             _sec75 = [r["label"] for r in _st74.is_layout(_is75)
@@ -6427,6 +6439,30 @@ def main():
                       if r["op"] not in ("رصيد سابق", "تسوية",
                                          "مستند محذوف")),
               str({k: (_st76[k]["closing"], _pn76[k]) for k in _pn76}))
+        # ── 77) ميزان المراجعة: عنوان المجموعة ثم «إجمالي …» بعد فروعها
+        with db(readonly=True) as conn:
+            _tb77 = _st74.trial_balance(conn, "2026-01-01", "2026-12-31",
+                                        "cash", 9)
+        _r77 = _tb77["rows"]
+        _ok77 = True
+        for _i77, _x77 in enumerate(_r77):
+            if _x77["kind"] != "header":
+                continue
+            _j77 = next((j for j in range(_i77 + 1, len(_r77))
+                         if _r77[j]["kind"] == "total"
+                         and _r77[j]["code"] == _x77["code"]), None)
+            _ok77 &= (_j77 is not None
+                      and _r77[_j77]["name"] == _st74.total_label(
+                          _x77["name"])
+                      and all(_r77[_j77][k] == _x77[k] for k in (
+                          "open_dr", "close_dr", "close_cr")))
+        check("ميزان المراجعة: لكل مجموعةٍ «إجمالي …» بعد فروعها (ومنه"
+              " «إجمالي الأصول») · والإجمالي العام لا يتضاعف",
+              _ok77 and any(x["name"] == "إجمالي الأصول" for x in _r77)
+              and _tb77["totals"]["balanced"]
+              and len(_tb77["sections"]) == len(
+                  [x for x in _r77 if x["is_root"]
+                   and x["kind"] != "total"]))
         from ui.dashboard_screen import DashboardScreen as _DS76
         check("لوحة الكسر: النقر على العيار يفتح كشفه",
               hasattr(_DS76, "_click_row")

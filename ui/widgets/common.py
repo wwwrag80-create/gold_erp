@@ -475,6 +475,47 @@ def style_total_row(table, r):
         style_total_item(it)
 
 
+# ══════════ الحسابات الرئيسية في القوائم: ألوانٌ متدرّجة غامقة ══════════
+# المستوى الأول (الأصول · الخصوم · حقوق الملكية · الإيرادات · المصروفات)
+# غامقٌ بخطٍّ أبيض، والمجموعة تحته أفتح، وما تحتها أفتح منها — فتُقرأ
+# الشجرة بالعين: أين يبدأ القسم وأين إجماليه. (صفّ الإجمالي العام أسود.)
+GROUP_SHADES = {
+    "light": {1: ("#4A3B17", "#FFFFFF"), 2: ("#D6C391", "#1C1A17"),
+              3: ("#EDE3C8", "#1C1A17")},
+    "dark": {1: ("#8A6D1D", "#FFFFFF"), 2: ("#4A3F2A", "#FFFFFF"),
+             3: ("#342D20", "#FFFFFF")},
+}
+
+
+def group_colors(level):
+    """(خلفية، خط) لصفّ حسابٍ رئيسي بحسب مستواه في الشجرة."""
+    try:
+        from ui import theme
+        name = theme.current_theme()
+    except Exception:
+        name = "light"
+    shades = GROUP_SHADES.get(name) or GROUP_SHADES["light"]
+    bg, fg = shades[min(max(int(level or 1), 1), 3)]
+    return QtGui.QColor(bg), QtGui.QColor(fg)
+
+
+def style_group_row(table, r, level):
+    """يلوّن صفَّ حسابٍ رئيسي (عنوانه أو إجماليه) بعرض الجدول كاملاً."""
+    bg, fg = group_colors(level)
+    for c in range(table.columnCount()):
+        it = table.item(r, c)
+        if it is None:
+            if table.cellWidget(r, c) is not None:
+                continue
+            it = QtWidgets.QTableWidgetItem("")
+            table.setItem(r, c, it)
+        f = it.font()
+        f.setBold(True)
+        it.setFont(f)
+        it.setBackground(QtGui.QBrush(bg))
+        it.setForeground(QtGui.QBrush(fg))
+
+
 def is_total_row(table, r, cols=3):
     for c in range(min(cols, table.columnCount())):
         it = table.item(r, c)

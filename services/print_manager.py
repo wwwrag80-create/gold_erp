@@ -2126,16 +2126,27 @@ def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
 
     keys = ("open_dr", "open_cr", "dr", "cr", "close_dr", "close_cr")
     body = ""
+    # الحسابات الرئيسية: عنوانٌ ثم «إجمالي …» بعد فروعها، بلونٍ غامق
+    # متدرّج بالمستوى (الأول غامقٌ بخطٍّ أبيض)
+    shade = {1: ("#4A3B17", "#FFFFFF"), 2: ("#D6C391", "#1C1A17"),
+             3: ("#EDE3C8", "#1C1A17")}
     for r in tb["rows"]:
-        bold = r["is_root"] or not r["terminal"]
+        kind = r.get("kind", "account")
+        grp = kind in ("header", "total")
+        bold = grp or r["is_group"]
         b0, b1 = ("<b>", "</b>") if bold else ("", "")
-        bg = "background-color:#EFE9DC;" if r["is_root"] else ""
+        bg = ""
+        if grp:
+            c0, c1 = shade[min(max(r["level"], 1), 3)]
+            bg = f"background-color:{c0};color:{c1};"
         st = f' style="{bg}"' if bg else ""
         pad = 10 * (r["level"] - 1) + 4
-        tds = [f'<td{st}>{b0}{en(r["code"])}{b1}</td>',
+        code = "" if kind == "total" else en(r["code"])
+        tds = [f'<td{st}>{b0}{code}{b1}</td>',
                f'<td class="r" style="{bg}padding-right:{pad}px">'
                f'{b0}{r["name"]}{b1}</td>']
-        tds += [f'<td class="num"{st}>{b0}{f(r[k])}{b1}</td>'
+        tds += [f'<td class="num"{st}>{b0}'
+                f'{"" if kind == "header" else f(r[k])}{b1}</td>'
                 for k in keys]
         body += "<tr>" + cells(*tds) + "</tr>"
     if not body:
