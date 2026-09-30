@@ -450,6 +450,137 @@ def scrap_actuals(conn):
     return out
 
 
+def _move_entry(conn, ref_table, ref_id, cache):
+    """قيد حركة صندوق الكسر: التوريد يحفظ رقم قيده، والبقية مستندها."""
+    key = (ref_table, ref_id)
+    if key not in cache:
+        cols = ("SELECT id, entry_date, doc_no, source_table, source_id,"
+                " user_note FROM journal_entries")
+        if ref_table == "work_orders":
+            r = conn.execute(cols + " WHERE id=? AND is_deleted=0",
+                             (ref_id,)).fetchone()
+        else:
+            r = conn.execute(cols + " WHERE source_table=? AND source_id=?"
+                             " AND is_deleted=0 ORDER BY id DESC LIMIT 1",
+                             (ref_table, ref_id)).fetchone()
+        cache[key] = r
+    return cache[key]
+
+
+def scrap_karat_statement(conn, karat, date_from=None, date_to=None):
+    """كشف صندوق الكسر **لعيارٍ واحد** بوزنه الفعلي.
+
+    الصندوق حسابٌ واحد (1310) للأعيرة كلها وكشفه يخلطها؛ وتفصيل كل
+    عيار في `scrap_moves` (فواتير · سندات · صب · توريد). فيُبنى كشف
+    العيار منها ويُربط كل سطر بقيده: التاريخ ورقم السند ونوع العملية
+    والجهة. والقيود اليدوية على الصندوق لا عيار لها — تُنسب للعيار
+    الأساسي 18 كما تنسبها لوحة التحكم، فيطابق آخرُ رصيدٍ رقمَ اللوحة.
+
+    يعيد: rows (date · eid · src · sid · doc_no · op · name · desc ·
+    inw · outw · bal · bal18) و opening و closing و total_in و total_out.
+    """
+    from models import journal as _jr
+    k = int(karat)
+    if k not in config.KARATS:
+        raise ValueError(f"عيارٌ غير مدعوم لصندوق الكسر: {karat}")
+    code = BOX_CODE.get(k)
+    box = conn.execute("SELECT id, code, name FROM accounts WHERE code=?",
+                       (code,)).fetchone()
+    ecache, dcache, ccache = {}, {}, {}
+    self_names = {_jr.short_name(box["code"], box["name"])} if box else set()
+    items = []
+    linked = set()
+    for m in conn.execute(
+            "SELECT id, karat, actual_delta, ref_table, ref_id,"
+            " substr(created_at,1,10) d FROM scrap_moves WHERE is_deleted=0"
+            " ORDER BY id"):
+        e = _move_entry(conn, m["ref_table"], m["ref_id"], ecache)
+        if e is not None:
+            linked.add(e["id"])
+        if m["karat"] != k:
+            continue
+        items.append({"date": e["entry_date"] if e else (m["d"] or ""),
+                      "e": e, "src": m["ref_table"], "sid": m["ref_id"],
+                      "delta": float(m["actual_delta"] or 0), "_o": m["id"]})
+    # قيودٌ يدوية على الصندوق بلا حركة عيار: للعيار الأساسي وحده
+    base = (config.BASE_KARAT if config.BASE_KARAT in BOX_CODE
+            else config.KARATS[0])
+    if k == base and box:
+        from models.accounts import subtree_ids
+        ids = subtree_ids(conn, box["id"]) or [box["id"]]
+        qs = ",".join("?" * len(ids))
+        for r in conn.execute(
+                "SELECT e.id, e.entry_date, e.doc_no, e.source_table,"
+                " e.source_id, e.user_note,"
+                " SUM(l.gold_debit-l.gold_credit) g"
+                " FROM journal_lines l JOIN journal_entries e"
+                " ON e.id=l.entry_id AND e.is_deleted=0"
+                f" WHERE l.account_id IN ({qs}) GROUP BY e.id", ids):
+            if r["id"] in linked or abs(r["g"] or 0) < 0.0005:
+                continue
+            items.append({"date": r["entry_date"], "e": r,
+                          "src": r["source_table"], "sid": r["source_id"],
+                          "delta": gold_math.from_base_karat(r["g"], base),
+                          "_o": 10 ** 9 + r["id"]})
+    items.sort(key=lambda x: (x["date"] or "", x["e"]["id"] if x["e"]
+                              else 0, x["_o"]))
+    # ما يبقى بين الدفتر والحركات (تقريبٌ أو حركةٌ قديمة): سطر تسوية
+    # ظاهر — فرصيد الكشف رصيد اللوحة نفسه، ولا يُخفى الفرق في الإجمالي
+    panel = scrap_actuals(conn).get(k, 0.0)
+    gap = round(panel - sum(x["delta"] for x in items),
+                config.WEIGHT_DECIMALS)
+    if abs(gap) >= 0.001:
+        items.append({"date": items[-1]["date"] if items else "",
+                      "e": None, "src": None, "sid": None, "delta": gap,
+                      "_o": 0, "adjust": True})
+
+    opening = 0.0
+    rows = []
+    for x in items:
+        if date_to and x["date"] and x["date"] > date_to:
+            continue
+        if date_from and x["date"] and x["date"] < date_from:
+            opening = round(opening + x["delta"], 3)
+            continue
+        rows.append(x)
+    out, bal = [], opening
+    if date_from:
+        out.append({"date": date_from, "eid": "", "src": None, "sid": None,
+                    "doc_no": "", "op": "رصيد سابق", "name": "—",
+                    "desc": "", "inw": 0.0, "outw": 0.0, "bal": opening,
+                    "bal18": gold_math.to_base_karat(opening, k)})
+    tin = tout = 0.0
+    for x in rows:
+        e = x["e"]
+        bal = round(bal + x["delta"], 3)
+        if x.get("adjust"):
+            doc_no, op, name, desc, eid = "", "تسوية", "—", \
+                "فرقٌ بين رصيد الدفتر وحركات العيار", ""
+        elif e is None:
+            doc_no, op, name, desc, eid = "", "مستند محذوف", "—", "", ""
+        else:
+            doc_no, op = _jr._doc_info(conn, e["source_table"],
+                                       e["source_id"], dcache)
+            doc_no = doc_no or e["doc_no"] or f"#{e['id']}"
+            name = _jr._counterparty(conn, e["id"], self_names, ccache,
+                                     "gold")
+            desc = (e["user_note"] or "").strip()
+            eid = e["id"]
+        d = x["delta"]
+        tin += max(d, 0.0)
+        tout += max(-d, 0.0)
+        out.append({"date": x["date"], "eid": eid,
+                    "src": e["source_table"] if e else None,
+                    "sid": e["source_id"] if e else None,
+                    "doc_no": doc_no, "op": op, "name": name or "—",
+                    "desc": desc, "inw": round(max(d, 0.0), 3),
+                    "outw": round(max(-d, 0.0), 3), "bal": bal,
+                    "bal18": round(gold_math.to_base_karat(bal, k), 3)})
+    return {"karat": k, "rows": out, "opening": round(opening, 3),
+            "closing": round(bal, 3), "total_in": round(tin, 3),
+            "total_out": round(tout, 3)}
+
+
 def stock_snapshot(conn):
     """الجرد اللحظي لكل المخازن (دفتري + فعلي)."""
     actual = scrap_actuals(conn)

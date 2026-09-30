@@ -157,6 +157,8 @@ class DashboardScreen(QtWidgets.QWidget):
 
         self.table = make_table()
         self.table.doubleClicked.connect(self._drill_row)
+        # لوحة صناديق الكسر: نقرةٌ واحدة على العيار تفتح كشفه
+        self.table.clicked.connect(self._click_row)
         self.totals = big_label()
 
         # نطاق التاريخ لهذه اللوحة — يُحفظ معها
@@ -582,11 +584,45 @@ class DashboardScreen(QtWidgets.QWidget):
             p = self.panels[min(self.current, len(self.panels) - 1)]
             if p.get("kind") == "stock":
                 return self.edit_stock_item()
+            if p.get("kind") == "scrap" and self._rows[i].get("karat"):
+                return self._open_scrap_karat(self._rows[i]["karat"])
             code = self._rows[i].get("code")
             if code and self.on_drill_code:
                 self.on_drill_code(code)
         except Exception:
             pass
+
+    def _click_row(self, index):
+        """نقرة على عيارٍ في لوحة الكسر ← كشف ذلك العيار وحده."""
+        try:
+            p = self.panels[min(self.current, len(self.panels) - 1)]
+            i = index.row()
+            if p.get("kind") != "scrap" or not (0 <= i < len(self._rows)):
+                return
+            k = self._rows[i].get("karat")
+            if k:
+                self._open_scrap_karat(k)
+        except Exception as e:
+            err(self, e)
+
+    def _open_scrap_karat(self, karat):
+        import time as _t
+        # النقرة المزدوجة تبدأ بنقرةٍ مفردة — لا تُفتح النافذة مرتين
+        now = _t.monotonic()
+        if now - getattr(self, "_scrap_ts", 0.0) < 0.8:
+            return None
+        self._scrap_ts = now
+        from ui.widgets.scrap_statement import ScrapKaratDialog
+        p = self.panels[min(self.current, len(self.panels) - 1)]
+        try:
+            dlg = ScrapKaratDialog(self, karat, p.get("date_from") or None,
+                                   p.get("date_to") or None)
+        except Exception as e:
+            err(self, e)
+            return None
+        dlg.exec_()
+        self._scrap_ts = _t.monotonic()
+        return dlg
 
     # ══════════ العرض ══════════
     def refresh(self):
@@ -716,7 +752,9 @@ class DashboardScreen(QtWidgets.QWidget):
 
     def _render_scrap(self, conn, p):
         rows = dp.scrap_rows(conn)
-        self._rows = [{"code": "1310"} for _ in rows]
+        # كل عيار يفتح كشفه وحده؛ وصفّ الإجمالي كشفَ الصندوق كاملاً
+        self._rows = [{"code": "1310", "karat": r["karat"]} for r in rows]
+        self._rows.append({"code": "1310"})
         data = [(f"عيار {r['karat']}", f"{r['actual']:,.2f}",
                  f"{kv.g(r['eq18']):,.2f}") for r in rows]
         tot_a = round(sum(r["actual"] for r in rows), 3)
@@ -724,7 +762,8 @@ class DashboardScreen(QtWidgets.QWidget):
         data.append(("الإجمالي", f"{tot_a:,.2f}", f"{kv.g(tot_e):,.2f}"))
         self._fill(SCRAP_COLS_NOW(), data, bold_last=True,
                    weights=[34, 33, 33])
-        self.tbl_title.setText(f"◄ {p['title']} — حساب 1310")
+        self.tbl_title.setText(f"◄ {p['title']} — حساب 1310   ·   انقر على"
+                               " العيار لعرض كشفه وحده")
         self.totals.setText(
             f"مجموع الأوزان الفعلية: {tot_a:,.2f} جم   ·   "
             f"الرصيد المحاسبي بمكافئ {kv.active()}: "

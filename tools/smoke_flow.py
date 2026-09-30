@@ -6394,6 +6394,24 @@ def main():
             check("ميزان الريال يُظهر المخزون (أرقامه وزنية) ويبقى متوازناً",
                   any(r["code"] == "1020" for r in _tb75["rows"])
                   and _tb75["totals"]["balanced"])
+
+        # ── 76) كشف صندوق الكسر لكل عيارٍ وحده من لوحة التحكم (4.41)
+        from models.inventory import scrap_karat_statement as _sk76
+        from models import dash_panels as _dp76
+        with db(readonly=True) as conn:
+            _pn76 = {r["karat"]: r["actual"] for r in _dp76.scrap_rows(conn)}
+            _st76 = {k: _sk76(conn, k) for k in _pn76}
+        check("كشف كل عيار: رصيده رقم اللوحة نفسه، وسطوره بعياره وحده"
+              " برقم السند",
+              all(abs(_st76[k]["closing"] - _pn76[k]) < 0.001 for k in _pn76)
+              and all(r["doc_no"] for k in _st76 for r in _st76[k]["rows"]
+                      if r["op"] not in ("رصيد سابق", "تسوية",
+                                         "مستند محذوف")),
+              str({k: (_st76[k]["closing"], _pn76[k]) for k in _pn76}))
+        from ui.dashboard_screen import DashboardScreen as _DS76
+        check("لوحة الكسر: النقر على العيار يفتح كشفه",
+              hasattr(_DS76, "_click_row")
+              and hasattr(_DS76, "_open_scrap_karat"))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
