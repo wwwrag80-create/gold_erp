@@ -112,17 +112,8 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
             " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
             " GROUP BY l.account_id", p):
         raw[r["aid"]] = (r["op"] or 0.0, r["dr"] or 0.0, r["cr"] or 0.0)
-    # حساباتٌ لها رصيدٌ أو حركة في البُعد **الآخر** حتى نهاية الفترة:
-    # المخزون وزنيٌّ كله، فكان يختفي من ميزان الريال كأنه غير موجود.
-    # يبقى ظاهراً بأعمدةٍ فارغة (أرقامه في ميزان الذهب).
-    odim = "cash" if dim == "gold" else "gold"
-    oeps = _EPS[odim]
-    other = {r["aid"] for r in conn.execute(
-        f"SELECT l.account_id aid FROM journal_lines l"
-        " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
-        " WHERE (:dt IS NULL OR e.entry_date <= :dt)"
-        f" GROUP BY l.account_id HAVING SUM(ABS(l.{odim}_debit)"
-        f" + ABS(l.{odim}_credit)) > {oeps}", p)}
+    # بُعدٌ واحد في كل ميزان (4.42): ميزان الريال لا يعرض حساباً لا
+    # رصيد له بالريال — حسابات الذهب في ميزان الذهب وحده
 
     rows_all, by_id, roots = _tree(conn)
 
@@ -143,8 +134,6 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
             cd += v[4]
             cc += v[5]
         node["_v"] = (od, oc, dr, cr, cd, cc)
-        node["_other"] = node["id"] in other or any(
-            ch.get("_other") for ch in node["children"])
         return node["_v"]
 
     for r in roots:
@@ -153,24 +142,19 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
     def is_zero(node):
         return all(abs(x) <= eps for x in node["_v"])
 
-    def hidden(node):
-        return is_zero(node) and not node.get("_other")
-
     out = []
 
     def walk(node, level):
-        if not include_zero and hidden(node):
+        if not include_zero and is_zero(node):
             return
         kids = [c for c in node["children"]
-                if include_zero or not hidden(c)]
+                if include_zero or not is_zero(c)]
         shows_kids = level < max_level and bool(kids)
         od, oc, dr, cr, cd, cc = node["_v"]
         out.append({
             "level": level, "code": node["code"], "name": node["name"],
             "type": node["type"], "is_group": bool(node["children"]),
             "is_root": level == 1, "terminal": not shows_kids,
-            # صفرٌ في هذا البُعد وأرقامه في الآخر (المخزون في ميزان الريال)
-            "other_dim": is_zero(node) and bool(node.get("_other")),
             "open_dr": round(od, rnd), "open_cr": round(oc, rnd),
             "dr": round(dr, rnd), "cr": round(cr, rnd),
             "close_dr": round(cd, rnd), "close_cr": round(cc, rnd)})
@@ -532,6 +516,9 @@ def layout(fp):
 IS_LINES = [
     ("sales", "المبيعات والإيرادات", "rev"),
     ("returns", "يُطرح: مردودات المبيعات", "rev"),
+    # 4.42: الذهب يُباع بوزنه — فيقابل وزنَ المبيع (ناقصاً المردود)
+    # وزنُه الخارج من المخزون، وصافيهما صفرٌ وزناً: ربح المصنع أجوره
+    ("gold_out", "يُطرح: الذهب المسلَّم من المخزون (وزناً)", "rev"),
     ("discounts", "يُطرح: الخصم المسموح به", "rev"),
     ("net_diff", "يُضاف: فرق الصافي", "rev"),
     # 4.40: «خسائر الورشة» — الفواقد كاملةً ثم المسترجع منها وحده
@@ -577,6 +564,33 @@ def _is_classify(node, by_id, root_type):
     return "sales" if root_type == "revenue" else "admin"
 
 
+def _gold_sales_weight(conn, d1, d2, v, detail):
+    """وزن الذهب المباع والمردود في الفترة — من الفواتير.
+
+    البيع لا يُقيَّد إيراداً وزنياً (4.40): الذهب ينتقل من المخزون إلى
+    ذمة العميل. فيُعرض في القائمة عرضاً إجمالياً: المبيعات بوزنها،
+    والمردودات بوزنها، ثم «الذهب المسلَّم من المخزون» بصافيهما مقابلاً —
+    فيرى القارئ ما بِيع من الذهب ويبقى ربح الذهب الوزني كما في الدفتر.
+    """
+    r = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN total_weight END),0)"
+        " s, COALESCE(SUM(CASE WHEN kind='sale_return' THEN total_weight"
+        " END),0) r FROM invoices WHERE is_deleted=0"
+        " AND invoice_date BETWEEN ? AND ?", (d1, d2)).fetchone()
+    sold, ret = float(r["s"] or 0), float(r["r"] or 0)
+    if abs(sold) < 0.0005 and abs(ret) < 0.0005:
+        return
+    v["sales"] += sold
+    v["returns"] -= ret
+    v["gold_out"] -= sold - ret
+    detail["sales"].append(("—", "الذهب المباع وزناً (فواتير البيع)", sold))
+    if ret:
+        detail["returns"].append(("—", "الذهب المردود وزناً (فواتير"
+                                  " المرتجع)", -ret))
+    detail["gold_out"].append(("—", "الذهب الخارج من المخزون بالبيع"
+                               " (صافي المبيع والمردود)", -(sold - ret)))
+
+
 def _is_period(conn, d1, d2, dim, rows, by_id):
     """بنود قائمة الدخل لفترة وبُعد — بأثرها على الربح."""
     eps = _EPS[dim]
@@ -603,6 +617,8 @@ def _is_period(conn, d1, d2, dim, rows, by_id):
         key = _is_classify(node, by_id, rtype)
         v[key] += -b                        # أثرها على الربح
         detail[key].append((node["code"], node["name"], -b))
+    if dim == "gold":
+        _gold_sales_weight(conn, d1, d2, v, detail)
     rnd = 3 if dim == "gold" else 2
     v = {k: round(x, rnd) for k, x in v.items()}
     t, run = {}, 0.0
@@ -687,10 +703,11 @@ def _is_accounts(st, key):
     acc = {}
     for dim in ("cash", "gold"):
         for code, name, amt in st[dim]["detail"].get(key, []):
-            e = acc.setdefault(code, {"kind": "acct", "key": key,
-                                      "label": f"{code} — {name}",
-                                      "cash": 0.0, "cash_cmp": 0.0,
-                                      "gold": 0.0, "gold_cmp": 0.0})
+            e = acc.setdefault(code + name, {
+                "kind": "acct", "key": key,
+                # سطرٌ من الفواتير لا حساب له (وزن الذهب المباع)
+                "label": name if code == "—" else f"{code} — {name}",
+                "cash": 0.0, "cash_cmp": 0.0, "gold": 0.0, "gold_cmp": 0.0})
             e[dim] += amt
     return [acc[k] for k in sorted(acc)]
 

@@ -39,7 +39,8 @@ NOTE_REF = {
     "eosb": 12, "capital": 13, "partners": 13, "retained": 13,
     "opening_susp": 13, "eq_other": 13, "profit": 13,
     # قائمة الدخل
-    "sales": 14, "returns": 14, "discounts": 14, "net_diff": 14,
+    "sales": 14, "returns": 14, "gold_out": 14, "discounts": 14,
+    "net_diff": 14,
     "workshop": 15, "recovered": 15,
     "admin": 16, "labor": 16, "materials": 16,
 }
@@ -300,8 +301,8 @@ def build(conn, date_from, date_to, compare=True):
                             if s == "eq"), 2))}]
     notes[13]["paras"] = ["تفصيل الحركة في «قائمة التغيرات في حقوق"
                           " الملكية»."]
-    notes[14]["tables"] = [_table("", isdet("sales", "returns", "discounts",
-                                            "net_diff"))]
+    notes[14]["tables"] = [_table("", isdet("sales", "returns", "gold_out",
+                                            "discounts", "net_diff"))]
     notes[15]["tables"] = [_table("", isdet("workshop", "recovered"),
                                   sign=-1)]
     notes[16]["tables"] = [_table("", isdet("admin", "labor", "materials"),

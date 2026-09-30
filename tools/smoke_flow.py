@@ -6381,6 +6381,7 @@ def main():
                   " رواتب · مواد) — بلا «إيرادات ومصروفات أخرى»",
                   _lbl75 == ["المبيعات والإيرادات",
                              "يُطرح: مردودات المبيعات",
+                             "يُطرح: الذهب المسلَّم من المخزون (وزناً)",
                              "يُطرح: الخصم المسموح به",
                              "يُضاف: فرق الصافي", "فواقد الورشة",
                              "يُخصم: المسترجع من التصفية",
@@ -6391,9 +6392,27 @@ def main():
                   str(_sec75))
             _tb75 = _st74.trial_balance(conn, "2026-01-01", "2026-12-31",
                                         "cash", 9)
-            check("ميزان الريال يُظهر المخزون (أرقامه وزنية) ويبقى متوازناً",
-                  any(r["code"] == "1020" for r in _tb75["rows"])
+            # 4.42: بُعدٌ واحد في كل ميزان — لا حساب ذهبٍ في ميزان الريال
+            check("ميزان الريال يعرض حسابات الريال وحدها ويبقى متوازناً",
+                  not any(all(abs(r[k]) < 0.005 for k in (
+                      "open_dr", "open_cr", "dr", "cr", "close_dr",
+                      "close_cr")) for r in _tb75["rows"])
                   and _tb75["totals"]["balanced"])
+            _g75 = _is75["gold"]
+            _w75 = conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN total_weight"
+                " END),0) s, COALESCE(SUM(CASE WHEN kind='sale_return' THEN"
+                " total_weight END),0) r FROM invoices WHERE is_deleted=0"
+                " AND invoice_date BETWEEN '2026-01-01' AND '2026-12-31'"
+                ).fetchone()
+            check("قائمة الدخل: الذهب المباع والمردود بوزنه من الفواتير،"
+                  " ويقابله المسلَّم من المخزون — وربح الذهب ربح الدفتر",
+                  abs(_g75["values"]["sales"] - _w75["s"]) < 0.001
+                  and abs(_g75["values"]["gold_out"]
+                          + _w75["s"] - _w75["r"]) < 0.001
+                  and abs(_g75["totals"]["net"] - _st74._pl(
+                      conn, "2026-01-01", "2026-12-31", "gold")) < 0.001,
+                  str((_g75["values"]["sales"], _w75["s"])))
 
         # ── 76) كشف صندوق الكسر لكل عيارٍ وحده من لوحة التحكم (4.41)
         from models.inventory import scrap_karat_statement as _sk76
