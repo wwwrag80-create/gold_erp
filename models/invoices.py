@@ -276,18 +276,14 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     elif kind == "sale":
         desc = ("فاتورة بيع" + ("" if apply_vat else " (غير ضريبية)")
                + f" — {ent['name']}")
-        # فصل الإيراد: الذهب في حساب مستقل عن الأجور، مع إثبات تكلفة
-        # الذهب مقابل خروجه من المخزون — فيبقى الميزان سليماً والمخزون
-        # صحيحاً، وصافي ربح الذهب صفراً (المصنع يربح على الأجور).
+        # الذهب ينتقل بوزنه من المخزون إلى ذمة العميل (انتقال أصلٍ لا
+        # إيراد)، والإيراد أجوره وحدها. (قبل 4.40 كان يمرّ بزوجٍ متقابل:
+        # إيراد ذهب وزناً 4110 ↔ تكلفته 5150، صافيه صفر.)
         lines = [
             {"account_id": ent_acc, "gold_debit": total_w, "cash_debit": grand,
              "line_desc": "مديونية ذهب + أجور" + (" وضريبة" if apply_vat else "")},
-            {"account_id": acc_id(conn, "4110"), "gold_credit": total_w,
-             "line_desc": "إيراد مبيعات ذهب (وزناً)"},
             {"account_id": acc_id(conn, "4120"), "cash_credit": wages,
              "line_desc": "إيراد مبيعات أجور"},
-            {"account_id": acc_id(conn, "5150"), "gold_debit": total_w,
-             "line_desc": "تكلفة مبيعات الذهب"},
             {"account_id": src_id, "gold_credit": total_w,
              "line_desc": f"خروج الذهب من {src_name['name']}"},
         ]
@@ -297,16 +293,12 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     else:
         desc = ("مرتجع بيع" + ("" if apply_vat else " (غير ضريبي)")
                + f" — {ent['name']}")
-        # المرتجع: عكس الفصل نفسه عبر حسابي المردودات
+        # المرتجع: الذهب يعود إلى المخزون من ذمة العميل، والأجور مردودات
         lines = [
-            {"account_id": acc_id(conn, "4910"), "gold_debit": total_w,
-             "line_desc": "مردودات مبيعات ذهب (وزناً)"},
             {"account_id": acc_id(conn, "4920"), "cash_debit": wages,
              "line_desc": "مردودات مبيعات أجور"},
             {"account_id": src_id, "gold_debit": total_w,
              "line_desc": f"عودة الذهب إلى {src_name['name']}"},
-            {"account_id": acc_id(conn, "5150"), "gold_credit": total_w,
-             "line_desc": "عكس تكلفة مبيعات الذهب"},
         ]
         if vat:
             lines.append({"account_id": acc_id(conn, "2100"), "cash_debit": vat})

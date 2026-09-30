@@ -64,11 +64,8 @@ IS_CONCEPTS = [
     ("before_zakat", "ifrs-full:ProfitLossBeforeTax", True),
     ("net", "ifrs-full:ProfitLoss", True),
     ("admin", "ifrs-full:AdministrativeExpense", False),
-    ("depr", "ifrs-full:DepreciationExpense", False),
-    ("ecl_exp", "ifrs-full:ImpairmentLossImpairmentGainAndReversalOf"
-                "ImpairmentLossDeterminedInAccordanceWithIFRS9", False),
-    ("other_income", "ifrs-full:OtherIncome", False),
-    ("other_exp", "ifrs-full:OtherExpenseByFunction", False),
+    ("labor", "ifrs-full:EmployeeBenefitsExpense", False),
+    ("materials", "ifrs-full:RawMaterialsAndConsumablesUsed", False),
     ("zakat", "ksa-ext:ZakatExpense", False),
 ]
 CF_CONCEPTS = [

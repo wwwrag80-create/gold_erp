@@ -136,8 +136,8 @@ def zakat_compute(conn, d1, d2, extra_add=0.0, extra_ded=0.0):
     inc = st.income_statement(conn, d1, d2, False)["cash"]
     before_zakat = inc["totals"]["before_zakat"]
     # المخصصات المحمّلة على الربح تُردّ إليه — لا تُحسم زكوياً
-    prov_exp = -(inc["values"].get("ecl_exp", 0.0)) + (
-        _bal(conn, "5870", d2, d1))
+    # (الخسائر الائتمانية ضمن الإدارية منذ 4.40 — تُقرأ من حسابها)
+    prov_exp = _bal(conn, "5880", d2, d1) + _bal(conn, "5870", d2, d1)
     adjusted = round(before_zakat + prov_exp, 2)
 
     additions = [

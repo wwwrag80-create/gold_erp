@@ -5582,8 +5582,10 @@ def main():
             " AND i.is_deleted=0 ORDER BY i.id LIMIT 1").fetchone()
         _mi66 = _ds66.model_items(conn, _cust66[0])
     _src66 = pathlib.Path(_rp66.__file__).read_text(encoding="utf-8")
-    check("قائمة الدخل: الصب والتصفية (1350) بدل الفاقد الفني (5120)",
-          '_period_account_gold(conn, "1350"' in _src66
+    # 4.40: 1350 صار 5125 «فاقد التصفية والصب» (الحساب نفسه)
+    check("قائمة الدخل: فاقد التصفية والصب (5125، كان 1350) بدل الفاقد"
+          " الفني (5120)",
+          '_period_account_gold(conn, "5125"' in _src66
           and '_period_account_gold(conn, "5120"' not in _src66)
     check("موديلات الجهة: كل موديلٍ بأرقام تشغيله وأوزانها",
           _mi66 and all(m["items"] and all("wo" in i and "weight" in i
@@ -6269,7 +6271,7 @@ def main():
             _a74 = {r["code"]: r for r in conn.execute(
                 "SELECT a.*, p.code pcode FROM accounts a"
                 " LEFT JOIN accounts p ON p.id=a.parent_id")}
-            check("الدليل: الفصوص 5520 مصروفٌ تحت تكاليف التشغيل المباشرة"
+            check("الدليل: الفصوص 5520 مصروفٌ تحت مواد ومصروفات التشغيل"
                   " (نقد ووزن) · المسترجع 5190 مقابلٌ دائن تحت الفواقد",
                   "1150" not in _a74 and "1360" not in _a74
                   and _a74["5520"]["type"] == "expense"
@@ -6308,12 +6310,12 @@ def main():
                       " account_id=?", (_e74, _n74["519001"])).fetchone())
             _is74 = _st74.income_statement(conn, "2026-01-01", "2026-12-31",
                                            compare=False)
-            check("قائمة الدخل: «المسترجع من التصفية» بندٌ يُطرح من"
-                  " الفواقد، و«الفصوص المصروفة للتصنيع» بندٌ مستقل",
+            check("قائمة الدخل: «المسترجع من التصفية» يُخصم تحت خسائر"
+                  " الورشة، والفصوص ضمن مواد التشغيل",
                   _is74["gold"]["values"]["recovered"] >= 4.0 - 1e-6
-                  and "stones" in _is74["gold"]["values"]
                   and any(k == "recovered" and s74 == "cos"
-                          for k, _t, s74 in _st74.IS_LINES))
+                          for k, _t, s74 in _st74.IS_LINES)
+                  and _st74._IS_MAP.get("5050") == "materials")
             _r74 = _jr74.statement(conn, [_n74["519001"]], "2026-01-01",
                                    "2026-12-31")
             _r74x = _jr74.statement(
@@ -6339,6 +6341,59 @@ def main():
               and hasattr(_f72.screens[3], "show_movement")
               and hasattr(_f72.screens[4], "show_movement"))
         _d74.close()
+
+        # ── 75) فواقد الورشة · قائمة دخل مبسّطة · المخزون في ميزان الريال
+        from database.seed import (drop_gold_sale_pair as _dp75,
+                                   GOLD_SALE_PAIR as _gp75)
+        with db() as conn:
+            _a75 = {r["code"]: r for r in conn.execute(
+                "SELECT a.*, p.code pcode FROM accounts a"
+                " LEFT JOIN accounts p ON p.id=a.parent_id")}
+            check("الدليل: فواقد الورشة 5100 (قسم التصنيع 5110 · التصفية"
+                  " والصب 5125 · بيع الذهب 5140 · المسترجع 5190) تحت"
+                  " المصروفات مباشرة",
+                  _a75["5100"]["name"] == "فواقد الورشة"
+                  and _a75["5100"]["pcode"] == "5000"
+                  and _a75["5110"]["name"] == "فواقد قسم التصنيع"
+                  and all(_a75[c]["pcode"] == "5100"
+                          for c in ("5110", "5125", "5140", "5190"))
+                  and "1350" not in _a75)
+            check("الدليل: رواتب وأجور التشغيل 5690 تجمع 5700 و5710 ·"
+                  " لا «تكاليف التشغيل المباشرة» ولا «خسائر تشغيل الذهب»",
+                  _a75["5700"]["pcode"] == "5690"
+                  and _a75["5710"]["pcode"] == "5690"
+                  and not any(r["name"] in ("تكاليف التشغيل المباشرة",
+                                            "خسائر تشغيل الذهب")
+                              for r in _a75.values()))
+            _n75 = conn.execute(
+                "SELECT COUNT(*) FROM journal_lines l JOIN accounts a ON"
+                " a.id=l.account_id WHERE a.code IN (%s)"
+                % ",".join("?" * len(_gp75)), _gp75).fetchone()[0]
+            check("البيع لا يمرّ بزوج «إيراد ذهب وزناً ↔ تكلفته»",
+                  _n75 == 0 and _dp75(conn) == 0, _n75)
+            _is75 = _st74.income_statement(conn, "2026-01-01", "2026-12-31",
+                                           compare=False)
+            _sec75 = [r["label"] for r in _st74.is_layout(_is75)
+                      if r["kind"] == "sec"]
+            _lbl75 = [t for _k, t, _s in _st74.IS_LINES]
+            check("قائمة الدخل: الإيرادات (… + فرق الصافي) · خسائر الورشة"
+                  " (الفواقد − المسترجع) · المصاريف التشغيلية (إدارية ·"
+                  " رواتب · مواد) — بلا «إيرادات ومصروفات أخرى»",
+                  _lbl75 == ["المبيعات والإيرادات",
+                             "يُطرح: مردودات المبيعات",
+                             "يُطرح: الخصم المسموح به",
+                             "يُضاف: فرق الصافي", "فواقد الورشة",
+                             "يُخصم: المسترجع من التصفية",
+                             "المصاريف الإدارية والعمومية",
+                             "رواتب وأجور التشغيل",
+                             "مواد ومصروفات تشغيل مباشرة", "الزكاة"]
+                  and "الإيرادات والمصروفات الأخرى" not in _sec75,
+                  str(_sec75))
+            _tb75 = _st74.trial_balance(conn, "2026-01-01", "2026-12-31",
+                                        "cash", 9)
+            check("ميزان الريال يُظهر المخزون (أرقامه وزنية) ويبقى متوازناً",
+                  any(r["code"] == "1020" for r in _tb75["rows"])
+                  and _tb75["totals"]["balanced"])
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

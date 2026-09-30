@@ -112,6 +112,17 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
             " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
             " GROUP BY l.account_id", p):
         raw[r["aid"]] = (r["op"] or 0.0, r["dr"] or 0.0, r["cr"] or 0.0)
+    # حساباتٌ لها رصيدٌ أو حركة في البُعد **الآخر** حتى نهاية الفترة:
+    # المخزون وزنيٌّ كله، فكان يختفي من ميزان الريال كأنه غير موجود.
+    # يبقى ظاهراً بأعمدةٍ فارغة (أرقامه في ميزان الذهب).
+    odim = "cash" if dim == "gold" else "gold"
+    oeps = _EPS[odim]
+    other = {r["aid"] for r in conn.execute(
+        f"SELECT l.account_id aid FROM journal_lines l"
+        " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
+        " WHERE (:dt IS NULL OR e.entry_date <= :dt)"
+        f" GROUP BY l.account_id HAVING SUM(ABS(l.{odim}_debit)"
+        f" + ABS(l.{odim}_credit)) > {oeps}", p)}
 
     rows_all, by_id, roots = _tree(conn)
 
@@ -132,6 +143,8 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
             cd += v[4]
             cc += v[5]
         node["_v"] = (od, oc, dr, cr, cd, cc)
+        node["_other"] = node["id"] in other or any(
+            ch.get("_other") for ch in node["children"])
         return node["_v"]
 
     for r in roots:
@@ -140,19 +153,24 @@ def trial_balance(conn, date_from=None, date_to=None, dim="cash",
     def is_zero(node):
         return all(abs(x) <= eps for x in node["_v"])
 
+    def hidden(node):
+        return is_zero(node) and not node.get("_other")
+
     out = []
 
     def walk(node, level):
-        if not include_zero and is_zero(node):
+        if not include_zero and hidden(node):
             return
         kids = [c for c in node["children"]
-                if include_zero or not is_zero(c)]
+                if include_zero or not hidden(c)]
         shows_kids = level < max_level and bool(kids)
         od, oc, dr, cr, cd, cc = node["_v"]
         out.append({
             "level": level, "code": node["code"], "name": node["name"],
             "type": node["type"], "is_group": bool(node["children"]),
             "is_root": level == 1, "terminal": not shows_kids,
+            # صفرٌ في هذا البُعد وأرقامه في الآخر (المخزون في ميزان الريال)
+            "other_dim": is_zero(node) and bool(node.get("_other")),
             "open_dr": round(od, rnd), "open_cr": round(oc, rnd),
             "dr": round(dr, rnd), "cr": round(cr, rnd),
             "close_dr": round(cd, rnd), "close_cr": round(cc, rnd)})
@@ -193,7 +211,7 @@ LINES = [
     ("nca_other", "أصول غير متداولة أخرى", "nca"),
     # الأصول المتداولة
     ("cash", "النقد وما في حكمه", "ca"),
-    ("inventory", "المخزون — الذهب والفصوص والمشغولات", "ca"),
+    ("inventory", "المخزون — الذهب الخام والمشغول والكسر", "ca"),
     ("receivables", "الذمم المدينة — العملاء والجهات", "ca"),
     ("ecl", "يُطرح: مخصص الخسائر الائتمانية المتوقعة", "ca"),
     ("supplier_adv", "دفعات مقدّمة للموردين", "ca"),
@@ -501,53 +519,51 @@ def layout(fp):
 #  3) قائمة الدخل (الأرباح والخسائر)
 # ══════════════════════════════════════════════════════════════════
 #
-# بطريقة «وظيفة المصروف» (IAS 1.103) — الأشيع في القوائم السعودية
-# المدقّقة: الإيراد، ثم تكلفة الإيراد ⇒ مجمل الربح، ثم المصاريف
-# الإدارية ⇒ الربح التشغيلي، ثم الإيرادات والمصروفات الأخرى ⇒ صافي
-# ربح الفترة. من دفتر الأستاذ نفسه (أساس الاستحقاق) لا من الفواتير ولا
+# بطريقة «وظيفة المصروف» (IAS 1.103) مبسّطةً لمصنع الذهب (4.40):
+# الإيرادات (المبيعات − المردودات − الخصم + فرق الصافي) ⇒ صافي
+# الإيرادات، ثم خسائر الورشة (الفواقد − المسترجع) ⇒ مجمل الربح، ثم
+# المصاريف التشغيلية (إدارية وعمومية · رواتب وأجور · مواد تشغيل) ⇒
+# الربح قبل الزكاة، ثم الزكاة ⇒ صافي ربح الفترة. من دفتر الأستاذ نفسه (أساس الاستحقاق) لا من الفواتير ولا
 # من سندات الصرف: فالسداد لمورّد ليس مصروفاً، والضريبة ليست إيراداً.
 #
 # القيم «بأثرها على الربح»: الإيراد موجب والمصروف سالب — فالمجاميع
 # جمعٌ مباشر، والسالب يُطبع بين قوسين.
 
 IS_LINES = [
-    ("sales", "المبيعات والإيرادات التشغيلية", "rev"),
+    ("sales", "المبيعات والإيرادات", "rev"),
     ("returns", "يُطرح: مردودات المبيعات", "rev"),
     ("discounts", "يُطرح: الخصم المسموح به", "rev"),
-    ("cos_gold", "تكلفة الذهب المباع وفواقد التشغيل", "cos"),
-    # 4.39: بندان مستقلان يراهما المراجع ولا يختلطان بالفاقد
-    ("recovered", "يُطرح من الفواقد: المسترجع من التصفية", "cos"),
-    ("stones", "الفصوص والأحجار المصروفة للتصنيع", "cos"),
-    ("cos_labor", "رواتب وأجور التشغيل", "cos"),
-    ("cos_other", "مواد ومصروفات تشغيل مباشرة", "cos"),
+    ("net_diff", "يُضاف: فرق الصافي", "rev"),
+    # 4.40: «خسائر الورشة» — الفواقد كاملةً ثم المسترجع منها وحده
+    ("workshop", "فواقد الورشة", "cos"),
+    ("recovered", "يُخصم: المسترجع من التصفية", "cos"),
     ("admin", "المصاريف الإدارية والعمومية", "opex"),
-    ("depr", "إهلاك الأصول الثابتة", "opex"),
-    ("ecl_exp", "الخسائر الائتمانية المتوقعة", "opex"),
-    ("other_income", "إيرادات أخرى", "other"),
-    ("other_exp", "مصروفات أخرى", "other"),
+    ("labor", "رواتب وأجور التشغيل", "opex"),
+    ("materials", "مواد ومصروفات تشغيل مباشرة", "opex"),
     ("zakat", "الزكاة", "zakat"),
 ]
 IS_SUBTOTALS = [
     # (بعد القسم، المفتاح، العنوان)
     ("rev", "net_revenue", "صافي الإيرادات"),
-    ("cos", "gross", "مجمل الربح (الخسارة)"),
-    ("opex", "operating", "الربح (الخسارة) التشغيلي"),
-    ("other", "before_zakat", "صافي الربح (الخسارة) قبل الزكاة"),
+    ("cos", "gross", "مجمل الربح بعد خسائر الورشة"),
+    ("opex", "before_zakat", "صافي الربح (الخسارة) قبل الزكاة"),
     ("zakat", "net", "صافي ربح (خسارة) الفترة"),
 ]
-IS_SECTIONS = {"rev": "الإيرادات", "cos": "تكلفة الإيرادات",
-               "opex": "المصاريف التشغيلية",
-               "other": "الإيرادات والمصروفات الأخرى",
-               "zakat": "الزكاة"}
+IS_SECTIONS = {"rev": "الإيرادات", "cos": "خسائر الورشة",
+               "opex": "المصاريف التشغيلية", "zakat": "الزكاة"}
 
+# نموذجٌ مبسّط لمصنع ذهب (4.40): لا قسم «إيرادات ومصروفات أخرى» — ما
+# لا بند له من الإيراد يُضمّ إلى المبيعات والإيرادات، ومن المصروف إلى
+# المصاريف الإدارية والعمومية (ومنها الإهلاك والخسائر الائتمانية).
 _IS_MAP = {
-    "4900": "returns", "4200": "other_income", "4300": "other_income",
-    "5200": "discounts", "5300": "discounts",
-    "5100": "cos_gold", "5700": "cos_labor", "5710": "cos_labor",
-    "5190": "recovered", "5520": "stones",
-    "5050": "cos_other", "5860": "depr", "5800": "admin",
-    "5900": "other_exp", "5880": "ecl_exp", "5950": "zakat",
-    "4400": "other_income",
+    "4900": "returns", "5200": "discounts", "5300": "discounts",
+    "5600": "net_diff",
+    "5100": "workshop", "5190": "recovered",
+    "5690": "labor", "5700": "labor", "5710": "labor",
+    "5050": "materials",
+    "5800": "admin", "5900": "admin", "5950": "zakat",
+    # بقايا زوج «الذهب المباع وزناً» (قيدٌ يدوي عليه): مع المبيعات
+    "5150": "sales",
 }
 
 
@@ -558,7 +574,7 @@ def _is_classify(node, by_id, root_type):
             return _IS_MAP[cur["code"]]
         cur = by_id.get(cur["parent_id"])
         seen += 1
-    return "sales" if root_type == "revenue" else "other_exp"
+    return "sales" if root_type == "revenue" else "admin"
 
 
 def _is_period(conn, d1, d2, dim, rows, by_id):
@@ -593,6 +609,8 @@ def _is_period(conn, d1, d2, dim, rows, by_id):
     for sec, key, _title in IS_SUBTOTALS:
         run += sum(v[k] for k, _t, s in IS_LINES if s == sec)
         t[key] = round(run, rnd)
+    # الربح التشغيلي = قبل الزكاة (لا قسم «أخرى» بينهما) — للتوافق
+    t["operating"] = t["before_zakat"]
     t["revenue_gross"] = v["sales"]
     t["cos"] = round(sum(v[k] for k, _t, s in IS_LINES if s == "cos"), rnd)
     t["opex"] = round(sum(v[k] for k, _t, s in IS_LINES if s == "opex"), rnd)
@@ -651,9 +669,9 @@ def is_layout(st, accounts=False):
 
     out = []
     for sec, key, title in IS_SUBTOTALS:
+        # هيكلٌ ثابت (4.40): كل البنود تظهر ولو صفراً — فتُقرأ القائمة
+        # بالترتيب نفسه كل فترة (الصفر يُطبع «—»)
         lines = [row("line", t, k) for k, t, s in IS_LINES if s == sec]
-        lines = [r for r in lines if not _hidden(
-            (r["cash"], r["cash_cmp"], r["gold"], r["gold_cmp"]))]
         if lines:
             out.append({"kind": "sec", "label": IS_SECTIONS[sec], "key": sec})
             for ln in lines:

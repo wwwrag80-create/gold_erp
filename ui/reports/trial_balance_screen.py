@@ -166,6 +166,15 @@ class TrialBalanceScreen(QtWidgets.QWidget):
                         it.setFont(f)
                     if r["is_root"]:
                         it.setBackground(shade)
+                    if r.get("other_dim"):
+                        # أرقامه في البُعد الآخر: المخزون وزناً في ميزان
+                        # الريال — ظاهرٌ بلونٍ خافت لا مختفٍ
+                        it.setForeground(QtGui.QColor("#8A7F70"))
+                        it.setToolTip(
+                            "أرصدة هذا الحساب "
+                            + ("وزنية — اختر «الذهب» من «العملة» لعرضها"
+                               if dim == "cash" else
+                               "بالريال — اختر «النقد» من «العملة» لعرضها"))
                     tbl.setItem(i, c, it)
             last = len(rows)
             tot = ["", "الإجمالي"] + [fmt(t[k], dim) for k in KEYS]
@@ -191,7 +200,11 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         self.status.setText(
             f"{'✔ الميزان متوازن' if t['balanced'] else '✘ الميزان غير متوازن'}"
             f" ({unit})   ·   {per}   ·   الفترة: {span}   ·   "
-            f"عدد الحسابات: {tb['accounts']}")
+            f"عدد الحسابات: {tb['accounts']}"
+            + ("   ·   الحسابات الخافتة أرصدتها "
+               + ("وزنية (اعرضها بالذهب)" if dim == "cash"
+                  else "بالريال (اعرضها بالنقد)")
+               if any(r.get("other_dim") for r in rows) else ""))
         self.status.setStyleSheet(
             "color:#0F5A24;font-weight:bold" if t["balanced"]
             else "color:#9A0018;font-weight:bold")
