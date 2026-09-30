@@ -27,6 +27,7 @@ from models import statements
 from models.reports import income_statement_consignment
 from ui.widgets.common import (date_edit, dstr, err, fill, make_table,
                                tab_widget, title_label)
+from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
@@ -67,7 +68,7 @@ class ConsignmentTab(QtWidgets.QWidget):
         btn = QtWidgets.QPushButton("إعداد القائمة")
         btn.clicked.connect(self.load)
 
-        head = QtWidgets.QHBoxLayout()
+        head = FlowLayout()
         head.addWidget(QtWidgets.QLabel("الفترة:"))
         head.addWidget(self.period)
         head.addWidget(QtWidgets.QLabel("من:"))
@@ -231,7 +232,7 @@ class StandardIncomeTab(QtWidgets.QWidget):
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
 
-        head = QtWidgets.QHBoxLayout()
+        head = FlowLayout()
         head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("الفترة:"))
         head.addWidget(self.period)

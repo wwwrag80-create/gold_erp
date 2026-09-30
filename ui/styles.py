@@ -124,6 +124,10 @@ QHeaderView::section:hover { color: @goldDim; }
 /* ══ التبويبات: خط سفلي بدل الحبّات الممتلئة ══ */
 QTabWidget::pane { border: 1px solid @line; border-radius: 10px;
                    background: @surface; top: -1px; }
+/* الخط العريض على الشريط نفسه لا على التبويب وحده: Qt يقيس عرض
+   التبويب بخط الشريط ويرسمه بخط التبويب — فكان يُقصّ حرفٌ من العنوان
+   الطويل («موذج التصريف»، «لقوائم الختامية») */
+QTabBar { font-weight: bold; }
 QTabBar::tab { background: transparent; padding: 9px 20px; margin: 0 2px;
   min-width: 96px;
   color: @muted; font-weight: bold; border-bottom: 3px solid transparent; }

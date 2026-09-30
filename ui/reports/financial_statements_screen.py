@@ -27,6 +27,15 @@ TABS = [
     ("التدفقات النقدية", CashFlowScreen),
     ("تسويات نهاية الفترة والقوائم الختامية", PeriodEndScreen),
 ]
+# عنوان التبويب المختصر — ستة عناوين كاملة في شريطٍ لا يلتفّ كانت تفرض
+# على الشاشة عرضاً أكبر من نافذة اللابتوب، فتنزاح القوائم خارج الإطار.
+# الاسم الكامل في التلميح وفي `open_tab`.
+SHORT = {
+    "قائمة المركز المالي": "المركز المالي",
+    "قائمة الدخل": "الدخل",
+    "التغيرات في حقوق الملكية": "حقوق الملكية",
+    "تسويات نهاية الفترة والقوائم الختامية": "نهاية الفترة",
+}
 
 
 class FinancialStatementsScreen(QtWidgets.QWidget):
@@ -38,7 +47,11 @@ class FinancialStatementsScreen(QtWidgets.QWidget):
         for title, _cls in TABS:
             holder = QtWidgets.QWidget()
             QtWidgets.QVBoxLayout(holder).setContentsMargins(0, 0, 0, 0)
-            self.tabs.addTab(holder, title)
+            # الشاشة الداخلية لا تفرض عرضها على التبويب — تنطوي داخله
+            holder.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                                 QtWidgets.QSizePolicy.Preferred)
+            i = self.tabs.addTab(holder, SHORT.get(title, title))
+            self.tabs.setTabToolTip(i, title)
         self.tabs.currentChanged.connect(self._ensure)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)

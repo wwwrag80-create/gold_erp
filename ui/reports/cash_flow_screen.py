@@ -23,6 +23,7 @@ from models import statements
 from ui.reports.income_statement import PERIODS, money, period_range
 from ui.widgets.common import (date_edit, dstr, err, info, make_table,
                                title_label)
+from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
 
@@ -60,7 +61,7 @@ class CashFlowScreen(QtWidgets.QWidget):
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
 
-        head = QtWidgets.QHBoxLayout()
+        head = FlowLayout()
         head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("الفترة:"))
         head.addWidget(self.period)

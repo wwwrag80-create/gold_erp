@@ -6217,13 +6217,44 @@ def main():
         _mw72 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
             encoding="utf-8")
         check("«القوائم المالية»: ستة تبويبات تُبنى عند فتحها · بندٌ واحد",
-              _tabs72 == ["ميزان المراجعة", "قائمة المركز المالي",
-                          "قائمة الدخل", "التغيرات في حقوق الملكية",
-                          "التدفقات النقدية",
-                          "تسويات نهاية الفترة والقوائم الختامية"]
+              _tabs72 == ["ميزان المراجعة", "المركز المالي", "الدخل",
+                          "حقوق الملكية", "التدفقات النقدية",
+                          "نهاية الفترة"]
+              and _f72.tabs.tabToolTip(5)
+              == "تسويات نهاية الفترة والقوائم الختامية"
               and len(_f72.screens) == 6
               and "FinancialStatementsScreen(user)" in _mw72
               and "TrialBalanceScreen(user)" not in _mw72, str(_tabs72))
+
+        # ── 73) لا تتّسع القوائم خارج إطار الشاشة ولا الطباعة (4.38)
+        # كان شريط الأدوات الأفقي يفرض ١٥٠٠ بكسل حدّاً أدنى، فتنزاح
+        # القائمة إلى اليسار ويُقصّ نصف الجدول على شاشة اللابتوب
+        from ui.widgets.flow_layout import FlowLayout as _FL73
+        _w73 = max(_f72.screens[i].minimumSizeHint().width()
+                   for i in range(5))
+        check("القوائم المالية: الشاشات تنطوي في عرض اللابتوب (≤ 700 بكسل)",
+              _w73 <= 700 and _f72.minimumSizeHint().width() <= 760,
+              f"{_w73} · {_f72.minimumSizeHint().width()}")
+        _h73 = _QW72.QWidget()
+        _fl73 = _FL73(_h73)
+        for _t73 in ("من:", "x" * 40, "إلى:", "y" * 40, "زر"):
+            _fl73.addWidget(_QW72.QLabel(_t73) if _t73.endswith(":")
+                            else _QW72.QPushButton(_t73))
+        _fl73.addStretch(1)
+        _one73 = _fl73.heightForWidth(4000)
+        _two73 = _fl73.heightForWidth(_fl73.minimumSize().width() + 5)
+        check("شريط الأدوات المنطوي: يلتفّ لسطرٍ ثانٍ ولا يفصل «من:» عن حقله",
+              _two73 > _one73 and len(_fl73._units()) == 3,
+              f"{_one73} → {_two73} · {len(_fl73._units())}")
+        from services import browser_print as _bp73
+        _is73 = _bp73.build_page("income_statement", 0, auto_print=False,
+                                 date_from="2026-01-01",
+                                 date_to="2026-12-31", compare=True)
+        check("قوالب القوائم: بيانات المنشأة زوجان في السطر بعرضٍ ثابت"
+              " · المعاينة بعرض الورقة · تصغير الجدول الأعرض من الصفحة",
+              'class="items meta"' in _is73 and "table.meta" in _is73
+              and "194mm" in _is73 and "beforeprint" in _is73
+              and "t.style.zoom" in _is73)
         _c72 = _C72({"id": 1, "username": "admin"})
         check("شاشة الدليل: زرّا فحص السلامة والطباعة",
               hasattr(_c72, "run_audit") and hasattr(_c72, "print_coa"))

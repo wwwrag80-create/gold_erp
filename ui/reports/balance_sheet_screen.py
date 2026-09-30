@@ -24,6 +24,7 @@ from models import balance_tree, statements
 from services import karat_view as kv
 from ui.widgets.common import (big_label, date_edit, dstr, err, info,
                                make_table, tab_widget, title_label)
+from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
 COLS = ["الحساب", "الكود", "النقد / الأجور (ريال)", "الذهب (جم 18)"]
@@ -76,7 +77,7 @@ class FinancialPositionTab(QtWidgets.QWidget):
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
 
-        head = QtWidgets.QHBoxLayout()
+        head = FlowLayout()
         head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("كما في:"))
         head.addWidget(self.as_of)
@@ -322,7 +323,7 @@ class AccountTreeTab(QtWidgets.QWidget):
         btn_print = QtWidgets.QPushButton("🖨 طباعة")
         btn_print.clicked.connect(self.print_sheet)
 
-        head = QtWidgets.QHBoxLayout()
+        head = FlowLayout()
         head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("كما في:"))
         head.addWidget(self.d_to, 0)
@@ -336,7 +337,9 @@ class AccountTreeTab(QtWidgets.QWidget):
         self.table = make_table()
         _enhance(self.table, key="balance_sheet")
         self.summary = big_label()
+        self.summary.setWordWrap(True)
         self.check = big_label()
+        self.check.setWordWrap(True)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 4, 0, 0)

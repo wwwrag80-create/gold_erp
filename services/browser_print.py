@@ -61,6 +61,15 @@ PRINT_CSS = """
     flex-direction: column;
   }
   .sheet-body { flex: 1 1 auto; }
+  /* المعاينة بعرض الورقة نفسه: ما يتّسع على الشاشة يتّسع على الورق،
+     ولا يُفاجأ المستخدم بجدولٍ مقصوص عند الطباعة */
+  @media screen {
+    .sheet { width: %(paper)s; max-width: 100%%; margin: 0 auto; }
+  }
+
+  /* بيانات المنشأة والفترة: أعمدة ثابتة وقيمٌ تلتفّ */
+  table.meta { table-layout: fixed; }
+  table.meta td { word-wrap: break-word; }
 
   /* كل الجداول بعرض الصفحة كاملاً */
   table { width: 100%%; border-collapse: collapse; direction: rtl;
@@ -169,8 +178,36 @@ def _page_setup(doc_type):
         # تقارير التصنيع عريضة الأعمدة — هوامش أضيق لتتسع الصفحة
         margin = "5mm" if doc_type in ("mfg_target", "mfg_salary") else "8mm"
         return {"size": "A4 landscape", "margin": margin,
-                "minheight": "180mm"}
-    return {"size": "A4 portrait", "margin": "8mm", "minheight": "265mm"}
+                "minheight": "180mm",
+                "paper": "287mm" if margin == "5mm" else "281mm"}
+    return {"size": "A4 portrait", "margin": "8mm", "minheight": "265mm",
+            "paper": "194mm"}
+
+
+# ══ شبكة أمان: لا جدول أعرض من الورقة ══
+# جدولٌ عناوينه لا تنكسر (`th {white-space: nowrap}`) أو أعمدته كثيرة
+# قد يتجاوز عرض الصفحة؛ والمتصفح لا يصغّره بل يمدّه خارج الإطار — وفي
+# الاتجاه العربي يخرج من اليسار فيُقصّ آخر أعمدته عند الطباعة. هذا
+# النص يقيس كل جدول بعد تحميل الخطوط وقبل الطباعة، ويصغّر الأعرض من
+# حاويته بنسبة الفرق فقط؛ فيظهر كاملاً بخطٍّ أصغر قليلاً.
+FIT_SCRIPT = """<script>(function(){
+function fit(){
+  var ts=document.querySelectorAll('.sheet-body table');
+  for(var i=0;i<ts.length;i++){ts[i].style.zoom='';}
+  for(var j=0;j<ts.length;j++){
+    var t=ts[j],p=t.parentElement; if(!p){continue;}
+    var need=t.scrollWidth, room=p.clientWidth;
+    if(room>0 && need>room+1){
+      t.style.zoom=String(Math.floor((room-3)/need*1000)/1000);}
+  }
+}
+function go(){ if(document.fonts&&document.fonts.ready){
+  document.fonts.ready.then(fit);} else {fit();} }
+window.addEventListener('load',go);
+window.addEventListener('beforeprint',fit);
+if(window.matchMedia){var m=window.matchMedia('print');
+  if(m.addListener){m.addListener(function(e){if(e.matches){fit();}});}}
+})();</script>"""
 
 
 def build_page(doc_type, doc_id, auto_print=True, **kw):
@@ -205,7 +242,7 @@ def build_page(doc_type, doc_id, auto_print=True, **kw):
         + (PRINT_CSS % setup) +
         f"</head><body dir='rtl'>{toolbar}"
         f"<div class='sheet'><div class='sheet-body'>{inner}</div></div>"
-        f"{script}</body></html>")
+        f"{FIT_SCRIPT}{script}</body></html>")
 
 
 def open_document(doc_type, doc_id, auto_print=True, **kw):

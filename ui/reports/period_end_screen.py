@@ -22,6 +22,7 @@ from database.database import db
 from models import period_end as pe
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, tab_widget, title_label)
+from ui.widgets.flow_layout import FlowLayout
 
 
 def _m(v):
@@ -53,7 +54,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
         btn.setObjectName("homeBtn")
         btn.clicked.connect(self.refresh_all)
 
-        head = QtWidgets.QHBoxLayout()
+        head = FlowLayout()
         head.addWidget(QtWidgets.QLabel("الفترة المالية من:"))
         head.addWidget(self.d_from)
         head.addWidget(QtWidgets.QLabel("إلى:"))
@@ -111,7 +112,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
             "⬇ حزمة للمحاسب القانوني / منصة «قوائم»")
         b_pkg.setObjectName("ghost")
         b_pkg.clicked.connect(self.export_package)
-        row = QtWidgets.QHBoxLayout()
+        row = FlowLayout()
         for b in (b_full, b_notes, b_pkg):
             row.addWidget(b)
         row.addStretch(1)
@@ -186,7 +187,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
         b_post.clicked.connect(self.post_zakat)
         b_print = QtWidgets.QPushButton("🖨 طباعة الاحتساب")
         b_print.clicked.connect(self.print_zakat)
-        row = QtWidgets.QHBoxLayout()
+        row = FlowLayout()
         row.addWidget(QtWidgets.QLabel("إضافات أخرى:"))
         row.addWidget(self.z_add)
         row.addWidget(QtWidgets.QLabel("حسميات أخرى:"))
@@ -268,10 +269,11 @@ class PeriodEndScreen(QtWidgets.QWidget):
         b_post = QtWidgets.QPushButton("✔ قيّد تسوية المخصص")
         b_post.setObjectName("homeBtn")
         b_post.clicked.connect(self.post_eos)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel(
-            "عدّل تاريخ التعيين والأجر (الأساسي + البدلات الثابتة) في الجدول"
-            " ثم احفظ:"))
+        row = FlowLayout()
+        hint = QtWidgets.QLabel(
+            "عدّل تاريخ التعيين والأجر في الجدول ثم احفظ:")
+        hint.setToolTip("الأجر = الأساسي + البدلات الثابتة")
+        row.addWidget(hint)
         row.addWidget(b_save)
         row.addWidget(b_post)
         row.addStretch(1)
@@ -365,7 +367,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
         from models import aging
         w = QtWidgets.QWidget()
         self.rate_boxes = []
-        row = QtWidgets.QHBoxLayout()
+        row = FlowLayout()
         row.addWidget(QtWidgets.QLabel("نسبة المخصص لكل فئة:"))
         for lbl in aging.BUCKET_LABELS:
             sp = QtWidgets.QDoubleSpinBox()
@@ -479,6 +481,11 @@ class PeriodEndScreen(QtWidgets.QWidget):
         self._select(self.p_exp, "5810")
         b_add = QtWidgets.QPushButton("➕ تسجيل")
         b_add.clicked.connect(self.add_prepaid)
+        # قائمةٌ بعرض أطول بنودها تدفع المجموعة خارج إطار الشاشة
+        for cb in (self.p_exp, self.p_mode, self.p_cash):
+            cb.setSizeAdjustPolicy(
+                QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(14)
         f1 = QtWidgets.QGridLayout(g1)
         f1.addWidget(self.p_name, 0, 0, 1, 2)
         f1.addWidget(QtWidgets.QLabel("حساب المصروف:"), 0, 2)
@@ -512,7 +519,11 @@ class PeriodEndScreen(QtWidgets.QWidget):
         self.a_rev.setChecked(True)
         b_acc = QtWidgets.QPushButton("✔ قيّد الاستحقاق بتاريخ نهاية الفترة")
         b_acc.clicked.connect(self.accrue)
-        f2 = QtWidgets.QHBoxLayout(g2)
+        self.a_exp.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.a_exp.setMinimumContentsLength(14)
+        self.a_note.setMinimumWidth(200)
+        f2 = FlowLayout(g2)
         for x in (self.a_exp, self.a_amt, self.a_note, self.a_rev, b_acc):
             f2.addWidget(x)
         lay = QtWidgets.QVBoxLayout(w)

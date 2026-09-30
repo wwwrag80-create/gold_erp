@@ -75,6 +75,8 @@ QT_INHERITED = {
     "palette", "setPalette", "wordWrap", "pixmap", "lower", "hideEvent",
     "graphicsEffect", "setGraphicsEffect", "setFixedWidth", "isEnabled",
     "setWindowOpacity", "showFullScreen",
+    # موروثات QLayout (شريط الأدوات المنطوي `FlowLayout`)
+    "contentsMargins", "parentWidget",
 }
 OPTIONAL = {"on_edit_cancelled", "refresh", "load_document"}
 MIXIN = {"init_edit_mode", "edit_widgets", "begin_edit", "cancel_edit",

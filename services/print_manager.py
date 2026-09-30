@@ -2088,13 +2088,21 @@ def _entity_meta(pairs):
     if getattr(config, "COMPANY_VAT_NUMBER", ""):
         items.append(("الرقم الضريبي", en(config.COMPANY_VAT_NUMBER)))
     items += list(pairs)
+    # زوجان في كل سطر بعروضٍ ثابتة — ثلاثة أزواج بفتراتٍ لا تنكسر كانت
+    # أعرض من ورقة A4 الطولية بنحو ٨٠ بكسل، فيخرج الجدول عن يسار الصفحة
+    # ويُقصّ آخر ما فيه (فترة المقارنة والعملة)
+    th = '<th width="17%" style="white-space:normal">'
     rows = ""
-    for i in range(0, len(items), 3):
+    for i in range(0, len(items), 2):
         tds = []
-        for k, v in items[i:i + 3]:
-            tds += [thw(k), f"<td>{v}</td>"]
+        pair = items[i:i + 2]
+        for k, v in pair:
+            tds += [f"{th}{k}</th>", f'<td width="33%">{v}</td>']
+        if len(pair) == 1:
+            tds += [f"{th}&nbsp;</th>", '<td width="33%"></td>']
         rows += f"<tr>{cells(*tds)}</tr>"
-    return f"{TBL}{rows}</table><br/>"
+    return ('<table class="items meta" width="100%" cellspacing="0"'
+            f' cellpadding="4">{rows}</table><br/>')
 
 
 def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,

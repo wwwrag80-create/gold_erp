@@ -17,6 +17,7 @@ from models import statements
 from services import karat_view as kv
 from ui.widgets.common import (big_label, date_edit, dstr, err, info,
                                make_table, style_total_row, title_label)
+from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 
 COLS = ["الكود", "اسم الحساب",
@@ -72,7 +73,7 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
 
-        head = QtWidgets.QHBoxLayout()
+        head = FlowLayout()
         head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("من:"))
         head.addWidget(self.d_from)
@@ -138,7 +139,10 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         try:
             tbl.clear()
             tbl.setColumnCount(len(COLS))
-            tbl.setHorizontalHeaderLabels(COLS)
+            # الزوج في سطرين («أول المدة» فوق «مدين») — في سطرٍ واحد
+            # يُقصّ العنوان على شاشة اللابتوب فيُقرأ «ول المدة — مدي»
+            tbl.setHorizontalHeaderLabels(
+                [c.replace(" — ", "\n") for c in COLS])
             tbl.setRowCount(len(rows) + 1)
             shade = QtGui.QColor("#EFE9DC")
             for i, r in enumerate(rows):
