@@ -6260,6 +6260,85 @@ def main():
               hasattr(_c72, "run_audit") and hasattr(_c72, "print_coa"))
         _f72.close()
         _c72.close()
+
+        # ── 74) الفصوص والمسترجع من التصفية خارج مخزون الذهب (4.39)
+        from services.accounting_engine import post_entry as _pe74
+        from database.seed import move_production_accounts as _mv74
+        from models import statements as _st74, journal as _jr74
+        with db() as conn:
+            _a74 = {r["code"]: r for r in conn.execute(
+                "SELECT a.*, p.code pcode FROM accounts a"
+                " LEFT JOIN accounts p ON p.id=a.parent_id")}
+            check("الدليل: الفصوص 5520 مصروفٌ تحت تكاليف التشغيل المباشرة"
+                  " (نقد ووزن) · المسترجع 5190 مقابلٌ دائن تحت الفواقد",
+                  "1150" not in _a74 and "1360" not in _a74
+                  and _a74["5520"]["type"] == "expense"
+                  and _a74["5520"]["pcode"] == "5050"
+                  and _a74["5520"]["balance_type"] == "both"
+                  and _a74["5190"]["pcode"] == "5100"
+                  and _a74["5190"]["nature"] == "credit")
+            # قاعدةٌ بالتخطيط القديم: 1150 و1360 (وفرعه) تحت المخزون
+            _inv74 = _a74["1020"]["id"]
+            conn.execute("UPDATE accounts SET code='1150', type='asset',"
+                         " nature='debit', parent_id=? WHERE code='5520'",
+                         (_inv74,))
+            conn.execute("UPDATE accounts SET code='1360', type='asset',"
+                         " nature='debit', parent_id=? WHERE code='5190'",
+                         (_inv74,))
+            conn.execute(
+                "INSERT INTO accounts(code,name,type,parent_id,is_postable,"
+                "nature,balance_type) SELECT '136001','مسترجع الشفط',"
+                "'asset',id,1,'debit','gold' FROM accounts WHERE code='1360'")
+            _old74 = {c: acc_id(conn, c) for c in ("1150", "136001")}
+            _e74 = _pe74(conn, "2026-03-20", "مسترجع التصفية للخزينة", [
+                {"account_id": acc_id(conn, "1100"), "gold_debit": 4.0},
+                {"account_id": _old74["136001"], "gold_credit": 4.0}],
+                source_table="manual", username="admin")
+            _mv74(conn)
+            _mv74(conn)          # مرتين: لا أثر للتكرار
+            _n74 = {r["code"]: r["id"] for r in conn.execute(
+                "SELECT code, id FROM accounts")}
+            check("الترقية: 1150←5520 و136001←519001 بالمعرّف نفسه والقيد"
+                  " باقٍ عليه",
+                  _n74.get("5520") == _old74["1150"]
+                  and _n74.get("519001") == _old74["136001"]
+                  and "1150" not in _n74 and "1360" not in _n74
+                  and conn.execute(
+                      "SELECT 1 FROM journal_lines WHERE entry_id=? AND"
+                      " account_id=?", (_e74, _n74["519001"])).fetchone())
+            _is74 = _st74.income_statement(conn, "2026-01-01", "2026-12-31",
+                                           compare=False)
+            check("قائمة الدخل: «المسترجع من التصفية» بندٌ يُطرح من"
+                  " الفواقد، و«الفصوص المصروفة للتصنيع» بندٌ مستقل",
+                  _is74["gold"]["values"]["recovered"] >= 4.0 - 1e-6
+                  and "stones" in _is74["gold"]["values"]
+                  and any(k == "recovered" and s74 == "cos"
+                          for k, _t, s74 in _st74.IS_LINES))
+            _r74 = _jr74.statement(conn, [_n74["519001"]], "2026-01-01",
+                                   "2026-12-31")
+            _r74x = _jr74.statement(
+                conn, [_n74["519001"]], "2026-01-01", "2026-12-31",
+                exclude_sql="e.id=%d" % _e74)
+            check("تفصيل الحركة: رقم السند والتاريخ، ويستبعد ما تستبعده"
+                  " القائمة",
+                  any(r["date"] == "2026-03-20" and r["doc_no"]
+                      for r in _r74)
+                  and not any(r["date"] == "2026-03-20" for r in _r74x),
+                  str([(r["date"], r["doc_no"]) for r in _r74]))
+        from ui.widgets.account_movement import (AccountMovementDialog as
+                                                 _D74)
+        _d74 = _D74(None, "1100", "خزينة التصنيع", "2026-01-01",
+                    "2026-12-31")
+        check("نافذة تفصيل الحركة: أعمدة رقم السند والرصيد · وزرّ في كل"
+              " قائمة",
+              _d74.table.horizontalHeaderItem(2).text() == "رقم السند"
+              and len(_d74.rows) > 0
+              and hasattr(_f72.screens[0], "show_movement")
+              and hasattr(_f72.screens[1].tree, "show_movement")
+              and hasattr(_f72.screens[2].standard, "show_movement")
+              and hasattr(_f72.screens[3], "show_movement")
+              and hasattr(_f72.screens[4], "show_movement"))
+        _d74.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

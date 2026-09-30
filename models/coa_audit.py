@@ -174,7 +174,7 @@ def audit(conn):
         out.append((INFO, "أسماء مكرّرة تحت الأب نفسه", "", dup))
     empty = [r["code"] for r in rows if not r["is_postable"]
              and r["id"] not in kids and r["id"] not in moved
-             and r["code"] not in ("1360",)]
+             and r["code"] not in ("5190",)]
     if empty:
         out.append((INFO, "مجموعات بلا فروع", "لا ضرر — للتنظيم فقط", empty))
     return out

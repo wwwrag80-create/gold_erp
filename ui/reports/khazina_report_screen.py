@@ -28,10 +28,11 @@ class KhazinaReportScreen(QtWidgets.QWidget):
         head.addWidget(btn)
         head.addStretch(1)
 
-        # لوحتان: الذهب، ومخزن الفصوص والأحجار مجتمعين (حساب 1150)
+        # لوحتان: الذهب، والفصوص والأحجار المصروفة للتصنيع (حساب 5520 —
+        # مصروفٌ لا مخزون منذ 4.39: ما صُرف منها للخزينة في الفترة)
         self.t_gold = Card("الذهب", "إجمالي أوزان الذهب الصافي المُدخَل")
-        self.t_jewels = Card("مخزن الفصوص والأحجار",
-                             "رصيد حساب 1150 — الفصوص والأحجار معاً")
+        self.t_jewels = Card("الفصوص والأحجار المصروفة للتصنيع",
+                             "صافي دائن حساب 5520 في الفترة")
         tiles = QtWidgets.QHBoxLayout()
         for c in (self.t_gold, self.t_jewels):
             tiles.addWidget(c)
@@ -64,11 +65,13 @@ class KhazinaReportScreen(QtWidgets.QWidget):
                 pin = production_inputs_summary(
                     conn, dstr(self.d_from),
                     dstr(self.d_to))
-                # رصيد مخزن الفصوص والأحجار (1150) داخل نفس الاتصال
+                # المصروف للتصنيع من الفصوص والأحجار (5520) في الفترة
                 try:
                     from models.accounts import acc_id
                     from services.accounting_engine import account_balance
-                    inv_g = account_balance(conn, acc_id(conn, "1150"))[0]
+                    inv_g = -account_balance(
+                        conn, acc_id(conn, "5520"), dstr(self.d_from),
+                        dstr(self.d_to))[0]
                 except Exception:
                     inv_g = ((pin.get("jewels") or 0)
                              + (pin.get("stones") or 0))

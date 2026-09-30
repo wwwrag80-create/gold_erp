@@ -222,6 +222,10 @@ class StandardIncomeTab(QtWidgets.QWidget):
         self.cmp_on.setChecked(True)
         self.accounts = QtWidgets.QCheckBox("إظهار الحسابات تحت كل بند")
         self.accounts.stateChanged.connect(self._rerender)
+        btn_mov = QtWidgets.QPushButton("🔎 تفصيل البند وحركته")
+        btn_mov.setToolTip("حسابات البند المحدد، ومن كلٍّ منها كشف حركته"
+                           " في الفترة بأرقام السندات")
+        btn_mov.clicked.connect(self.show_movement)
 
         btn = QtWidgets.QPushButton("إعداد القائمة")
         btn.setObjectName("homeBtn")
@@ -243,12 +247,14 @@ class StandardIncomeTab(QtWidgets.QWidget):
         head.addWidget(self.cmp_on)
         head.addWidget(self.accounts)
         head.addWidget(btn)
+        head.addWidget(btn_mov)
         head.addWidget(btn_print)
         head.addWidget(btn_exp)
         head.addStretch(1)
 
         self.table = make_table()
         _enhance(self.table, key="income_std")
+        self.table.doubleClicked.connect(lambda *_: self.show_movement())
         self.status = QtWidgets.QLabel("")
         self.status.setWordWrap(True)
 
@@ -305,6 +311,30 @@ class StandardIncomeTab(QtWidgets.QWidget):
         if cmp:
             v.append(money(r["gold_cmp"], True))
         return v
+
+    def show_movement(self):
+        """بندٌ ← حساباته؛ وحسابٌ (تحت البند) ← كشف حركته مباشرة."""
+        from ui.widgets.account_movement import (AccountsPicker, PL_EXCLUDE,
+                                                 merge_detail, show_movement)
+        i = self.table.currentRow()
+        rows = getattr(self, "rows", None) or []
+        if not self.st or not (0 <= i < len(rows)):
+            err(self, ValueError("اختر بنداً من القائمة أولاً"))
+            return
+        r = rows[i]
+        d1, d2 = self.st["date_from"], self.st["date_to"]
+        if r["kind"] == "acct":
+            code, _sep, name = r["label"].partition(" — ")
+            show_movement(self, code.strip(), name.strip(), d1, d2,
+                          PL_EXCLUDE)
+        elif r["kind"] == "line":
+            items = merge_detail(self.st, r["key"])
+            AccountsPicker(self, r["label"], items, d1, d2, PL_EXCLUDE,
+                           note=f"من {d1} إلى {d2} — بأثرها على الربح"
+                           ).exec_()
+        else:
+            err(self, ValueError("هذا سطر مجموع — اختر بنداً فوقه لترى"
+                                 " حساباته"))
 
     def _rerender(self):
         if not self.st:

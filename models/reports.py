@@ -45,7 +45,7 @@ def khazina_production_report(conn, date_from, date_to):
     — دون احتساب الفاقد/التسويات ضمن هذا الرقم)."""
     khazina_id = conn.execute(
         "SELECT id FROM accounts WHERE code='1100'").fetchone()["id"]
-    jewel_row = conn.execute("SELECT id FROM accounts WHERE code='1150'").fetchone()
+    jewel_row = conn.execute("SELECT id FROM accounts WHERE code='5520'").fetchone()
     jewel_id = jewel_row["id"] if jewel_row else None
 
     opening = conn.execute(
@@ -437,7 +437,8 @@ def balance_sheet(conn, date_to=None, date_from=None):
 
     # ── أصول ثابتة القيد (تبقى أصولاً دائماً) ──
     boxes_g, boxes_c = bal(["1400", "1410", "1500"])
-    vault_g, vault_c = bal(["1100", "1150", "1200", "1250", "1300", "1350"])
+    # 4.39: الفصوص (5520) خرجت من المخزون إلى تكلفة الإيرادات
+    vault_g, vault_c = bal(["1100", "1200", "1250", "1300", "1350"])
     # سلف الموظفين والعمال والعهد — كلها أصول متداولة
     emp_g, emp_c = bal(["1950", "1960", "1970"])
     fixed_g, fixed_c = bal(["1700"])
@@ -485,7 +486,7 @@ def balance_sheet(conn, date_to=None, date_from=None):
 
     assets = [
         ("الصناديق والبنوك", boxes_c, boxes_g),
-        ("الخزائن (ذهب خام ومشغول وفصوص)", vault_c, vault_g),
+        ("الخزائن (ذهب خام ومشغول)", vault_c, vault_g),
         ("أرصدة العملاء المدينة", cust_dc, cust_dg),
         ("أرصدة موردين مدينة (دفعات مقدمة)", sup_dc, sup_dg),
         ("سلف وعهد الموظفين", emp_c, emp_g),

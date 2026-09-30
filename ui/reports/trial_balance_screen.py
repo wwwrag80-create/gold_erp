@@ -72,6 +72,10 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
+        btn_mov = QtWidgets.QPushButton("🔎 تفصيل الحركة")
+        btn_mov.setToolTip("كشف حركة الحساب المحدد في فترة الميزان —"
+                           " بأرقام السندات وتواريخها")
+        btn_mov.clicked.connect(self.show_movement)
 
         head = FlowLayout()
         head.setSpacing(6)
@@ -87,12 +91,14 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         head.addWidget(self.level)
         head.addWidget(self.show_zero)
         head.addWidget(btn)
+        head.addWidget(btn_mov)
         head.addWidget(btn_print)
         head.addWidget(btn_exp)
         head.addStretch(1)
 
         self.table = make_table()
         _enhance(self.table, key="trial_balance_std")
+        self.table.doubleClicked.connect(lambda *_: self.show_movement())
         self.status = big_label()
         self.status.setWordWrap(True)
 
@@ -189,6 +195,18 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         self.status.setStyleSheet(
             "color:#0F5A24;font-weight:bold" if t["balanced"]
             else "color:#9A0018;font-weight:bold")
+
+    def show_movement(self):
+        """كشف حركة الحساب المحدد في فترة الميزان — من أين جاء رقمه."""
+        from ui.widgets.account_movement import show_movement
+        i = self.table.currentRow()
+        rows = (self.last or {}).get("rows") or []
+        if not (0 <= i < len(rows)):
+            err(self, ValueError("اختر حساباً من الميزان أولاً"))
+            return
+        r = rows[i]
+        show_movement(self, r["code"], r["name"], self.last["date_from"],
+                      self.last["date_to"])
 
     # ══════════════════════════════════════════════════════════════
     def export_csv(self):

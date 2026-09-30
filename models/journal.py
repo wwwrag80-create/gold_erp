@@ -105,7 +105,8 @@ def _doc_info(conn, src, sid, cache):
 
 
 SHORT_NAMES = {
-    "1100": "خزينة التصنيع", "1150": "فصوص وأحجار",
+    "1100": "خزينة التصنيع", "5520": "فصوص وأحجار",
+    "5190": "مسترجع التصفية",
     "1200": "الذهب المشغول", "1250": "تسويات الأوزان",
     "1300": "صناديق الكسر",
     "1310": "صندوق الكسر",
@@ -221,13 +222,19 @@ def _op_label(source_table, entry_desc):
     return "قيد يومية يدوي"
 
 
-def statement(conn, account_id, date_from=None, date_to=None):
+def statement(conn, account_id, date_from=None, date_to=None,
+              exclude_sql=None):
     """كشف حساب مزدوج بأعمدة مرتبة:
 
     التاريخ | نوع العملية | رقم السند | اسم الجهة/الحساب المقابل |
     البيان (فارغ ما لم يكتب المستخدم ملاحظة) | مدين/دائن/رصيد ذهب |
     مدين/دائن/رصيد نقد.
+
+    `exclude_sql`: شرطٌ على القيد `e` تُستبعد به قيودٌ من الرصيد والحركة
+    معاً — تفصيل بندٍ في القوائم المالية يستبعد ما تستبعده القائمة نفسها
+    (قيود الإقفال الدفتري) فيطابق آخرُ رصيدٍ في الكشف رقمَ القائمة.
     """
+    skip = f" AND NOT ({exclude_sql})" if exclude_sql else ""
     # **حسابٌ واحد أو شجرةُ حسابٍ تجميعي**: يُقبل رقمٌ أو قائمة أرقام.
     # فكشفُ «إجمالي العملاء» هو كشفُ فروعه مجموعةً — ولا يُرحَّل على
     # الحساب التجميعي نفسه شيء، فقراءتُه وحده تعطي كشفاً خاوياً.
@@ -247,7 +254,7 @@ def statement(conn, account_id, date_from=None, date_to=None):
             " COALESCE(SUM(l.cash_debit-l.cash_credit),0) c"
             " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
             f" WHERE e.is_deleted=0 AND l.account_id IN ({ph})"
-            "   AND e.entry_date<?",
+            "   AND e.entry_date<?" + skip,
             ids + [date_from]).fetchone()
         gb, cb = round(op["g"], 3), round(op["c"], 2)
         rows.append({"date": date_from, "eid": "", "op": "رصيد سابق",
@@ -261,7 +268,7 @@ def statement(conn, account_id, date_from=None, date_to=None):
          " l.line_desc ld, e.doc_no jdoc,"
          " (SELECT i.kind FROM invoices i WHERE i.id=e.source_id) _kind"
          " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-         f" WHERE e.is_deleted=0 AND l.account_id IN ({ph})")
+         f" WHERE e.is_deleted=0 AND l.account_id IN ({ph})" + skip)
     if date_from:
         q += " AND e.entry_date>=?"; params.append(date_from)
     if date_to:

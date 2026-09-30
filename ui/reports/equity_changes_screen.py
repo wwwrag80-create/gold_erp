@@ -55,6 +55,10 @@ class EquityChangesScreen(QtWidgets.QWidget):
         btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
+        btn_mov = QtWidgets.QPushButton("🔎 حسابات حقوق الملكية وحركتها")
+        btn_mov.setToolTip("حسابات حقوق الملكية بأرصدتها، ومن كلٍّ منها"
+                           " كشف حركته في الفترة بأرقام السندات")
+        btn_mov.clicked.connect(self.show_movement)
 
         head = FlowLayout()
         head.setSpacing(6)
@@ -68,12 +72,14 @@ class EquityChangesScreen(QtWidgets.QWidget):
         head.addWidget(self.dim)
         head.addWidget(self.cmp_on)
         head.addWidget(btn)
+        head.addWidget(btn_mov)
         head.addWidget(btn_print)
         head.addWidget(btn_exp)
         head.addStretch(1)
 
         self.table = make_table()
         _enhance(self.table, key="equity_changes")
+        self.table.doubleClicked.connect(lambda *_: self.show_movement())
         self.status = QtWidgets.QLabel("")
         self.status.setWordWrap(True)
 
@@ -112,6 +118,30 @@ class EquityChangesScreen(QtWidgets.QWidget):
     def _headers(self):
         return (["البيان"] + [t for _k, t in self.eq["columns"]]
                 + ["المجموع"])
+
+    def show_movement(self):
+        """حسابات حقوق الملكية بأرصدتها آخر الفترة — ومن كلٍّ منها حركته."""
+        from ui.widgets.account_movement import AccountsPicker
+        try:
+            d1, d2 = dstr(self.d_from), dstr(self.d_to)
+            # قيد فتح السنة دفتريٌّ يعكس الإقفال — لا حركة فعلية
+            skip = "COALESCE(e.source_table,'')='year_open'"
+            with db(readonly=True) as conn:
+                items = [(r["code"], r["name"], r["c"] or 0.0, r["g"] or 0.0)
+                         for r in conn.execute(
+                    "SELECT a.code, a.name,"
+                    " -SUM(l.cash_debit-l.cash_credit) c,"
+                    " -SUM(l.gold_debit-l.gold_credit) g"
+                    " FROM journal_lines l"
+                    " JOIN journal_entries e ON e.id=l.entry_id"
+                    "  AND e.is_deleted=0"
+                    " JOIN accounts a ON a.id=l.account_id"
+                    f" WHERE a.type='equity' AND e.entry_date<=? AND NOT"
+                    f" ({skip}) GROUP BY a.id ORDER BY a.code", (d2,))]
+            AccountsPicker(self, "حسابات حقوق الملكية", items, d1, d2, skip,
+                           note=f"الأرصدة (دائنة موجبة) كما في {d2}").exec_()
+        except Exception as e:
+            err(self, e)
 
     def _render(self):
         eq = self.eq

@@ -60,6 +60,10 @@ class CashFlowScreen(QtWidgets.QWidget):
         btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
+        btn_mov = QtWidgets.QPushButton("🔎 حركة الصندوق والبنوك")
+        btn_mov.setToolTip("حسابات النقد وما في حكمه، ومن كلٍّ منها كشف"
+                           " حركته في الفترة بأرقام السندات")
+        btn_mov.clicked.connect(self.show_movement)
 
         head = FlowLayout()
         head.setSpacing(6)
@@ -72,6 +76,7 @@ class CashFlowScreen(QtWidgets.QWidget):
         head.addWidget(self.method)
         head.addWidget(self.cmp_on)
         head.addWidget(btn)
+        head.addWidget(btn_mov)
         head.addWidget(btn_print)
         head.addWidget(btn_exp)
         head.addStretch(1)
@@ -184,6 +189,31 @@ class CashFlowScreen(QtWidgets.QWidget):
         self.status.setStyleSheet(
             "color:#0F5A24;font-weight:bold" if ok
             else "color:#9A0018;font-weight:bold")
+
+    def show_movement(self):
+        """النقد وما في حكمه: كل صندوقٍ وبنك برصيده، ومنه كشف حركته."""
+        from models.accounts import subtree_ids_by_code
+        from ui.widgets.account_movement import AccountsPicker
+        try:
+            d1, d2 = dstr(self.d_from), dstr(self.d_to)
+            with db(readonly=True) as conn:
+                ids = subtree_ids_by_code(conn, "1010")
+                if not ids:
+                    raise ValueError("مجموعة النقد 1010 غير موجودة")
+                qs = ",".join("?" * len(ids))
+                items = [(r["code"], r["name"], r["c"] or 0.0, 0.0)
+                         for r in conn.execute(
+                    "SELECT a.code, a.name,"
+                    " (SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0)"
+                    "  FROM journal_lines l JOIN journal_entries e"
+                    "  ON e.id=l.entry_id AND e.is_deleted=0"
+                    "  WHERE l.account_id=a.id AND e.entry_date<=?) c"
+                    f" FROM accounts a WHERE a.id IN ({qs})"
+                    " AND a.is_postable=1 ORDER BY a.code", [d2] + ids)]
+            AccountsPicker(self, "النقد وما في حكمه", items, d1, d2,
+                           note=f"الأرصدة كما في {d2}").exec_()
+        except Exception as e:
+            err(self, e)
 
     def export_csv(self):
         try:

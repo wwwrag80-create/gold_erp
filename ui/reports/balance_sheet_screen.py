@@ -76,6 +76,10 @@ class FinancialPositionTab(QtWidgets.QWidget):
         btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
+        btn_mov = QtWidgets.QPushButton("🔎 تفصيل البند وحركته")
+        btn_mov.setToolTip("حسابات البند المحدد، ومن كلٍّ منها كشف حركته"
+                           " بأرقام السندات")
+        btn_mov.clicked.connect(lambda: self.show_detail())
 
         head = FlowLayout()
         head.setSpacing(6)
@@ -84,6 +88,7 @@ class FinancialPositionTab(QtWidgets.QWidget):
         head.addWidget(self.cmp_on)
         head.addWidget(self.cmp_to)
         head.addWidget(btn)
+        head.addWidget(btn_mov)
         head.addWidget(btn_print)
         head.addWidget(btn_exp)
         head.addStretch(1)
@@ -204,49 +209,42 @@ class FinancialPositionTab(QtWidgets.QWidget):
             "color:#0F5A24;font-weight:bold" if ok
             else "color:#9A0018;font-weight:bold")
 
-    def show_detail(self, row, _col=0):
-        if not self.fp or row >= len(self.rows):
+    def show_detail(self, row=None, _col=0):
+        """حسابات البند بأرصدتها — ومن كلٍّ منها كشف حركته بأرقام السندات."""
+        from ui.widgets.account_movement import (AccountsPicker, PL_EXCLUDE,
+                                                 bs_exclude, merge_detail)
+        if row is None or row is False:
+            row = self.table.currentRow()
+        if not self.fp or not (0 <= row < len(self.rows)):
+            err(self, ValueError("اختر بنداً من القائمة أولاً"))
             return
         r = self.rows[row]
         key = r.get("key")
         if r["kind"] != "line" or not key:
+            err(self, ValueError("اختر بنداً (لا عنواناً ولا مجموعاً)"))
             return
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(f"تفصيل البند — {r['label']}")
-        dlg.setLayoutDirection(QtCore.Qt.RightToLeft)
-        dlg.resize(620, 420)
-        t = make_table()
-        heads = ["الكود", "الحساب", "ريال", f"ذهب ({kv.unit()})"]
-        acc = {}
-        for dim in ("cash", "gold"):
-            for code, name, amt in self.fp[dim]["detail"].get(key, []):
-                e = acc.setdefault((code, name), {"cash": 0.0, "gold": 0.0})
-                e[dim] += amt
-        t.setColumnCount(4)
-        t.setHorizontalHeaderLabels(heads)
-        items = sorted(acc.items())
-        t.setRowCount(len(items))
-        for i, ((code, name), v) in enumerate(items):
-            for c, s in enumerate((code, name, money(v["cash"]),
-                                   money(v["gold"], True))):
-                it = QtWidgets.QTableWidgetItem(s)
-                it.setTextAlignment(QtCore.Qt.AlignRight if c == 1
-                                    else QtCore.Qt.AlignCenter)
-                t.setItem(i, c, it)
-        note = QtWidgets.QLabel(
-            "صافي ربح الفترة من قائمة الدخل — من أول السنة المالية حتى تاريخ"
-            " القائمة." if key == "profit" else
-            f"عدد الحسابات: {len(items)} — كما في {self.fp['as_of']}")
-        lay = QtWidgets.QVBoxLayout(dlg)
-        lay.addWidget(title_label(r["label"]))
-        lay.addWidget(t, 1)
-        lay.addWidget(note)
-        try:
-            from ui.widgets.table_fit import fit_columns
-            fit_columns(t, [14, 46, 20, 20])
-        except Exception:
-            pass
-        dlg.exec_()
+        as_of = self.fp["as_of"]
+        if key == "profit":
+            # ربح الفترة: حسابات الإيراد والمصروف من أول السنة المالية
+            y0 = f"{as_of[:4]}-01-01"
+            with db(readonly=True) as conn:
+                ist = statements.income_statement(conn, y0, as_of,
+                                                  compare=False)
+            acc = {}
+            for k, _t, _s in statements.IS_LINES:
+                for c, n, cash, gold in merge_detail(ist, k):
+                    e = acc.setdefault((c, n), [0.0, 0.0])
+                    e[0] += cash
+                    e[1] += gold
+            items = [(c, n, v[0], v[1]) for (c, n), v in sorted(acc.items())]
+            AccountsPicker(self, r["label"], items, y0, as_of, PL_EXCLUDE,
+                           note=f"صافي ربح الفترة من {y0} حتى {as_of}"
+                                " — حساباته بأثرها على الربح").exec_()
+            return
+        items = merge_detail(self.fp, key)
+        AccountsPicker(self, r["label"], items, None, as_of, bs_exclude(),
+                       note=f"عدد الحسابات: {len(items)} — كما في {as_of}"
+                       ).exec_()
 
     def export_csv(self):
         try:
@@ -322,6 +320,9 @@ class AccountTreeTab(QtWidgets.QWidget):
         btn.clicked.connect(self.load)
         btn_print = QtWidgets.QPushButton("🖨 طباعة")
         btn_print.clicked.connect(self.print_sheet)
+        btn_mov = QtWidgets.QPushButton("🔎 تفصيل الحركة")
+        btn_mov.setToolTip("كشف حركة الحساب المحدد بأرقام السندات")
+        btn_mov.clicked.connect(self.show_movement)
 
         head = FlowLayout()
         head.setSpacing(6)
@@ -331,11 +332,14 @@ class AccountTreeTab(QtWidgets.QWidget):
         head.addWidget(self.level, 0)
         head.addWidget(self.zero, 0)
         head.addWidget(btn, 0)
+        head.addWidget(btn_mov, 0)
         head.addWidget(btn_print, 0)
         head.addStretch(1)
 
         self.table = make_table()
         _enhance(self.table, key="balance_sheet")
+        self.table.doubleClicked.connect(lambda *_: self.show_movement())
+        self._codes = []
         self.summary = big_label()
         self.summary.setWordWrap(True)
         self.check = big_label()
@@ -361,6 +365,15 @@ class AccountTreeTab(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    def show_movement(self):
+        from ui.widgets.account_movement import show_movement
+        i = self.table.currentRow()
+        if not (0 <= i < len(self._codes)) or not self._codes[i][0]:
+            err(self, ValueError("اختر حساباً من الشجرة أولاً"))
+            return
+        code, name = self._codes[i]
+        show_movement(self, code, name, None, dstr(self.d_to))
+
     def _render(self, b):
         rows, marks = [], []
         for sec in b["sections"]:
@@ -380,6 +393,8 @@ class AccountTreeTab(QtWidgets.QWidget):
                              f"{r['cash']:,.2f}",
                              f"{kv.g(r['gold']):,.2f}"))
             rows.append(("", "", "", ""))
+        self._codes = [(r[1], r[0].strip().lstrip("◄").strip())
+                       for r in rows]
 
         self.table.setUpdatesEnabled(False)
         try:
