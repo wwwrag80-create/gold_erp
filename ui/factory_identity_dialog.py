@@ -75,8 +75,8 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
         with db(readonly=True) as conn:
             self._custom = branding.is_custom(conn)
             data = branding.load(conn)
-        if not self._custom:
-            # أول ضبط: الترتيب الذي طُلب — الشعار يساراً
+        if not self._custom or branding.is_blank(data):
+            # أول ضبط (ومنه هوية المصنع الجديد الفارغة): الشعار يساراً
             data["layout"] = "logo_left"
         self.set_data(data)
         self._editable = self._can_edit()

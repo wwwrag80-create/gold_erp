@@ -5345,8 +5345,9 @@ def main():
             _inv63 = conn.execute("SELECT id FROM invoices WHERE"
                                   " is_deleted=0 LIMIT 1").fetchone()[0]
         _h0 = _pm62.build_html("invoices", _inv63)
-        check("قبل الضبط: الترويسة الأصلية كما هي",
-              "مصنع جاديت للتصنيع" in _h0 and "Jadeite Factory" in _h0)
+        check("قبل الضبط: مصنعٌ جديد بلا اسمٍ ولا شعار (لا هوية مصنعٍ آخر)",
+              "جاديت" not in _h0 and "Jadeite" not in _h0
+              and _br63.is_blank() and config.LOGO_PATH is None)
         _png63 = (__import__("services.photo_qr", fromlist=["x"])
                   .qr_png_data_uri("logo63").split(",", 1)[1])
         _id63 = dict(_br63.defaults(), name="مصنع النخبة للذهب",
@@ -5389,9 +5390,11 @@ def main():
               "<img" not in _pm62.letterhead())
         with db() as conn:
             _br63.reset(conn, "admin")
-        check("«الهوية الأصلية» تعيد الترويسة المسلَّمة",
-              "Jadeite Factory" in _pm62.letterhead()
-              and config.COMPANY_NAME == "مصنع جاديت للتصنيع")
+        # 4.44: المحو لا يعيد هوية مصنعٍ آخر — المصنع بلا اسمٍ ولا شعار
+        check("محو الهوية: بلا اسم مصنعٍ آخر ولا شعاره",
+              "Jadeite" not in _pm62.letterhead()
+              and "<img" not in _pm62.letterhead()
+              and config.COMPANY_NAME == "")
     finally:
         config.BASE_DIR = _base63
 
@@ -6463,6 +6466,85 @@ def main():
               and len(_tb77["sections"]) == len(
                   [x for x in _r77 if x["is_root"]
                    and x["kind"] != "total"]))
+        # ── 78) المستعجل · المعلّقات · هوية المصنع الجديد (4.44)
+        from models import pending as _pd78
+        from models.inventory import (create_work_orders_batch as _cb78,
+                                      update_supply_batch as _ub78)
+        from models.invoices import create_sale as _cs78
+        with db() as conn:
+            _r78 = _cb78(conn, [{"wo_no": "U78-1", "gold": 20.0,
+                                 "wage_per_gram": 10.0}], "2026-07-01",
+                         "admin")
+            _e78 = _r78["entry_id"]
+            _pd78.mark_urgent(conn, _e78, "admin")
+            _u78 = [x["entry_id"] for x in _pd78.list_urgent(conn)]
+            _g78 = conn.execute(
+                "SELECT SUM(gold_debit) FROM journal_lines WHERE entry_id=?",
+                (_e78,)).fetchone()[0]
+        check("دفعة مستعجلة: مُرحَّلةٌ مُثبتة في الحسابات وفي «المستعجل»",
+              _e78 in _u78 and abs(_g78 - 20.0) < 0.001, str(_u78))
+        with db() as conn:
+            _ub78(conn, _e78, [
+                {"wo_no": "U78-1", "gold": 20.0, "wage_per_gram": 10.0},
+                {"wo_no": "U78-2", "gold": 15.0, "wage_per_gram": 10.0}],
+                "2026-07-01", "admin")
+            _pd78.complete_urgent(conn, _e78, "admin")
+            _g78b = conn.execute(
+                "SELECT SUM(gold_debit) FROM journal_lines WHERE entry_id=?",
+                (_e78,)).fetchone()[0]
+            _u78b = [x["entry_id"] for x in _pd78.list_urgent(conn)]
+        check("استكمال المستعجلة: القيد نفسه بالقيمة الجديدة، وتخرج من"
+              " «المستعجل»", abs(_g78b - 35.0) < 0.001 and _e78 not in _u78b,
+              str(_g78b))
+        with db() as conn:
+            _wo78 = conn.execute("SELECT id FROM work_orders WHERE"
+                                 " work_order_no='U78-2'").fetchone()["id"]
+            _ent78 = conn.execute("SELECT id FROM entities WHERE"
+                                  " entity_type='customer' LIMIT 1"
+                                  ).fetchone()["id"]
+            _n0 = conn.execute("SELECT COUNT(*) FROM journal_entries"
+                               ).fetchone()[0]
+            _st78 = {"kind": "sale", "customer_id": _ent78,
+                     "date": "2026-07-02", "items": [
+                         {"wo_id": _wo78, "weight": 15.0, "wage": 10.0,
+                          "karat": 18}]}
+            _h78 = _pd78.hold_invoice(conn, _st78, "admin", "ينتظر العميل")
+            _n1 = conn.execute("SELECT COUNT(*) FROM journal_entries"
+                               ).fetchone()[0]
+            _wst = conn.execute("SELECT status FROM work_orders WHERE id=?",
+                                (_wo78,)).fetchone()[0]
+            _hl78 = _pd78.list_held(conn)
+        check("فاتورة معلّقة: بلا قيد ولا أثر على المخزون، وفي «المعلّقات»",
+              _n1 == _n0 and _wst == "in_stock"
+              and any(x["id"] == _h78 and x["count"] == 1 for x in _hl78))
+        with db() as conn:
+            _cs78(conn, _ent78, [{"work_order_id": _wo78}], "2026-07-03",
+                  "admin", apply_vat=False)
+            _bad78 = [x["unavailable"] for x in _pd78.list_held(conn)
+                      if x["id"] == _h78]
+            _pd78.drop_held(conn, _h78, "admin", "اختبار")
+            _gone78 = not any(x["id"] == _h78
+                              for x in _pd78.list_held(conn))
+        check("المعلّقة لا تحجز الطقم — بيعه في غيرها يُنبَّه به، وتُلغى بلا"
+              " أثر", _bad78 == [1] and _gone78, str(_bad78))
+        from services import branding as _br78
+        _base78 = config.BASE_DIR
+        config.BASE_DIR = pathlib.Path(_TMP)    # لا يمسّ مرآة الجهاز وشعاره
+        try:
+            with db() as conn:
+                _br78.reset(conn, "admin")
+                _blank78 = _br78.load(conn)
+        finally:
+            config.BASE_DIR = _base78
+        check("هوية المصنع الجديد فارغة: بلا اسمٍ ولا شعار ولا سجل",
+              _br78.is_blank(_blank78) and _blank78["hide_logo"]
+              and not _blank78["cr"] and not _blank78["vat"])
+        from ui.production_screen import ProductionScreen as _PS78
+        from ui.sales_screen import SalesScreen as _SS78
+        check("قسما «المستعجل» و«المعلّقات» في الشاشتين",
+              hasattr(_PS78, "load_urgent") and hasattr(_PS78, "load_entry")
+              and hasattr(_SS78, "hold_invoice")
+              and hasattr(_SS78, "open_held"))
         from ui.dashboard_screen import DashboardScreen as _DS76
         check("لوحة الكسر: النقر على العيار يفتح كشفه",
               hasattr(_DS76, "_click_row")

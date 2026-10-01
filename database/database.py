@@ -1434,6 +1434,15 @@ def migrate_schema() -> None:
         from models.period_end import ensure_schema as _pe_schema
         _pe_schema(conn)
 
+        # 4.44: الدفعات المستعجلة والفواتير المعلّقة
+        from models.pending import ensure_schema as _pd_schema
+        _pd_schema(conn)
+
+        # 4.44: قاعدةٌ قائمة بلا هويةٍ محفوظة تحفظ هويتها كما تظهر —
+        # فالمصنع الجديد وحده يبدأ بهويةٍ فارغة
+        from services import branding as _br
+        _br.ensure_initial(conn)
+
 
 def run_migrations_files():
     """ينفّذ ملفات الهجرة المرقّمة مرة واحدة لكل إصدار.

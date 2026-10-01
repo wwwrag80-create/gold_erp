@@ -315,6 +315,65 @@ def tab_widget():
     return t
 
 
+class TitledSections(QtWidgets.QWidget):
+    """قسمان في شاشة إدخال (الإصدار والمعلّقات، التوريد والمستعجل)
+    وعناوينهما في سطر عنوان الشاشة نفسه — لا شريطَ تبويبٍ فوق الصفحة
+    يقتطع من جدول البنود. واجهتها واجهة `QTabWidget` فيما يلزم."""
+    currentChanged = QtCore.pyqtSignal(int)
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.bar = QtWidgets.QTabBar()
+        self.bar.setElideMode(QtCore.Qt.ElideNone)
+        self.bar.setUsesScrollButtons(False)
+        self.bar.setExpanding(False)
+        self.bar.setDrawBase(False)
+        self.bar.setDocumentMode(True)
+        self.bar.setStyleSheet("QTabBar::tab { padding: 5px 18px; }")
+        self.stack = QtWidgets.QStackedWidget()
+        self.bar.currentChanged.connect(self._switch)
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(title_label(title))
+        row.addStretch(1)
+        row.addWidget(self.bar, 0, QtCore.Qt.AlignBottom)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        lay.addLayout(row)
+        lay.addWidget(self.stack, 1)
+
+    def _switch(self, i):
+        if 0 <= i < self.stack.count():
+            self.stack.setCurrentIndex(i)
+            self.currentChanged.emit(i)
+
+    def addTab(self, w, text):
+        self.stack.addWidget(w)
+        return self.bar.addTab(text)
+
+    def tabBar(self):
+        return self.bar
+
+    def count(self):
+        return self.bar.count()
+
+    def tabText(self, i):
+        return self.bar.tabText(i)
+
+    def setTabText(self, i, text):
+        self.bar.setTabText(i, text)
+
+    def currentIndex(self):
+        return self.bar.currentIndex()
+
+    def setCurrentIndex(self, i):
+        self.bar.setCurrentIndex(i)
+
+    def widget(self, i):
+        return self.stack.widget(i)
+
+
 def row_height(table, lines=1, tight=False):
     """ارتفاع صفٍّ مريحٌ مشتقٌّ من قياس الخط لا من رقمٍ ثابت.
 

@@ -83,6 +83,74 @@ def defaults():
     return d
 
 
+def blank():
+    """هوية المصنع الجديد (4.44): بلا اسمٍ ولا شعار ولا بيانات.
+
+    المصنع الجديد لا يرث هوية مصنعٍ آخر (اسمه وسجله ورقمه الضريبي
+    وشعاره) — يُنشئ هويته بنفسه من «عرض ← هوية المصنع».
+    """
+    d = {k: "" for k in TEXT_FIELDS}
+    d.update({"layout": "classic", "logo_h": 120, "logo_b64": "",
+              "stamp_b64": "", "show_vat": False, "show_en": False,
+              "hide_logo": True})
+    return d
+
+
+def is_blank(d=None):
+    """هل الهوية لم تُنشأ بعد (بلا اسم)؟"""
+    d = _current if d is None else d
+    return not (d or {}).get("name")
+
+
+def _store(conn, d, username=None):
+    """يحفظ هويةً بلا تحقّق — للتهيئة وحدها (الهوية الفارغة بلا اسم)."""
+    from models.fiscal import set_setting
+    set_setting(conn, KEY, json.dumps(_clean(d), ensure_ascii=False),
+                username)
+
+
+def init_new_factory(conn):
+    """قاعدة مصنعٍ جديد: هويته فارغة حتى يُنشئها."""
+    if not is_custom(conn):
+        _store(conn, blank())
+        _apply_memory(blank())   # فوراً — لا تظهر هوية مصنعٍ آخر ولو لحظة
+
+
+def _apply_memory(d):
+    """يطبّق الهوية على `config` وحده — بلا كتابة مرآةٍ ولا مسّ صورٍ في
+    مجلد البيانات (تأسيس قاعدةٍ — ولو قاعدة اختبار — لا يمسّ شعار
+    المصنع القائم على الجهاز؛ والمرآة تُكتب عند المزامنة بعد الإقلاع)."""
+    d = _clean(d)
+    for k, c in _CONFIG_MAP:
+        setattr(config, c, d[k])
+    config.LOGO_PATH = None
+    config.LOGO_GOLD_PATH = None
+    config.STAMP_PATH = None
+    config.HEADER_LAYOUT = d["layout"]
+    config.LOGO_HEIGHT = d["logo_h"]
+    config.HEADER_SHOW_VAT = d["show_vat"]
+    config.HEADER_SHOW_EN = d["show_en"]
+    _current.clear()
+    _current.update(d)
+    _current["custom"] = True
+
+
+def ensure_initial(conn):
+    """قاعدةٌ قائمة قبل 4.44 بلا هويةٍ محفوظة: تُحفظ هويتها كما تظهر
+    اليوم (القيم المسلَّمة) — فلا يتغيّر شيءٌ في أوراقها، ولا تصير
+    القيم المسلَّمة هويةً يرثها مصنعٌ جديد. وقاعدةٌ جديدة فارغة لا تُمسّ
+    هنا (تُهيَّأ فارغةً عند تأسيسها)."""
+    try:
+        if is_custom(conn):
+            return False
+        if not conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone():
+            return False
+    except Exception:
+        return False
+    _store(conn, defaults())
+    return True
+
+
 def _clean(data):
     out = defaults()
     for k, v in (data or {}).items():
@@ -169,10 +237,14 @@ def save(conn, data, username=None):
 
 
 def reset(conn, username=None):
-    """يعيد الهوية المسلَّمة مع النظام."""
-    conn.execute("DELETE FROM app_settings WHERE key=?", (KEY,))
-    d = defaults()
-    apply(d, custom=False)
+    """يمحو الهوية: المصنع بلا اسمٍ ولا شعار حتى يُنشئ هويته من جديد.
+
+    (كانت تعيد القيم المسلَّمة مع النظام — وهي هوية مصنعٍ آخر لا يجوز
+    أن تُطبع على أوراق هذا المصنع.)
+    """
+    _store(conn, blank(), username)
+    d = blank()
+    apply(d)
     return d
 
 
@@ -256,11 +328,19 @@ def _write_mirror(d):
 
 
 def apply_cached():
-    """قبل فتح القاعدة: يطبّق آخر هويةٍ اعتُمدت على هذا الجهاز."""
+    """قبل فتح القاعدة: يطبّق آخر هويةٍ اعتُمدت على هذا الجهاز.
+
+    وأول تشغيلٍ لمصنعٍ جديد (لا قاعدة بعد ولا نسخة مرآة): هويةٌ فارغة —
+    فلا تظهر في بوابة الدخول هويةُ مصنعٍ آخر ولو للحظة.
+    """
     try:
         m = _mirror()
         if m.exists():
             apply(json.loads(m.read_text(encoding="utf-8")))
+            return True
+        db_path = Path(str(getattr(config, "DB_PATH", "") or ""))
+        if str(db_path) and not db_path.exists():
+            _apply_memory(blank())
             return True
     except Exception:
         pass

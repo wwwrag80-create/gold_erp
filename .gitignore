@@ -20,6 +20,8 @@ backups/
 *.db-shm
 *.bak
 system_errors.log
+# مرآة هوية المصنع (اسمه وشعاره وختمه) — بيانات المصنع لا الكود
+branding/
 # سجلات الإقلاع والأعطال (crash_guard) — تبقى على الجهاز
 logs/
 

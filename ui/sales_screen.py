@@ -12,7 +12,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 import config
 from database.database import db
-from models import entities, inventory, invoices
+from models import entities, inventory, invoices, pending
 from models.accounts import acc_id
 from models.inventory import BULK_LABEL, is_bulk_no
 from services import drafts
@@ -22,9 +22,8 @@ from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                fill, has_model_image, info, load_pref,
                                make_table, mspin, reload_combo,
                                row_action_buttons, row_height, run_bg,
-                               save_pref,
-                               search_combo, show_model_image, title_label,
-                               wspin)
+                               save_pref, search_combo, show_model_image,
+                               TitledSections, wspin)
 from ui.widgets.table_fit import fit_columns
 
 DRAFT_KEY = "sales"
@@ -460,14 +459,26 @@ class SalesScreen(QtWidgets.QWidget):
         self._wo = None              # آخر طقمٍ استُدعي في سطر الإدخال
         self._w18 = [0.0] * 6        # ظلُّ الأوزان بمكافئ 18
         self._wage18 = 0.0           # وظلُّ الأجر
+        self._held_id = None         # المعلّقة المفتوحة للاستكمال
+
+        # قسمان (4.44): «إصدار فاتورة» و«المعلّقات» — فواتير بدأ
+        # إعدادها ولم تُثبت: بلا قيدٍ ولا أثر حتى تُستكمل وتُرحَّل
+        issue = QtWidgets.QWidget()
+        il = QtWidgets.QVBoxLayout(issue)
+        il.setContentsMargins(0, 4, 0, 0)
+        il.addWidget(self._build_header())
+        il.addWidget(self._build_entry())
+        il.addWidget(self._build_items(), 1)
+        il.addLayout(self._build_footer())
+        self.tabs = TitledSections(
+            "المبيعات والمرتجعات والتحويلات الداخلية — فوترة ZATCA")
+        self.tabs.addTab(issue, "إصدار فاتورة")
+        self.tabs.addTab(self._build_held(), "⏸ المعلّقات")
+        self.tabs.currentChanged.connect(
+            lambda i: self.load_held() if i == 1 else None)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label(
-            "المبيعات والمرتجعات والتحويلات الداخلية — فوترة ZATCA"))
-        lay.addWidget(self._build_header())
-        lay.addWidget(self._build_entry())
-        lay.addWidget(self._build_items(), 1)
-        lay.addLayout(self._build_footer())
+        lay.addWidget(self.tabs, 1)
         self._install_shortcuts()
         self._sync_kind_labels()
         self._update_mode()
@@ -760,6 +771,13 @@ class SalesScreen(QtWidgets.QWidget):
         self.btn_cancel_edit.setObjectName("ghost")
         self.btn_cancel_edit.clicked.connect(self.cancel_edit)
         self.btn_cancel_edit.setVisible(False)
+        # تعليق: تُحفظ الفاتورة في «المعلّقات» بلا قيد ولا أثر
+        self.btn_hold = QtWidgets.QPushButton("⏸ تعليق الفاتورة")
+        self.btn_hold.setObjectName("ghost")
+        self.btn_hold.setToolTip(
+            "تُحفظ الفاتورة في «المعلّقات» بلا ترحيل ولا أثر على المخزون أو"
+            " الحسابات — تُفتح لاحقاً لاستكمالها وإثباتها")
+        self.btn_hold.clicked.connect(self.hold_invoice)
         keys = QtWidgets.QLabel(
             "⌨ F3 رقم التشغيل  ·  F4 العميل  ·  Enter ينتقل ويضيف  ·  "
             "F2 ترحيل الفاتورة  ·  Delete حذف السطر المحدد  ·  "
@@ -770,10 +788,151 @@ class SalesScreen(QtWidgets.QWidget):
         v = QtWidgets.QVBoxLayout()
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.btn_save, 1)
+        row.addWidget(self.btn_hold)
         row.addWidget(self.btn_cancel_edit)
         v.addLayout(row)
         v.addWidget(keys)
         return v
+
+    # ══════════════════════════════════════════════════════════════
+    #  ⏸ المعلّقات — فواتير لم تُثبت بعد (بلا قيد ولا أثر)
+    # ══════════════════════════════════════════════════════════════
+
+    def _build_held(self):
+        w = QtWidgets.QWidget()
+        self.held_tbl = make_table()
+        self.held_tbl.doubleClicked.connect(lambda *_: self.open_held())
+        self.held_rows = []
+        b_open = QtWidgets.QPushButton("↩ فتح لاستكمالها وإثباتها")
+        b_open.setObjectName("homeBtn")
+        b_open.clicked.connect(self.open_held)
+        b_drop = QtWidgets.QPushButton("🗑 إلغاء المعلّقة")
+        b_drop.setObjectName("ghost")
+        b_drop.clicked.connect(self.drop_held)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(b_open)
+        row.addWidget(b_drop)
+        row.addStretch(1)
+        self.held_note = QtWidgets.QLabel("")
+        self.held_note.setObjectName("cardSub")
+        self.held_note.setWordWrap(True)
+        lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(0, 4, 0, 0)
+        lay.addLayout(row)
+        lay.addWidget(self.held_tbl, 1)
+        lay.addWidget(self.held_note)
+        return w
+
+    def load_held(self):
+        try:
+            with db(readonly=True) as conn:
+                self.held_rows = pending.list_held(conn)
+            u = kv.unit()
+            kinds = {"sale": "مبيعات", "sale_return": "مرتجع"}
+            fill(self.held_tbl,
+                 ["رقم", "النوع", "الطرف", "التاريخ", "عدد\nالأطقم",
+                  f"الوزن\n({u})", "الأجور\n(ريال)", "تنبيه",
+                  "ملاحظة", "علّقها", "آخر تحديث"],
+                 [(r["id"], kinds.get(r["kind"], r["kind"]), r["customer"],
+                   r["date"], r["count"], f"{kv.g(r['weight']):,.3f}",
+                   f"{r['wages']:,.2f}",
+                   (f"⚠ {r['unavailable']} طقم لم يعد بالمخزن"
+                    if r["unavailable"] else "—"),
+                   r["note"] or "—", r["created_by"],
+                   (r["created_at"] or "")[:16])
+                  for r in self.held_rows])
+            n = len(self.held_rows)
+            self.tabs.setTabText(1, f"⏸ المعلّقات ({n})" if n
+                                 else "⏸ المعلّقات")
+            self.held_note.setText(
+                "الفاتورة المعلّقة لا قيد لها ولا أثر على المخزون أو الذمم —"
+                " لا تُثبت إلا بالترحيل. «فتح لاستكمالها» يعيدها إلى «إصدار"
+                " فاتورة»: أكملها ثم رحّلها فتُثبت وتخرج من هنا. والتعليق لا"
+                " يحجز الطقم: إن بِيع في فاتورةٍ أخرى ظهر هنا تنبيه."
+                if n else "لا فواتير معلّقة.")
+        except Exception as e:
+            err(self, e)
+
+    def _held_selected(self):
+        i = self.held_tbl.currentRow()
+        if not (0 <= i < len(self.held_rows)):
+            raise ValueError("اختر فاتورةً معلّقة من الجدول أولاً")
+        return self.held_rows[i]
+
+    def hold_invoice(self):
+        """يعلّق الفاتورة الجارية: تُحفظ بلا ترحيل وتُمسح الشاشة."""
+        try:
+            if self.editing_id is not None:
+                raise ValueError("فاتورةٌ مُرحَّلة مفتوحة للتعديل لا تُعلَّق —"
+                                 " احفظ تعديلها أو ألغِه")
+            state = self.draft_state()
+            if not state:
+                raise ValueError("لا بنود في الفاتورة — أضف طقماً قبل"
+                                 " تعليقها")
+            note, ok = QtWidgets.QInputDialog.getText(
+                self, "تعليق الفاتورة",
+                "ملاحظة تُذكّرك بها (اختياري):",
+                text=self.description.text().strip())
+            if not ok:
+                return
+            with db() as conn:
+                hid = pending.hold_invoice(conn, state,
+                                           self.user["username"],
+                                           note.strip(), self._held_id)
+            self._held_id = None
+            self.description.clear()
+            self._clear_items_now()
+            self._clear_entry()
+            self.live_note.setVisible(False)
+            drafts.clear(DRAFT_KEY, self.user.get("username"))
+            self.load_held()
+            info(self, f"عُلّقت الفاتورة برقم {hid} في «المعلّقات» — بلا قيد"
+                       " ولا أثر على المخزون أو الحسابات.")
+        except Exception as e:
+            err(self, e)
+
+    def open_held(self):
+        """يعيد المعلّقة إلى «إصدار فاتورة» لاستكمالها وترحيلها."""
+        try:
+            r = self._held_selected()
+            if self.items and self._held_id != r["id"] and not ask(
+                    self, "في «إصدار فاتورة» بنودٌ لم تُرحَّل — ستُستبدل"
+                          " بالفاتورة المعلّقة. متابعة؟"):
+                return
+            if self.editing_id is not None:
+                self.cancel_edit()
+            with db(readonly=True) as conn:
+                state = pending.get_held(conn, r["id"])
+            self._clear_items_now()
+            if not self.apply_draft(state):
+                raise ValueError("أطقم هذه الفاتورة لم تعد موجودة —"
+                                 " ألغِ المعلّقة")
+            self._held_id = r["id"]
+            self.tabs.setCurrentIndex(0)
+            self.live_note.setText(
+                f"⏸ فاتورة معلّقة رقم {r['id']} — أكملها ثم رحّلها لإثباتها"
+                " (أو علّقها ثانيةً)."
+                + (f"  ⚠ {r['unavailable']} طقم فيها لم يعد بالمخزن"
+                   " — احذفه قبل الترحيل." if r["unavailable"] else ""))
+            self.live_note.setVisible(True)
+        except Exception as e:
+            err(self, e)
+
+    def drop_held(self):
+        try:
+            r = self._held_selected()
+            if not ask(self, f"إلغاء الفاتورة المعلّقة رقم {r['id']}"
+                             f" ({r['customer']} · {r['count']} طقم)؟"
+                             "\nلا قيد لها فلا يتأثر شيء في الحسابات."):
+                return
+            with db() as conn:
+                pending.drop_held(conn, r["id"], self.user["username"],
+                                  "أُلغيت")
+            if self._held_id == r["id"]:
+                self._held_id = None
+            self.load_held()
+        except Exception as e:
+            err(self, e)
 
     # ══════════════════════════════════════════════════════════════
     #  حساب المصدر
@@ -1994,6 +2153,12 @@ class SalesScreen(QtWidgets.QWidget):
                             self.user["username"], apply_vat, desc,
                             qr_enabled=self.qr_check.isChecked(),
                             source_account_id=src_id, scrap_karat=karat)
+                    # المعلّقة المستكملة أُثبتت الآن — تخرج من المعلّقات
+                    # في المعاملة نفسها (فلا تبقى معلّقةً فاتورةٌ رُحّلت)
+                    if self._held_id and self.editing_id is None:
+                        pending.drop_held(
+                            conn, self._held_id, self.user["username"],
+                            f"أُثبتت بالفاتورة {res.get('invoice_no', '')}")
             # ══ نشر صفحة الفاتورة — **بعد إغلاق المعاملة، وخارج خيط
             #    الواجهة** ══
             # الرفع داخل معاملة الكتابة يحبس قفل القاعدة ثوانيَ فتتعطّل
@@ -2060,6 +2225,9 @@ class SalesScreen(QtWidgets.QWidget):
                              f"من حساب: {res.get('source_name', '—')}",
                        "invoices", res["id"])
             self.editing_id = None
+            if self._held_id:
+                self._held_id = None
+                self.load_held()
             self.description.clear()
             self.clear_items()
             self._clear_entry()
@@ -2087,3 +2255,4 @@ class SalesScreen(QtWidgets.QWidget):
         # الاستعادة بعد تعبئة قائمة العملاء: قبلها لا يوجد ما يُختار
         # منه، فيضيع العميل المحفوظ في المسوّدة.
         self._restore_draft()
+        self.load_held()             # عدّاد «المعلّقات» على عنوانه

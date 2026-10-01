@@ -228,6 +228,9 @@ def seed_initial_data() -> None:
             conn.execute(
                 "INSERT INTO users(username,password_hash,full_name,role) VALUES(?,?,?,?)",
                 (u, hash_password(p), full, role))
+        # مصنعٌ جديد: هويته فارغة — بلا اسم مصنعٍ آخر ولا شعاره (4.44)
+        from services import branding
+        branding.init_new_factory(conn)
 
 
 # ترقية قواعد البيانات القائمة: تُضاف الحسابات الناقصة فقط، وتُعاد هيكلة

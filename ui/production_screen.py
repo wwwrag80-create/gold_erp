@@ -12,14 +12,14 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 import config
 from database.database import db
-from models import inventory
+from models import inventory, pending
 from models.accounts import acc_id
 from services import drafts, gold_math, karat_view as kv
 from ui.widgets.common import (busy, confirm_post, posted, ask, big_label,
                                date_edit, dstr, enter_chain, err, fill,
                                load_pref, make_table, mspin,
-                               row_action_buttons, save_pref, title_label,
-                               wspin)
+                               row_action_buttons, save_pref,
+                               TitledSections, wspin)
 from ui.widgets.table_fit import fit_columns
 
 DRAFT_KEY = "production"
@@ -183,12 +183,23 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self._calc = False
         self._w18 = [0.0, 0.0, 0.0]   # ظلُّ أوزان السطر بمكافئ 18
 
+        # قسمان (4.44): «توريد دفعة» للإدخال والترحيل والاستكمال،
+        # و«المستعجل» لدفعاتٍ رُحّل ما وصل منها وتنتظر باقيها
+        supply = QtWidgets.QWidget()
+        sl = QtWidgets.QVBoxLayout(supply)
+        sl.setContentsMargins(0, 4, 0, 0)
+        sl.addWidget(self._build_header())
+        sl.addWidget(self._build_entry())
+        sl.addWidget(self._build_batch(), 1)
+        self.tabs = TitledSections(
+            "الوارد من التصنيع — خزينة التصنيع إلى مخزن البضاعة")
+        self.tabs.addTab(supply, "توريد دفعة")
+        self.tabs.addTab(self._build_urgent(), "⚡ المستعجل")
+        self.tabs.currentChanged.connect(
+            lambda i: self.load_urgent() if i == 1 else None)
+
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label(
-            "الوارد من التصنيع — خزينة التصنيع إلى مخزن البضاعة"))
-        lay.addWidget(self._build_header())
-        lay.addWidget(self._build_entry())
-        lay.addWidget(self._build_batch(), 1)
+        lay.addWidget(self.tabs, 1)
 
     # ══════════════════════════════════════════════════════════════
     #  ① الوجهة والتاريخ
@@ -396,7 +407,15 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.totals = big_label()
         btn_post = QtWidgets.QPushButton(
             "ترحيل الدفعة (قيد محاسبي مجمّع واحد)")
-        btn_post.clicked.connect(self.post_batch)
+        btn_post.clicked.connect(lambda: self.post_batch(urgent=False))
+        # دفعةٌ وصل بعضها: يُرحَّل الواصل الآن ويُثبت في الحسابات، وتبقى
+        # في «المستعجل» حتى يُستكمل باقيها
+        self.btn_urgent = QtWidgets.QPushButton("⚡ ترحيل كدفعة مستعجلة")
+        self.btn_urgent.setObjectName("ghost")
+        self.btn_urgent.setToolTip(
+            "يُرحَّل ما في الجدول الآن بقيده المعتاد، وتبقى الدفعة في قسم"
+            " «المستعجل» حتى تُستكمل أطقمها الباقية")
+        self.btn_urgent.clicked.connect(lambda: self.post_batch(urgent=True))
         self.init_edit_mode(btn_post, "التوريد")
         # يظهر حين تُستعاد دفعة لم تُرحَّل — فلا يظن المستخدم أن
         # أسطراً ظهرت من تلقاء نفسها.
@@ -413,9 +432,116 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         v.addWidget(self.edit_banner)
         prow = QtWidgets.QHBoxLayout()
         prow.addWidget(btn_post, 1)
+        prow.addWidget(self.btn_urgent)
         prow.addWidget(self.btn_cancel_edit)
         v.addLayout(prow)
         return box
+
+    # ══════════════════════════════════════════════════════════════
+    #  ⚡ المستعجل — دفعاتٌ رُحّل ما وصل منها وتنتظر باقيها
+    # ══════════════════════════════════════════════════════════════
+
+    def _build_urgent(self):
+        w = QtWidgets.QWidget()
+        self.urgent_tbl = make_table()
+        self.urgent_tbl.doubleClicked.connect(
+            lambda *_: self.complete_selected())
+        self.urgent_rows = []
+        b_open = QtWidgets.QPushButton("✎ استكمال الدفعة")
+        b_open.setObjectName("homeBtn")
+        b_open.setToolTip("تُفتح الدفعة في «توريد دفعة» بأطقمها المرحَّلة —"
+                          " أضف الباقي ثم رحّلها فيُعدَّل قيدها وتخرج من هنا")
+        b_open.clicked.connect(self.complete_selected)
+        b_done = QtWidgets.QPushButton("✔ اكتملت كما هي")
+        b_done.setToolTip("إخراج الدفعة من «المستعجل» بلا إضافة — وصلت"
+                          " كاملةً أو لن يصل غيرها")
+        b_done.clicked.connect(self.close_urgent)
+        b_view = QtWidgets.QPushButton("👁 معاينة سند التوريد")
+        b_view.setObjectName("ghost")
+        b_view.clicked.connect(self.preview_urgent)
+        row = QtWidgets.QHBoxLayout()
+        for b in (b_open, b_done, b_view):
+            row.addWidget(b)
+        row.addStretch(1)
+        self.urgent_note = QtWidgets.QLabel("")
+        self.urgent_note.setObjectName("cardSub")
+        self.urgent_note.setWordWrap(True)
+        lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(0, 4, 0, 0)
+        lay.addLayout(row)
+        lay.addWidget(self.urgent_tbl, 1)
+        lay.addWidget(self.urgent_note)
+        return w
+
+    def load_urgent(self):
+        try:
+            with db(readonly=True) as conn:
+                self.urgent_rows = pending.list_urgent(conn)
+            u = kv.unit()
+            fill(self.urgent_tbl,
+                 ["تاريخ الترحيل", "رقم القيد", "المرجع", "إلى حساب",
+                  "عدد الأطقم", f"الوزن المقيد ({u})", "أُرسلت مستعجلةً في"],
+                 [(r["date"], r["entry_id"], r["reference"] or "—",
+                   r["dest"], r["count"], f"{kv.g(r['weight']):,.3f}",
+                   (r["created_at"] or "")[:16])
+                  for r in self.urgent_rows])
+            n = len(self.urgent_rows)
+            self.tabs.setTabText(1, f"⚡ المستعجل ({n})" if n
+                                 else "⚡ المستعجل")
+            self.urgent_note.setText(
+                "الدفعة المستعجلة مُرحَّلةٌ بما وصل منها ومُثبتةٌ في الحسابات."
+                " «استكمال الدفعة» يفتحها في «توريد دفعة»: أضف الأطقم"
+                " الباقية ثم رحّلها، فيُعدَّل قيدها بالفرق ويُطبع سندها بقيمته"
+                " الجديدة وتخرج من هنا." if n else
+                "لا دفعات مستعجلة — كل الدفعات مكتملة.")
+        except Exception as e:
+            err(self, e)
+
+    def _urgent_selected(self):
+        i = self.urgent_tbl.currentRow()
+        if not (0 <= i < len(self.urgent_rows)):
+            raise ValueError("اختر دفعةً من الجدول أولاً")
+        return self.urgent_rows[i]
+
+    def complete_selected(self):
+        """يفتح الدفعة المستعجلة في «توريد دفعة» للاستكمال."""
+        try:
+            r = self._urgent_selected()
+            if self.batch and not self.is_editing and not ask(
+                    self, "في «توريد دفعة» أطقمٌ لم تُرحَّل بعد — ستُستبدل"
+                          " بالدفعة المستعجلة. متابعة؟"):
+                return
+            self.tabs.setCurrentIndex(0)
+            self.load_entry(r["entry_id"])
+        except Exception as e:
+            err(self, e)
+
+    def close_urgent(self):
+        try:
+            r = self._urgent_selected()
+            if not ask(self, f"إخراج الدفعة (قيد {r['entry_id']} ·"
+                             f" {r['count']} طقم) من «المستعجل» كما هي؟"):
+                return
+            with db() as conn:
+                pending.complete_urgent(conn, r["entry_id"],
+                                        self.user["username"])
+            self.load_urgent()
+        except Exception as e:
+            err(self, e)
+
+    def preview_urgent(self):
+        try:
+            r = self._urgent_selected()
+            with db(readonly=True) as conn:
+                wo = conn.execute(
+                    "SELECT id FROM work_orders WHERE entry_id=? ORDER BY id"
+                    " LIMIT 1", (r["entry_id"],)).fetchone()
+            if not wo:
+                raise ValueError("لا أطقم مرتبطة بهذه الدفعة")
+            from services import print_manager
+            print_manager.preview_document(self, "work_orders", wo["id"])
+        except Exception as e:
+            err(self, e)
 
     # ══════════════════════════════════════════════════════════════
     #  حساب الوجهة
@@ -835,7 +961,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
     #  الترحيل
     # ══════════════════════════════════════════════════════════════
 
-    def post_batch(self):
+    def post_batch(self, urgent=False):
         if not self.batch:
             err(self, "أضف طقماً واحداً على الأقل إلى الدفعة قبل الترحيل")
             return
@@ -845,7 +971,10 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         if not ask(self, f"ترحيل {len(self.batch)} طقم إلى "
                          f"{self.dest.currentText()}"
                          + (f" (عيار {karat})" if karat else "")
-                         + " بقيد محاسبي مجمّع واحد؟"):
+                         + " بقيد محاسبي مجمّع واحد؟"
+                         + ("\n\n⚡ دفعة مستعجلة: تُثبت في الحسابات الآن"
+                            " وتبقى في «المستعجل» حتى تُستكمل."
+                            if urgent else "")):
             return
         try:
             # التحقق من حياة القيد **قبل** فتح المعاملة — لا داخلها
@@ -878,6 +1007,15 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                             self.user["username"],
                             dest_account_id=dest_id, scrap_karat=karat,
                             reference=self.reference.text().strip())
+                    # المستعجل علامةٌ على القيد نفسه — في المعاملة ذاتها
+                    _eid = res.get("entry_id")
+                    if urgent:
+                        pending.mark_urgent(conn, _eid,
+                                            self.user["username"])
+                    elif self.is_editing and pending.is_urgent(conn, _eid):
+                        pending.complete_urgent(conn, _eid,
+                                                self.user["username"])
+                        res["urgent_done"] = True
             # ══ ما بعد هذه النقطة: المعاملة أُغلقت بنجاح ══
             # بناء الرسالة عرضٌ لا ترحيل. خطأٌ فيه كان يظهر للمستخدم
             # «خطأ» على عمليةٍ **تمّت وحُفظت** — فيعيدها ظانّاً أنها
@@ -910,6 +1048,11 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 if res.get("dest_name"):
                     lines = f"إلى حساب: {res['dest_name']}\n" + lines
             was_editing = bool(self.is_editing)
+            if urgent:
+                lines += ("\n\n⚡ دفعة مستعجلة — في قسم «المستعجل» حتى"
+                          " تُستكمل أطقمها الباقية.")
+            elif res.get("urgent_done"):
+                lines += "\n\n✔ اكتملت الدفعة المستعجلة وخرجت من «المستعجل»."
             posted(self, f"تم ترحيل الدفعة بقيد رقم {res.get('entry_id')}\n"
                        f"إجمالي الوزن المقيد: "
                        f"{kv.g(res.get('total_registered') or 0):.2f} "
@@ -924,10 +1067,28 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             self.draft_note.setVisible(False)
             self.render_batch()
             self.refresh()
+            self.load_urgent()
         except Exception as e:
             err(self, e)
 
-    def load_document(self, source_id):
+    def load_entry(self, entry_id):
+        """يفتح دفعة توريد بقيدها (من «المستعجل») للاستكمال أو التعديل."""
+        with db(readonly=True) as conn:
+            wo = conn.execute(
+                "SELECT id FROM work_orders WHERE entry_id=? AND"
+                " is_deleted=0 ORDER BY id LIMIT 1", (entry_id,)).fetchone()
+            if wo is None:
+                ln = conn.execute(
+                    "SELECT w.id FROM wo_batch_lines b JOIN work_orders w"
+                    " ON w.work_order_no=b.wo_no AND w.is_deleted=0"
+                    " WHERE b.entry_id=? ORDER BY b.seq LIMIT 1",
+                    (entry_id,)).fetchone()
+                wo = ln
+        if wo is None:
+            raise ValueError("لا أطقم مرتبطة بهذه الدفعة")
+        self.load_document(wo["id"], entry_id=entry_id)
+
+    def load_document(self, source_id, entry_id=None):
         """يفتح دفعة توريد قائمة للتعديل: يُنزل كل أطقم القيد المجمّع
         نفسه في الجدول (لأن عكس القيد يعكس الدفعة كاملة)."""
         try:
@@ -936,6 +1097,11 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                     "SELECT * FROM work_orders WHERE id=?", (source_id,)).fetchone()
                 if not wo:
                     raise ValueError("رقم التشغيل غير موجود")
+                # الرقم التجميعي يُحدَّث قيدُه مع كل دفعة — فالدفعة المفتوحة
+                # من «المستعجل» تُعرف بقيدها لا بقيد الطقم الأخير
+                if entry_id:
+                    wo = dict(wo)
+                    wo["entry_id"] = entry_id
                 # الطقم المباع يُعدَّل توريده أيضاً: تصحيح وزن مُدخل
                 # خطأً واجب سواء بقي بالمخزن أو خرج. القيد العكسي
                 # يُلغي أثر التوريد القديم كاملاً ويُرحَّل الجديد،
@@ -1032,3 +1198,4 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             f"({snap['wo_count']} طقم)")
         self.render_batch()
         self._restore_draft()
+        self.load_urgent()           # عدّاد «المستعجل» على عنوانه
