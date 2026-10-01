@@ -194,6 +194,8 @@ def list_held(conn):
         bad = 0
         if st.get("kind", "sale") == "sale":
             for it in items:
+                if it.get("wage_only"):
+                    continue          # سطر أجرٍ فقط: لا طقم يُحجز
                 wo = conn.execute(
                     "SELECT status, is_deleted FROM work_orders WHERE id=?",
                     (it.get("wo_id"),)).fetchone()
@@ -206,7 +208,9 @@ def list_held(conn):
             "date": st.get("date") or "", "count": len(items),
             "weight": round(sum(float(i.get("weight") or 0)
                                 for i in items), 3),
-            "wages": round(sum(float(i.get("weight") or 0)
+            "wages": round(sum(float(i.get("amount") or 0)
+                               if i.get("wage_only") else
+                               float(i.get("weight") or 0)
                                * float(i.get("wage") or 0)
                                for i in items), 2),
             "note": r["note"] or "", "created_by": r["created_by"] or "",

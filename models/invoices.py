@@ -11,6 +11,7 @@ from models import accounts as _acc
 from models.accounts import acc_id
 from models.entities import get_entity
 from models.inventory import add_scrap_move, adjust_bulk_wo
+from models import stock_home
 from services import gold_math, zatca
 from services.accounting_engine import post_entry
 from services.audit import log_action
@@ -113,6 +114,19 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
     out = []
     seen_single = set()
     for c in cart:
+        if c.get("wage_only"):
+            # ══ سطر أجرٍ فقط ══ بلا ذهب ولا مخزون: مبلغٌ يُحمَّل على
+            # العميل في أجوره (ويُردّ في المرتجع) — يُشار به إلى الطقم
+            # الخدمي «أجر» لأن البند يشير إلى طقمٍ دائماً.
+            amt = round(float(c.get("amount") or 0), 2)
+            if amt <= 0:
+                raise ValueError("أدخل مبلغ الأجر لسطر «أجر فقط»")
+            out.append({"wo": stock_home.service_wo(conn), "weight": 0.0,
+                        "wage": 0.0, "amount": amt, "wage_only": True,
+                        "item_id": c.get("item_id"), "karat": 0,
+                        "acc": None,
+                        "note": str(c.get("note") or "").strip()})
+            continue
         wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
                           (c["work_order_id"],)).fetchone()
         if not wo:
@@ -169,8 +183,207 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
                     "item_id": c.get("item_id"),
                     # عيار الإدخال: وصفٌ لا حساب — الوزن والأجر
                     # وصلا هنا بمكافئ 18 على أي حال.
-                    "karat": int(c.get("karat") or 0)})
+                    "karat": int(c.get("karat") or 0),
+                    # بيت الطقم: منه يخرج وإليه يعود (stock_home)
+                    "acc": (stock_home.home_account(conn, wo)
+                            if stock_home.home_of(wo) else None),
+                    "note": str(c.get("note") or "").strip()})
     return out
+
+
+def _line_wages(li, internal):
+    """أجور السطر: مبلغه إن كان «أجراً فقط»، وإلا الأجر × الوزن."""
+    if internal:
+        return 0.0
+    if li.get("wage_only"):
+        return round(float(li["amount"]), 2)
+    return gold_math.total_wages(li["wage"], li["weight"])
+
+
+def _acc_weights(lines_info, src_id):
+    """أوزان الفاتورة موزّعةً على حسابات مخازنها — بترتيب ظهورها."""
+    out = {}
+    for li in lines_info:
+        if li.get("wage_only"):
+            continue
+        a = int(li.get("acc") or src_id)
+        out[a] = round(out.get(a, 0.0) + float(li["weight"] or 0), 3)
+    return [(a, w) for a, w in out.items() if abs(w) > 1e-9]
+
+
+def _scrap_acc(conn, acc_weights, src_id):
+    for a, _w in acc_weights:
+        if is_scrap_account(conn, a):
+            return a
+    return src_id
+
+
+def _scrap_weight(conn, acc_weights):
+    return round(sum(w for a, w in acc_weights
+                     if is_scrap_account(conn, a)), 3)
+
+
+def _scrap_karat(conn, lines_info, given):
+    """عيار ما خرج من صندوق الكسر: المختار في الفاتورة، وإلا عيار
+    الدفعة التي ورّدت الطقم إلى الصندوق."""
+    if given:
+        return int(given)
+    from models.inventory import batch_dest_karat
+    for li in lines_info:
+        a = li.get("acc")
+        if a and is_scrap_account(conn, a) and li["wo"]["entry_id"]:
+            k = batch_dest_karat(conn, li["wo"]["entry_id"])
+            if k:
+                return int(k)
+    return 0
+
+
+def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
+                 apply_vat):
+    """أسطر قيد الفاتورة — المرجع الواحد للإنشاء والتعديل.
+
+    الذهب يخرج من **حساب كل طقم** (أو يعود إليه)، فقد تحمل الفاتورة
+    الواحدة سطراً لكل مخزن. والأسطر الصفرية تُحذف: فاتورة «أجر فقط»
+    لا سطر ذهبٍ فيها.
+    """
+    total_w = round(sum(w for _a, w in acc_weights), 3)
+    ent_acc = ent["account_id"]
+
+    def _nm(a):
+        r = conn.execute("SELECT name FROM accounts WHERE id=?",
+                         (a,)).fetchone()
+        return r["name"] if r else str(a)
+
+    if internal:
+        if kind == "sale":
+            desc = f"تحويل داخلي (إعادة تشغيل) — إلى {ent['name']}"
+            lines = [{"account_id": ent_acc, "gold_debit": total_w,
+                      "line_desc": "استلام طقم لإعادة التشغيل"}]
+            lines += [{"account_id": a, "gold_credit": w,
+                       "line_desc": f"خروج الذهب من {_nm(a)}"}
+                      for a, w in acc_weights]
+        else:
+            desc = f"عكس تحويل داخلي — من {ent['name']}"
+            lines = [{"account_id": a, "gold_debit": w,
+                      "line_desc": f"عودة الذهب إلى {_nm(a)}"}
+                     for a, w in acc_weights]
+            lines.append({"account_id": ent_acc, "gold_credit": total_w,
+                          "line_desc": "إعادة الطقم من خزينة التصنيع"})
+    elif kind == "sale":
+        desc = ("فاتورة بيع" + ("" if apply_vat else " (غير ضريبية)")
+                + f" — {ent['name']}")
+        # الإيراد وزناً وأجوراً: الذهب بوزنه في «إيرادات مبيعات ذهب»
+        # 4110، ويقابله «الذهب المسلَّم من المخزون» 4950 بالوزن نفسه —
+        # فصافي الذهب من البيع صفر (يُباع بوزنه) وربح المصنع أجوره 4120.
+        lines = [
+            {"account_id": ent_acc, "gold_debit": total_w,
+             "cash_debit": grand,
+             "line_desc": "مديونية ذهب + أجور"
+                          + (" وضريبة" if apply_vat else "")},
+            {"account_id": acc_id(conn, "4110"), "gold_credit": total_w,
+             "line_desc": "إيراد مبيعات ذهب (وزناً)"},
+            {"account_id": acc_id(conn, "4120"), "cash_credit": wages,
+             "line_desc": "إيراد مبيعات أجور"},
+            {"account_id": acc_id(conn, "4950"), "gold_debit": total_w,
+             "line_desc": "الذهب المسلَّم من المخزون"},
+        ]
+        lines += [{"account_id": a, "gold_credit": w,
+                   "line_desc": f"خروج الذهب من {_nm(a)}"}
+                  for a, w in acc_weights]
+        if vat:
+            lines.append({"account_id": acc_id(conn, "2100"),
+                          "cash_credit": vat})
+    else:
+        desc = ("مرتجع بيع" + ("" if apply_vat else " (غير ضريبي)")
+                + f" — {ent['name']}")
+        # المرتجع: عكس البيع — مردودات الذهب وزناً 4910 والأجور 4920،
+        # ويعود كل طقمٍ إلى حسابه فيُعكس «الذهب المسلَّم» 4950
+        lines = [
+            {"account_id": acc_id(conn, "4910"), "gold_debit": total_w,
+             "line_desc": "مردودات مبيعات ذهب (وزناً)"},
+            {"account_id": acc_id(conn, "4920"), "cash_debit": wages,
+             "line_desc": "مردودات مبيعات أجور"},
+        ]
+        lines += [{"account_id": a, "gold_debit": w,
+                   "line_desc": f"عودة الذهب إلى {_nm(a)}"}
+                  for a, w in acc_weights]
+        lines.append({"account_id": acc_id(conn, "4950"),
+                      "gold_credit": total_w,
+                      "line_desc": "عودة الذهب إلى المخزون"})
+        if vat:
+            lines.append({"account_id": acc_id(conn, "2100"),
+                          "cash_debit": vat})
+        lines.append({"account_id": ent_acc, "gold_credit": total_w,
+                      "cash_credit": grand,
+                      "line_desc": "عكس مديونية الذهب والأجور"})
+    keys = ("gold_debit", "gold_credit", "cash_debit", "cash_credit")
+    lines = [l for l in lines
+             if any(abs(float(l.get(k) or 0)) > 1e-9 for k in keys)]
+    return desc, lines
+
+
+def _invoice_acc_weights(conn, invoice_id, src):
+    return [(int(r["a"]), round(float(r["w"] or 0), 3)) for r in conn.execute(
+        "SELECT COALESCE(it.stock_account_id, ?) a,"
+        " SUM(it.registered_weight) w FROM invoice_items it"
+        " JOIN work_orders wo ON wo.id=it.work_order_id"
+        " WHERE it.invoice_id=? AND COALESCE(wo.is_service,0)=0"
+        " GROUP BY 1 ORDER BY MIN(it.id)", (src, invoice_id))
+        if abs(float(r["w"] or 0)) > 1e-9]
+
+
+def _rebuild_invoice_entry(conn, invoice_id):
+    """يعيد كتابة أسطر قيد الفاتورة من بنودها — بعد تعديلها في مكانها.
+
+    القيد نفسه (رقمه وتاريخه ومستنده) يبقى؛ وأسطره تُبنى بالقاعدة
+    نفسها التي أنشأته، فتطابق الفاتورة دائماً: ذهب كل طقمٍ على حسابه،
+    والأجور وأسطر الأجر فقط، والضريبة.
+    """
+    inv = conn.execute("SELECT * FROM invoices WHERE id=?",
+                       (invoice_id,)).fetchone()
+    entry_id = inv["entry_id"]
+    if not entry_id:
+        raise ValueError("الفاتورة بلا قيد محاسبي — تعذّر التعديل")
+    ent = get_entity(conn, inv["customer_id"])
+    internal = ent["entity_type"] == "internal"
+    src = inv["source_account_id"] or acc_id(conn, DEFAULT_SOURCE)
+    acc_w = {}
+    for r in conn.execute(
+            "SELECT COALESCE(it.stock_account_id, ?) a,"
+            " SUM(it.registered_weight) w FROM invoice_items it"
+            " JOIN work_orders wo ON wo.id=it.work_order_id"
+            " WHERE it.invoice_id=? AND COALESCE(wo.is_service,0)=0"
+            " GROUP BY 1 ORDER BY MIN(it.id)", (src, invoice_id)):
+        if abs(float(r["w"] or 0)) > 1e-9:
+            acc_w[int(r["a"])] = round(float(r["w"]), 3)
+    wages = 0.0 if internal else round(float(inv["total_wages"] or 0), 2)
+    vat = 0.0 if internal else round(float(inv["vat_amount"] or 0), 2)
+    grand = round(wages + vat, 2)
+    _desc, lines = _entry_lines(conn, inv["kind"], internal, ent,
+                                list(acc_w.items()), wages, vat, grand,
+                                bool(inv["vat_applied"]))
+    if not lines:
+        raise ValueError("الفاتورة بلا قيمة بعد التعديل — احذفها بدل"
+                         " تعديلها")
+    from services.accounting_engine import validate_lines
+    validate_lines(lines)
+    conn.execute("DELETE FROM journal_lines WHERE entry_id=?", (entry_id,))
+    for l in lines:
+        conn.execute(
+            "INSERT INTO journal_lines(entry_id,account_id,gold_debit,"
+            "gold_credit,cash_debit,cash_credit,line_desc)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (entry_id, l["account_id"], round(float(l.get("gold_debit") or 0), 3),
+             round(float(l.get("gold_credit") or 0), 3),
+             round(float(l.get("cash_debit") or 0), 2),
+             round(float(l.get("cash_credit") or 0), 2),
+             l.get("line_desc", "")))
+    try:
+        from models import integrity
+        integrity.mark(conn, entry_id)
+    except Exception:
+        pass
+    return list(acc_w.items())
 
 
 def _verify_posted(conn, invoice_id, entry_id):
@@ -234,87 +447,34 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     internal = ent["entity_type"] == "internal"
     if internal:
         apply_vat = False
-    total_w = round(sum(li["weight"] for li in lines_info), 3)
+        if any(li.get("wage_only") for li in lines_info):
+            raise ValueError("سطر «أجر فقط» لا يصح في تحويلٍ داخلي —"
+                             " لا أجور على خزينة التصنيع")
 
+    item_wages = [_line_wages(li, internal) for li in lines_info]
     if internal:
-        item_wages = [0.0 for _ in lines_info]
         wages = vat = grand = 0.0
     else:
-        item_wages = [gold_math.total_wages(li["wage"], li["weight"])
-                      for li in lines_info]
         wages = round(sum(item_wages), 2)
         vat = gold_math.wages_vat(wages) if apply_vat else 0.0
         grand = round(wages + vat, 2)
-    ent_acc = ent["account_id"]
-    # حساب المصدر: يُتحقَّق منه قبل أي كتابة، ويُستعمل في كل سطرٍ كان
-    # مكتوباً فيه «1200» — فالمخزن الذي يخرج منه الذهب واحدٌ في
-    # القيد كما هو في الواقع.
+    # حساب العملية («من حساب»): يُتحقَّق منه قبل أي كتابة. يخرج منه
+    # (أو يعود إليه) ما لا بيت له من الأطقم — الرقم التجميعي وما لم
+    # يُعرف حسابه — وكل طقمٍ له بيتٌ يخرج من بيته هو.
     src_id = resolve_source(conn, source_account_id)
     src_name = conn.execute("SELECT code, name FROM accounts WHERE id=?",
                             (src_id,)).fetchone()
-
+    acc_weights = _acc_weights(lines_info, src_id)
+    total_w = round(sum(w for _a, w in acc_weights), 3)
+    desc, lines = _entry_lines(conn, kind, internal, ent, acc_weights,
+                               wages, vat, grand, apply_vat)
     if internal:
-        if kind == "sale":
-            desc = f"تحويل داخلي (إعادة تشغيل) — إلى {ent['name']}"
-            lines = [
-                {"account_id": ent_acc, "gold_debit": total_w,
-                 "line_desc": "استلام طقم لإعادة التشغيل"},
-                {"account_id": src_id, "gold_credit": total_w,
-                 "line_desc": f"خروج الذهب من {src_name['name']}"},
-            ]
-            new_status, prefix = "sold", "T"
-        else:
-            desc = f"عكس تحويل داخلي — من {ent['name']}"
-            lines = [
-                {"account_id": src_id, "gold_debit": total_w,
-                 "line_desc": f"عودة الذهب إلى {src_name['name']}"},
-                {"account_id": ent_acc, "gold_credit": total_w,
-                 "line_desc": "إعادة الطقم من خزينة التصنيع"},
-            ]
-            new_status, prefix = "in_stock", "TR"
+        new_status, prefix = ("sold", "T") if kind == "sale" \
+            else ("in_stock", "TR")
         qr_b64 = ""
     elif kind == "sale":
-        desc = ("فاتورة بيع" + ("" if apply_vat else " (غير ضريبية)")
-               + f" — {ent['name']}")
-        # الإيراد وزناً وأجوراً: الذهب بوزنه في «إيرادات مبيعات ذهب»
-        # 4110، ويقابله «الذهب المسلَّم من المخزون» 4950 بالوزن نفسه —
-        # وكلاهما في قسم الإيرادات، فصافي الذهب من البيع صفر (يُباع بوزنه)
-        # وربح المصنع أجوره 4120.
-        lines = [
-            {"account_id": ent_acc, "gold_debit": total_w, "cash_debit": grand,
-             "line_desc": "مديونية ذهب + أجور" + (" وضريبة" if apply_vat else "")},
-            {"account_id": acc_id(conn, "4110"), "gold_credit": total_w,
-             "line_desc": "إيراد مبيعات ذهب (وزناً)"},
-            {"account_id": acc_id(conn, "4120"), "cash_credit": wages,
-             "line_desc": "إيراد مبيعات أجور"},
-            {"account_id": acc_id(conn, "4950"), "gold_debit": total_w,
-             "line_desc": "الذهب المسلَّم من المخزون"},
-            {"account_id": src_id, "gold_credit": total_w,
-             "line_desc": f"خروج الذهب من {src_name['name']}"},
-        ]
-        if vat:
-            lines.append({"account_id": acc_id(conn, "2100"), "cash_credit": vat})
         new_status, prefix = "sold", "S"
     else:
-        desc = ("مرتجع بيع" + ("" if apply_vat else " (غير ضريبي)")
-               + f" — {ent['name']}")
-        # المرتجع: عكس البيع — مردودات الذهب وزناً 4910 والأجور 4920،
-        # ويعود الذهب إلى المخزون فيُعكس «الذهب المسلَّم» 4950
-        lines = [
-            {"account_id": acc_id(conn, "4910"), "gold_debit": total_w,
-             "line_desc": "مردودات مبيعات ذهب (وزناً)"},
-            {"account_id": acc_id(conn, "4920"), "cash_debit": wages,
-             "line_desc": "مردودات مبيعات أجور"},
-            {"account_id": src_id, "gold_debit": total_w,
-             "line_desc": f"عودة الذهب إلى {src_name['name']}"},
-            {"account_id": acc_id(conn, "4950"), "gold_credit": total_w,
-             "line_desc": "عودة الذهب إلى المخزون"},
-        ]
-        if vat:
-            lines.append({"account_id": acc_id(conn, "2100"), "cash_debit": vat})
-        lines.append({"account_id": ent_acc, "gold_credit": total_w,
-                      "cash_credit": grand,
-                      "line_desc": "عكس مديونية الذهب والأجور"})
         new_status, prefix = "in_stock", "R"
 
     if apply_vat and not internal:
@@ -324,7 +484,9 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     elif not internal:
         qr_b64 = ""
 
-    _karat = int(scrap_karat or 0) if is_scrap_account(conn, src_id) else 0
+    _scrap_w = _scrap_weight(conn, acc_weights)
+    _karat = (_scrap_karat(conn, lines_info, scrap_karat)
+              if _scrap_w > 0 or is_scrap_account(conn, src_id) else 0)
     cur = conn.execute(
         "INSERT INTO invoices(kind,customer_id,invoice_date,wage_per_gram,"
         "total_weight,total_wages,vat_amount,grand_total,qr_base64,vat_applied,"
@@ -347,10 +509,17 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
         wo = li["wo"]
         conn.execute(
             "INSERT INTO invoice_items(invoice_id,work_order_id,"
-            "registered_weight,wage_per_gram,wages,karat)"
-            " VALUES(?,?,?,?,?,?)",
+            "registered_weight,wage_per_gram,wages,karat,"
+            "stock_account_id,line_note)"
+            " VALUES(?,?,?,?,?,?,?,?)",
             (inv_id, wo["id"], li["weight"], li["wage"], w,
-             int(li.get("karat") or 0)))
+             int(li.get("karat") or 0), li.get("acc"),
+             li.get("note") or ""))
+        if li.get("wage_only"):
+            continue                 # أجرٌ فقط: لا مخزون يتحرّك
+        if kind == "sale_return" and not wo["is_bulk"] and not li.get("acc"):
+            # طقمٌ لا بيت له يعود إلى حساب المرتجع — فيصير بيته
+            stock_home.bind(conn, wo["id"], src_id)
         if wo["is_bulk"]:
             delta = li["weight"] if kind == "sale_return" else -li["weight"]
             adjust_bulk_wo(conn, delta, username, wo_id=wo["id"])
@@ -369,7 +538,8 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     # (TLV) وحده يُحفظ هنا، والصورة تُبنى عند عرضها أو طباعتها.
     qr_path = None
     # بيعٌ من صندوق الكسر: يُنقص الصندوق بعياره لا الحساب وحده
-    _sync_scrap_moves(conn, inv_id, src_id, _karat, total_w, kind)
+    _sync_scrap_moves(conn, inv_id, _scrap_acc(conn, acc_weights, src_id),
+                      _karat, _scrap_w, kind)
     # تحقق صريح قبل إنهاء المعاملة: لا فاتورة بلا قيد مرحَّل فعلياً
     _verify_posted(conn, inv_id, entry_id)
     # ══ الفاتورة الإلكترونية (المرحلة الثانية) ══
@@ -426,7 +596,8 @@ def get_invoice_full(conn, invoice_id):
     items = conn.execute(
         "SELECT it.id item_id, it.work_order_id, it.registered_weight,"
         " it.wage_per_gram, it.wages, COALESCE(it.karat,0) karat,"
-        " w.work_order_no, w.is_bulk,"
+        " COALESCE(it.line_note,'') line_note, it.stock_account_id,"
+        " w.work_order_no, w.is_bulk, COALESCE(w.is_service,0) is_service,"
         " w.gold_weight, w.small_stones, w.big_stones, w.stones_after_discount"
         " FROM invoice_items it JOIN work_orders w ON w.id=it.work_order_id"
         " WHERE it.invoice_id=? ORDER BY it.id", (invoice_id,)).fetchall()
@@ -734,13 +905,19 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         _src = resolve_source(conn, source_account_id)
         if int(_src) != int(_old_src):
             from models.accounts import account_name
-            if inv["entry_id"]:
-                conn.execute(
-                    "UPDATE journal_lines SET account_id=?"
-                    " WHERE entry_id=? AND account_id=?",
-                    (_src, inv["entry_id"], _old_src))
+            # أسطر القيد تُعاد كتابتها من البنود بعد التعديل
+            # (`_rebuild_invoice_entry`): ما لا بيت له من الأطقم ينتقل
+            # إلى الحساب الجديد، وما له بيتٌ يبقى على بيته.
             conn.execute("UPDATE invoices SET source_account_id=?"
                          " WHERE id=?", (_src, invoice_id))
+            if inv["kind"] == "sale_return":
+                # أطقمٌ صار حساب هذا المرتجع بيتَها تتبعه إلى الجديد
+                conn.execute(
+                    "UPDATE work_orders SET stock_account_id=? WHERE id IN"
+                    " (SELECT work_order_id FROM invoice_items WHERE"
+                    "  invoice_id=? AND stock_account_id IS NULL)"
+                    " AND stock_account_id=?",
+                    (_src, invoice_id, _old_src))
             _moved_src = (account_name(conn, _old_src),
                           account_name(conn, _src))
     _karat = int(scrap_karat or 0) if is_scrap_account(conn, _src) else 0
@@ -782,7 +959,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     # الدفتر بلا أثر. وحذفُ أحد سطرَيه لا يحذف شيئاً، لأن رقم طقمه
     # ما زال في السلة بسطره الآخر.
     old = [dict(r) for r in conn.execute(
-        "SELECT it.*, w.work_order_no wno, w.is_bulk"
+        "SELECT it.*, w.work_order_no wno, w.is_bulk,"
+        " COALESCE(w.is_service,0) is_service"
         " FROM invoice_items it"
         " JOIN work_orders w ON w.id=it.work_order_id"
         " WHERE it.invoice_id=? ORDER BY it.id", (invoice_id,))]
@@ -818,12 +996,15 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     dw = 0.0          # صافي فرق الوزن
     dg = 0.0          # صافي فرق الأجور
 
+    if internal and any(li.get("wage_only") for li in new_lines):
+        raise ValueError("سطر «أجر فقط» لا يصح في تحويلٍ داخلي")
     for li in new_lines:
         wo = li["wo"]
         wid = wo["id"]
         w = round(float(li["weight"] or 0), 3)
         wage = float(li["wage"] or 0)
-        wages = gold_math.total_wages(wage, w) if not internal else 0.0
+        wages = _line_wages(li, internal)
+        _svc = bool(li.get("wage_only"))
 
         # مطابقة السطر بسطره: برقمه إن جاء، وإلا فبطقمه المفرد.
         # وما لا يُطابَق سطرٌ **مُضاف** — وهو ما يجعل ١٠٠ ثم ٥٠
@@ -845,10 +1026,19 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         if prev is None:
             conn.execute(
                 "INSERT INTO invoice_items(invoice_id,work_order_id,"
-                "registered_weight,wage_per_gram,wages,karat)"
-                " VALUES(?,?,?,?,?,?)",
+                "registered_weight,wage_per_gram,wages,karat,"
+                "stock_account_id,line_note)"
+                " VALUES(?,?,?,?,?,?,?,?)",
                 (invoice_id, wid, w, wage, wages,
-                 int(li.get("karat") or 0)))
+                 int(li.get("karat") or 0), li.get("acc"),
+                 li.get("note") or ""))
+            if _svc:
+                dg += wages
+                added.append(f"{wo['work_order_no']} {wages:,.2f}")
+                continue
+            if kind == "sale_return" and not wo["is_bulk"] \
+                    and not li.get("acc"):
+                stock_home.bind(conn, wid, _src)
             # بند مُضاف: يحرّك المخزون فقط إن كانت هذه الفاتورة آخر
             # حركة للطقم — وإلا فحالته اليوم نتيجة حركة أحدث.
             if preserve_stock and is_last_movement(conn, wid, invoice_id):
@@ -868,12 +1058,16 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
 
         ow = round(float(prev["registered_weight"] or 0), 3)
         og = round(float(prev["wages"] or 0), 2)
+        _note = li.get("note") or ""
         if abs(w - ow) < 0.001 and abs(wages - og) < 0.01:
+            if _note != (prev.get("line_note") or ""):
+                conn.execute("UPDATE invoice_items SET line_note=?"
+                             " WHERE id=?", (_note, prev["id"]))
             continue
         conn.execute(
             "UPDATE invoice_items SET registered_weight=?,"
-            " wage_per_gram=?, wages=?, karat=? WHERE id=?",
-            (w, wage, wages, int(li.get("karat") or 0), prev["id"]))
+            " wage_per_gram=?, wages=?, karat=?, line_note=? WHERE id=?",
+            (w, wage, wages, int(li.get("karat") or 0), _note, prev["id"]))
         if wo["is_bulk"] and preserve_stock \
                 and is_last_movement(conn, wid, invoice_id):
             d = (w - ow)
@@ -893,7 +1087,9 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         og = round(float(prev["wages"] or 0), 2)
         # بند محذوف: يعود الطقم لحالته السابقة فقط إن كانت هذه
         # الفاتورة آخر حركة له — فيصير متاحاً للبيع فوراً.
-        if preserve_stock and is_last_movement(conn, wid, invoice_id):
+        if prev["is_service"]:
+            pass                     # أجرٌ فقط: لا مخزون يعود
+        elif preserve_stock and is_last_movement(conn, wid, invoice_id):
             if prev["is_bulk"]:
                 adjust_bulk_wo(
                     conn, -ow if kind == "sale_return" else ow, username,
@@ -916,8 +1112,14 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         # صحّح تاريخاً فقط رأى رسالةً تقول إنه لم يغيّر شيئاً —
         # والمستند قد انتقل فعلاً. فيُسجَّل هنا كما يُسجَّل هناك.
         # وكذلك نقلُ حساب المصدر وحده.
-        _sync_scrap_moves(conn, invoice_id, _src, _karat,
-                          float(inv["total_weight"] or 0), kind)
+        if _moved_src:
+            _aw = _rebuild_invoice_entry(conn, invoice_id)
+            _sync_scrap_moves(conn, invoice_id, _scrap_acc(conn, _aw, _src),
+                              _karat, _scrap_weight(conn, _aw), kind)
+        else:
+            _aw = _invoice_acc_weights(conn, invoice_id, _src)
+            _sync_scrap_moves(conn, invoice_id, _scrap_acc(conn, _aw, _src),
+                              _karat, _scrap_weight(conn, _aw), kind)
         # تصحيحُ البيان وحده تعديلٌ حقيقي كذلك: يُسجَّل ويُحفظ على
         # الفاتورة، ولا يُقال لصاحبه «لا تغيير» وقد تغيّر بيانه.
         if _desc_moved:
@@ -974,11 +1176,15 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
          if description is not None
          else (tw, tg, tvat, tgrand, invoice_id)))
 
-    # ── تعديل القيد بالفرق الصافي ──
-    _adjust_invoice_entry(conn, inv, kind, internal, dw, dg, dvat)
+    # ── أسطر القيد تُبنى من البنود بعد التعديل ──
+    # كانت تُضرب بنسبة التغيّر — يصحّ ذلك ومخزن الفاتورة واحد. أما
+    # وكل طقمٍ يخرج من حسابه، فطقمٌ يُضاف من مخزنٍ آخر لا تُصيبه نسبة؛
+    # فيُكتب القيد بالقاعدة التي أنشأته، ويبقى قيداً واحداً برقمه.
+    _aw = _rebuild_invoice_entry(conn, invoice_id)
     # حركة صندوق الكسر تُكتب من الإجمالي **بعد** التعديل لا بفرقه:
     # استبدالٌ لسطرٍ واحد، فلا يتراكم خصمان لفاتورةٍ عُدِّلت مرتين.
-    _sync_scrap_moves(conn, invoice_id, _src, _karat, tw, kind)
+    _sync_scrap_moves(conn, invoice_id, _scrap_acc(conn, _aw, _src),
+                      _karat, _scrap_weight(conn, _aw), kind)
 
     # صفحة الفاتورة على الجوال صارت غير مطابقة لها: تُعلَّم لتُعاد
     # كتابتها عقب الترحيل. والرمز المطبوع لا يتغيّر — المسار نفسه

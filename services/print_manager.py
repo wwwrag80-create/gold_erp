@@ -509,6 +509,15 @@ def _tpl_invoice(conn, invoice_id):
         after = (wo["stones_after_discount"] if wo else 0) or 0
         standing = (wo["standing_gold"] if wo else 0) or 0
         reg = it["registered_weight"]
+        if wo is not None and "is_service" in wo.keys() \
+                and wo["is_service"]:
+            # سطر «أجر فقط»: بيانه والمبلغ — بلا أوزان
+            _nt = (it["line_note"] if "line_note" in it.keys() else "") or ""
+            body_rows += "<tr>" + cells(
+                tdw("—"), tdw("أجر فقط" + (f" — {_nt}" if _nt else "")),
+                tdw(""), tdw(""), tdw(""), tdw(""), tdw(""), tdw(""),
+                tdw("—"), tdw(_w(it["wages"], 2))) + "</tr>"
+            continue
         # الرقم التجميعي سجلٌّ واحد يحمل **الرصيد الكلي**، فطباعة
         # أعمدته كما هي تُظهر كل الرصيد بدل الوزن المُدخل في السطر.
         # لذلك نعرض وزن السطر نفسه: القائم = المقيد والذهب = المقيد.
@@ -2227,10 +2236,12 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
     body = ""
     for r in rows:
         k = r["kind"]
-        if k == "sec":
+        if k in ("sec", "memohead"):
+            _bg = "#EFE9DC" if k == "sec" else "#F7F4EE"
+            _lb = (f'<b>{r["label"]}</b>' if k == "sec"
+                   else f'<i>{r["label"]}</i>')
             body += (f'<tr><td class="r" colspan="{ncol}"'
-                     f' style="background-color:#EFE9DC">'
-                     f'<b>{r["label"]}</b></td></tr>')
+                     f' style="background-color:{_bg}">{_lb}</td></tr>')
             continue
         vals = [_fp_money(r["cash"])]
         if has_cmp:
@@ -2238,7 +2249,13 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
         vals.append(_fp_money(r["gold"], True))
         if has_cmp:
             vals.append("" if k == "acct" else _fp_money(r["gold_cmp"], True))
-        if k == "line":
+        if k == "memo":
+            st_ = ' style="color:#555;font-style:italic"'
+            lbl = (f'<td class="r" style="padding-right:18px;color:#555;'
+                   f'font-style:italic">{r["label"]}</td>')
+            tds = [f'<td class="num"{st_}>{v}</td>' for v in vals]
+            tds.insert(0, "<td></td>")
+        elif k == "line":
             lbl = (f'<td class="r" style="padding-right:18px">'
                    f'{r["label"]}</td>')
             tds = [f'<td class="num">{v}</td>' for v in vals]
@@ -3183,7 +3200,8 @@ def _tpl_invoice_models(conn, invoice_id=0, per_page=4):
         " i.invoice_date d FROM invoice_items it"
         " JOIN invoices i ON i.id=it.invoice_id"
         " LEFT JOIN work_orders w ON w.id=it.work_order_id"
-        " WHERE it.invoice_id=? ORDER BY m, w.work_order_no",
+        " WHERE it.invoice_id=? AND COALESCE(w.is_service,0)=0"
+        " ORDER BY m, w.work_order_no",
         (invoice_id,)).fetchall()
     models = _group_models(rows)
     models.sort(key=lambda m: mc.model_key(m["model"]))

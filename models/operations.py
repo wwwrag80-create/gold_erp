@@ -21,11 +21,17 @@ from services.audit import log_action
 def _invoice_cart(conn, invoice_id):
     """يعيد بنود الفاتورة بصيغة سلة قابلة لإعادة الترحيل."""
     rows = conn.execute(
-        "SELECT work_order_id, registered_weight, wage_per_gram,"
-        " COALESCE(karat,0) karat"
-        " FROM invoice_items WHERE invoice_id=? ORDER BY id",
+        "SELECT it.work_order_id, it.registered_weight, it.wage_per_gram,"
+        " COALESCE(it.karat,0) karat, it.wages,"
+        " COALESCE(it.line_note,'') line_note,"
+        " COALESCE(w.is_service,0) is_service"
+        " FROM invoice_items it JOIN work_orders w ON w.id=it.work_order_id"
+        " WHERE it.invoice_id=? ORDER BY it.id",
         (invoice_id,)).fetchall()
-    return [{"work_order_id": r["work_order_id"],
+    return [{"wage_only": True, "amount": r["wages"],
+             "note": r["line_note"], "work_order_id": r["work_order_id"]}
+            if r["is_service"] else
+            {"work_order_id": r["work_order_id"],
              "weight": r["registered_weight"],
              "karat": r["karat"],
              "wage_override": r["wage_per_gram"]} for r in rows]
@@ -192,8 +198,8 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
         raise ValueError("لا يمكن ترك الفاتورة بلا بنود — احذفها بدل ذلك")
 
     old_cart = _invoice_cart(conn, invoice_id)
-    old_ids = {c["work_order_id"] for c in old_cart}
-    new_ids = {c["work_order_id"] for c in new_cart}
+    old_ids = {c["work_order_id"] for c in old_cart if not c.get("wage_only")}
+    new_ids = {c["work_order_id"] for c in new_cart if not c.get("wage_only")}
     removed, added = old_ids - new_ids, new_ids - old_ids
     kind = inv["kind"]
 

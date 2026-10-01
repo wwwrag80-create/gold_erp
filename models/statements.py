@@ -530,42 +530,55 @@ def layout(fp):
 # جمعٌ مباشر، والسالب يُطبع بين قوسين.
 
 IS_LINES = [
-    ("sales", "المبيعات والإيرادات", "rev"),
+    # 4.45: «المبيعات» أولاً — إيرادات مبيعات الذهب 4110 والأجور 4120.
+    # الذهب يُباع بوزنه: «إيرادات مبيعات ذهب» 4110 ومردوداتها 4910
+    # ومقابلهما «الذهب المسلَّم من المخزون» 4950 تُصفّى في هذا البند
+    # (صافيها صفرٌ وزناً)، فلا يظهر سطرُ «الذهب المسلَّم» — ووزن الذهب
+    # المباع يُعرض في «بيانات للعلم» أسفل القائمة.
+    ("sales", "المبيعات (مبيعات الذهب والأجور)", "rev"),
     ("returns", "يُطرح: مردودات المبيعات", "rev"),
-    # الذهب يُباع بوزنه — «إيرادات مبيعات ذهب» 4110 و«مردوداتها» 4910
-    # في بندَيهما، ويقابل صافيَهما «الذهب المسلَّم من المخزون» 4950
-    ("gold_out", "يُطرح: الذهب المسلَّم من المخزون (وزناً)", "rev"),
     ("discounts", "يُطرح: الخصم المسموح به", "rev"),
     ("net_diff", "يُضاف: فرق الصافي", "rev"),
+    # ثم بقية حسابات الإيرادات — ومنها إيرادات التحصيل (4500): ما
+    # يُقبض إيراداً لا سداداً لذمّة
+    ("other_rev", "إيرادات التحصيل والإيرادات العرضية", "orev"),
     # 4.40: «خسائر الورشة» — الفواقد كاملةً ثم المسترجع منها وحده
     ("workshop", "فواقد الورشة", "cos"),
     ("recovered", "يُخصم: المسترجع من التصفية", "cos"),
+    # 4.45: المصاريف التشغيلية بالترتيب المطلوب
     ("admin", "المصاريف الإدارية والعمومية", "opex"),
-    ("labor", "رواتب وأجور التشغيل", "opex"),
+    ("labor", "مصروفات العمال", "opex"),
+    ("mgmt", "رواتب الإدارة", "opex"),
     ("materials", "مواد ومصروفات تشغيل مباشرة", "opex"),
     ("zakat", "الزكاة", "zakat"),
 ]
 IS_SUBTOTALS = [
     # (بعد القسم، المفتاح، العنوان)
-    ("rev", "net_revenue", "صافي الإيرادات"),
+    ("rev", "net_sales", "صافي المبيعات"),
+    ("orev", "net_revenue", "إجمالي الإيرادات"),
     ("cos", "gross", "مجمل الربح بعد خسائر الورشة"),
     ("opex", "before_zakat", "صافي الربح (الخسارة) قبل الزكاة"),
     ("zakat", "net", "صافي ربح (خسارة) الفترة"),
 ]
-IS_SECTIONS = {"rev": "الإيرادات", "cos": "خسائر الورشة",
-               "opex": "المصاريف التشغيلية", "zakat": "الزكاة"}
+IS_SECTIONS = {"rev": "المبيعات", "orev": "الإيرادات الأخرى والتحصيلية",
+               "cos": "خسائر الورشة", "opex": "المصاريف التشغيلية",
+               "zakat": "الزكاة"}
 
-# نموذجٌ مبسّط لمصنع ذهب (4.40): لا قسم «إيرادات ومصروفات أخرى» — ما
-# لا بند له من الإيراد يُضمّ إلى المبيعات والإيرادات، ومن المصروف إلى
-# المصاريف الإدارية والعمومية (ومنها الإهلاك والخسائر الائتمانية).
+# نموذجٌ مبسّط لمصنع ذهب: ما لا بند له من الإيراد يُضمّ إلى «الإيرادات
+# الأخرى والتحصيلية»، ومن المصروف إلى المصاريف الإدارية والعمومية (ومنها
+# الإهلاك والخسائر الائتمانية).
 _IS_MAP = {
+    "4100": "sales", "4110": "sales", "4120": "sales", "4130": "sales",
+    "4910": "sales", "4950": "sales",          # زوج الذهب وزناً — صافيه صفر
     "4900": "returns", "5200": "discounts", "5300": "discounts",
     "5600": "net_diff",
     "5100": "workshop", "5190": "recovered",
-    "5690": "labor", "5700": "labor", "5710": "labor",
+    # مصروفات العمال: رواتب عمال التصنيع (مسيرها) وما صُرف لعاملٍ
+    # وحُمِّل مصروفاً بسند صرف — ورواتب الإدارة: مسير الموظفين
+    "5690": "labor", "5710": "labor",
+    "5700": "mgmt", "5805": "mgmt",
     "5050": "materials",
     "5800": "admin", "5900": "admin", "5950": "zakat",
-    "4950": "gold_out",
 }
 
 
@@ -576,7 +589,7 @@ def _is_classify(node, by_id, root_type):
             return _IS_MAP[cur["code"]]
         cur = by_id.get(cur["parent_id"])
         seen += 1
-    return "sales" if root_type == "revenue" else "admin"
+    return "other_rev" if root_type == "revenue" else "admin"
 
 
 def _is_period(conn, d1, d2, dim, rows, by_id):
@@ -649,7 +662,52 @@ def income_statement(conn, date_from, date_to, compare=True):
             cv, ct, _d = _is_period(conn, c1, c2, dim, rows, by_id)
             out[dim]["compare"] = cv
             out[dim]["compare_totals"] = ct
+    out["memo"] = _is_memo(conn, date_from, date_to)
+    if c1:
+        out["memo_cmp"] = _is_memo(conn, c1, c2)
     return out
+
+
+IS_MEMO = [
+    ("m_sold", "وزن الذهب المباع للعملاء (4110)"),
+    ("m_returned", "وزن الذهب المردود من العملاء (4910)"),
+    ("m_collect", "تحصيلات الفترة من سندات القبض — سدادٌ لذمم"),
+]
+
+
+def _is_memo(conn, d1, d2):
+    """بياناتٌ للعلم أسفل قائمة الدخل — لا تدخل في الربح.
+
+    **وزن الذهب المباع**: الذهب يُباع بوزنه فيُقابل إيرادَه الوزنيَّ
+    «الذهب المسلَّم من المخزون» بالوزن نفسه، وصافيهما في الربح صفر.
+    فالوزن يُعرض هنا لا بنداً يُطرح في القائمة.
+
+    **التحصيلات**: سند القبض من عميلٍ **سدادٌ** لذمّته التي نشأت يوم
+    البيع، وإيرادها قُيّد حينها في «المبيعات». عدُّها إيراداً ثانيةً
+    يضاعف الإيراد. فتُعرض هنا للعلم — وما يُقبض إيراداً حقيقياً (لا
+    ذمّة له) يُقبض على «إيرادات التحصيل» 4500 فيدخل القائمة بنده.
+    """
+    def _acc(code, sign_col):
+        r = conn.execute(
+            f"SELECT COALESCE(SUM({sign_col}),0) v FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
+            " JOIN accounts a ON a.id=l.account_id AND a.code=?"
+            " WHERE e.entry_date BETWEEN ? AND ?", (code, d1, d2)).fetchone()
+        return round(float(r["v"] or 0), 3)
+    sold = _acc("4110", "l.gold_credit-l.gold_debit")
+    ret = _acc("4910", "l.gold_debit-l.gold_credit")
+    r = conn.execute(
+        "SELECT COALESCE(SUM(v.cash_amount),0) c,"
+        " COALESCE(SUM(v.gold_equiv18),0) g FROM vouchers v"
+        " JOIN journal_entries e ON e.id=v.entry_id AND e.is_deleted=0"
+        " JOIN accounts a ON a.id=v.target_account_id"
+        " WHERE v.kind='receipt' AND v.is_deleted=0"
+        " AND v.voucher_date BETWEEN ? AND ? AND a.type<>'revenue'",
+        (d1, d2)).fetchone()
+    return {"m_sold": {"cash": 0.0, "gold": sold},
+            "m_returned": {"cash": 0.0, "gold": ret},
+            "m_collect": {"cash": round(float(r["c"] or 0), 2),
+                          "gold": round(float(r["g"] or 0), 3)}}
 
 
 def is_layout(st, accounts=False):
@@ -682,6 +740,17 @@ def is_layout(st, accounts=False):
                     out.extend(_is_accounts(st, ln["key"]))
         out.append(row("grand" if key == "net" else "sub", title, key,
                        tot=True))
+    memo = st.get("memo")
+    if memo:
+        cm = st.get("memo_cmp") or {}
+        out.append({"kind": "memohead",
+                    "label": "بياناتٌ للعلم — لا تدخل في صافي الربح",
+                    "key": "memo"})
+        for k, label in IS_MEMO:
+            out.append({"kind": "memo", "label": label, "key": k,
+                        "cash": memo[k]["cash"], "gold": memo[k]["gold"],
+                        "cash_cmp": (cm.get(k) or {}).get("cash", 0.0),
+                        "gold_cmp": (cm.get(k) or {}).get("gold", 0.0)})
     return out
 
 

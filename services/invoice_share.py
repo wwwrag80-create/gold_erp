@@ -113,7 +113,8 @@ def model_lines(conn, invoice_id):
             " COUNT(*) n, ROUND(SUM(it.registered_weight),3) g"
             " FROM invoice_items it"
             " JOIN work_orders w ON w.id=it.work_order_id"
-            " WHERE it.invoice_id=? GROUP BY m ORDER BY m",
+            " WHERE it.invoice_id=? AND COALESCE(w.is_service,0)=0"
+            " GROUP BY m ORDER BY m",
             (invoice_id,)).fetchall()
     except Exception:
         return []

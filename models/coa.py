@@ -550,3 +550,168 @@ def child_count_safe(account_id):
             return child_count(conn, account_id)
     except Exception:
         return 0
+
+
+# ══════════════════════════════════════════════════════════════════
+#  نقل حسابٍ تحت أبٍ آخر (4.45)
+# ══════════════════════════════════════════════════════════════════
+#
+# الحساب ينتقل **بمعرّفه** — فقيوده كلها تنتقل معه كما هي، ولا يُمسّ
+# رصيدٌ ولا مستند. الذي يتغيّر مكانه في الشجرة، وبه نهجه المحاسبي:
+#   • النوع والطبيعة يرثهما من أبيه الجديد (كما يرث الحساب المُنشأ
+#     تحته) — فحسابٌ نُقل من المصروفات الإدارية إلى مواد التشغيل يظهر
+#     في بندها من قائمة الدخل، ومن الأصول إلى الخصوم يظهر في الميزانية
+#     مطلوباً لا أصلاً. والحساب المقابل (طبيعته عكس أبيه) يبقى مقابلاً.
+#   • نوع القياس (نقد/ذهب) يبقى له — فهو صفة حركته لا مكانه.
+#   • الكود يبقى كما هو افتراضاً، ويُعاد ترقيمه تحت الأب الجديد عند
+#     الطلب (إلا الحسابات التي يقرؤها النظام بكودها).
+#   • يُوسم «منقولاً بيد المستخدم» فلا تُعيده الهيكلة القياسية عند
+#     الإقلاع إلى مكانه القديم.
+#
+# الضوابط: لا يُنقل حسابٌ رئيسي (جذر)، ولا تحت نفسه أو أحد فروعه
+# (حلقة)، ولا تحت حسابِ حركةٍ عليه قيود (فيختلط رصيده المباشر بأرصدة
+# أبنائه). وحسابُ جهة تعامل لا يُنقل إلى قسمٍ آخر من هنا — تغيير نوع
+# الجهة (عميل ← مورد) من «التكويد الموحّد» يفعل ذلك مع بطاقة الجهة.
+
+def _subtree(conn, account_id):
+    ids, frontier = [int(account_id)], [int(account_id)]
+    while frontier:
+        frontier = [r["id"] for r in conn.execute(
+            "SELECT id FROM accounts WHERE parent_id IN (%s)"
+            % ",".join("?" * len(frontier)), frontier)]
+        ids += frontier
+    return ids
+
+
+def _root(conn, account_id):
+    cur, guard = get_account(conn, account_id), 0
+    while cur is not None and cur["parent_id"] and guard < 30:
+        cur = get_account(conn, cur["parent_id"])
+        guard += 1
+    return cur
+
+
+def _program_codes():
+    """أكواد يقرؤها البرنامج بكودها — لا يُعاد ترقيمها."""
+    try:
+        from database.seed import ACCOUNTS
+        return {a[0] for a in ACCOUNTS}
+    except Exception:
+        return set()
+
+
+def move_targets(conn, account_id):
+    """الآباء الممكنون: كل حسابٍ نشط ليس الحساب ولا من فروعه، وليس
+    حسابَ حركةٍ عليه قيود. يعيد (id, code, name, type, is_postable)."""
+    sub = set(_subtree(conn, account_id))
+    acc = get_account(conn, account_id)
+    out = []
+    for r in conn.execute(
+            "SELECT id, code, name, type, is_postable, parent_id"
+            " FROM accounts WHERE is_active=1 ORDER BY code"):
+        if r["id"] in sub or (acc and r["id"] == acc["parent_id"]):
+            continue
+        if r["is_postable"] and has_movement(conn, r["id"], live_only=False):
+            continue
+        out.append(r)
+    return out
+
+
+def move_account(conn, account_id, new_parent_id, username, recode=False,
+                 entity_ok=False):
+    acc = get_account(conn, account_id)
+    if not acc:
+        raise ValueError("الحساب غير موجود")
+    if not acc["parent_id"]:
+        raise ValueError(f"«{acc['code']} — {acc['name']}» حسابٌ رئيسي في"
+                         " رأس الشجرة — لا يُنقل")
+    par = get_account(conn, new_parent_id)
+    if not par:
+        raise ValueError("اختر الحساب الذي يُنقل تحته")
+    if not par["is_active"]:
+        raise ValueError(f"«{par['name']}» مجمَّد — نشِّطه أولاً")
+    if int(par["id"]) == int(acc["parent_id"]):
+        raise ValueError(f"الحساب تحت «{par['name']}» أصلاً")
+    sub = _subtree(conn, account_id)
+    if int(par["id"]) in sub:
+        raise ValueError("لا يُنقل الحساب تحت نفسه أو تحت أحد فروعه")
+    if par["is_postable"] and has_movement(conn, par["id"], live_only=False):
+        raise ValueError(
+            f"«{par['code']} — {par['name']}» حسابُ حركةٍ عليه قيود — لا "
+            "يصير أباً لحساب آخر: يختلط رصيده المباشر بأرصدة أبنائه فلا "
+            "يُقرأ أيٌّ منهما. اختر حساباً تجميعياً (رئيسياً).")
+    old_root, new_root = _root(conn, acc["id"]), _root(conn, par["id"])
+    cross = (old_root and new_root and old_root["id"] != new_root["id"])
+    if cross and not entity_ok:
+        q = ",".join("?" * len(sub))
+        ent = conn.execute(
+            f"SELECT name FROM entities WHERE is_deleted=0 AND"
+            f" (account_id IN ({q}) OR capital_account_id IN ({q}))",
+            sub + sub).fetchone()
+        if ent:
+            raise ValueError(
+                f"حساب الجهة «{ent['name']}» لا يُنقل إلى قسمٍ آخر من هنا"
+                " — غيّر نوع الجهة من «التكويد الموحّد لجهات التعامل»"
+                " فينتقل حسابها مع بطاقتها.")
+        tag = conn.execute(
+            f"SELECT code, name FROM accounts WHERE id IN ({q})"
+            " AND COALESCE(system_tag,'')<>''", sub).fetchone()
+        if tag:
+            raise ValueError(
+                f"«{tag['code']} — {tag['name']}» حسابٌ نظامي تُرحِّل عليه"
+                " العمليات الآلية — لا يُنقل إلى قسمٍ آخر من الشجرة.")
+    # الطبيعة: يرثها من أبيه الجديد؛ والحساب المقابل (عكس أبيه) يبقى عكسه
+    old_par = get_account(conn, acc["parent_id"])
+    contra = old_par is not None and acc["nature"] != old_par["nature"]
+    flip = {"debit": "credit", "credit": "debit"}
+    new_nature = flip[par["nature"]] if contra else par["nature"]
+    for aid in sub:
+        r = get_account(conn, aid)
+        n = new_nature if r["nature"] == acc["nature"] else flip[new_nature]
+        conn.execute("UPDATE accounts SET type=?, nature=? WHERE id=?",
+                     (par["type"], n, aid))
+    old_code = acc["code"]
+    new_code = old_code
+    if recode:
+        prog = _program_codes()
+        q = ",".join("?" * len(sub))
+        bad = conn.execute(
+            f"SELECT code FROM accounts WHERE id IN ({q}) AND"
+            " COALESCE(system_tag,'')<>''", sub).fetchone()
+        if bad or any(get_account(conn, a)["code"] in prog for a in sub):
+            raise ValueError(
+                "حسابٌ يقرؤه النظام بكوده لا يُعاد ترقيمه — يُنقل بكوده"
+                " كما هو (ألغِ «إعادة الترقيم»)")
+        new_code = next_child_code(conn, par["id"])
+        for aid in sub[1:]:
+            c = get_account(conn, aid)["code"]
+            if c.startswith(old_code):
+                cand = new_code + c[len(old_code):]
+                if not conn.execute("SELECT 1 FROM accounts WHERE code=?",
+                                    (cand,)).fetchone():
+                    conn.execute("UPDATE accounts SET code=? WHERE id=?",
+                                 (cand, aid))
+    conn.execute("UPDATE accounts SET parent_id=?, code=?, parent_locked=1"
+                 " WHERE id=?", (par["id"], new_code, acc["id"]))
+    # الأب الجديد صار تجميعياً؛ والقديم إن خلا من الأبناء ولا حركة له
+    # يعود حساب حركة فلا يبقى مجموعةً فارغة لا تقبل شيئاً
+    if par["is_postable"]:
+        conn.execute("UPDATE accounts SET is_postable=0 WHERE id=?",
+                     (par["id"],))
+    if old_par is not None and not child_count(conn, old_par["id"]) \
+            and old_par["parent_id"] \
+            and not has_movement(conn, old_par["id"], live_only=False):
+        conn.execute("UPDATE accounts SET is_postable=1 WHERE id=?",
+                     (old_par["id"],))
+    recompute_levels(conn)
+    msg = (f"نقل {old_code} — {acc['name']}: من {old_par['code'] if old_par else '—'}"
+           f" إلى {par['code']} — {par['name']}"
+           + (f" · الكود {old_code} ← {new_code}" if new_code != old_code
+              else "")
+           + (f" · النوع {TYPE_LABELS.get(acc['type'])} ← "
+              f"{TYPE_LABELS.get(par['type'])}" if cross else ""))
+    log_action(conn, username, "update", "accounts", acc["id"], msg)
+    return {"id": acc["id"], "old_code": old_code, "code": new_code,
+            "parent": f"{par['code']} — {par['name']}",
+            "type": par["type"], "nature": new_nature,
+            "moved": len(sub), "cross": bool(cross), "message": msg}

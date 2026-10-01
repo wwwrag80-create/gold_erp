@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users(
 CREATE TABLE IF NOT EXISTS accounts(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name_locked INTEGER NOT NULL DEFAULT 0,
+  parent_locked INTEGER NOT NULL DEFAULT 0,
   code TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
   account_level INTEGER NOT NULL DEFAULT 1,
@@ -880,6 +881,11 @@ def migrate_schema() -> None:
         if cols and "name_locked" not in cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN"
                          " name_locked INTEGER NOT NULL DEFAULT 0")
+        # 4.45: حسابٌ نقله المستخدم تحت أبٍ آخر يبقى حيث وضعه — لا
+        # تُعيده الهيكلة القياسية عند الإقلاع
+        if cols and "parent_locked" not in cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN"
+                         " parent_locked INTEGER NOT NULL DEFAULT 0")
 
         # 24) دمج صندوق الصافي 24 في صندوق الكسر
         # كلاهما ذهب خام؛ فصلهما كان يفرض متابعة رصيدين لبضاعة
@@ -1437,6 +1443,10 @@ def migrate_schema() -> None:
         # 4.44: الدفعات المستعجلة والفواتير المعلّقة
         from models.pending import ensure_schema as _pd_schema
         _pd_schema(conn)
+
+        # 4.45: بيت الطقم (حساب مخزنه) وسطر «أجر فقط»
+        from models.stock_home import ensure_schema as _sh_schema
+        _sh_schema(conn)
 
         # 4.44: قاعدةٌ قائمة بلا هويةٍ محفوظة تحفظ هويتها كما تظهر —
         # فالمصنع الجديد وحده يبدأ بهويةٍ فارغة

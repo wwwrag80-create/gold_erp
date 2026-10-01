@@ -3521,6 +3521,10 @@ def main():
             {"wo_no": "SRC-2", "gold": 30.0, "small_stones": 0.0,
              "big_stones": 0.0, "wage_per_gram": 20.0},
         ], "2026-12-20", "admin")
+        # أطقمٌ بلا بيت (كما قبل 4.45): تتبع «من حساب» الفاتورة. أما
+        # الطقم المرتبط بحسابه فيخرج من حسابه — فحصه في الخطوة 79.
+        conn.execute("UPDATE work_orders SET stock_account_id=NULL"
+                     " WHERE work_order_no IN ('SRC-1','SRC-2')")
         _scrap44 = acc_id(conn, "1310")
         _worked44 = acc_id(conn, "1200")
         post_entry(conn, "2026-12-20", "رصيد كسر للاختبار", [
@@ -3639,7 +3643,7 @@ def main():
               _scr44._chain == _order44 and len(_scr44._enter_navs) >= 1)
         check("وأعمدة الجدول بالترتيب نفسه بعد عمود الأزرار",
               _scr44.COLS == ["", "الموديل", "رقم التشغيل", "العيار",
-                              "الوزن المقيد", "الوزن القائم", "الذهب",
+                              "الحساب", "الوزن المقيد", "الوزن القائم", "الذهب",
                               "الفصوص", "الأحجار", "الأحجار بعد الخصم",
                               "الأجر/جم", "الأجرة (ريال)"],
               " · ".join(_scr44.COLS))
@@ -5751,13 +5755,16 @@ def main():
     _v68 = _is["cash"]["values"]
     check("المجاميع المرحلية: صافي الإيراد ← مجمل الربح ← التشغيلي ← الصافي",
           abs(_t68["net_revenue"] - (_v68["sales"] + _v68["returns"]
-                                     + _v68["discounts"])) < 0.02
+                                     + _v68["discounts"] + _v68["net_diff"]
+                                     + _v68["other_rev"])) < 0.02
           and abs(_t68["gross"] - _t68["net_revenue"] - _t68["cos"]) < 0.02
           and abs(_t68["operating"] - _t68["gross"] - _t68["opex"]) < 0.02
           and _v68["returns"] <= 0.001 and "compare" in _is["cash"])
     _li68 = _st67.is_layout(_is, accounts=True)
     check("قائمة الدخل: أقسامها وإيضاح حساباتها · بلا ضريبة ولا سداد",
-          _li68[-1]["label"] == "صافي ربح (خسارة) الفترة"
+          any(x["kind"] == "grand" and x["label"] == "صافي ربح (خسارة) الفترة"
+              for x in _li68)
+          and _li68[-1]["kind"] == "memo"
           and any(x["kind"] == "acct" for x in _li68)
           and not any(x["kind"] == "acct" and x["label"][:4] in
                       ("2100", "1900", "1400", "2300") for x in _li68))
@@ -6394,14 +6401,18 @@ def main():
             check("قائمة الدخل: الإيرادات (… + فرق الصافي) · خسائر الورشة"
                   " (الفواقد − المسترجع) · المصاريف التشغيلية (إدارية ·"
                   " رواتب · مواد) — بلا «إيرادات ومصروفات أخرى»",
-                  _lbl75 == ["المبيعات والإيرادات",
+                  # 4.45: المبيعات ثم الإيرادات الأخرى والتحصيلية؛ لا سطر
+                  # «الذهب المسلَّم» (يُصفّى في المبيعات)؛ والمصاريف:
+                  # إدارية · العمال · رواتب الإدارة · مواد
+                  _lbl75 == ["المبيعات (مبيعات الذهب والأجور)",
                              "يُطرح: مردودات المبيعات",
-                             "يُطرح: الذهب المسلَّم من المخزون (وزناً)",
                              "يُطرح: الخصم المسموح به",
-                             "يُضاف: فرق الصافي", "فواقد الورشة",
+                             "يُضاف: فرق الصافي",
+                             "إيرادات التحصيل والإيرادات العرضية",
+                             "فواقد الورشة",
                              "يُخصم: المسترجع من التصفية",
                              "المصاريف الإدارية والعمومية",
-                             "رواتب وأجور التشغيل",
+                             "مصروفات العمال", "رواتب الإدارة",
                              "مواد ومصروفات تشغيل مباشرة", "الزكاة"]
                   and "الإيرادات والمصروفات الأخرى" not in _sec75,
                   str(_sec75))
@@ -6420,14 +6431,18 @@ def main():
                 " total_weight END),0) r FROM invoices WHERE is_deleted=0"
                 " AND invoice_date BETWEEN '2026-01-01' AND '2026-12-31'"
                 ).fetchone()
-            check("قائمة الدخل: الذهب المباع والمردود بوزنه من الفواتير،"
-                  " ويقابله المسلَّم من المخزون — وربح الذهب ربح الدفتر",
-                  abs(_g75["values"]["sales"] - _w75["s"]) < 0.001
-                  and abs(_g75["values"]["gold_out"]
-                          + _w75["s"] - _w75["r"]) < 0.001
+            # 4.45: زوج الذهب وزناً يُصفّى في «المبيعات» (صافيه صفر)،
+            # ووزن المباع والمردود يُعرض في «بيانات للعلم» من الفواتير
+            _m75 = _is75["memo"]
+            check("قائمة الدخل: زوج الذهب يُصفّى في المبيعات، ووزن المباع"
+                  " والمردود في «بيانات للعلم» كما في الفواتير — وربح الذهب"
+                  " ربح الدفتر",
+                  abs(_g75["values"]["sales"]) < 0.001
+                  and abs(_m75["m_sold"]["gold"] - _w75["s"]) < 0.001
+                  and abs(_m75["m_returned"]["gold"] - _w75["r"]) < 0.001
                   and abs(_g75["totals"]["net"] - _st74._pl(
                       conn, "2026-01-01", "2026-12-31", "gold")) < 0.001,
-                  str((_g75["values"]["sales"], _w75["s"])))
+                  str((_g75["values"]["sales"], _m75["m_sold"], _w75["s"])))
 
         # ── 76) كشف صندوق الكسر لكل عيارٍ وحده من لوحة التحكم (4.41)
         from models.inventory import scrap_karat_statement as _sk76
@@ -6551,6 +6566,91 @@ def main():
               and hasattr(_DS76, "_open_scrap_karat"))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    # ══════════════════════════════════════════════════════════════
+    step("79) بيت الطقم · سطر أجر فقط · نقل الجهة والحساب · قائمة الدخل")
+    from models import coa as _coa79, entities as _en79
+    from models import invoices as _iv79, statements as _st79
+    from models import vouchers as _vo79
+    from models.inventory import create_work_orders_batch as _b79
+    _d79 = date.today().isoformat()
+    with db() as conn:
+        _grp79 = acc_id(conn, "1020")
+        _sp79 = _coa79.add_sub_account(conn, _grp79, "معرض خاص ٧٩", "admin",
+                                       measurement="gold")["id"]
+        _b79(conn, [{"wo_no": "H79-1", "gold": 10.0, "wage_per_gram": 10}],
+             _d79, "admin")
+        _b79(conn, [{"wo_no": "H79-2", "gold": 20.0, "wage_per_gram": 10}],
+             _d79, "admin", dest_account_id=_sp79)
+        _c79 = _en79.add_entity(conn, "عميل ٧٩", "customer", username="admin")
+        _ws79 = {r["work_order_no"]: r for r in conn.execute(
+            "SELECT * FROM work_orders WHERE work_order_no LIKE 'H79-%'")}
+        _s0 = account_balance(conn, _sp79)[0]
+        _m0 = account_balance(conn, acc_id(conn, "1200"))[0]
+        _r79 = _iv79.create_sale(
+            conn, _c79, [{"work_order_id": _ws79["H79-1"]["id"]},
+                         {"work_order_id": _ws79["H79-2"]["id"]},
+                         {"wage_only": True, "amount": 55, "note": "تلميع"}],
+            _d79, "admin", apply_vat=False)
+        _s1 = account_balance(conn, _sp79)[0]
+        _m1 = account_balance(conn, acc_id(conn, "1200"))[0]
+    check("الطقم يخرج من حساب دفعته: H79-2 من «معرض خاص» و H79-1 من"
+          " المشغول — في فاتورةٍ واحدة",
+          abs(_s0 - _s1 - 20) < 0.001 and abs(_m0 - _m1 - 10) < 0.001,
+          f"{_s0 - _s1} · {_m0 - _m1}")
+    check("سطر «أجر فقط» يدخل أجور العميل بلا ذهب ولا مخزون",
+          abs(_r79["total_wages"] - 355) < 0.01
+          and abs(_r79["total_weight"] - 30) < 0.001, str(_r79["total_wages"]))
+    with db() as conn:
+        _rr79 = _iv79.create_sale_return(
+            conn, _c79, [{"work_order_id": _ws79["H79-2"]["id"]}], _d79,
+            "admin", apply_vat=False)
+        _s2 = account_balance(conn, _sp79)[0]
+    check("المرتجع يعيد الطقم إلى حسابه هو (لا إلى «من حساب» الفاتورة)",
+          abs(_s2 - _s0) < 0.001, str(_s2 - _s1))
+    with db() as conn:
+        _e79 = _en79.get_entity(conn, _c79)
+        _en79.update_entity(conn, _c79, "admin",
+                            vat_number="300000000000003")
+        _en79.change_entity_type(conn, _c79, "supplier", "admin")
+        _pc79 = conn.execute(
+            "SELECT p.code, a.type FROM accounts a JOIN accounts p"
+            " ON p.id=a.parent_id WHERE a.id=?",
+            (_e79["account_id"],)).fetchone()
+    check("نقل نوع الجهة (عميل ← مورد) ينقل حسابها بقيوده تحت الموردين",
+          _pc79["code"] == "2300" and _pc79["type"] == "liability")
+    with db() as conn:
+        _x79 = _coa79.add_sub_account(conn, acc_id(conn, "5800"),
+                                      "مصروف ٧٩", "admin")["id"]
+        _coa79.move_account(conn, _x79, acc_id(conn, "5050"), "admin")
+        _pp79 = conn.execute("SELECT p.code, a.parent_locked FROM accounts a"
+                             " JOIN accounts p ON p.id=a.parent_id"
+                             " WHERE a.id=?", (_x79,)).fetchone()
+    check("دليل الحسابات: نقل حسابٍ تحت أبٍ آخر ويبقى مكانه",
+          _pp79["code"] == "5050" and _pp79["parent_locked"] == 1)
+    with db(readonly=True) as conn:
+        _is79 = _st79.income_statement(conn, f"{_d79[:4]}-01-01", _d79,
+                                       compare=False)
+    _keys79 = [k for k, _t, _s in _st79.IS_LINES]
+    check("قائمة الدخل: المبيعات · الإيرادات الأخرى والتحصيلية · العمال ·"
+          " رواتب الإدارة — وبيانات للعلم (الذهب المباع والتحصيلات)",
+          "gold_out" not in _keys79 and "other_rev" in _keys79
+          and _keys79.index("admin") < _keys79.index("labor")
+          < _keys79.index("mgmt") < _keys79.index("materials")
+          and set(_is79["memo"]) == {"m_sold", "m_returned", "m_collect"})
+    with db() as conn:
+        _w79 = _en79.add_entity(conn, "عامل ٧٩", "worker", username="admin",
+                                basic_salary=2000)
+        _dflt79 = _vo79.staff_expense_default(conn, _w79)
+        _en79.update_entity(conn, _w79, "admin", direct_pay=True)
+        _v79 = _vo79.create_voucher(conn, "payment", _d79, "admin",
+                                    entity_id=_w79, cash_amount=300)
+        _codes79 = {r["code"] for r in conn.execute(
+            "SELECT a.code FROM journal_lines l JOIN accounts a"
+            " ON a.id=l.account_id WHERE l.entry_id=?", (_v79["entry_id"],))}
+    check("سند صرف العامل: سلفة افتراضاً (لا يتكرّر مع المسير)، ومصروفات"
+          " العمال 5710 لمن يُصرف له مباشرةً بلا مسير",
+          _dflt79 is False and "5710" in _codes79)
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

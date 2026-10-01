@@ -54,7 +54,7 @@ def by_model(conn, date_from=None, date_to=None):
         " FROM invoice_items it"
         " JOIN invoices i ON i.id=it.invoice_id"
         " JOIN work_orders w ON w.id=it.work_order_id"
-        " WHERE i.is_deleted=0" + clause +
+        " WHERE i.is_deleted=0 AND COALESCE(w.is_service,0)=0" + clause +
         " GROUP BY mno", p).fetchall()
 
     out = []

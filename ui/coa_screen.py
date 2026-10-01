@@ -59,6 +59,75 @@ class AddSubDialog(QtWidgets.QDialog):
         form.addRow(box)
 
 
+class MoveAccountDialog(QtWidgets.QDialog):
+    """نقل حسابٍ (بفروعه وحركته) تحت أبٍ آخر — مع ما يترتّب محاسبياً."""
+
+    def __init__(self, parent, acc, targets, cur_parent):
+        super().__init__(parent)
+        self.acc = acc
+        self.setWindowTitle(f"نقل الحساب — {acc['code']} {acc['name']}")
+        self.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.setMinimumWidth(620)
+        self.targets = list(targets)
+        self.combo = QtWidgets.QComboBox()
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        for t in self.targets:
+            self.combo.addItem(
+                f"{t['code']} — {t['name']}  ({coa.TYPE_LABELS.get(t['type'])}"
+                + ("" if not t["is_postable"] else " · يصير تجميعياً") + ")",
+                t["id"])
+        comp = self.combo.completer()
+        comp.setFilterMode(QtCore.Qt.MatchContains)
+        comp.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
+        self.recode = QtWidgets.QCheckBox(
+            "إعادة ترقيم الكود تحت الحساب الجديد (يبقى كوده كما هو إن لم"
+            " يُختر)")
+        self.preview = QtWidgets.QLabel()
+        self.preview.setWordWrap(True)
+        self.preview.setObjectName("cardSub")
+        self.combo.currentIndexChanged.connect(self._update)
+        form = QtWidgets.QFormLayout()
+        form.addRow("الحساب:", QtWidgets.QLabel(
+            f"<b>{acc['code']} — {acc['name']}</b> · تحت "
+            f"{cur_parent['code']} — {cur_parent['name']}"
+            if cur_parent else f"{acc['code']} — {acc['name']}"))
+        form.addRow("يُنقل تحت:", self.combo)
+        form.addRow("", self.recode)
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.button(QtWidgets.QDialogButtonBox.Ok).setText("⇄ نقل")
+        bb.button(QtWidgets.QDialogButtonBox.Cancel).setText("إلغاء")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        v = QtWidgets.QVBoxLayout(self)
+        v.addLayout(form)
+        v.addWidget(self.preview)
+        v.addWidget(bb)
+        self._update()
+
+    def target_id(self):
+        return self.combo.currentData()
+
+    def _update(self, *_):
+        i = self.combo.currentIndex()
+        if not (0 <= i < len(self.targets)):
+            self.preview.setText("")
+            return
+        t = self.targets[i]
+        same = t["type"] == self.acc["type"]
+        self.preview.setText(
+            "ينتقل الحساب بمعرّفه: قيوده كلها وأرصدته تبقى كما هي، ويتغيّر"
+            " مكانه في الشجرة والقوائم المالية.\n"
+            + ("النوع باقٍ: " + coa.TYPE_LABELS.get(t["type"], "") if same
+               else f"⚠ النوع يتغيّر: {coa.TYPE_LABELS.get(self.acc['type'])}"
+                    f" ← {coa.TYPE_LABELS.get(t['type'])} — فيظهر رصيده في"
+                    " قسمه الجديد من الميزانية أو قائمة الدخل، وطبيعته"
+                    " (مدين/دائن) تتبع أباه الجديد.")
+            + ("\nالحساب المختار حساب حركة بلا قيود — يصير تجميعياً."
+               if t["is_postable"] else ""))
+
+
 class CoaScreen(QtWidgets.QWidget):
     def __init__(self, user, on_open_ledger=None):
         super().__init__()
@@ -96,12 +165,18 @@ class CoaScreen(QtWidgets.QWidget):
         btn_audit.clicked.connect(self.run_audit)
         btn_print = QtWidgets.QPushButton("🖨 طباعة الدليل")
         btn_print.clicked.connect(self.print_coa)
+        btn_move = QtWidgets.QPushButton("⇄ نقل الحساب المحدد")
+        btn_move.setToolTip("نقل الحساب بفروعه وحركته تحت حسابٍ رئيسي أو"
+                            " فرعي آخر")
+        btn_move.clicked.connect(
+            lambda: self.move(self._selected_id()))
 
         top = QtWidgets.QHBoxLayout()
         top.addWidget(self.search, 2)
         top.addWidget(self.show_frozen)
         top.addWidget(btn_expand)
         top.addWidget(btn_collapse)
+        top.addWidget(btn_move)
         top.addWidget(btn_audit)
         top.addWidget(btn_print)
 
@@ -113,8 +188,8 @@ class CoaScreen(QtWidgets.QWidget):
         lay.addWidget(self.summary)
         note = QtWidgets.QLabel(
             "انقر بزر الماوس الأيمن على أي حساب: إضافة حساب فرعي (يرث نوع "
-            "الأب وطبيعته آلياً) · تعديل الاسم · تجميد/تنشيط · كشف حساب · "
-            "حذف. الخط العريض = حساب تجميعي، والرمادي = حساب مجمَّد لا "
+            "الأب وطبيعته آلياً) · تعديل الاسم · نقله تحت حساب آخر بحركته · "
+            "تجميد/تنشيط · كشف حساب · حذف. الخط العريض = حساب تجميعي، والرمادي = حساب مجمَّد لا "
             "يظهر في قوائم الإدخال.")
         note.setObjectName("cardSub")
         note.setWordWrap(True)
@@ -361,6 +436,9 @@ class CoaScreen(QtWidgets.QWidget):
         m = QtWidgets.QMenu(self)
         m.addAction("➕ إضافة حساب فرعي", lambda: self.add_sub(aid))
         m.addAction("✎ تعديل اسم الحساب", lambda: self.rename(aid))
+        if acc["parent_id"]:
+            m.addAction("⇄ نقل الحساب تحت حساب آخر…",
+                        lambda: self.move(aid))
         m.addSeparator()
         m.addAction("📄 كشف حساب", lambda: self.open_ledger())
         m.addSeparator()
@@ -394,6 +472,31 @@ class CoaScreen(QtWidgets.QWidget):
                        f"والطبيعة «{coa.NATURE_LABELS.get(res['nature'])}» "
                        f"من الحساب الأب (المستوى {res['level']}).\n"
                        "وسيظهر فوراً في قوائم الإدخال بكل الشاشات.")
+            self.refresh(force=True)
+        except Exception as e:
+            err(self, e)
+
+    def move(self, aid):
+        try:
+            if aid is None:
+                raise ValueError("حدّد حساباً في الشجرة أولاً")
+            with db() as conn:
+                acc = coa.get_account(conn, aid)
+                if not acc["parent_id"]:
+                    raise ValueError("الحساب الرئيسي في رأس الشجرة لا يُنقل")
+                targets = coa.move_targets(conn, aid)
+                cur = coa.get_account(conn, acc["parent_id"])
+            dlg = MoveAccountDialog(self, acc, targets, cur)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            with db() as conn:
+                res = coa.move_account(conn, aid, dlg.target_id(),
+                                       self.user["username"],
+                                       recode=dlg.recode.isChecked())
+            info(self, "تم النقل — الحركة والأرصدة كما هي.\n\n"
+                       + res["message"]
+                       + (f"\n\nنُقل معه {res['moved'] - 1} حساب فرعي."
+                          if res["moved"] > 1 else ""))
             self.refresh(force=True)
         except Exception as e:
             err(self, e)

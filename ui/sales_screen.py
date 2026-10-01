@@ -12,7 +12,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 import config
 from database.database import db
-from models import entities, inventory, invoices, pending
+from models import entities, inventory, invoices, pending, stock_home
 from models.accounts import acc_id
 from models.inventory import BULK_LABEL, is_bulk_no
 from services import drafts
@@ -439,11 +439,11 @@ class SalesScreen(QtWidgets.QWidget):
     """
 
     # العمود الأول بلا عنوان: فيه زرّا تعديل السطر وحذفه.
-    COLS = ["", "الموديل", "رقم التشغيل", "العيار", "الوزن المقيد",
+    COLS = ["", "الموديل", "رقم التشغيل", "العيار", "الحساب", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
             "الأحجار بعد الخصم", "الأجر/جم", "الأجرة (ريال)"]
     # أوزان العرض (مجموعها 100): عمود الأزرار يكفيه القليل
-    COL_W = [6, 10, 10, 6, 9, 9, 8, 8, 8, 9, 8, 9]
+    COL_W = [5, 9, 9, 6, 10, 8, 8, 7, 7, 7, 8, 7, 9]
 
     def __init__(self, user):
         super().__init__()
@@ -670,6 +670,15 @@ class SalesScreen(QtWidgets.QWidget):
         self.line_reg.valueChanged.connect(self._reg_changed)
         self.btn_add_line = QtWidgets.QPushButton("+ إضافة سطر")
         self.btn_add_line.clicked.connect(self.add_item)
+        # ══ سطر «أجر فقط» ══ أجرٌ على العميل بلا طقم ولا ذهب (تلميع،
+        # تعديل مقاس، أجرةٌ فاتت): يدخل أجوره وحدها ولا يمسّ المخزون.
+        # ويُضاف كذلك بكتابة المبلغ في خانة الأجر ورقمُ التشغيل فارغ.
+        self.btn_wage_only = QtWidgets.QPushButton("+ أجر فقط")
+        self.btn_wage_only.setObjectName("ghost")
+        self.btn_wage_only.setToolTip(
+            "سطر أجرٍ بلا طقم ولا ذهب — يُضاف إلى أجور العميل وحدها.\n"
+            "أو: اكتب المبلغ في خانة الأجر ورقم التشغيل فارغ ثم Enter.")
+        self.btn_wage_only.clicked.connect(self.add_wage_only)
 
         def _sub(t):
             lbl = QtWidgets.QLabel(t)
@@ -700,6 +709,11 @@ class SalesScreen(QtWidgets.QWidget):
             g.addWidget(widget, 1, c)
             g.setColumnStretch(c, stretch)
         g.addWidget(self.btn_add_line, 1, len(fields))
+        g.addWidget(self.btn_wage_only, 1, len(fields) + 1)
+        # Enter على زرّ الإضافة يضغطه (الزر خارج سلسلة الخانات، ومن
+        # وصل إليه بـTab كان يحتاج المسطرة لا Enter)
+        for _b in (self.btn_add_line, self.btn_wage_only):
+            _b.setAutoDefault(True)
 
         # ترتيب التنقّل هو ترتيب الخانات نفسه، وEnter على آخر خانة
         # يضيف السطر. ورقم التشغيل **إلزامي**: Enter لا يتجاوزه وهو
@@ -997,15 +1011,44 @@ class SalesScreen(QtWidgets.QWidget):
         ret = self._is_return()
         self.source_lbl.setText("إلى حساب:" if ret else "من حساب:")
         self.source.setToolTip(
-            ("الحساب الذي يدخل إليه ذهب هذا المرتجع. يُحفظ مع العملية "
-             "ويُطبع عليها.") if ret else
-            ("الحساب الذي يخرج منه ذهب هذه الفاتورة — ويعود إليه في "
-             "المرتجع. يُحفظ مع الفاتورة ويُطبع عليها."))
+            ("الطقم المرتبط بحسابٍ (من دفعة توريده) يعود إلى حسابه هو.\n"
+             "وهذا الحساب لما لا حساب له: الطقم الجديد غير المسجّل "
+             "(فيصير حسابه) والرقم التجميعي.") if ret else
+            ("الطقم المرتبط بحسابٍ (من دفعة توريده) يخرج من حسابه هو — "
+             "عمود «الحساب» في البنود.\nوهذا الحساب لما لا حساب له: "
+             "الرقم التجميعي وما لم يُعرف حسابه."))
         self.scrap_lbl.setText("عيار الإضافة:" if ret else "عيار الخصم:")
 
     def _source_changed(self, *_):
         self._sync_scrap_box()
         self._save_source_pref()
+        if getattr(self, "items", None):
+            self.render_items()      # أسطر بلا بيتٍ تتبع الحساب المختار
+
+    def _line_acc_id(self, it):
+        """الحساب الذي يخرج منه السطر أو يعود إليه: المحفوظ مع سطر
+        فاتورةٍ تُعدَّل، وإلا بيت الطقم، وإلا حساب العملية المختار."""
+        if it.get("wage_only"):
+            return None
+        if it.get("acc"):
+            return int(it["acc"])
+        h = stock_home.home_of(it["wo"])
+        return h or self.source.currentData()
+
+    def _line_acc_name(self, it):
+        a = self._line_acc_id(it)
+        for r in self.sources:
+            if r["id"] == a:
+                return r["name"]
+        if a:
+            try:
+                with db(readonly=True) as conn:
+                    r = conn.execute("SELECT name FROM accounts WHERE id=?",
+                                     (a,)).fetchone()
+                return r["name"] if r else "—"
+            except Exception:
+                return "—"
+        return "—"
 
     def _save_source_pref(self, *_):
         code = self._source_code()
@@ -1058,8 +1101,12 @@ class SalesScreen(QtWidgets.QWidget):
             "qr": bool(self.qr_check.isChecked()),
             "source": self._source_code(),
             "scrap_karat": self.scrap_karat.currentData(),
-            "items": [{"wo_id": i["wo"]["id"], "weight": i["weight"],
-                       "wage": i["wage"], "karat": i.get("karat") or 0}
+            "items": [({"wage_only": True, "amount": i["amount"],
+                        "note": i.get("note") or "", "weight": 0.0,
+                        "wage": 0.0}
+                       if i.get("wage_only") else
+                       {"wo_id": i["wo"]["id"], "weight": i["weight"],
+                        "wage": i["wage"], "karat": i.get("karat") or 0})
                       for i in self.items],
         }
 
@@ -1069,8 +1116,14 @@ class SalesScreen(QtWidgets.QWidget):
             return False
         items = []
         try:
-            with db(readonly=True) as conn:
+            with db() as conn:
                 for it in d["items"]:
+                    if it.get("wage_only"):
+                        items.append(self._wage_item(
+                            stock_home.service_wo(conn),
+                            float(it.get("amount") or 0),
+                            it.get("note") or ""))
+                        continue
                     wo = conn.execute(
                         "SELECT * FROM work_orders WHERE id=? AND"
                         " is_deleted=0", (it.get("wo_id"),)).fetchone()
@@ -1554,6 +1607,11 @@ class SalesScreen(QtWidgets.QWidget):
                 for it in items:
                     wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
                                       (it["work_order_id"],)).fetchone()
+                    if stock_home.is_service(wo):
+                        cart.append(self._wage_item(
+                            wo, float(it["wages"] or 0),
+                            it["line_note"] or "", item_id=it["item_id"]))
+                        continue
                     # المخزَّن بمكافئ 18 ← المعروض بعيار السطر كما كُتب
                     k = int(it["karat"] or 0) or kv.active()
                     cart.append(self._item_from_wo(
@@ -1563,6 +1621,7 @@ class SalesScreen(QtWidgets.QWidget):
                         # يُحدِّث. الرقم التجميعي يتكرّر في الفاتورة
                         # بأسطرٍ مستقلة، ولا يميّزها إلا هذا الرقم.
                         item_id=it["item_id"]))
+                    cart[-1]["acc"] = it["stock_account_id"]
                 src = conn.execute(
                     "SELECT code FROM accounts WHERE id=?",
                     (inv["source_account_id"],)).fetchone() \
@@ -1616,8 +1675,12 @@ class SalesScreen(QtWidgets.QWidget):
 
     def add_item(self):
         """يضيف سطر الإدخال إلى بنود الفاتورة بعد التحقّق منه."""
+        self._commit_spins()
         no = self.barcode.text().strip()
         if not no:
+            # رقم تشغيلٍ فارغ ومبلغٌ في خانة الأجر ⇒ سطر «أجر فقط»
+            if self.line_wage.value() > 0:
+                return self._append_wage_only(self.line_wage.value(), "")
             self._focus(self.barcode)
             return
         try:
@@ -1736,6 +1799,95 @@ class SalesScreen(QtWidgets.QWidget):
             err(self, e)
             return False
 
+    def _commit_spins(self):
+        """ما كُتب في خانةٍ ولم يُعتمد بعد (عمليةٌ مثل 12+3، أو رقمٌ
+        لم تُغادَر خانته) يُعتمد قبل قراءة السطر."""
+        for w in (self.line_reg, self.line_standing, self.line_gold,
+                  self.line_small, self.line_big, self.line_after,
+                  self.line_wage):
+            try:
+                w.interpretText()
+            except Exception:
+                pass
+
+    def add_wage_only(self):
+        """زرّ «+ أجر فقط»: مبلغٌ وبيانٌ اختياري."""
+        try:
+            self._guard_wage_only()
+        except Exception as e:
+            err(self, e)
+            return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("سطر أجر فقط")
+        dlg.setLayoutDirection(QtCore.Qt.RightToLeft)
+        amt = mspin()
+        amt.setDecimals(2)
+        if self.line_wage.value() > 0 and not self.barcode.text().strip():
+            amt.setValue(self.line_wage.value())
+        note = QtWidgets.QLineEdit()
+        note.setPlaceholderText("مثلاً: تلميع · تعديل مقاس · أجرة سابقة")
+        form = QtWidgets.QFormLayout()
+        form.addRow("المبلغ (ريال):", amt)
+        form.addRow("البيان:", note)
+        hint = QtWidgets.QLabel(
+            "يُضاف إلى أجور العميل وحدها — بلا ذهب ولا أثرٍ على المخزون."
+            "\nوفي المرتجع يُردّ من أجوره.")
+        hint.setObjectName("cardSub")
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.button(QtWidgets.QDialogButtonBox.Ok).setText("إضافة")
+        bb.button(QtWidgets.QDialogButtonBox.Cancel).setText("إلغاء")
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addLayout(form)
+        v.addWidget(hint)
+        v.addWidget(bb)
+        amt.setFocus()
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        amt.interpretText()
+        self._append_wage_only(amt.value(), note.text().strip())
+
+    def _guard_wage_only(self):
+        cid = self.customer.currentData()
+        if cid is not None and self._is_internal(cid):
+            raise ValueError("سطر «أجر فقط» لا يصح في تحويلٍ داخلي —"
+                             " لا أجور على خزينة التصنيع")
+
+    def _append_wage_only(self, amount, note=""):
+        try:
+            self._guard_wage_only()
+            amount = round(float(amount or 0), 2)
+            if amount <= 0:
+                raise ValueError("أدخل مبلغ الأجر")
+            with db() as conn:
+                swo = stock_home.service_wo(conn, self.user["username"])
+            self.items.append(self._wage_item(swo, amount, note))
+            self._clear_entry()
+            self.barcode.setFocus()
+            self.render_items()
+            return True
+        except Exception as e:
+            err(self, e)
+            return False
+
+    @staticmethod
+    def _wage_item(swo, amount, note="", item_id=None):
+        return {"wo": swo, "wage_only": True, "amount": round(amount, 2),
+                "note": note or "", "weight": 0.0, "wage": 0.0,
+                "karat": kv.active(), "item_id": item_id,
+                "gold": 0.0, "small": 0.0, "big": 0.0, "after": 0.0,
+                "standing": 0.0}
+
+    @staticmethod
+    def _wages_of(it, internal=False):
+        if internal:
+            return 0.0
+        if it.get("wage_only"):
+            return float(it.get("amount") or 0)
+        return gold_math.total_wages(it["wage"] or 0.0, it["weight"])
+
     def remove_item(self, row=None):
         """يحذف السطر — ويفكّ ربط الموديل الذي سُجّل في هذه الجلسة.
 
@@ -1781,6 +1933,19 @@ class SalesScreen(QtWidgets.QWidget):
             return
         it = self.items[r]
         wo = it["wo"]
+        if it.get("wage_only"):
+            v, ok = QtWidgets.QInputDialog.getDouble(
+                self, "تعديل سطر أجر فقط", "المبلغ (ريال):",
+                float(it.get("amount") or 0), 0.01, 1e9, 2)
+            if ok:
+                n, ok2 = QtWidgets.QInputDialog.getText(
+                    self, "تعديل سطر أجر فقط", "البيان:",
+                    text=it.get("note") or "")
+                it["amount"] = round(v, 2)
+                if ok2:
+                    it["note"] = n.strip()
+                self.render_items()
+            return
         k0 = int(it.get("karat") or kv.active())
         p = self._parts_of(it)
         dlg = QtWidgets.QDialog(self)
@@ -1940,8 +2105,17 @@ class SalesScreen(QtWidgets.QWidget):
         rows = []
         t = {"reg": 0.0, "standing": 0.0, "gold": 0.0, "small": 0.0,
              "big": 0.0, "after": 0.0, "wages": 0.0}
+        n_sets = 0
         for it in self.items:
             wo = it["wo"]
+            if it.get("wage_only"):
+                amt = 0.0 if internal else float(it.get("amount") or 0)
+                rows.append(("", "—", "أجر فقط" + (
+                    f" — {it['note']}" if it.get("note") else ""),
+                    "—", "أجور العميل", "", "", "", "", "", "", "—", amt))
+                t["wages"] += amt
+                continue
+            n_sets += 1
             k = int(it.get("karat") or kv.active())
             wage = 0.0 if internal else (it["wage"] or 0.0)
             weight = float(it.get("weight") or 0)
@@ -1951,7 +2125,8 @@ class SalesScreen(QtWidgets.QWidget):
             if mn != "—" and has_model_image(mn):
                 mn = f"🖼 {mn}"
             wages = gold_math.total_wages(wage, weight)
-            rows.append(("", mn, wo["work_order_no"], f"عيار {k}", weight,
+            rows.append(("", mn, wo["work_order_no"], f"عيار {k}",
+                         self._line_acc_name(it), weight,
                          p["standing"], p["gold"], p["small"], p["big"],
                          p["after"], wage, wages))
             # الإجماليات تُجمع بمكافئ 18 لا بأرقام الشاشة: أسطرٌ
@@ -1962,8 +2137,10 @@ class SalesScreen(QtWidgets.QWidget):
             t["wages"] += wages
         if rows:
             u = kv.active()
-            rows.append(("", "الإجمالي", f"{len(self.items)} طقم",
-                         f"عيار {u}", round(kv.g(t['reg']), 3),
+            n_w = len(self.items) - n_sets
+            rows.append(("", "الإجمالي", f"{n_sets} طقم"
+                         + (f" + {n_w} أجر" if n_w else ""),
+                         f"عيار {u}", "", round(kv.g(t['reg']), 3),
                          round(kv.g(t["standing"]), 3),
                          round(kv.g(t["gold"]), 3),
                          round(kv.g(t["small"]), 3),
@@ -2015,9 +2192,7 @@ class SalesScreen(QtWidgets.QWidget):
             self.p_wages.set_value("—", "بلا أجور ولا ضريبة")
             self._update_live_balance(cid, w18, 0.0)
             return
-        wages = round(sum(gold_math.total_wages(i["wage"] or 0.0,
-                                                i["weight"])
-                          for i in self.items), 2)
+        wages = round(sum(self._wages_of(i) for i in self.items), 2)
         self.p_weight.set_value(
             f"{kv.g(w18):,.2f} {u}",
             f"{len(self.items)} طقم — وهو وعاء الأجور")
@@ -2083,14 +2258,18 @@ class SalesScreen(QtWidgets.QWidget):
             karat = (self.scrap_karat.currentData()
                      if self._is_scrap_source() else None)
             # الحد الفاصل: كل ما يعبر إلى القاعدة بمكافئ 18
-            cart = [{"work_order_id": i["wo"]["id"],
-                     # سطرٌ حُمِّل من فاتورةٍ تُعدَّل يحمل رقمه؛
-                     # والمُضاف حديثاً بلا رقم فيُسجَّل سطراً جديداً
-                     "item_id": i.get("item_id"),
-                     "weight": self._store_w(i),
-                     "karat": int(i.get("karat") or kv.active()),
-                     "wage_override": (None if internal else kv.rate_store(
-                         i["wage"], int(i.get("karat") or kv.active())))}
+            cart = [({"wage_only": True, "amount": i["amount"],
+                      "note": i.get("note") or "",
+                      "item_id": i.get("item_id"), "weight": 0.0}
+                     if i.get("wage_only") else
+                     {"work_order_id": i["wo"]["id"],
+                      # سطرٌ حُمِّل من فاتورةٍ تُعدَّل يحمل رقمه؛
+                      # والمُضاف حديثاً بلا رقم فيُسجَّل سطراً جديداً
+                      "item_id": i.get("item_id"),
+                      "weight": self._store_w(i),
+                      "karat": int(i.get("karat") or kv.active()),
+                      "wage_override": (None if internal else kv.rate_store(
+                          i["wage"], int(i.get("karat") or kv.active())))})
                     for i in self.items]
             desc = self.description.text().strip()
             # تأكيد الترحيل: أثر محاسبي لا يُلغى إلا بقيد عكسي
@@ -2098,9 +2277,17 @@ class SalesScreen(QtWidgets.QWidget):
                           if self.kind.currentData() == "sale"
                           else "فاتورة مرتجع")
             tot_w = round(sum(c["weight"] for c in cart), 3)
-            tot_wage = sum(gold_math.total_wages(i["wage"] or 0.0,
-                                                 i["weight"])
-                           for i in self.items)
+            tot_wage = sum(self._wages_of(i) for i in self.items)
+            # الذهب موزّعاً على حساباته: كل طقمٍ يخرج من حسابه
+            _by = {}
+            for i in self.items:
+                if i.get("wage_only"):
+                    continue
+                n = self._line_acc_name(i)
+                _by[n] = _by.get(n, 0.0) + self._store_w(i)
+            _acc_txt = "".join(
+                f"\n   • {n}: {kv.g(w):,.2f} {kv.unit()}"
+                for n, w in _by.items())
             if not confirm_post(
                     self,
                     f"{kind_label}\n\n"
@@ -2109,7 +2296,10 @@ class SalesScreen(QtWidgets.QWidget):
                     + f"{self.source.currentText()}"
                     + (f" — عيار {karat}" if karat else "") + "\n"
                     f"عدد الأطقم: {len(self.items)}\n"
-                    f"الوزن المقيد: {kv.g(tot_w):,.2f} {kv.unit()}\n"
+                    + (("دخول الذهب إلى:" if self._is_return()
+                        else "خروج الذهب من:") + _acc_txt + "\n"
+                       if _by else "")
+                    + f"الوزن المقيد: {kv.g(tot_w):,.2f} {kv.unit()}\n"
                     f"الأجور: {tot_wage:,.2f} ريال\n"
                     f"التاريخ: {dstr(self.date)}"
                     + ("\n\nفاتورة ضريبية (15%)" if apply_vat else "")):

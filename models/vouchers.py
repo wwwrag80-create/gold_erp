@@ -52,12 +52,56 @@ def doc_note(notes, rows):
     return "  —  ".join(parts)
 
 
+STAFF_EXPENSE = {"worker": ("5710", "أجر عامل — مصروفات العمال"),
+                 "employee": ("5700", "راتب موظف — رواتب الإدارة")}
+
+
+def staff_expense_default(conn, entity_id):
+    """هل يُحمَّل صرفُ هذا العامل/الموظف مصروفاً افتراضاً؟
+
+    بحسب بطاقته: «يُصرف له مباشرةً بلا مسير رواتب» ⇒ نعم — فكل ما
+    يُصرف له أجرٌ يُحمَّل مصروفاً. وإلا (الأصل) فأجره يُثبت مصروفاً يوم
+    ترحيل مسير الرواتب، وما يُصرف له قبله سلفةٌ وبعده سداد — فلو حُمِّل
+    الصرف مصروفاً لتكرّر الأجر مرتين (مرةً بالسند ومرةً بالمسير).
+    """
+    ent = get_entity(conn, entity_id) if entity_id else None
+    if not ent or ent["entity_type"] not in STAFF_EXPENSE:
+        return False
+    try:
+        return bool(ent["direct_pay"])
+    except (IndexError, KeyError):
+        return False
+
+
+def staff_expense_account(conn, kind, entity_id, target_acc, cash_amount,
+                          flag=None):
+    if kind != "payment" or not entity_id or not cash_amount:
+        return None
+    ent = get_entity(conn, entity_id)
+    if not ent or ent["entity_type"] not in STAFF_EXPENSE \
+            or ent["account_id"] != target_acc:
+        return None
+    if flag is None:
+        flag = staff_expense_default(conn, entity_id)
+    if not flag:
+        return None
+    code, label = STAFF_EXPENSE[ent["entity_type"]]
+    return acc_id(conn, code), label
+
+
 def create_voucher(conn, kind, voucher_date, username, *,
                    entity_id=None, account_id=None,
                    gold_weight=0.0, gold_karat=18, cash_amount=0.0,
                    cash_account_code="1400", net_diff=0.0,
-                   disc_cash=0.0, disc_gold=0.0, notes="", rows=None):
+                   disc_cash=0.0, disc_gold=0.0, notes="", rows=None,
+                   staff_expense=None):
     """سند قبض/صرف يقبل **أسطراً متعددة** في السند الواحد.
+
+    `staff_expense` (سند صرفٍ لعاملٍ أو موظف): يُحمَّل المصروف النقدي
+    مصروفاً — «مصروفات العمال» 5710 للعامل و«رواتب الإدارة» 5700
+    للموظف — بقيدٍ مقابلٍ على حسابه في السند نفسه: فيظهر في كشفه
+    المدفوعُ والمُحمَّل معاً ولا يبقى سلفةً عليه. None ⇒ من بطاقته
+    («يُصرف له مباشرةً بلا مسير» — `staff_expense_default`).
 
     `rows`: قائمة أسطر مرنة تسمح بأعيرة مختلفة ونقد معاً، مثال:
         [{"kind": "gold", "weight": 100, "karat": 21, "notes": "كسر"},
@@ -198,15 +242,24 @@ def create_voucher(conn, kind, voucher_date, username, *,
                   {"account_id": target_acc, "gold_credit": disc_gold,
                    "line_desc": "خصم مسموح وزناً"}]
 
+    staff_exp = staff_expense_account(conn, kind, entity_id, target_acc,
+                                      cash_amount, staff_expense)
+    if staff_exp:
+        exp_acc, label_exp = staff_exp
+        lines += [{"account_id": exp_acc, "cash_debit": cash_amount,
+                   "line_desc": label_exp},
+                  {"account_id": target_acc, "cash_credit": cash_amount,
+                   "line_desc": f"{label_exp} — يُحمَّل مصروفاً"}]
+
     label = "سند قبض" if kind == "receipt" else "سند صرف"
     cur = conn.execute(
         "INSERT INTO vouchers(kind,customer_id,target_account_id,voucher_date,"
         "gold_weight,gold_karat,gold_equiv18,cash_amount,cash_account_code,"
-        "net_diff,disc_cash,disc_gold,notes,created_by)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "net_diff,disc_cash,disc_gold,notes,created_by,staff_expense)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (kind, entity_id, target_acc, voucher_date, gold_weight, gold_karat,
          equiv, cash_amount, cash_account_code, net_diff, disc_cash, disc_gold,
-         notes, username))
+         notes, username, 1 if staff_exp else 0))
     v_id = cur.lastrowid
     v_no = f"V-{v_id:05d}"
     entry_id = post_entry(conn, voucher_date,
@@ -281,7 +334,7 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
                    account_id=None, rows=None, gold_weight=0.0,
                    gold_karat=18, cash_amount=0.0, cash_account_code=None,
                    net_diff=0.0, disc_cash=0.0, disc_gold=0.0, notes="",
-                   voucher_date=None):
+                   voucher_date=None, staff_expense=None):
     """يعدّل سنداً مُرحَّلاً **في مكانه** — بنفس رقمه وتاريخه.
 
     **لماذا لا نعكس ونُعيد**: العكس يُنشئ سنداً برقم ووقت جديدين،
@@ -351,7 +404,10 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
         account_id=account_id, rows=rows, gold_weight=gold_weight,
         gold_karat=gold_karat, cash_amount=cash_amount,
         cash_account_code=cash_account_code, net_diff=net_diff,
-        disc_cash=disc_cash, disc_gold=disc_gold, notes=notes)
+        disc_cash=disc_cash, disc_gold=disc_gold, notes=notes,
+        # التعديل يُبقي اختيار السند الأصلي ما لم يُغيََّر صراحةً
+        staff_expense=(bool(v["staff_expense"]) if staff_expense is None
+                       and "staff_expense" in v.keys() else staff_expense))
 
     # أسطر السند تنتقل للسند الأصلي
     conn.execute("UPDATE voucher_lines SET voucher_id=? WHERE voucher_id=?",
@@ -398,12 +454,12 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
         "UPDATE vouchers SET kind=?, customer_id=?, target_account_id=?,"
         " gold_weight=?, gold_karat=?, gold_equiv18=?, cash_amount=?,"
         " cash_account_code=?, net_diff=?, disc_cash=?, disc_gold=?,"
-        " notes=? WHERE id=?",
+        " notes=?, staff_expense=? WHERE id=?",
         (src["kind"], src["customer_id"], src["target_account_id"],
          src["gold_weight"], src["gold_karat"], src["gold_equiv18"],
          src["cash_amount"], src["cash_account_code"],
          src["net_diff"], src["disc_cash"], src["disc_gold"],
-         src["notes"], voucher_id))
+         src["notes"], src["staff_expense"], voucher_id))
 
     # ── حارس التوازن ──
     chk = conn.execute(

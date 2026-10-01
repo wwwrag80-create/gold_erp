@@ -342,6 +342,9 @@ def create_work_orders_batch(conn, rows, entry_date, username,
              p["standing"], p["rate"], p["reg"], p["wage"], barcode_path,
              p["notes"], entry_id, username))
         wo_id = cur.lastrowid
+        # بيت الطقم حساب وجهة دفعته: منه يخرج عند البيع وإليه يعود
+        conn.execute("UPDATE work_orders SET stock_account_id=? WHERE id=?",
+                     (dest_id, wo_id))
         log_action(conn, username, "create", "work_orders", wo_id,
                    f"reg={p['reg']}")
         created.append({"id": wo_id, "work_order_no": p["wo_no"],
@@ -386,7 +389,8 @@ def list_in_stock(conn):
 
 
 def search_work_orders(conn, q="", date_from=None, date_to=None, limit=200):
-    sql = "SELECT * FROM work_orders WHERE is_deleted=0"
+    sql = ("SELECT * FROM work_orders WHERE is_deleted=0"
+           " AND COALESCE(is_service,0)=0")      # لا الطقم الخدمي «أجر»
     params = []
     if q:
         sql += " AND work_order_no LIKE ?"; params.append(f"%{q}%")
@@ -705,6 +709,8 @@ def opening_stock_batch(conn, rows, entry_date, username):
              p["standing"], p["rate"], p["reg"], p["wage"], barcode_path,
              p["notes"], entry_id, username))
         wo_id = cur.lastrowid
+        conn.execute("UPDATE work_orders SET stock_account_id=? WHERE id=?",
+                     (lines[0]["account_id"], wo_id))
         log_action(conn, username, "create", "work_orders", wo_id,
                    f"opening reg={p['reg']}")
         created.append({"id": wo_id, "work_order_no": p["wo_no"],
@@ -801,7 +807,9 @@ def adjust_wo_weight(conn, wo_id, new_gold, new_small, new_big, username,
     diff = round(new_reg - wo["registered_weight"], 3)
     entry_id = None
     if abs(diff) >= 0.001:
-        worked = acc_id(conn, "1200")
+        # الطقم في بيته: التسوية على حساب مخزنه لا على المشغول دائماً
+        from models import stock_home
+        worked = stock_home.home_account(conn, wo)
         no = wo["work_order_no"]
         if diff > 0:
             # الزيادة: الطرف الدائن آلي وإجباري — «مخزون تسويات أوزان
@@ -1125,7 +1133,8 @@ def adjust_or_delete_wo(conn, wo_id, username, new_gold=None,
                  else f"تعديل وزن رقم التشغيل {wo_no}")
 
     amount = abs(diff)
-    mash = acc_id(conn, "1200")
+    from models import stock_home
+    mash = stock_home.home_account(conn, wo)     # حساب مخزن الطقم
     adj = acc_id(conn, ADJUST_ACCOUNT)
     if diff < 0:
         # خروج من المخزون: دائن الذهب المشغول / مدين التسويات
@@ -1462,6 +1471,34 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
                      (dest_id, dest_line["id"]))
         moved_dest = (account_name(conn, _old_dest),
                       account_name(conn, dest_id))
+    # أطقم الدفعة بيتها حساب وجهتها — المُضاف في هذا التعديل، وكلُّها
+    # إن انتقلت الوجهة (إلا طقماً صار له بيتٌ آخر بمرتجعٍ لاحق)
+    _d = dest_id or _old_dest
+    if _d:
+        conn.execute(
+            "UPDATE work_orders SET stock_account_id=? WHERE is_bulk=0"
+            " AND id IN (SELECT work_order_id FROM wo_batch_lines"
+            "  WHERE entry_id=?)"
+            " AND (stock_account_id IS NULL OR stock_account_id=?)",
+            (_d, entry_id, _old_dest or _d))
+    if moved_dest:
+        # ما بِيع أو رُجّع من أطقمها خرج من الوجهة الخطأ (أو عاد إليها):
+        # تُصحَّح أسطر تلك الفواتير إلى الوجهة الصحيحة، فلا يبقى في
+        # الحساب القديم رصيدٌ لم يدخله أصلاً.
+        from models.invoices import _rebuild_invoice_entry
+        invs = [r["invoice_id"] for r in conn.execute(
+            "SELECT DISTINCT it.invoice_id FROM invoice_items it"
+            " JOIN invoices i ON i.id=it.invoice_id AND i.is_deleted=0"
+            " WHERE it.stock_account_id=? AND it.work_order_id IN"
+            " (SELECT work_order_id FROM wo_batch_lines WHERE entry_id=?)",
+            (_old_dest, entry_id))]
+        conn.execute(
+            "UPDATE invoice_items SET stock_account_id=?"
+            " WHERE stock_account_id=? AND work_order_id IN"
+            " (SELECT work_order_id FROM wo_batch_lines WHERE entry_id=?)",
+            (dest_id, _old_dest, entry_id))
+        for iid in invs:
+            _rebuild_invoice_entry(conn, iid)
 
     # ── تعديل القيد بالفرق الصافي ──
     delta = round(delta, 3)

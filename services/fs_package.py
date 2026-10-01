@@ -65,6 +65,7 @@ IS_CONCEPTS = [
     ("net", "ifrs-full:ProfitLoss", True),
     ("admin", "ifrs-full:AdministrativeExpense", False),
     ("labor", "ifrs-full:EmployeeBenefitsExpense", False),
+    ("mgmt", "ifrs-full:EmployeeBenefitsExpense", False),
     ("materials", "ifrs-full:RawMaterialsAndConsumablesUsed", False),
     ("zakat", "ksa-ext:ZakatExpense", False),
 ]
@@ -160,7 +161,7 @@ def export(path, date_from, date_to, compare=True, method="indirect"):
     rows = [["البيان", "إيضاح", "الفترة الحالية"]
             + (["فترة المقارنة"] if inc["compare_from"] else [])]
     for r in st.is_layout(inc):
-        if r["kind"] == "sec":
+        if r["kind"] in ("sec", "memohead"):
             rows.append([r["label"]])
             continue
         rows.append([r["label"], fs_notes.NOTE_REF.get(r.get("key"), "")

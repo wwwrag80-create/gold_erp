@@ -7,8 +7,9 @@ from PyQt5 import QtCore, QtWidgets
 from database.database import db
 from services import karat_view as kv
 from models import entities
-from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
-                               info, make_table, mspin, title_label, wspin)
+from ui.widgets.common import (TitledSections, ask, big_label, date_edit,
+                               dstr, err, fill, info, make_table, mspin,
+                               style_group_row, wspin)
 from ui.widgets.table_tools import enhance
 
 TYPE_ITEMS = [("عميل", "customer"), ("مورد", "supplier"),
@@ -121,36 +122,73 @@ class EntitiesScreen(QtWidgets.QWidget):
         # بالترتيب، فإعادة ترتيبها تجعل «احذف المحدد» يحذف غير المحدد.
         enhance(self.table, key="entities", sortable=False)
         self.table.itemSelectionChanged.connect(self._row_selected)
+        self.table.doubleClicked.connect(lambda *_: self.edit_selected())
         self.summary = big_label()
+        self.summary.setWordWrap(True)
+
+        # ══ ① دليل جهات التعامل — قسمٌ مستقل في الأعلى ══
+        # الدليل دفترُ الأستاذ المساعد: كل جهةٍ بكود حسابها ومجموعتها
+        # الرقابية في الشجرة ورصيدَيها بطبيعتهما (مدين/دائن)، مجمّعةً
+        # بنوعها ولكل نوعٍ مجموعه — فيُطابَق مجموعُ كل نوعٍ رصيدَ
+        # مجموعته في ميزان المراجعة.
+        self.f_type = QtWidgets.QComboBox()
+        self.f_type.addItem("كل الأنواع", None)
+        for label, val in TYPE_ITEMS:
+            self.f_type.addItem(label, val)
+        self.f_type.addItem("حساب داخلي", "internal")
+        self.f_type.currentIndexChanged.connect(self.refresh)
+        self.f_search = QtWidgets.QLineEdit()
+        self.f_search.setPlaceholderText("بحث بالاسم أو الهاتف أو الرقم"
+                                         " الضريبي…")
+        self.f_search.textChanged.connect(self.refresh)
+        btn_edit = QtWidgets.QPushButton("✎ تعديل الجهة / نقل نوعها")
+        btn_edit.setObjectName("homeBtn")
+        btn_edit.clicked.connect(self.edit_selected)
+        btn_stmt = QtWidgets.QPushButton("📄 كشف حساب الجهة")
+        btn_stmt.clicked.connect(self.statement_selected)
         btn_refresh = QtWidgets.QPushButton("تحديث الأرصدة")
         btn_refresh.setObjectName("ghost")
         btn_refresh.clicked.connect(self.refresh)
         btn_del = QtWidgets.QPushButton("حذف الجهة المحددة (بلا حركات فقط)")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_selected)
+        frow = QtWidgets.QHBoxLayout()
+        frow.addWidget(QtWidgets.QLabel("النوع:"))
+        frow.addWidget(self.f_type)
+        frow.addWidget(self.f_search, 1)
+        frow.addWidget(btn_edit)
+        frow.addWidget(btn_stmt)
+        frow.addWidget(btn_refresh)
+        frow.addWidget(btn_del)
+        dir_page = QtWidgets.QWidget()
+        dl = QtWidgets.QVBoxLayout(dir_page)
+        dl.setContentsMargins(0, 4, 0, 0)
+        dl.addLayout(frow)
+        dl.addWidget(self.table, 1)
+        dl.addWidget(self.summary)
 
-        list_box = QtWidgets.QGroupBox("دليل جهات التعامل")
-        ll = QtWidgets.QVBoxLayout(list_box)
-        ll.addWidget(self.table)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(btn_refresh)
-        row.addWidget(btn_del)
-        row.addStretch(1)
-        row.addWidget(self.summary)
-        ll.addLayout(row)
-        ll.addWidget(self._credit_box())
+        add_page = QtWidgets.QWidget()
+        apl = QtWidgets.QVBoxLayout(add_page)
+        apl.setContentsMargins(0, 4, 0, 0)
+        apl.addWidget(add_box)
+        apl.addStretch(1)
 
+        terms_page = QtWidgets.QWidget()
+        tpl = QtWidgets.QVBoxLayout(terms_page)
+        tpl.setContentsMargins(0, 4, 0, 0)
+        tnote = QtWidgets.QLabel("حدّد الجهة من «دليل جهات التعامل» ثم اضبط"
+                                 " شروطها هنا.")
+        tnote.setObjectName("cardSub")
+        tpl.addWidget(tnote)
+        tpl.addWidget(self._credit_box())
+        tpl.addStretch(1)
+
+        self.tabs = TitledSections("التكويد الموحّد لجهات التعامل")
+        self.tabs.addTab(dir_page, "📒 دليل جهات التعامل")
+        self.tabs.addTab(add_page, "➕ إضافة جهة")
+        self.tabs.addTab(terms_page, "⚖ شروط التعامل")
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label("التكويد الموحّد لجهات التعامل"))
-        sp = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        w1 = QtWidgets.QWidget(); QtWidgets.QVBoxLayout(w1).addWidget(add_box)
-        w2 = QtWidgets.QWidget(); QtWidgets.QVBoxLayout(w2).addWidget(list_box)
-        sp.addWidget(w1); sp.addWidget(w2)
-        # نموذج الإضافة ثابت الطول، والدليل يطول بعدد الجهات — فالتمدّد
-        # للدليل وحده، والفاصل قابل للسحب لمن يريد غير ذلك.
-        sp.setStretchFactor(0, 0)
-        sp.setStretchFactor(1, 1)
-        lay.addWidget(sp, 1)
+        lay.addWidget(self.tabs, 1)
         self._type_changed()
 
     # ══════════════════════════════════════════════════════════════
@@ -229,13 +267,12 @@ class EntitiesScreen(QtWidgets.QWidget):
 
     def save_agreed_wage(self):
         try:
-            r = self.table.currentRow()
-            ids = getattr(self, "_row_ids", [])
-            if r < 0 or r >= len(ids):
+            eid = self._current_id()
+            if eid is None:
                 raise ValueError("حدّد جهةً من الدليل أولاً")
             with db() as conn:
                 entities.set_agreed_wage(
-                    conn, ids[r], kv.rate_store(self.agreed_wage.value()),
+                    conn, eid, kv.rate_store(self.agreed_wage.value()),
                     dstr(self.agreed_from), "", self.user["username"])
             info(self, "حُفظت الأجرة المتفق عليها — وسُجّلت بتاريخها.")
             self.refresh()
@@ -245,16 +282,15 @@ class EntitiesScreen(QtWidgets.QWidget):
     def _row_selected(self):
         """يملأ حقول السقف بقيم الجهة المحددة في الدليل."""
         try:
-            r = self.table.currentRow()
-            ids = getattr(self, "_row_ids", [])
-            if r < 0 or r >= len(ids):
+            eid = self._current_id()
+            if eid is None:
                 self.lbl_credit_who.setText("— لم تُحدَّد جهة —")
                 return
             with db(readonly=True) as conn:
-                e = entities.get_entity(conn, ids[r])
-                c, g = entities.credit_limit(conn, ids[r])
-                aw = entities.agreed_wage(conn, ids[r])
-                hist = entities.wage_history(conn, ids[r])
+                e = entities.get_entity(conn, eid)
+                c, g = entities.credit_limit(conn, eid)
+                aw = entities.agreed_wage(conn, eid)
+                hist = entities.wage_history(conn, eid)
             self.lbl_credit_who.setText(e["name"] if e else "—")
             self.lim_cash.setValue(c)
             self.lim_gold.setValue(kv.g(g))
@@ -271,13 +307,12 @@ class EntitiesScreen(QtWidgets.QWidget):
 
     def save_limit(self):
         try:
-            r = self.table.currentRow()
-            ids = getattr(self, "_row_ids", [])
-            if r < 0 or r >= len(ids):
+            eid = self._current_id()
+            if eid is None:
                 raise ValueError("حدّد جهةً من الدليل أولاً")
             with db() as conn:
                 entities.set_credit_limit(
-                    conn, ids[r], self.lim_cash.value(),
+                    conn, eid, self.lim_cash.value(),
                     kv.store(self.lim_gold.value()), self.user["username"])
             info(self, "حُفظ حدّ الائتمان للجهة المحددة.")
             self.refresh()
@@ -403,58 +438,251 @@ class EntitiesScreen(QtWidgets.QWidget):
             err(self, e)
 
     def delete_selected(self):
-        r = self.table.currentRow()
-        if r < 0 or r >= len(getattr(self, "_row_ids", [])):
+        eid = self._current_id()
+        if eid is None:
             return
         if not ask(self, "حذف الجهة المحددة؟ (يُسمح فقط لمن ليس لها أي حركة)"):
             return
         try:
             with db() as conn:
-                entities.delete_entity(conn, self._row_ids[r], self.user["username"])
+                entities.delete_entity(conn, eid, self.user["username"])
             info(self, "تم حذف الجهة")
             self.refresh()
         except Exception as e:
             err(self, e)
 
-    def refresh(self):
+    def refresh(self, *_):
         from services import credit_guard
+        t = self.f_type.currentData()
+        types = (t,) if t else None
         with db() as conn:
-            rows, self._row_ids = [], []
+            rows, self._row_ids, groups = [], [], []
             # المتجاوزون يُقرأون دفعةً واحدة لا جهةً جهة — الدليل قد
             # يحوي مئات الأسماء، واستعلامٌ لكل اسم يُبطئ فتح الشاشة.
             over = {r["entity_id"]: r for r in credit_guard.over_limit(conn)}
-            for e in entities.list_entities(conn):
-                g, c = entities.balances(conn, e["id"])
+            items = entities.directory(conn, types, self.f_search.text().strip())
+            share_total = entities.partners_share_total(conn)
+            extra_of = {}
+            for d in items:
+                e = d["row"]
                 if e["entity_type"] == "partner":
                     cg, cc_ = entities.capital_balance(conn, e["id"])
-                    extra = (f"رأس مال: {abs(cc_):,.2f} ر / {abs(cg):,.2f} جم "
-                            f"— حصة {e['share_percent']:.1f}%")
+                    extra_of[e["id"]] = (
+                        f"رأس مال: {abs(cc_):,.2f} ر / {kv.g(abs(cg)):,.2f}"
+                        f" — حصة {e['share_percent']:.1f}%")
                 elif e["entity_type"] in ("employee", "worker"):
-                    extra = (f"{e['job_title'] or '—'} — راتب "
-                            f"{e['basic_salary']:,.2f}")
+                    extra_of[e["id"]] = (f"{e['job_title'] or '—'} — راتب "
+                                         f"{e['basic_salary']:,.2f}")
                 else:
-                    extra = e["vat_number"] or "—"
+                    extra_of[e["id"]] = " · ".join(
+                        x for x in ((e["phone"] or ""),
+                                    (f"ض: {e['vat_number']}"
+                                     if e["vat_number"] else ""))
+                        if x) or "—"
                 lc, lg = entities.credit_limit(conn, e["id"])
+                d["limit"] = lc, lg
+
+        def _side(v, dec, unit=""):
+            if abs(v) < (0.0005 if dec == 3 else 0.005):
+                return "—"
+            return f"{abs(v):,.{dec}f}{unit} " + ("مدين" if v > 0 else "دائن")
+
+        order = [v for _l, v in TYPE_ITEMS] + ["internal"]
+        by_t = {}
+        for d in items:
+            by_t.setdefault(d["type"], []).append(d)
+        for tt in order:
+            grp = by_t.get(tt)
+            if not grp:
+                continue
+            tc = round(sum(x["cash"] for x in grp), 2)
+            tg = round(sum(x["gold"] for x in grp), 3)
+            for d in grp:
+                lc, lg = d["limit"]
                 bits = []
                 if lc:
                     bits.append(f"{lc:,.0f} ريال")
                 if lg:
                     bits.append(f"{kv.g(lg):,.0f} {kv.unit()}")
                 limit_txt = " · ".join(bits) if bits else "بلا حدّ"
-                if e["id"] in over:
+                if d["id"] in over:
                     limit_txt = "⛔ تجاوز — " + limit_txt
-                rows.append((e["name"], entities.TYPE_LABELS[e["entity_type"]],
-                            f"{c:,.2f}", f"{kv.g(g):,.2f}", limit_txt, extra))
-                self._row_ids.append(e["id"])
-            share_total = entities.partners_share_total(conn)
-        fill(self.table, ["الاسم", "النوع", "رصيد نقدي",
-                          f"رصيد ذهب ({kv.unit()})", "حدّ الائتمان",
-                          "بيانات إضافية"], rows)
+                rows.append((d["code"], d["name"],
+                             entities.TYPE_LABELS[d["type"]], d["group"],
+                             _side(d["cash"], 2), _side(kv.g(d["gold"]), 3),
+                             limit_txt, extra_of.get(d["id"], "—")))
+                self._row_ids.append(d["id"])
+            _pl = {"customer": "العملاء", "supplier": "الموردين",
+                   "partner": "الشركاء", "employee": "الموظفين",
+                   "worker": "العمال", "other": "الجهات الأخرى",
+                   "internal": "الحسابات الداخلية"}.get(tt, tt)
+            rows.append(("", f"إجمالي {_pl} ({len(grp)})",
+                         "", "", _side(tc, 2), _side(kv.g(tg), 3), "", ""))
+            self._row_ids.append(None)
+            groups.append(len(rows) - 1)
+        fill(self.table, ["الكود", "الاسم", "النوع", "الحساب الرقابي",
+                          "الرصيد النقدي (ريال)",
+                          f"الرصيد الوزني ({kv.unit()})", "حدّ الائتمان",
+                          "بيانات"], rows)
+        for r in groups:
+            try:
+                style_group_row(self.table, r, 2)
+            except Exception:
+                pass
+        try:
+            from ui.widgets.table_fit import fit_columns
+            fit_columns(self.table, [8, 20, 8, 18, 13, 13, 10, 10])
+        except Exception:
+            pass
+        n = sum(1 for x in self._row_ids if x is not None)
         w = "" if abs(share_total - 100) < 0.01 or share_total == 0 else \
             "  ⚠ المجموع لا يساوي 100%"
         over_txt = f" | ⛔ متجاوزون للسقف: {len(over)}" if over else ""
         self.summary.setText(
-            f"عدد الجهات: {len(rows)} | مجموع حصص الشركاء: "
-            f"{share_total:.2f}%{w}{over_txt}")
+            f"عدد الجهات: {n} | مجموع حصص الشركاء: "
+            f"{share_total:.2f}%{w}{over_txt}\n"
+            "مجموع كل نوعٍ يطابق رصيد مجموعته الرقابية في ميزان المراجعة."
+            " النقر المزدوج على جهةٍ يفتحها للتعديل أو نقل نوعها.")
         self._reload_completer()
         self._load_mode()
+
+    def _current_id(self):
+        r = self.table.currentRow()
+        ids = getattr(self, "_row_ids", [])
+        return ids[r] if 0 <= r < len(ids) else None
+
+    def edit_selected(self):
+        try:
+            eid = self._current_id()
+            if eid is None:
+                raise ValueError("حدّد جهةً من الدليل أولاً (لا صفّ إجمالي)")
+            with db(readonly=True) as conn:
+                e = entities.get_entity(conn, eid)
+            if e["entity_type"] == "internal":
+                raise ValueError("الحساب الداخلي يُدار من دليل الحسابات")
+            dlg = EntityEditDialog(self, e)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            v = dlg.values()
+            with db() as conn:
+                entities.update_entity(
+                    conn, eid, self.user["username"], name=v["name"],
+                    phone=v["phone"], address=v["address"],
+                    vat_number=v["vat"], job_title=v["job"],
+                    basic_salary=v["salary"], share_percent=v["share"],
+                    direct_pay=v["direct"])
+                res = entities.change_entity_type(
+                    conn, eid, v["type"], self.user["username"])
+            msg = "حُفظت بيانات الجهة."
+            if res.get("changed"):
+                msg += ("\n\nنُقل نوعها: "
+                        f"{entities.TYPE_LABELS[res['from']]} ← "
+                        f"{entities.TYPE_LABELS[res['to']]} — وانتقل حسابها"
+                        " بقيوده ورصيده تحت مجموعته الرقابية الجديدة، فيظهر"
+                        " في قسمه الصحيح من الميزانية.")
+            info(self, msg)
+            self.refresh()
+        except Exception as e:
+            err(self, e)
+
+    def statement_selected(self):
+        try:
+            eid = self._current_id()
+            if eid is None:
+                raise ValueError("حدّد جهةً من الدليل أولاً")
+            with db(readonly=True) as conn:
+                e = entities.get_entity(conn, eid)
+                a = conn.execute("SELECT code, name FROM accounts WHERE id=?",
+                                 (e["account_id"],)).fetchone()
+            from ui.widgets.account_movement import show_movement
+            show_movement(self, a["code"], a["name"])
+        except Exception as e:
+            err(self, e)
+
+
+class EntityEditDialog(QtWidgets.QDialog):
+    """بطاقة الجهة للتعديل — ونوعها بين الأنواع المتوافقة محاسبياً."""
+
+    def __init__(self, parent, e):
+        super().__init__(parent)
+        self.e = e
+        self.setWindowTitle(f"تعديل الجهة — {e['name']}")
+        self.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.setMinimumWidth(520)
+        t = e["entity_type"]
+        self.type = QtWidgets.QComboBox()
+        for tt in entities.allowed_types(t):
+            self.type.addItem(entities.TYPE_LABELS[tt], tt)
+        self.type.setCurrentIndex(max(0, self.type.findData(t)))
+        self.name = QtWidgets.QLineEdit(e["name"])
+        self.phone = QtWidgets.QLineEdit(e["phone"] or "")
+        self.address = QtWidgets.QLineEdit(e["address"] or "")
+        self.vat = QtWidgets.QLineEdit(e["vat_number"] or "")
+        self.job = QtWidgets.QLineEdit(e["job_title"] or "")
+        self.salary = mspin()
+        self.salary.setValue(float(e["basic_salary"] or 0))
+        self.share = mspin(maximum=100.0)
+        self.share.setValue(float(e["share_percent"] or 0))
+        f = QtWidgets.QFormLayout()
+        f.addRow("نوع الجهة:", self.type)
+        f.addRow("الاسم:", self.name)
+        f.addRow("رقم التواصل:", self.phone)
+        if t in entities.TRADE_TYPES:
+            f.addRow("العنوان:", self.address)
+            f.addRow("الرقم الضريبي:", self.vat)
+        self.direct = QtWidgets.QCheckBox(
+            "يُصرف له مباشرةً بلا مسير رواتب — كل سند صرفٍ له يُحمَّل"
+            " أجراً (مصروفات العمال / رواتب الإدارة)")
+        try:
+            self.direct.setChecked(bool(e["direct_pay"]))
+        except (IndexError, KeyError):
+            pass
+        if t in entities.STAFF_TYPES:
+            f.addRow("المسمى الوظيفي:", self.job)
+            f.addRow("الراتب الأساسي:", self.salary)
+            f.addRow("", self.direct)
+        if t == "partner":
+            f.addRow("نسبة الحصة (%):", self.share)
+        self.note = QtWidgets.QLabel()
+        self.note.setObjectName("cardSub")
+        self.note.setWordWrap(True)
+        self.type.currentIndexChanged.connect(self._sync)
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.button(QtWidgets.QDialogButtonBox.Ok).setText("حفظ")
+        bb.button(QtWidgets.QDialogButtonBox.Cancel).setText("إلغاء")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        v = QtWidgets.QVBoxLayout(self)
+        v.addLayout(f)
+        v.addWidget(self.note)
+        v.addWidget(bb)
+        self._sync()
+
+    def _sync(self, *_):
+        t0, t1 = self.e["entity_type"], self.type.currentData()
+        if t1 == t0:
+            self.note.setText(
+                "أنواعٌ يُنقل إليها: " + " · ".join(
+                    entities.TYPE_LABELS[x]
+                    for x in entities.allowed_types(t0) if x != t0)
+                + ". والتجاري لا يُنقل إلى موظفٍ أو شريك — بنيته مختلفة."
+                if len(entities.allowed_types(t0)) > 1 else
+                "هذا النوع لا يُنقل إلى غيره — بنيته المحاسبية مختلفة.")
+        else:
+            grp = {"customer": "إجمالي العملاء (أصول متداولة)",
+                   "supplier": "إجمالي الموردين (خصوم متداولة)",
+                   "other": "إجمالي الجهات الأخرى (أصول متداولة)",
+                   "employee": "مستحقات الموظفين",
+                   "worker": "رواتب العمال المستحقة"}.get(t1, "")
+            self.note.setText(
+                f"⚠ نقل النوع إعادةُ تصنيف: ينتقل حساب الجهة بقيوده ورصيده"
+                f" تحت «{grp}». لا يُمسّ قيدٌ سابق، ويظهر الرصيد في قسمه"
+                " الجديد من الميزانية من الآن.")
+
+    def values(self):
+        return {"type": self.type.currentData(), "name": self.name.text(),
+                "phone": self.phone.text(), "address": self.address.text(),
+                "vat": self.vat.text(), "job": self.job.text(),
+                "salary": self.salary.value(), "share": self.share.value(),
+                "direct": self.direct.isChecked()}

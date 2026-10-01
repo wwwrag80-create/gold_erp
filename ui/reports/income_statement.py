@@ -332,6 +332,10 @@ class StandardIncomeTab(QtWidgets.QWidget):
             AccountsPicker(self, r["label"], items, d1, d2, PL_EXCLUDE,
                            note=f"من {d1} إلى {d2} — بأثرها على الربح"
                            ).exec_()
+        elif r["kind"] in ("memo", "memohead"):
+            err(self, ValueError("بيانٌ للعلم لا بندٌ في الربح — وزن الذهب"
+                                 " في كشف 4110/4910، والتحصيلات في سجل"
+                                 " سندات القبض"))
         else:
             err(self, ValueError("هذا سطر مجموع — اختر بنداً فوقه لترى"
                                  " حساباته"))
@@ -352,10 +356,11 @@ class StandardIncomeTab(QtWidgets.QWidget):
             muted = QtGui.QColor("#5A5146")
             for i, r in enumerate(self.rows):
                 k = r["kind"]
-                if k == "sec":
+                if k in ("sec", "memohead"):
                     vals = [r["label"]] + [""] * (len(heads) - 1)
                 else:
-                    pad = {"line": "\u2003", "acct": "\u2003" * 3}
+                    pad = {"line": "\u2003", "acct": "\u2003" * 3,
+                           "memo": "\u2003"}
                     vals = (["\u200f" + pad.get(k, "") + r["label"]]
                             + self._values(r))
                 for c, v in enumerate(vals):
@@ -369,12 +374,15 @@ class StandardIncomeTab(QtWidgets.QWidget):
                     if k == "acct":
                         f.setPointSizeF(max(7.0, f.pointSizeF() - 1))
                         it.setForeground(muted)
+                    if k in ("memo", "memohead"):
+                        f.setItalic(True)
+                        it.setForeground(muted)
                     it.setFont(f)
                     tbl.setItem(i, c, it)
                 # الأقسام ومجاميعها بلونٍ غامق، وصافي الربح أغمقها
                 if k in ("sec", "sub", "grand"):
                     style_group_row(tbl, i, 1 if k == "grand" else 2)
-                if k == "sec":
+                if k in ("sec", "memohead"):
                     tbl.setSpan(i, 0, 1, len(heads))
         finally:
             tbl.setUpdatesEnabled(True)
@@ -424,7 +432,7 @@ class StandardIncomeTab(QtWidgets.QWidget):
                 w.writerow([h.replace("\n", " — ")
                             for h in self._headers()])
                 for r in self.rows:
-                    if r["kind"] == "sec":
+                    if r["kind"] in ("sec", "memohead"):
                         w.writerow([r["label"]])
                         continue
                     vals = [round(r["cash"], 2)]

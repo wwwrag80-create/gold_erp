@@ -508,3 +508,171 @@ def ensure_employee_accrual_accounts(conn, username="system"):
                      (acc, r["id"]))
         made += 1
     return made
+
+
+# ══════════════════════════════════════════════════════════════════
+#  تعديل الجهة ونقل نوعها (4.45)
+# ══════════════════════════════════════════════════════════════════
+#
+# الجهة بطاقةٌ وحسابٌ في الشجرة. تعديل بياناتها (الاسم والهاتف
+# والعنوان والرقم الضريبي…) يمسّ البطاقة، والاسم يتبعه اسم حسابها.
+#
+# **نقل النوع** إعادةُ تصنيفٍ محاسبي: الحساب نفسه (بمعرّفه وقيوده
+# ورصيده) ينتقل تحت المجموعة الرقابية لنوعه الجديد — العميل تحت «إجمالي
+# العملاء» (أصول)، والمورد تحت «إجمالي الموردين» (خصوم)، والجهة الأخرى
+# تحت «المدينون الآخرون». فيقرأ الميزان الرصيدَ في قسمه الصحيح من الآن
+# ولا يُمسّ قيدٌ سابق. والمسموح:
+#   • بين الجهات التجارية: عميل ↔ مورد ↔ جهة أخرى — حسابٌ واحد يُنقل.
+#   • بين الموظف والعامل: حساب السلف باقٍ، وحساب المستحقات ينتقل بين
+#     «مستحقات الموظفين» و«رواتب العمال المستحقة»، ويتبعه المسير.
+# وما عداهما (تجاري ↔ موظف/شريك) بنيةٌ مختلفة — الشريك حسابان في حقوق
+# الملكية، والموظف بطاقةٌ في المسير بحسابين — فيُنشأ بنوعه ويُحوَّل
+# الرصيد إليه بقيد.
+
+TRADE_TYPES = ("customer", "supplier", "other")
+STAFF_TYPES = ("employee", "worker")
+
+
+def allowed_types(entity_type):
+    if entity_type in TRADE_TYPES:
+        return TRADE_TYPES
+    if entity_type in STAFF_TYPES:
+        return STAFF_TYPES
+    return (entity_type,)
+
+
+def _rename_acc(conn, account_id, new_name):
+    if account_id:
+        conn.execute("UPDATE accounts SET name=? WHERE id=?",
+                     (new_name, account_id))
+
+
+def update_entity(conn, entity_id, username, name=None, phone=None,
+                  address=None, vat_number=None, job_title=None,
+                  basic_salary=None, share_percent=None, direct_pay=None):
+    e = get_entity(conn, entity_id)
+    if not e or e["is_deleted"]:
+        raise ValueError("الجهة غير موجودة")
+    if e["entity_type"] == "internal":
+        raise ValueError("الحساب الداخلي لا يُعدَّل من هنا")
+    t = e["entity_type"]
+    name = e["name"] if name is None else name.strip()
+    if not name:
+        raise ValueError("أدخل اسم الجهة")
+    if name != e["name"]:
+        dup = name_exists(conn, name, t)
+        if dup and dup["id"] != e["id"]:
+            raise ValueError(f"يوجد {TYPE_LABELS[t]} بالاسم نفسه:"
+                             f" «{dup['name']}»")
+    vat = e["vat_number"] if vat_number is None else vat_number.strip()
+    if t == "supplier" and not (vat or "").strip():
+        raise ValueError("الرقم الضريبي إلزامي للموردين")
+    sal = e["basic_salary"] if basic_salary is None else float(basic_salary)
+    if t in STAFF_TYPES and sal <= 0:
+        raise ValueError("أدخل الراتب الأساسي")
+    share = e["share_percent"] if share_percent is None else float(share_percent)
+    if t == "partner" and not 0 <= share <= 100:
+        raise ValueError("نسبة الحصة بين 0 و100")
+    conn.execute(
+        "UPDATE entities SET name=?, phone=?, address=?, vat_number=?,"
+        " job_title=?, basic_salary=?, share_percent=? WHERE id=?",
+        (name, (e["phone"] if phone is None else phone.strip()),
+         (e["address"] if address is None else address.strip()), vat,
+         (e["job_title"] if job_title is None else job_title.strip()),
+         sal, share, entity_id))
+    if name != e["name"]:
+        if t == "partner":
+            _rename_acc(conn, e["account_id"], f"جاري الشريك: {name}")
+            _rename_acc(conn, e["capital_account_id"],
+                        f"رأس مال الشريك: {name}")
+        elif t in STAFF_TYPES:
+            _rename_acc(conn, e["account_id"], PREFIX[t] + name)
+            _rename_acc(conn, e["capital_account_id"],
+                        ("مستحقات الموظف: " if t == "employee"
+                         else "مستحقات العامل: ") + name)
+        else:
+            _rename_acc(conn, e["account_id"], PREFIX[t] + name)
+    if direct_pay is not None and t in STAFF_TYPES:
+        conn.execute("UPDATE entities SET direct_pay=? WHERE id=?",
+                     (1 if direct_pay else 0, entity_id))
+    if t in STAFF_TYPES and e["employee_id"]:
+        conn.execute("UPDATE employees SET name=?, basic_salary=? WHERE id=?",
+                     (name, sal, e["employee_id"]))
+    log_action(conn, username, "update", "entities", entity_id,
+               f"تعديل بيانات {TYPE_LABELS[t]}: {e['name']}"
+               + (f" ← {name}" if name != e["name"] else ""))
+    return get_entity(conn, entity_id)
+
+
+def change_entity_type(conn, entity_id, new_type, username):
+    """ينقل الجهة إلى نوعٍ آخر — وحسابها تحت مجموعته الرقابية."""
+    from models import coa
+    e = get_entity(conn, entity_id)
+    if not e or e["is_deleted"]:
+        raise ValueError("الجهة غير موجودة")
+    old = e["entity_type"]
+    if new_type == old:
+        return {"changed": False}
+    if new_type not in allowed_types(old):
+        raise ValueError(
+            f"لا يُنقل {TYPE_LABELS.get(old)} إلى {TYPE_LABELS.get(new_type)}"
+            " — البنية المحاسبية مختلفة (الشريك حسابان في حقوق الملكية،"
+            " والموظف والعامل بطاقة مسيرٍ بحسابين).\n\nأنشئ الجهة بنوعها"
+            " الجديد، ثم حوّل الرصيد إليها بقيد يومية.")
+    if new_type == "supplier" and not (e["vat_number"] or "").strip():
+        raise ValueError("أدخل الرقم الضريبي أولاً — إلزامي للموردين")
+    dup = name_exists(conn, e["name"], new_type)
+    if dup and dup["id"] != e["id"]:
+        raise ValueError(f"يوجد {TYPE_LABELS[new_type]} بالاسم نفسه:"
+                         f" «{dup['name']}»")
+    moved = []
+    if new_type in TRADE_TYPES:
+        par = acc_id(conn, PARENT_CODE[new_type])
+        coa.move_account(conn, e["account_id"], par, username,
+                         entity_ok=True)
+        _rename_acc(conn, e["account_id"], PREFIX[new_type] + e["name"])
+        moved.append(PARENT_CODE[new_type])
+    else:
+        # موظف ↔ عامل: حساب السلف باقٍ، والمستحقات تنتقل
+        _rename_acc(conn, e["account_id"], PREFIX[new_type] + e["name"])
+        if e["capital_account_id"]:
+            dest = (EMPLOYEE_ACCRUED_PARENT if new_type == "employee"
+                    else WORKER_ACCRUED_PARENT)
+            coa.move_account(conn, e["capital_account_id"],
+                             acc_id(conn, dest), username, entity_ok=True)
+            _rename_acc(conn, e["capital_account_id"],
+                        ("مستحقات الموظف: " if new_type == "employee"
+                         else "مستحقات العامل: ") + e["name"])
+            moved.append(dest)
+        if e["employee_id"]:
+            conn.execute("UPDATE employees SET staff_kind=? WHERE id=?",
+                         (new_type, e["employee_id"]))
+    conn.execute("UPDATE entities SET entity_type=? WHERE id=?",
+                 (new_type, entity_id))
+    log_action(conn, username, "update", "entities", entity_id,
+               f"نقل نوع الجهة {e['name']}: {TYPE_LABELS[old]} ←"
+               f" {TYPE_LABELS[new_type]} (الحساب تحت {' · '.join(moved)})")
+    return {"changed": True, "from": old, "to": new_type, "moved": moved}
+
+
+def directory(conn, types=None, q=""):
+    """دليل الجهات للعرض: الكود والحساب الرقابي والرصيدان بطبيعتهما."""
+    out = []
+    qn = normalize_name(q) if q else ""
+    for e in list_entities(conn, types):
+        if qn and qn not in normalize_name(e["name"]) \
+                and q not in (e["phone"] or "") \
+                and q not in (e["vat_number"] or ""):
+            continue
+        acc = conn.execute(
+            "SELECT a.code, p.code pcode, p.name pname FROM accounts a"
+            " LEFT JOIN accounts p ON p.id=a.parent_id WHERE a.id=?",
+            (e["account_id"],)).fetchone()
+        g, c = account_balance(conn, e["account_id"])
+        out.append({"id": e["id"], "name": e["name"],
+                    "type": e["entity_type"],
+                    "code": acc["code"] if acc else "",
+                    "group": (f"{acc['pcode']} — {acc['pname']}"
+                              if acc and acc["pcode"] else ""),
+                    "cash": round(c, 2), "gold": round(g, 3), "row": e})
+    return out
