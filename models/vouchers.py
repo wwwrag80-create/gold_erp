@@ -52,8 +52,31 @@ def doc_note(notes, rows):
     return "  —  ".join(parts)
 
 
+# ══════════════════════════════════════════════════════════════════
+#  تحميل سند الصرف مصروفاً (4.45 للعمال والموظفين · 4.46 لكل جهة)
+# ------------------------------------------------------------------
+#  سند الصرف لجهةٍ **سدادٌ** لما لها أو **سلفةٌ** عليها — لا مصروف: فالمصروف
+#  أُثبت يوم نشأ الدين (فاتورة المورد، مسير الرواتب). لكن يُصرف أحياناً
+#  ما هو مصروفٌ بذاته: أجرٌ لعاملٍ بلا مسير، خدمةٌ من موردٍ بلا فاتورة
+#  مشتريات، تعويضٌ أو هديةٌ لعميل. فيُحمَّل السند مصروفاً على حسابه
+#  بقيدٍ مقابلٍ على حساب الجهة في السند نفسه: يظهر في كشفها المدفوعُ
+#  والمُحمَّل معاً، ويظهر المصروف في قائمة الدخل في بنده.
+#
+#  الحساب الافتراضي بنوع الجهة:
+#    • العامل ← «مصروفات العمال» 5710 · الموظف ← «رواتب الإدارة» 5700
+#    • العميل ← «مدفوعات وتعويضات للعملاء» 5250 — تُطرح من الإيراد
+#      (المدفوع للعميل تخفيضٌ لثمن ما بيع له — المعيار الدولي 15)
+#    • المورد والجهة الأخرى ← «مصروفات تشغيلية» 5500 (ويُختار غيره)
+# ══════════════════════════════════════════════════════════════════
 STAFF_EXPENSE = {"worker": ("5710", "أجر عامل — مصروفات العمال"),
                  "employee": ("5700", "راتب موظف — رواتب الإدارة")}
+EXPENSE_DEFAULT = {"worker": "5710", "employee": "5700",
+                   "customer": "5250", "supplier": "5500", "other": "5500"}
+EXPENSE_LABEL = {"worker": "أجر عامل — مصروفات العمال",
+                 "employee": "راتب موظف — رواتب الإدارة",
+                 "customer": "مدفوعٌ للعميل — يُطرح من الإيراد",
+                 "supplier": "مصروفٌ مدفوع للمورد",
+                 "other": "مصروفٌ مدفوع للجهة"}
 
 
 def staff_expense_default(conn, entity_id):
@@ -63,6 +86,7 @@ def staff_expense_default(conn, entity_id):
     يُصرف له أجرٌ يُحمَّل مصروفاً. وإلا (الأصل) فأجره يُثبت مصروفاً يوم
     ترحيل مسير الرواتب، وما يُصرف له قبله سلفةٌ وبعده سداد — فلو حُمِّل
     الصرف مصروفاً لتكرّر الأجر مرتين (مرةً بالسند ومرةً بالمسير).
+    والجهات الأخرى لا تُحمَّل إلا باختيارٍ صريح في السند.
     """
     ent = get_entity(conn, entity_id) if entity_id else None
     if not ent or ent["entity_type"] not in STAFF_EXPENSE:
@@ -73,20 +97,73 @@ def staff_expense_default(conn, entity_id):
         return False
 
 
-def staff_expense_account(conn, kind, entity_id, target_acc, cash_amount,
-                          flag=None):
-    if kind != "payment" or not entity_id or not cash_amount:
+def expense_default_account(conn, entity_id):
+    """الحساب المقترح لتحميل صرفٍ لهذه الجهة — أو None (لا يصلح)."""
+    ent = get_entity(conn, entity_id) if entity_id else None
+    if not ent or ent["entity_type"] not in EXPENSE_DEFAULT:
+        return None
+    try:
+        return acc_id(conn, EXPENSE_DEFAULT[ent["entity_type"]])
+    except Exception:
+        return None
+
+
+def expense_accounts(conn):
+    """الحسابات التي يُحمَّل عليها سند صرف: كل مصروفٍ قابلٍ للترحيل."""
+    return conn.execute(
+        "SELECT id, code, name, balance_type FROM accounts WHERE"
+        " type='expense' AND is_active=1 AND is_postable=1"
+        " ORDER BY code").fetchall()
+
+
+def _resolve_expense(conn, kind, entity_id, target_acc, cash_amount, gold18,
+                     expense_account_id=None, staff_flag=None):
+    """(حساب المصروف، بيانه) لسند الصرف — أو None (سدادٌ/سلفة).
+
+    `expense_account_id`: حسابٌ صريح (> 0)، أو 0 = «لا تحميل» صراحةً،
+    أو None = بحسب الجهة (العامل/الموظف من بطاقته، وغيرهما لا).
+    """
+    if kind != "payment" or not entity_id or not (cash_amount or gold18):
         return None
     ent = get_entity(conn, entity_id)
-    if not ent or ent["entity_type"] not in STAFF_EXPENSE \
-            or ent["account_id"] != target_acc:
+    if not ent or ent["account_id"] != target_acc \
+            or ent["entity_type"] not in EXPENSE_DEFAULT:
         return None
-    if flag is None:
-        flag = staff_expense_default(conn, entity_id)
-    if not flag:
+    t = ent["entity_type"]
+    if expense_account_id is None:
+        flag = staff_flag
+        if flag is None:
+            flag = staff_expense_default(conn, entity_id)
+        if not flag:
+            return None
+        aid = acc_id(conn, EXPENSE_DEFAULT[t])
+    elif not expense_account_id:
         return None
-    code, label = STAFF_EXPENSE[ent["entity_type"]]
-    return acc_id(conn, code), label
+    else:
+        aid = int(expense_account_id)
+    acc = conn.execute("SELECT * FROM accounts WHERE id=?", (aid,)).fetchone()
+    if not acc or acc["type"] != "expense" or not acc["is_postable"] \
+            or not acc["is_active"]:
+        raise ValueError("اختر حساب مصروفٍ قابلاً للترحيل لتحميل السند عليه")
+    if gold18 and acc["balance_type"] == "cash":
+        raise ValueError(
+            f"«{acc['code']} — {acc['name']}» حسابٌ نقدي لا يقبل الذهب —"
+            " اختر حساباً بالذهب، أو اجعل الذهب في سندٍ مستقل")
+    if cash_amount and acc["balance_type"] == "gold":
+        raise ValueError(
+            f"«{acc['code']} — {acc['name']}» حسابٌ وزني لا يقبل النقد —"
+            " اختر حساباً نقدياً أو بالنقد والذهب")
+    return aid, EXPENSE_LABEL[t]
+
+
+def staff_expense_account(conn, kind, entity_id, target_acc, cash_amount,
+                          flag=None):
+    """توافق خلفي: حساب تحميل صرفٍ نقدي لعاملٍ/موظف."""
+    ent = get_entity(conn, entity_id) if entity_id else None
+    if not ent or ent["entity_type"] not in STAFF_EXPENSE:
+        return None
+    return _resolve_expense(conn, kind, entity_id, target_acc, cash_amount,
+                            0.0, None, flag)
 
 
 def create_voucher(conn, kind, voucher_date, username, *,
@@ -94,14 +171,13 @@ def create_voucher(conn, kind, voucher_date, username, *,
                    gold_weight=0.0, gold_karat=18, cash_amount=0.0,
                    cash_account_code="1400", net_diff=0.0,
                    disc_cash=0.0, disc_gold=0.0, notes="", rows=None,
-                   staff_expense=None):
+                   staff_expense=None, expense_account_id=None):
     """سند قبض/صرف يقبل **أسطراً متعددة** في السند الواحد.
 
-    `staff_expense` (سند صرفٍ لعاملٍ أو موظف): يُحمَّل المصروف النقدي
-    مصروفاً — «مصروفات العمال» 5710 للعامل و«رواتب الإدارة» 5700
-    للموظف — بقيدٍ مقابلٍ على حسابه في السند نفسه: فيظهر في كشفه
-    المدفوعُ والمُحمَّل معاً ولا يبقى سلفةً عليه. None ⇒ من بطاقته
-    («يُصرف له مباشرةً بلا مسير» — `staff_expense_default`).
+    `expense_account_id` (سند صرفٍ لجهة): يُحمَّل المصروف على هذا
+    الحساب بقيدٍ مقابلٍ على حساب الجهة في السند نفسه (0 = لا تحميل؛
+    None = بحسب الجهة). `staff_expense` توافقٌ خلفي للعامل والموظف —
+    None ⇒ من بطاقته («يُصرف له مباشرةً بلا مسير»).
 
     `rows`: قائمة أسطر مرنة تسمح بأعيرة مختلفة ونقد معاً، مثال:
         [{"kind": "gold", "weight": 100, "karat": 21, "notes": "كسر"},
@@ -242,24 +318,35 @@ def create_voucher(conn, kind, voucher_date, username, *,
                   {"account_id": target_acc, "gold_credit": disc_gold,
                    "line_desc": "خصم مسموح وزناً"}]
 
-    staff_exp = staff_expense_account(conn, kind, entity_id, target_acc,
-                                      cash_amount, staff_expense)
+    _gold18 = round(sum(x["equiv"] for x in norm if x["kind"] == "gold"), 3) \
+        if norm else (gold_math.to_base_karat(gold_weight, gold_karat)
+                      if gold_weight else 0.0)
+    staff_exp = _resolve_expense(conn, kind, entity_id, target_acc,
+                                 cash_amount, _gold18, expense_account_id,
+                                 staff_expense)
     if staff_exp:
         exp_acc, label_exp = staff_exp
-        lines += [{"account_id": exp_acc, "cash_debit": cash_amount,
-                   "line_desc": label_exp},
-                  {"account_id": target_acc, "cash_credit": cash_amount,
-                   "line_desc": f"{label_exp} — يُحمَّل مصروفاً"}]
+        if cash_amount:
+            lines += [{"account_id": exp_acc, "cash_debit": cash_amount,
+                       "line_desc": label_exp},
+                      {"account_id": target_acc, "cash_credit": cash_amount,
+                       "line_desc": f"{label_exp} — يُحمَّل مصروفاً"}]
+        if _gold18:
+            lines += [{"account_id": exp_acc, "gold_debit": _gold18,
+                       "line_desc": label_exp + " (ذهب)"},
+                      {"account_id": target_acc, "gold_credit": _gold18,
+                       "line_desc": f"{label_exp} — يُحمَّل مصروفاً (ذهب)"}]
 
     label = "سند قبض" if kind == "receipt" else "سند صرف"
     cur = conn.execute(
         "INSERT INTO vouchers(kind,customer_id,target_account_id,voucher_date,"
         "gold_weight,gold_karat,gold_equiv18,cash_amount,cash_account_code,"
-        "net_diff,disc_cash,disc_gold,notes,created_by,staff_expense)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "net_diff,disc_cash,disc_gold,notes,created_by,staff_expense,"
+        "expense_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (kind, entity_id, target_acc, voucher_date, gold_weight, gold_karat,
          equiv, cash_amount, cash_account_code, net_diff, disc_cash, disc_gold,
-         notes, username, 1 if staff_exp else 0))
+         notes, username, 1 if staff_exp else 0,
+         staff_exp[0] if staff_exp else None))
     v_id = cur.lastrowid
     v_no = f"V-{v_id:05d}"
     entry_id = post_entry(conn, voucher_date,
@@ -334,7 +421,8 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
                    account_id=None, rows=None, gold_weight=0.0,
                    gold_karat=18, cash_amount=0.0, cash_account_code=None,
                    net_diff=0.0, disc_cash=0.0, disc_gold=0.0, notes="",
-                   voucher_date=None, staff_expense=None):
+                   voucher_date=None, staff_expense=None,
+                   expense_account_id=None):
     """يعدّل سنداً مُرحَّلاً **في مكانه** — بنفس رقمه وتاريخه.
 
     **لماذا لا نعكس ونُعيد**: العكس يُنشئ سنداً برقم ووقت جديدين،
@@ -398,6 +486,19 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     conn.execute("DELETE FROM voucher_lines WHERE voucher_id=?",
                  (voucher_id,))
 
+    # ── تحميل المصروف: يبقى كما في السند الأصلي ما لم يُغيَّر صراحةً ──
+    # (سندات 4.45 للعامل/الموظف حُمِّلت بعلامةٍ بلا حساب محفوظ)
+    _exp_keep, _staff_keep = expense_account_id, staff_expense
+    if _exp_keep is None and _staff_keep is None:
+        _ea = v["expense_account_id"] if "expense_account_id" in v.keys() \
+            else None
+        if _ea:
+            _exp_keep = _ea
+        elif "staff_expense" in v.keys() and v["staff_expense"]:
+            _staff_keep = True
+        else:
+            _exp_keep = 0
+
     # ── بناء السند الجديد في سجل مؤقّت ثم نقل محتواه ──
     tmp = create_voucher(
         conn, kind, v["voucher_date"], username, entity_id=entity_id,
@@ -405,9 +506,8 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
         gold_karat=gold_karat, cash_amount=cash_amount,
         cash_account_code=cash_account_code, net_diff=net_diff,
         disc_cash=disc_cash, disc_gold=disc_gold, notes=notes,
-        # التعديل يُبقي اختيار السند الأصلي ما لم يُغيََّر صراحةً
-        staff_expense=(bool(v["staff_expense"]) if staff_expense is None
-                       and "staff_expense" in v.keys() else staff_expense))
+        # التعديل يُبقي تحميل السند الأصلي (حسابه) ما لم يُغيَّر صراحةً
+        staff_expense=_staff_keep, expense_account_id=_exp_keep)
 
     # أسطر السند تنتقل للسند الأصلي
     conn.execute("UPDATE voucher_lines SET voucher_id=? WHERE voucher_id=?",
@@ -454,12 +554,13 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
         "UPDATE vouchers SET kind=?, customer_id=?, target_account_id=?,"
         " gold_weight=?, gold_karat=?, gold_equiv18=?, cash_amount=?,"
         " cash_account_code=?, net_diff=?, disc_cash=?, disc_gold=?,"
-        " notes=?, staff_expense=? WHERE id=?",
+        " notes=?, staff_expense=?, expense_account_id=? WHERE id=?",
         (src["kind"], src["customer_id"], src["target_account_id"],
          src["gold_weight"], src["gold_karat"], src["gold_equiv18"],
          src["cash_amount"], src["cash_account_code"],
          src["net_diff"], src["disc_cash"], src["disc_gold"],
-         src["notes"], src["staff_expense"], voucher_id))
+         src["notes"], src["staff_expense"], src["expense_account_id"],
+         voucher_id))
 
     # ── حارس التوازن ──
     chk = conn.execute(

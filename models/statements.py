@@ -537,11 +537,15 @@ IS_LINES = [
     # المباع يُعرض في «بيانات للعلم» أسفل القائمة.
     ("sales", "المبيعات (مبيعات الذهب والأجور)", "rev"),
     ("returns", "يُطرح: مردودات المبيعات", "rev"),
-    ("discounts", "يُطرح: الخصم المسموح به", "rev"),
+    ("discounts", "يُطرح: الخصم المسموح به والمدفوع للعملاء", "rev"),
     ("net_diff", "يُضاف: فرق الصافي", "rev"),
     # ثم بقية حسابات الإيرادات — ومنها إيرادات التحصيل (4500): ما
     # يُقبض إيراداً لا سداداً لذمّة
     ("other_rev", "إيرادات التحصيل والإيرادات العرضية", "orev"),
+    # 4.46: تكلفة الذهب المباع — الذهب المسلَّم من المخزون (4950) مقابل
+    # مبيعات الذهب وزناً. يأتي **بعد** صافي المبيعات لا داخلها: فيظهر
+    # وزن المبيع والمردود وصافيهما، ثم تكلفتها، والمجمل ربحُ الوزن الحقيقي
+    ("cogs", "يُطرح: تكلفة الذهب المباع (المسلَّم من المخزون)", "cos"),
     # 4.40: «خسائر الورشة» — الفواقد كاملةً ثم المسترجع منها وحده
     ("workshop", "فواقد الورشة", "cos"),
     ("recovered", "يُخصم: المسترجع من التصفية", "cos"),
@@ -556,12 +560,13 @@ IS_SUBTOTALS = [
     # (بعد القسم، المفتاح، العنوان)
     ("rev", "net_sales", "صافي المبيعات"),
     ("orev", "net_revenue", "إجمالي الإيرادات"),
-    ("cos", "gross", "مجمل الربح بعد خسائر الورشة"),
+    ("cos", "gross", "مجمل الربح"),
     ("opex", "before_zakat", "صافي الربح (الخسارة) قبل الزكاة"),
     ("zakat", "net", "صافي ربح (خسارة) الفترة"),
 ]
 IS_SECTIONS = {"rev": "المبيعات", "orev": "الإيرادات الأخرى والتحصيلية",
-               "cos": "خسائر الورشة", "opex": "المصاريف التشغيلية",
+               "cos": "تكلفة المبيعات وخسائر الورشة",
+               "opex": "المصاريف التشغيلية",
                "zakat": "الزكاة"}
 
 # نموذجٌ مبسّط لمصنع ذهب: ما لا بند له من الإيراد يُضمّ إلى «الإيرادات
@@ -569,8 +574,9 @@ IS_SECTIONS = {"rev": "المبيعات", "orev": "الإيرادات الأخر
 # الإهلاك والخسائر الائتمانية).
 _IS_MAP = {
     "4100": "sales", "4110": "sales", "4120": "sales", "4130": "sales",
-    "4910": "sales", "4950": "sales",          # زوج الذهب وزناً — صافيه صفر
+    "4950": "cogs",                  # الذهب المسلَّم ← تكلفة الذهب المباع
     "4900": "returns", "5200": "discounts", "5300": "discounts",
+    "5250": "discounts",             # المدفوع للعملاء يُطرح من الإيراد
     "5600": "net_diff",
     "5100": "workshop", "5190": "recovered",
     # مصروفات العمال: رواتب عمال التصنيع (مسيرها) وما صُرف لعاملٍ
@@ -669,33 +675,24 @@ def income_statement(conn, date_from, date_to, compare=True):
 
 
 IS_MEMO = [
-    ("m_sold", "وزن الذهب المباع للعملاء (4110)"),
-    ("m_returned", "وزن الذهب المردود من العملاء (4910)"),
-    ("m_collect", "تحصيلات الفترة من سندات القبض — سدادٌ لذمم"),
+    ("m_collect", "المقبوض من العملاء والجهات (سندات القبض) — سدادٌ لذمم"),
+    ("m_paid_sup", "المدفوع للموردين (سندات الصرف) — سدادٌ لذمم"),
 ]
 
 
 def _is_memo(conn, d1, d2):
     """بياناتٌ للعلم أسفل قائمة الدخل — لا تدخل في الربح.
 
-    **وزن الذهب المباع**: الذهب يُباع بوزنه فيُقابل إيرادَه الوزنيَّ
-    «الذهب المسلَّم من المخزون» بالوزن نفسه، وصافيهما في الربح صفر.
-    فالوزن يُعرض هنا لا بنداً يُطرح في القائمة.
-
     **التحصيلات**: سند القبض من عميلٍ **سدادٌ** لذمّته التي نشأت يوم
     البيع، وإيرادها قُيّد حينها في «المبيعات». عدُّها إيراداً ثانيةً
-    يضاعف الإيراد. فتُعرض هنا للعلم — وما يُقبض إيراداً حقيقياً (لا
-    ذمّة له) يُقبض على «إيرادات التحصيل» 4500 فيدخل القائمة بنده.
+    يضاعف الإيراد. وما يُقبض إيراداً حقيقياً (لا ذمّة له) يُقبض على
+    «إيرادات التحصيل» 4500 فيدخل القائمة بنده.
+
+    **المدفوع للموردين**: السداد لموردٍ **ليس مصروفاً** — المصروف أُثبت
+    يوم فاتورة المشتريات في بنده (مواد التشغيل، الإدارية…). وما يُصرف
+    لمورد مصروفاً بلا فاتورةٍ يُحمَّل مصروفاً من السند نفسه فيظهر في
+    بنده لا هنا.
     """
-    def _acc(code, sign_col):
-        r = conn.execute(
-            f"SELECT COALESCE(SUM({sign_col}),0) v FROM journal_lines l"
-            " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
-            " JOIN accounts a ON a.id=l.account_id AND a.code=?"
-            " WHERE e.entry_date BETWEEN ? AND ?", (code, d1, d2)).fetchone()
-        return round(float(r["v"] or 0), 3)
-    sold = _acc("4110", "l.gold_credit-l.gold_debit")
-    ret = _acc("4910", "l.gold_debit-l.gold_credit")
     r = conn.execute(
         "SELECT COALESCE(SUM(v.cash_amount),0) c,"
         " COALESCE(SUM(v.gold_equiv18),0) g FROM vouchers v"
@@ -704,10 +701,19 @@ def _is_memo(conn, d1, d2):
         " WHERE v.kind='receipt' AND v.is_deleted=0"
         " AND v.voucher_date BETWEEN ? AND ? AND a.type<>'revenue'",
         (d1, d2)).fetchone()
-    return {"m_sold": {"cash": 0.0, "gold": sold},
-            "m_returned": {"cash": 0.0, "gold": ret},
-            "m_collect": {"cash": round(float(r["c"] or 0), 2),
-                          "gold": round(float(r["g"] or 0), 3)}}
+    p = conn.execute(
+        "SELECT COALESCE(SUM(v.cash_amount),0) c,"
+        " COALESCE(SUM(v.gold_equiv18),0) g FROM vouchers v"
+        " JOIN journal_entries e ON e.id=v.entry_id AND e.is_deleted=0"
+        " JOIN entities en ON en.id=v.customer_id"
+        " AND en.entity_type='supplier'"
+        " WHERE v.kind='payment' AND v.is_deleted=0"
+        " AND COALESCE(v.staff_expense,0)=0"
+        " AND v.voucher_date BETWEEN ? AND ?", (d1, d2)).fetchone()
+    return {"m_collect": {"cash": round(float(r["c"] or 0), 2),
+                          "gold": round(float(r["g"] or 0), 3)},
+            "m_paid_sup": {"cash": round(float(p["c"] or 0), 2),
+                           "gold": round(float(p["g"] or 0), 3)}}
 
 
 def is_layout(st, accounts=False):

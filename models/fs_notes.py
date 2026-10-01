@@ -41,7 +41,7 @@ NOTE_REF = {
     # قائمة الدخل
     "sales": 14, "returns": 14, "discounts": 14,
     "net_diff": 14, "other_rev": 14,
-    "workshop": 15, "recovered": 15,
+    "cogs": 15, "workshop": 15, "recovered": 15,
     "admin": 16, "labor": 16, "mgmt": 16, "materials": 16,
 }
 
@@ -303,7 +303,7 @@ def build(conn, date_from, date_to, compare=True):
                           " الملكية»."]
     notes[14]["tables"] = [_table("", isdet("sales", "returns", "discounts",
                                             "net_diff", "other_rev"))]
-    notes[15]["tables"] = [_table("", isdet("workshop", "recovered"),
+    notes[15]["tables"] = [_table("", isdet("cogs", "workshop", "recovered"),
                                   sign=-1)]
     notes[16]["tables"] = [_table("", isdet("admin", "labor", "mgmt",
                                                  "materials"),

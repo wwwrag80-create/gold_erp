@@ -676,3 +676,55 @@ def directory(conn, types=None, q=""):
                               if acc and acc["pcode"] else ""),
                     "cash": round(c, 2), "gold": round(g, 3), "row": e})
     return out
+
+
+# مجموعة رقابية ← نوع الجهة التجارية التي يقع حسابها تحتها
+GROUP_TYPE = {"1600": "customer", "2300": "supplier", "1650": "other"}
+
+
+def type_of_account(conn, account_id):
+    """النوع التجاري الذي تقتضيه مكانة الحساب في الشجرة — أو None."""
+    cur = conn.execute("SELECT id, code, parent_id FROM accounts WHERE id=?",
+                       (account_id,)).fetchone()
+    guard = 0
+    while cur is not None and guard < 30:
+        if cur["code"] in GROUP_TYPE and cur["id"] != account_id:
+            return GROUP_TYPE[cur["code"]]
+        if not cur["parent_id"]:
+            break
+        cur = conn.execute("SELECT id, code, parent_id FROM accounts"
+                           " WHERE id=?", (cur["parent_id"],)).fetchone()
+        guard += 1
+    return None
+
+
+def sync_types_from_tree(conn, account_ids, username):
+    """بعد نقل حسابات في الشجرة: الجهة التجارية يتبع نوعُها مجموعةَ
+    حسابها الجديدة، ويُصحَّح بادئ اسم الحساب («عميل: » ← «مورد: »).
+    يعيد [(اسم الجهة، النوع القديم، الجديد)]."""
+    ids = [int(a) for a in account_ids or []]
+    if not ids:
+        return []
+    q = ",".join("?" * len(ids))
+    out = []
+    for e in conn.execute(
+            f"SELECT * FROM entities WHERE is_deleted=0 AND account_id IN ({q})",
+            ids).fetchall():
+        old = e["entity_type"]
+        if old not in TRADE_TYPES:
+            continue
+        new = type_of_account(conn, e["account_id"])
+        if not new or new == old:
+            continue
+        conn.execute("UPDATE entities SET entity_type=? WHERE id=?",
+                     (new, e["id"]))
+        a = conn.execute("SELECT name FROM accounts WHERE id=?",
+                         (e["account_id"],)).fetchone()
+        if a and a["name"].startswith(PREFIX[old]):
+            _rename_acc(conn, e["account_id"],
+                        PREFIX[new] + a["name"][len(PREFIX[old]):])
+        log_action(conn, username, "update", "entities", e["id"],
+                   f"نوع الجهة يتبع حسابها في الشجرة: {TYPE_LABELS[old]} ←"
+                   f" {TYPE_LABELS[new]}")
+        out.append((e["name"], TYPE_LABELS[old], TYPE_LABELS[new]))
+    return out

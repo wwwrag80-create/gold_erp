@@ -570,8 +570,8 @@ def child_count_safe(account_id):
 #
 # الضوابط: لا يُنقل حسابٌ رئيسي (جذر)، ولا تحت نفسه أو أحد فروعه
 # (حلقة)، ولا تحت حسابِ حركةٍ عليه قيود (فيختلط رصيده المباشر بأرصدة
-# أبنائه). وحسابُ جهة تعامل لا يُنقل إلى قسمٍ آخر من هنا — تغيير نوع
-# الجهة (عميل ← مورد) من «التكويد الموحّد» يفعل ذلك مع بطاقة الجهة.
+# أبنائه). وحسابُ جهة تعامل يُنقل من هنا كغيره، ونوع الجهة يتبعه:
+# تحت «إجمالي الموردين» تصير مورداً، وتحت «إجمالي العملاء» عميلاً.
 
 def _subtree(conn, account_id):
     ids, frontier = [int(account_id)], [int(account_id)]
@@ -642,24 +642,9 @@ def move_account(conn, account_id, new_parent_id, username, recode=False,
             "يُقرأ أيٌّ منهما. اختر حساباً تجميعياً (رئيسياً).")
     old_root, new_root = _root(conn, acc["id"]), _root(conn, par["id"])
     cross = (old_root and new_root and old_root["id"] != new_root["id"])
-    if cross and not entity_ok:
-        q = ",".join("?" * len(sub))
-        ent = conn.execute(
-            f"SELECT name FROM entities WHERE is_deleted=0 AND"
-            f" (account_id IN ({q}) OR capital_account_id IN ({q}))",
-            sub + sub).fetchone()
-        if ent:
-            raise ValueError(
-                f"حساب الجهة «{ent['name']}» لا يُنقل إلى قسمٍ آخر من هنا"
-                " — غيّر نوع الجهة من «التكويد الموحّد لجهات التعامل»"
-                " فينتقل حسابها مع بطاقتها.")
-        tag = conn.execute(
-            f"SELECT code, name FROM accounts WHERE id IN ({q})"
-            " AND COALESCE(system_tag,'')<>''", sub).fetchone()
-        if tag:
-            raise ValueError(
-                f"«{tag['code']} — {tag['name']}» حسابٌ نظامي تُرحِّل عليه"
-                " العمليات الآلية — لا يُنقل إلى قسمٍ آخر من الشجرة.")
+    # 4.46: لا رفض هنا لحساب جهةٍ أو حسابٍ نظامي — النقل قرارُ المحاسب.
+    # حسابُ الجهة يتبعه نوعها بحسب مجموعته الجديدة (بعد النقل أدناه)،
+    # والحساب النظامي يبقى بكوده ووسمه فتصله العمليات الآلية كما كانت.
     # الطبيعة: يرثها من أبيه الجديد؛ والحساب المقابل (عكس أبيه) يبقى عكسه
     old_par = get_account(conn, acc["parent_id"])
     contra = old_par is not None and acc["nature"] != old_par["nature"]
@@ -704,14 +689,24 @@ def move_account(conn, account_id, new_parent_id, username, recode=False,
         conn.execute("UPDATE accounts SET is_postable=1 WHERE id=?",
                      (old_par["id"],))
     recompute_levels(conn)
+    # حسابُ جهة تعامل: نوعها يتبع مجموعته الرقابية الجديدة (عميل/مورد/
+    # جهة أخرى) — فلا تبقى «عميلاً» وحسابها بين الموردين
+    synced = []
+    try:
+        from models import entities as _ents
+        synced = _ents.sync_types_from_tree(conn, sub, username)
+    except Exception:
+        synced = []
     msg = (f"نقل {old_code} — {acc['name']}: من {old_par['code'] if old_par else '—'}"
            f" إلى {par['code']} — {par['name']}"
            + (f" · الكود {old_code} ← {new_code}" if new_code != old_code
               else "")
            + (f" · النوع {TYPE_LABELS.get(acc['type'])} ← "
-              f"{TYPE_LABELS.get(par['type'])}" if cross else ""))
+              f"{TYPE_LABELS.get(par['type'])}" if cross else "")
+           + "".join(f" · الجهة «{n}»: {a} ← {b}" for n, a, b in synced))
     log_action(conn, username, "update", "accounts", acc["id"], msg)
     return {"id": acc["id"], "old_code": old_code, "code": new_code,
             "parent": f"{par['code']} — {par['name']}",
             "type": par["type"], "nature": new_nature,
-            "moved": len(sub), "cross": bool(cross), "message": msg}
+            "moved": len(sub), "cross": bool(cross), "message": msg,
+            "entities": synced}

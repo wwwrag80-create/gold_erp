@@ -139,21 +139,34 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             adj.addWidget(wd)
         adj.addSpacing(12)
         adj.addWidget(self.notes, 1)
-        # ══ صرفٌ لعاملٍ أو موظف ══ يُحمَّل أجراً/راتباً (مصروفاً) أو يبقى
-        # سلفةً/سداداً على حسابه. الافتراضي يُقرأ من رصيده: من له أجرٌ
-        # مستحقٌّ مُرحَّل من المسير يُسدَّد له، ومن لا فيُحمَّل مصروفاً.
-        self.staff_exp = QtWidgets.QCheckBox(
-            "يُحمَّل أجراً مصروفاً (مصروفات العمال / رواتب الإدارة)")
+        # ══ تحميل سند الصرف مصروفاً (4.46: لأي جهة) ══
+        # الصرف لجهةٍ سدادٌ أو سلفة — إلا ما هو مصروفٌ بذاته: أجرُ عاملٍ
+        # بلا مسير، خدمةٌ من موردٍ بلا فاتورة مشتريات، تعويضٌ لعميل.
+        # فيُختار الحساب، ويظهر المبلغ في قائمة الدخل في بنده.
+        self.staff_exp = QtWidgets.QCheckBox("تحميل المبلغ مصروفاً على:")
         self.staff_exp.setToolTip(
-            "سند صرف لعامل أو موظف: إن فُعِّل يُحمَّل المبلغ النقدي مصروفاً"
-            " — «مصروفات العمال» 5710 للعامل و«رواتب الإدارة» 5700 للموظف —"
-            " ويظهر في كشف حسابه مدفوعاً ومُحمَّلاً.\nوإن لم يُفعَّل يبقى"
-            " على حسابه: سلفةً، أو سداداً لراتبٍ رُحِّل من مسير الرواتب"
-            " (فلا يُحمَّل مرتين).")
-        self.staff_exp.setVisible(False)
+            "سند صرفٍ لجهة: إن فُعِّل يُحمَّل المبلغ (نقداً أو ذهباً) على"
+            " الحساب المختار ويظهر في كشف الجهة مدفوعاً ومُحمَّلاً.\n"
+            "العامل ← مصروفات العمال 5710 · الموظف ← رواتب الإدارة 5700 ·"
+            " العميل ← مدفوعات وتعويضات للعملاء 5250 (تُطرح من الإيراد) ·"
+            " المورد ← مصروفات تشغيلية (أو ما تختاره).\n"
+            "وإن لم يُفعَّل فالسند سدادٌ لما لها أو سلفةٌ عليها — لا مصروف"
+            " (فاتورة المورد ومسير الرواتب أثبتا المصروف من قبل).")
+        self.exp_account = QtWidgets.QComboBox()
+        self.exp_account.setMinimumWidth(320)
         self._staff_touched = False
         self.staff_exp.clicked.connect(
             lambda *_: setattr(self, "_staff_touched", True))
+        self.exp_account.activated.connect(
+            lambda *_: setattr(self, "_staff_touched", True))
+        self.staff_exp.toggled.connect(self.exp_account.setEnabled)
+        self.exp_row = QtWidgets.QWidget()
+        _er = QtWidgets.QHBoxLayout(self.exp_row)
+        _er.setContentsMargins(0, 0, 0, 0)
+        _er.addWidget(self.staff_exp)
+        _er.addWidget(self.exp_account)
+        _er.addStretch(1)
+        self.exp_row.setVisible(False)
 
         btn_save = QtWidgets.QPushButton("✔ ترحيل السند")
         btn_save.clicked.connect(self.save)
@@ -180,7 +193,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         panels.addWidget(cash_box, 1)
         lay.addLayout(panels)
         lay.addLayout(adj)
-        lay.addWidget(self.staff_exp)
+        lay.addWidget(self.exp_row)
         enter_chain(self, [self.g_weight, self.c_amount, self.notes],
                     self.save)
         lay.addWidget(self.rows_table, 1)
@@ -261,25 +274,52 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
              if measure == "cash" else
              "هذا الحساب وزني فقط (GOLD_ONLY) — إدخال المبلغ معطَّل."))
 
+    def _reload_exp_accounts(self):
+        """حسابات المصروف التي يُحمَّل عليها سند الصرف — مرةً لكل تحديث."""
+        cur = self.exp_account.currentData()
+        self.exp_account.blockSignals(True)
+        self.exp_account.clear()
+        try:
+            with db(readonly=True) as conn:
+                for r in vouchers.expense_accounts(conn):
+                    self.exp_account.addItem(f"{r['code']} — {r['name']}",
+                                             r["id"])
+        except Exception:
+            pass
+        if cur is not None:
+            i = self.exp_account.findData(cur)
+            if i >= 0:
+                self.exp_account.setCurrentIndex(i)
+        self.exp_account.blockSignals(False)
+
     def _sync_staff(self):
-        """خيار «يُحمَّل مصروفاً» لسند صرفٍ لعاملٍ أو موظف وحده."""
+        """خيار «تحميل المبلغ مصروفاً» لسند صرفٍ إلى جهة تعامل."""
         mode, val = self._current_target()
         on = False
         dflt = False
+        dacc = None
         if mode == "entity" and val is not None \
                 and self.kind.currentData() == "payment":
             try:
                 with db(readonly=True) as conn:
                     e = entities.get_entity(conn, val)
-                    on = bool(e) and e["entity_type"] in ("worker",
-                                                          "employee")
+                    on = bool(e) and e["entity_type"] in \
+                        vouchers.EXPENSE_DEFAULT
                     if on:
                         dflt = vouchers.staff_expense_default(conn, val)
+                        dacc = vouchers.expense_default_account(conn, val)
             except Exception:
                 on = False
-        self.staff_exp.setVisible(on)
+        self.exp_row.setVisible(on)
+        if on and self.exp_account.count() == 0:
+            self._reload_exp_accounts()
         if on and not self._staff_touched:
             self.staff_exp.setChecked(dflt)
+            if dacc is not None:
+                i = self.exp_account.findData(dacc)
+                if i >= 0:
+                    self.exp_account.setCurrentIndex(i)
+        self.exp_account.setEnabled(self.staff_exp.isChecked())
 
     def show_balances(self):
         self._sync_staff()
@@ -427,9 +467,11 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                     cash_account_code=self.c_target.currentData(),
                     net_diff=nd, disc_cash=dc, disc_gold=dg,
                     notes=self.notes.text(),
-                    staff_expense=(self.staff_exp.isChecked()
-                                   if not self.staff_exp.isHidden()
-                                   else None))
+                    # مصروفٌ على الحساب المختار، أو 0 = سدادٌ/سلفة صراحةً
+                    expense_account_id=(
+                        (self.exp_account.currentData() or 0)
+                        if self.staff_exp.isChecked() else 0)
+                    if not self.exp_row.isHidden() else None)
             with busy(self, "جارٍ ترحيل السند…", stage="ترحيل سند"):
                 with db() as conn:
                     if self.is_editing:
@@ -538,7 +580,18 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             # الخصم والفرق مقفلان ما لم يُفعَّلا — والسند المفتوح للتعديل
             # يحملهما فيُفعَّلان أولاً، وإلا صُفّرا عند الحفظ بصمت
             self._staff_touched = True
+            self._reload_exp_accounts()
             self.staff_exp.setChecked(bool(v.get("staff_expense")))
+            _ea = v.get("expense_account_id")
+            if not _ea and v.get("staff_expense") and v.get("customer_id"):
+                with db(readonly=True) as conn:
+                    _ea = vouchers.expense_default_account(
+                        conn, v["customer_id"])
+            if _ea:
+                i = self.exp_account.findData(_ea)
+                if i >= 0:
+                    self.exp_account.setCurrentIndex(i)
+            self.exp_account.setEnabled(self.staff_exp.isChecked())
             has_adj = any(v.get(k) for k in ("net_diff", "disc_cash",
                                              "disc_gold"))
             self.adj_enable.setChecked(bool(has_adj))
@@ -626,6 +679,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                                   + r["name"]))
             reload_combo(self.account_combo, list_postable(conn),
                         lambda r: f"{r['code']} — {r['name']}")
+        self._reload_exp_accounts()
         self.show_balances()
         self._apply_measurement()
         self.kind_changed()

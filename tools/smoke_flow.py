@@ -1042,7 +1042,7 @@ def main():
         check("لكل بند مفتاح ثابت",
               all(it.data(0, _KEY) for it, _p in w1._iter_nav()))
 
-        # ══ الترتيب المعتمد: أربع عشرة شاشة يومية ثم مجموعة واحدة ══
+        # ══ الترتيب المعتمد: خمس عشرة شاشة يومية ثم مجموعة واحدة ══
         from ui.main_window import NAV_VERSION as _NAVV
         top = [w1.sidebar.topLevelItem(i).text(0)
                for i in range(w1.sidebar.topLevelItemCount())]
@@ -1051,7 +1051,7 @@ def main():
                 "المبيعات الضريبية", "سندات قبض/صرف", "العملاء — المبيعات والسداد",
                 "التسكيرات", "المشتريات",
                 "القيود اليومية", "تقارير مبيعات وإنتاج المصنع",
-                "الإدارة والتقارير"]
+                "التحليل والدراسات", "الإدارة والتقارير"]
         check("ترتيب القائمة هو المعتمد حرفياً",
               top[:len(want)] == want, str(top[:len(want)]))
         grp = next((w1.sidebar.topLevelItem(i)
@@ -1059,7 +1059,7 @@ def main():
                     if w1.sidebar.topLevelItem(i).text(0)
                     == "الإدارة والتقارير"), None)
         check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
-              grp is not None and grp.childCount() == len(base) - 13,
+              grp is not None and grp.childCount() == len(base) - 14,
               f"{grp.childCount() if grp else 0} بنداً")
         check("لا شاشة خارج الترتيب المعتمد",
               len(top) == len(want), str(top[len(want):]))
@@ -6406,9 +6406,11 @@ def main():
                   # إدارية · العمال · رواتب الإدارة · مواد
                   _lbl75 == ["المبيعات (مبيعات الذهب والأجور)",
                              "يُطرح: مردودات المبيعات",
-                             "يُطرح: الخصم المسموح به",
+                             "يُطرح: الخصم المسموح به والمدفوع للعملاء",
                              "يُضاف: فرق الصافي",
                              "إيرادات التحصيل والإيرادات العرضية",
+                             "يُطرح: تكلفة الذهب المباع (المسلَّم من"
+                             " المخزون)",
                              "فواقد الورشة",
                              "يُخصم: المسترجع من التصفية",
                              "المصاريف الإدارية والعمومية",
@@ -6431,18 +6433,22 @@ def main():
                 " total_weight END),0) r FROM invoices WHERE is_deleted=0"
                 " AND invoice_date BETWEEN '2026-01-01' AND '2026-12-31'"
                 ).fetchone()
-            # 4.45: زوج الذهب وزناً يُصفّى في «المبيعات» (صافيه صفر)،
-            # ووزن المباع والمردود يُعرض في «بيانات للعلم» من الفواتير
-            _m75 = _is75["memo"]
-            check("قائمة الدخل: زوج الذهب يُصفّى في المبيعات، ووزن المباع"
-                  " والمردود في «بيانات للعلم» كما في الفواتير — وربح الذهب"
-                  " ربح الدفتر",
-                  abs(_g75["values"]["sales"]) < 0.001
-                  and abs(_m75["m_sold"]["gold"] - _w75["s"]) < 0.001
-                  and abs(_m75["m_returned"]["gold"] - _w75["r"]) < 0.001
+            # 4.46: المبيعات والمردودات بوزنها، وصافي المبيعات يطرحهما،
+            # ثم «تكلفة الذهب المباع» (4950) تحتها — فالمجمل ربح الوزن
+            _v75 = _g75["values"]
+            check("قائمة الدخل: المبيعات والمردودات بوزنها من الفواتير،"
+                  " وصافي المبيعات يطرحهما، وتكلفة الذهب المباع تحتها —"
+                  " وربح الذهب ربح الدفتر",
+                  abs(_v75["sales"] - _w75["s"]) < 0.001
+                  and abs(_v75["returns"] + _w75["r"]) < 0.001
+                  and abs(_v75["cogs"] + _w75["s"] - _w75["r"]) < 0.001
+                  and abs(_g75["totals"]["net_sales"]
+                          - (_v75["sales"] + _v75["returns"]
+                             + _v75["discounts"] + _v75["net_diff"])) < 0.001
                   and abs(_g75["totals"]["net"] - _st74._pl(
                       conn, "2026-01-01", "2026-12-31", "gold")) < 0.001,
-                  str((_g75["values"]["sales"], _m75["m_sold"], _w75["s"])))
+                  str((_v75["sales"], _v75["returns"], _v75["cogs"],
+                       _w75["s"], _w75["r"])))
 
         # ── 76) كشف صندوق الكسر لكل عيارٍ وحده من لوحة التحكم (4.41)
         from models.inventory import scrap_karat_statement as _sk76
@@ -6635,9 +6641,10 @@ def main():
     check("قائمة الدخل: المبيعات · الإيرادات الأخرى والتحصيلية · العمال ·"
           " رواتب الإدارة — وبيانات للعلم (الذهب المباع والتحصيلات)",
           "gold_out" not in _keys79 and "other_rev" in _keys79
+          and _keys79.index("net_diff") < _keys79.index("cogs")
           and _keys79.index("admin") < _keys79.index("labor")
           < _keys79.index("mgmt") < _keys79.index("materials")
-          and set(_is79["memo"]) == {"m_sold", "m_returned", "m_collect"})
+          and set(_is79["memo"]) == {"m_collect", "m_paid_sup"})
     with db() as conn:
         _w79 = _en79.add_entity(conn, "عامل ٧٩", "worker", username="admin",
                                 basic_salary=2000)
@@ -6651,6 +6658,63 @@ def main():
     check("سند صرف العامل: سلفة افتراضاً (لا يتكرّر مع المسير)، ومصروفات"
           " العمال 5710 لمن يُصرف له مباشرةً بلا مسير",
           _dflt79 is False and "5710" in _codes79)
+
+    # ══════════════════════════════════════════════════════════════
+    step("80) المدفوع للعملاء والموردين في قائمة الدخل · نقل حساب جهة")
+    from models import vouchers as _vo80, entities as _en80, coa as _coa80
+    from models import statements as _st80
+    _d80 = date.today().isoformat()
+    _y80 = f"{_d80[:4]}-01-01"
+    with db(readonly=True) as conn:
+        _i0 = _st80.income_statement(conn, _y80, _d80, compare=False)
+    with db() as conn:
+        _c80 = _en80.add_entity(conn, "عميل ٨٠", "customer", username="admin")
+        _s80 = _en80.add_entity(conn, "مورد ٨٠", "supplier",
+                                vat_number="300000000000003",
+                                username="admin")
+        _ce80 = _en80.get_entity(conn, _c80)
+        # تعويضٌ لعميل: ٢٠٠ ريال و٣ جم — يُحمَّل «مدفوعات للعملاء» 5250
+        _v1 = _vo80.create_voucher(
+            conn, "payment", _d80, "admin", entity_id=_c80,
+            rows=[{"kind": "cash", "amount": 200},
+                  {"kind": "gold", "weight": 3, "karat": 18}],
+            expense_account_id=acc_id(conn, "5250"))
+        # سدادٌ لمورد — لا مصروف، ويظهر في «بيانات للعلم»
+        _vo80.create_voucher(conn, "payment", _d80, "admin", entity_id=_s80,
+                             cash_amount=500)
+        _bc80 = account_balance(conn, _ce80["account_id"])
+    with db(readonly=True) as conn:
+        _i1 = _st80.income_statement(conn, _y80, _d80, compare=False)
+    _dc = round(_i1["cash"]["values"]["discounts"]
+                - _i0["cash"]["values"]["discounts"], 2)
+    _dg = round(_i1["gold"]["values"]["discounts"]
+                - _i0["gold"]["values"]["discounts"], 3)
+    check("المدفوع للعميل (نقداً وذهباً) يُطرح من الإيراد في «الخصم المسموح"
+          " به والمدفوع للعملاء» — وكشف العميل لا يتغيّر رصيده",
+          _dc == -200 and _dg == -3 and abs(_bc80[0]) < 0.001
+          and abs(_bc80[1]) < 0.01, f"{_dc} · {_dg} · {_bc80}")
+    _ms = round(_i1["memo"]["m_paid_sup"]["cash"]
+                - _i0["memo"]["m_paid_sup"]["cash"], 2)
+    check("السداد للمورد لا يدخل المصروفات ويظهر في «بيانات للعلم»",
+          _ms == 500 and abs(_i1["cash"]["totals"]["opex"]
+                             - _i0["cash"]["totals"]["opex"]) < 0.01, str(_ms))
+    with db() as conn:
+        _r80 = _coa80.move_account(conn, _ce80["account_id"],
+                                   acc_id(conn, "2300"), "admin")
+        _t80 = _en80.get_entity(conn, _c80)["entity_type"]
+        _an80 = conn.execute("SELECT name, type FROM accounts WHERE id=?",
+                             (_ce80["account_id"],)).fetchone()
+    check("نقل حساب جهةٍ من دليل الحسابات مسموح، ونوعها يتبع مجموعته"
+          " (عميل ← مورد)",
+          _t80 == "supplier" and _an80["type"] == "liability"
+          and _an80["name"].startswith("مورد: ") and _r80["entities"],
+          f"{_t80} · {_an80['name']}")
+    _mw80 = open(os.path.join(ROOT, "ui", "main_window.py"),
+                 encoding="utf-8").read()
+    check("«التحليل والدراسات» في القائمة الرئيسية لا تحت «الإدارة"
+          " والتقارير»",
+          _mw80.index('("التحليل والدراسات",')
+          < _mw80.index('("الإدارة والتقارير", ['))
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

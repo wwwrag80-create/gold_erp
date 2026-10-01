@@ -57,6 +57,10 @@ def ensure_schema(conn):
         # سند صرفٍ لعاملٍ/موظف حُمِّل مصروفاً (models.vouchers)
         conn.execute("ALTER TABLE vouchers ADD COLUMN staff_expense"
                      " INTEGER NOT NULL DEFAULT 0")
+    if vcols and "expense_account_id" not in vcols:
+        # 4.46: الحساب الذي حُمِّل عليه سند الصرف (لأي جهة)
+        conn.execute("ALTER TABLE vouchers ADD COLUMN expense_account_id"
+                     " INTEGER REFERENCES accounts(id)")
     # الطقم الخدمي لا تتغيّر حالته من أي مسار (حذف فاتورة، تعديلها،
     # إلغاء عملية): تُتجاهل الكتابة بصمت فيبقى «مباعاً» بلا وزن.
     conn.execute(
