@@ -4,6 +4,7 @@
 موحّداً للفاتورة كلها)، مع إمكانية تعديله يدوياً لكل سطر. الرقم
 التجميعي يُباع/يُرتجع بجزء من رصيده الوزني القائم بدل قطعة كاملة.
 الطرف المقابل أي جهة تعامل (عميل/مورد/شريك) أو حساب داخلي."""
+from models import numbering as _numbering
 from datetime import datetime
 
 import config
@@ -362,6 +363,9 @@ def _rebuild_invoice_entry(conn, invoice_id):
     _desc, lines = _entry_lines(conn, inv["kind"], internal, ent,
                                 list(acc_w.items()), wages, vat, grand,
                                 bool(inv["vat_applied"]))
+    # وصف القيد يحمل اسم الطرف — يتبعه إن تبدّل الطرف في التعديل
+    conn.execute("UPDATE journal_entries SET description=? WHERE id=?",
+                 (f"{_desc} — {inv['invoice_no'] or ''}", entry_id))
     if not lines:
         raise ValueError("الفاتورة بلا قيمة بعد التعديل — احذفها بدل"
                          " تعديلها")
@@ -498,10 +502,10 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
          int(bool(qr_enabled)), description.strip(), src_id, _karat,
          username))
     inv_id = cur.lastrowid
-    inv_no = f"{prefix}-{inv_id:05d}"
+    inv_no = _numbering.next_no(conn, prefix)
     entry_id = post_entry(conn, invoice_date, f"{desc} — {inv_no}", lines,
                           source_table="invoices", source_id=inv_id,
-                          username=username, note=description)
+                          username=username, note=description, doc_no=inv_no)
     conn.execute("UPDATE invoices SET invoice_no=?, entry_id=? WHERE id=?",
                  (inv_no, entry_id, inv_id))
 
@@ -670,7 +674,7 @@ def create_tax_debit_note(conn, invoice_id, note_date, username):
         "INSERT INTO tax_debit_notes(invoice_id,note_date,vat_amount,created_by)"
         " VALUES(?,?,?,?)", (invoice_id, note_date, vat, username))
     note_id = cur.lastrowid
-    note_no = f"TDN-{note_id:05d}"
+    note_no = _numbering.next_no(conn, "TDN")
     entry_id = post_entry(
         conn, note_date,
         f"إشعار مدين ضريبي {note_no} — تسوية لاحقة لفاتورة {inv['invoice_no']} "
@@ -678,7 +682,7 @@ def create_tax_debit_note(conn, invoice_id, note_date, username):
         [{"account_id": ent["account_id"], "cash_debit": vat,
           "line_desc": f"ضريبة مستحقة لاحقاً على {inv['invoice_no']}"},
          {"account_id": acc_id(conn, "2100"), "cash_credit": vat}],
-        source_table="tax_debit_notes", source_id=note_id, username=username)
+        source_table="tax_debit_notes", source_id=note_id, username=username, doc_no=note_no)
     conn.execute("UPDATE tax_debit_notes SET note_no=?, entry_id=? WHERE id=?",
                  (note_no, entry_id, note_id))
     log_action(conn, username, "create", "tax_debit_notes", note_id,
@@ -756,11 +760,11 @@ def create_direct_adjustment(conn, entity_id, amount, adj_date, username,
         "vat_amount,created_by) VALUES(NULL,?,?,?,?,?)",
         ("", adj_date, amount, 0.0, username))
     adj_id = cur.lastrowid
-    note_no = f"ADJ-{adj_id:05d}"
+    note_no = _numbering.next_no(conn, "ADJ")
     entry_id = post_entry(
         conn, adj_date, f"تسوية مباشرة {note_no} — {ent['name']}", lines,
         source_table="tax_debit_notes", source_id=adj_id,
-        username=username, note=notes)
+        username=username, note=notes, doc_no=note_no)
     conn.execute("UPDATE tax_debit_notes SET note_no=?, entry_id=? WHERE id=?",
                  (note_no, entry_id, adj_id))
     log_action(conn, username, "create", "tax_debit_notes", adj_id,
@@ -808,8 +812,12 @@ def is_last_movement(conn, work_order_id, invoice_id):
 def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                    description=None, preserve_stock=True,
                    invoice_date=None, source_account_id=None,
-                   scrap_karat=None):
+                   scrap_karat=None, entity_id=None):
     """يعدّل فاتورة مُرحَّلة **في مكانها** — بلا فاتورة جديدة.
+
+    `entity_id`: الطرف الجديد إن غيّره المستخدم (محمد ← سالم): تنتقل
+    الذمّة كلها في القيد نفسه من حساب الأول إلى حساب الثاني، فلا يبقى
+    على القديم شيءٌ ولا تتكرّر على الجديد.
 
     **لماذا لا نعكس ونُعيد**: العكس يُنشئ فاتورة برقم جديد ووقت جديد،
     فيبدو للمراجع أن عمليتين وقعتا لا واحدة صُحّحت. والأصل المحاسبي
@@ -939,6 +947,25 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         inv = conn.execute("SELECT * FROM invoices WHERE id=?",
                            (invoice_id,)).fetchone()
 
+    # ══ تغيير الطرف (محمد ← سالم) ══
+    _moved_cust = None
+    if entity_id and int(entity_id) != int(inv["customer_id"]):
+        _new_ent = get_entity(conn, entity_id)
+        _old_ent = get_entity(conn, inv["customer_id"])
+        if not _new_ent or _new_ent["is_deleted"]:
+            raise ValueError("الطرف الجديد غير موجود")
+        if (_new_ent["entity_type"] == "internal") != \
+                (_old_ent is not None
+                 and _old_ent["entity_type"] == "internal"):
+            raise ValueError(
+                "لا يُبدَّل تحويلٌ داخلي بعميل (ولا العكس) في التعديل —"
+                " احذف المستند وأصدر الصحيح")
+        conn.execute("UPDATE invoices SET customer_id=? WHERE id=?",
+                     (int(entity_id), invoice_id))
+        _moved_cust = ((_old_ent["name"] if _old_ent else "—"),
+                       _new_ent["name"])
+        inv = conn.execute("SELECT * FROM invoices WHERE id=?",
+                           (invoice_id,)).fetchone()
     entity_id = inv["customer_id"]
     ent = get_entity(conn, entity_id)
     if not ent:
@@ -1111,8 +1138,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         # كان يُعيد «لا تغيير» ويبتلع النقل بلا أثرٍ في السجل، فمن
         # صحّح تاريخاً فقط رأى رسالةً تقول إنه لم يغيّر شيئاً —
         # والمستند قد انتقل فعلاً. فيُسجَّل هنا كما يُسجَّل هناك.
-        # وكذلك نقلُ حساب المصدر وحده.
-        if _moved_src:
+        # وكذلك نقلُ حساب المصدر وحده، وتبديلُ الطرف وحده.
+        if _moved_src or _moved_cust:
             _aw = _rebuild_invoice_entry(conn, invoice_id)
             _sync_scrap_moves(conn, invoice_id, _scrap_acc(conn, _aw, _src),
                               _karat, _scrap_weight(conn, _aw), kind)
@@ -1126,6 +1153,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
             conn.execute("UPDATE invoices SET description=? WHERE id=?",
                          (_new_desc, invoice_id))
         _notes = []
+        if _moved_cust:
+            _notes.append(f"الطرف {_moved_cust[0]} ← {_moved_cust[1]}")
         if _moved:
             _notes.append(f"التاريخ {_moved[0]} ← {_moved[1]}")
         if _moved_src:
@@ -1142,7 +1171,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         return {"id": invoice_id, "invoice_no": inv["invoice_no"],
                 "added": [], "updated": [], "removed": [],
                 "stock_touched": [], "moved_date": _moved,
-                "moved_source": _moved_src,
+                "moved_source": _moved_src, "moved_customer": _moved_cust,
                 "delta_weight": 0.0, "delta_wages": 0.0,
                 "entry_id": inv["entry_id"],
                 "unchanged": not _notes}
@@ -1196,6 +1225,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         pass
 
     _mv = f" · التاريخ {_moved[0]} ← {_moved[1]}" if _moved else ""
+    if _moved_cust:
+        _mv += f" · الطرف {_moved_cust[0]} ← {_moved_cust[1]}"
     if _moved_src:
         _mv += f" · الحساب {_moved_src[0]} ← {_moved_src[1]}"
     log_action(conn, username, "update", "invoices", invoice_id,
@@ -1209,6 +1240,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                     + _mv)
     return {"id": invoice_id, "invoice_no": inv["invoice_no"],
             "moved_date": _moved, "moved_source": _moved_src,
+            "moved_customer": _moved_cust,
             "source_account_id": _src, "scrap_karat": _karat,
             "added": added, "updated": updated, "removed": removed,
             "stock_touched": sorted(set(touched)),

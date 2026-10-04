@@ -4,6 +4,7 @@
    الفعلي بالرصيد الدفتري ويولّد قيد التسوية (عجز أو زيادة) آلياً.
 2) جرد تفصيلي بالباركود (الذهب المشغول): تُمرَّر أرقام التشغيل فعلياً
    وتُقارن بالمتاح في النظام — مطابق / عجز (مفقود) / زيادة (غير مسجَّل)."""
+from models import numbering as _numbering
 from models.accounts import acc_id
 from services.accounting_engine import account_balance, post_entry
 from services.audit import log_action
@@ -25,6 +26,7 @@ def create_bulk_stocktake(conn, account_code, actual_weight, stocktake_date,
     ledger = account_balance(conn, account_id)[0]
     diff = round(actual_weight - ledger, 3)  # + زيادة (النظام يقل عن الواقع) / − عجز
 
+    st_no = _numbering.next_no(conn, "ST")
     entry_id = None
     if diff != 0:
         if diff < 0:  # عجز: الفعلي أقل من الدفتري
@@ -38,7 +40,8 @@ def create_bulk_stocktake(conn, account_code, actual_weight, stocktake_date,
         entry_id = post_entry(
             conn, stocktake_date,
             f"تسوية جرد فعلي — حساب {account_code} ({'عجز' if diff < 0 else 'زيادة'})",
-            lines, source_table="stocktakes", username=username)
+            lines, source_table="stocktakes", username=username,
+            doc_no=st_no)
 
     cur = conn.execute(
         "INSERT INTO stocktakes(mode,account_id,stocktake_date,ledger_value,"
@@ -46,7 +49,6 @@ def create_bulk_stocktake(conn, account_code, actual_weight, stocktake_date,
         (account_id, stocktake_date, ledger, actual_weight, diff, entry_id,
          notes, username))
     st_id = cur.lastrowid
-    st_no = f"ST-{st_id:05d}"
     conn.execute("UPDATE stocktakes SET stocktake_no=? WHERE id=?", (st_no, st_id))
     if entry_id:
         conn.execute("UPDATE journal_entries SET source_id=? WHERE id=?",
@@ -76,6 +78,7 @@ def create_itemized_reconcile(conn, scanned_numbers, stocktake_date, username,
     matched_weight = round(sum(system[no]["registered_weight"] for no in matched), 3)
     ledger_weight = round(sum(r["registered_weight"] for r in system_rows), 3)
 
+    st_no = _numbering.next_no(conn, "ST")
     entry_id = None
     if missing_weight > 0:
         entry_id = post_entry(
@@ -84,7 +87,7 @@ def create_itemized_reconcile(conn, scanned_numbers, stocktake_date, username,
             [{"account_id": acc_id(conn, "5130"), "gold_debit": missing_weight,
               "line_desc": "عجز جرد بالباركود"},
              {"account_id": acc_id(conn, "1200"), "gold_credit": missing_weight}],
-            source_table="stocktakes", username=username)
+            source_table="stocktakes", username=username, doc_no=st_no)
 
     cur = conn.execute(
         "INSERT INTO stocktakes(mode,account_id,stocktake_date,ledger_value,"
@@ -94,7 +97,6 @@ def create_itemized_reconcile(conn, scanned_numbers, stocktake_date, username,
          -missing_weight, len(matched), len(missing), len(excess), entry_id,
          notes, username))
     st_id = cur.lastrowid
-    st_no = f"ST-{st_id:05d}"
     conn.execute("UPDATE stocktakes SET stocktake_no=? WHERE id=?", (st_no, st_id))
     if entry_id:
         conn.execute("UPDATE journal_entries SET source_id=? WHERE id=?",

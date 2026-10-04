@@ -953,8 +953,18 @@ class SalesScreen(QtWidgets.QWidget):
     # ══════════════════════════════════════════════════════════════
 
     def _reload_sources(self, conn):
-        """يملأ قائمة الحسابات ويعيد آخر اختيارٍ محفوظ."""
+        """يملأ قائمة الحسابات ويعيد آخر اختيارٍ محفوظ.
+
+        **في التعديل يبقى حساب الفاتورة نفسها**: كان تحديث الشاشة أثناء
+        تعديل فاتورة يعيد «آخر اختيار» المحفوظ مكان حسابها — فتنتقل
+        أطقمها عند الحفظ إلى حسابٍ لم يختره أحد.
+        """
         want = str(load_pref("sales_source_account", "")).strip()
+        if self.editing_id is not None or getattr(self, "_loading_doc",
+                                                  False):
+            cur = self._source_code()
+            if cur:
+                want = cur
         self.sources = invoices.source_accounts(conn)
         self.source.blockSignals(True)
         self.source.clear()
@@ -1021,7 +1031,10 @@ class SalesScreen(QtWidgets.QWidget):
 
     def _source_changed(self, *_):
         self._sync_scrap_box()
-        self._save_source_pref()
+        # اختيار حساب فاتورةٍ تُعدَّل لا يصير «آخر اختيار» للفواتير الجديدة
+        if self.editing_id is None and not getattr(self, "_loading_doc",
+                                                   False):
+            self._save_source_pref()
         if getattr(self, "items", None):
             self.render_items()      # أسطر بلا بيتٍ تتبع الحساب المختار
 
@@ -2330,7 +2343,10 @@ class SalesScreen(QtWidgets.QWidget):
                             self.user["username"], apply_vat=apply_vat,
                             description=desc,
                             invoice_date=dstr(self.date),
-                            source_account_id=src_id, scrap_karat=karat)
+                            source_account_id=src_id, scrap_karat=karat,
+                            # الطرف كما في الشاشة: إن غيّره المستخدم
+                            # انتقلت الذمّة كلها إلى الطرف الجديد
+                            entity_id=cid)
                     elif self.kind.currentData() == "sale":
                         res = invoices.create_sale(
                             conn, cid, cart, dstr(self.date),

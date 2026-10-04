@@ -800,7 +800,7 @@ def main():
             " WHERE gold_weight > 0 LIMIT 1").fetchone()
     if vrow:
         check("وزن سطر السند يبقى بعياره الفعلي",
-              abs(gold_math.to_base_karat(vrow["gold_weight"],
+              abs(_gm.to_base_karat(vrow["gold_weight"],
                                           vrow["gold_karat"])
                   - vrow["gold_equiv18"]) < 0.02,
               f"{vrow['gold_weight']} ع{vrow['gold_karat']}")
@@ -6715,6 +6715,86 @@ def main():
           " والتقارير»",
           _mw80.index('("التحليل والدراسات",')
           < _mw80.index('("الإدارة والتقارير", ['))
+
+    # ══════════════════════════════════════════════════════════════
+    step("81) ترقيم مستقل لكل مستند · تعديل عميل الفاتورة · حاسبة الخانة")
+    from models import vouchers as _vo81, invoices as _iv81
+    from models import entities as _en81, numbering as _nb81
+    from models.inventory import create_work_orders_batch as _b81
+    _d81 = date.today().isoformat()
+
+    def _nums81(conn, prefix):
+        got = set()
+        for t, c in _nb81._sources(conn):
+            for r in conn.execute(f"SELECT {c} v FROM {t} WHERE {c} LIKE ?",
+                                  (f"{prefix}-%",)):
+                got.add(_nb81._suffix(r["v"], prefix))
+        return sorted(got)
+
+    with db(readonly=True) as conn:
+        _seq81 = {p: _nums81(conn, p)
+                  for p in ("S", "R", "RV", "PV", "P", "F", "JV", "ST")}
+    # فجوةٌ واحدة مقصودة في JV: فحص «البصمات» يمحو قيداً من الجدول من
+    # خارج النظام ليثبت كشف العبث — ولا فجوة غيرها في أي نوع
+    _bad81 = {p: sorted(set(range(1, s[-1] + 1)) - set(s))
+              for p, s in _seq81.items()
+              if s and (s[0] != 1 or s[-1] - len(s) > (1 if p == "JV" else 0))}
+    check("كل نوع مستندٍ يبدأ من 1 بحرفه ويتصل بلا فجوات:"
+          " بيع S · مرتجع R · قبض RV · صرف PV · مشتريات P · تسكير F ·"
+          " قيد يومية JV · جرد ST",
+          not _bad81 and all(_seq81[p] for p in ("S", "R", "RV", "PV", "P",
+                                                 "F", "JV")),
+          str({p: len(s) for p, s in _seq81.items()}) + str(_bad81))
+    with db() as conn:
+        _c81 = _en81.add_entity(conn, "محمد ٨١", "customer", username="admin")
+        _k81 = _en81.add_entity(conn, "سالم ٨١", "customer", username="admin")
+        _v81 = _vo81.create_voucher(conn, "receipt", _d81, "admin",
+                                    entity_id=_c81, cash_amount=100)
+        _vo81.update_voucher(conn, _v81["id"], "admin", entity_id=_c81,
+                             cash_amount=150)
+        _vn81 = _vo81.create_voucher(conn, "receipt", _d81, "admin",
+                                     entity_id=_c81, cash_amount=10)
+    check("تعديل السند يُبقي رقمه ولا يستهلك رقماً — السند التالي يليه مباشرة",
+          _nb81._suffix(_vn81["voucher_no"], "RV")
+          == _nb81._suffix(_v81["voucher_no"], "RV") + 1,
+          f"{_v81['voucher_no']} → {_vn81['voucher_no']}")
+    with db() as conn:
+        _b81(conn, [{"wo_no": "N81-1", "gold": 15.0, "wage_per_gram": 10}],
+             _d81, "admin")
+        _w81 = conn.execute("SELECT id FROM work_orders"
+                            " WHERE work_order_no='N81-1'").fetchone()["id"]
+        _s81 = _iv81.create_sale(conn, _c81, [{"work_order_id": _w81}], _d81,
+                                 "admin", apply_vat=False)
+        _a81 = {e: _en81.get_entity(conn, e)["account_id"]
+                for e in (_c81, _k81)}
+        _cb0 = account_balance(conn, _a81[_c81])
+        _src0 = conn.execute("SELECT source_account_id FROM invoices"
+                             " WHERE id=?", (_s81["id"],)).fetchone()[0]
+        _u81 = _iv81.update_invoice(conn, _s81["id"],
+                                    [{"work_order_id": _w81}], "admin",
+                                    entity_id=_k81)
+        _i81 = conn.execute("SELECT customer_id, source_account_id, entry_id,"
+                            " invoice_no FROM invoices WHERE id=?",
+                            (_s81["id"],)).fetchone()
+        _cb1 = account_balance(conn, _a81[_c81])
+        _kb1 = account_balance(conn, _a81[_k81])
+        _jd81 = conn.execute("SELECT description FROM journal_entries"
+                             " WHERE id=?", (_i81["entry_id"],)).fetchone()[0]
+    check("تعديل عميل الفاتورة (محمد ← سالم): الفاتورة وقيدها ورصيدها ينتقلان"
+          " كاملاً للجديد، ورقمها وحساب مخزونها لا يتغيّران",
+          _i81["customer_id"] == _k81 and _u81.get("moved_customer")
+          and _i81["invoice_no"] == _s81["invoice_no"]
+          and _i81["source_account_id"] == _src0
+          and abs(_kb1[0] - 15) < 0.001 and abs(_kb1[1] - 150) < 0.01
+          and abs(_cb0[0] - _cb1[0] - 15) < 0.001
+          and abs(_cb0[1] - _cb1[1] - 150) < 0.01 and "سالم ٨١" in _jd81,
+          f"{_cb0} → {_cb1} · {_kb1} · {_jd81}")
+    from ui.widgets.smart_input import evaluate as _ev81
+    _long81 = "+".join(["12.5"] * 1500)
+    check("الخانة الحسابية: سلسلة جمعٍ طويلة (1500 رقماً) تُحسب بلا رفضٍ صامت",
+          _ev81(_long81) == 12.5 * 1500
+          and _ev81("10+20-5*2") == 20 and _ev81("1+") is None,
+          str(_ev81(_long81)))
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

@@ -7,6 +7,7 @@
 المبلغ صافياً أو شاملاً — فيخرج منها سجل المشتريات الضريبية وضريبة
 المدخلات القابلة للخصم في الإقرار."""
 import config
+from models import numbering as _numbering
 from models.accounts import acc_id
 from models.entities import get_entity
 from services.accounting_engine import post_entry
@@ -194,14 +195,14 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
          tax_treatment, acc["id"], price_mode, discount, pay_mode,
          invoice_type))
     p_id = cur.lastrowid
-    p_no = f"P-{p_id:05d}"
+    p_no = _numbering.next_no(conn, "P")
     label = "شراء أصل ثابت" if kind == "asset" else "مشتريات تشغيلية"
     how = {"credit": "آجلة", "cash": "نقداً", "bank": "بتحويل بنكي"}[pay_mode]
     entry_id = post_entry(
         conn, purchase_date,
         f"{label} {how} {p_no} — المورد {sup['name']}{ref} — {description}",
         lines, source_table="purchases", source_id=p_id, username=username,
-        note=description)
+        note=description, doc_no=p_no)
     conn.execute("UPDATE purchases SET purchase_no=?, entry_id=? WHERE id=?",
                  (p_no, entry_id, p_id))
     log_action(conn, username, "create", "purchases", p_id, p_no)

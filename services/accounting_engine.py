@@ -48,11 +48,19 @@ def validate_lines(lines):
 
 
 # بادئة رقم المستند بحسب نوع العملية
+# بادئة رقم القيد لكل نوع عملية — ولكلٍّ تسلسلٌ مستقلّ يبدأ من 1
+# (models.numbering). القيد اليومي اليدوي وحده «JV»: فلا تستهلك أرقامَه
+# قيودٌ آلية (جرد، إهلاك، استحقاق…) فتظهر فجواتٌ في دفتر القيود.
 _DOC_PREFIX = {
     "invoices": "INV", "vouchers": "VCH", "work_orders": "PRD",
     "melting_ops": "MLT", "fixing_ops": "FIX", "purchases": "PUR",
     "tax_sales": "TAX",
     "payroll_ledger": "PAY", "mfg_salaries": "WSL", "shrinkage_ops": "SHR",
+    "manual": "JV", "stocktakes": "ST", "tax_debit_notes": "TDN",
+    "wo_adjust": "WOA", "workshop_losses": "WL", "entities": "OB",
+    "opening_entry": "OB", "year_close": "YC", "year_open": "YO",
+    "depreciation": "DEP", "prepaid": "PRP", "prepaid_amort": "AMR",
+    "accrual": "ACR", "accrual_rev": "ACV",
 }
 
 
@@ -84,7 +92,8 @@ def _verify_entry_posted(conn, entry_id):
 
 
 def post_entry(conn, entry_date, description, lines,
-               source_table=None, source_id=None, username=None, note=""):
+               source_table=None, source_id=None, username=None, note="",
+               doc_no=None):
     """ترحيل قيد متوازن ضمن معاملة conn المفتوحة، ويعيد رقم القيد.
 
     `description` وسم داخلي للتتبع فقط ولا يُعرض في كشوف الحساب.
@@ -148,12 +157,19 @@ def post_entry(conn, entry_date, description, lines,
     except Exception:
         pass
 
-    # رقم مستند موحّد لكل قيد — يوثّق العملية ويجعلها قابلة للتتبّع
-    if not conn.execute("SELECT doc_no FROM journal_entries WHERE id=?",
-                        (entry_id,)).fetchone()["doc_no"]:
-        prefix = _DOC_PREFIX.get(source_table, "JV")
+    # رقم مستند لكل قيد — رقمُ المستند نفسه إن مُرِّر (فاتورة S-00001
+    # تظهر في كشف الحساب برقمها لا برقم قيدٍ آخر)، وإلا فتسلسلٌ خاص
+    # بنوع العملية يبدأ من 1 (models.numbering) — لا معرّف القيد العام
+    # الذي يقفز مع كل عمليةٍ في النظام.
+    if doc_no:
         conn.execute("UPDATE journal_entries SET doc_no=? WHERE id=?",
-                     (f"{prefix}-{entry_id:05d}", entry_id))
+                     (str(doc_no), entry_id))
+    elif not conn.execute("SELECT doc_no FROM journal_entries WHERE id=?",
+                          (entry_id,)).fetchone()["doc_no"]:
+        prefix = _DOC_PREFIX.get(source_table or "manual", "OP")
+        from models.numbering import next_no
+        conn.execute("UPDATE journal_entries SET doc_no=? WHERE id=?",
+                     (next_no(conn, prefix), entry_id))
 
     _verify_entry_posted(conn, entry_id)
 

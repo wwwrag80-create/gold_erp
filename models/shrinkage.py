@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """تسوية فاقد التصنيع الشهرية: مطابقة خزينة التصنيع مع الجرد الفعلي
 بتحميل الخياسات على صندوق فاقد الذهب — قسم التصنيع."""
+from models import numbering as _numbering
 from models.accounts import acc_id
 from services.accounting_engine import post_entry
 from services.audit import log_action
@@ -22,11 +23,11 @@ def create_shrinkage(conn, weight, op_date, period, username,
         "created_by) VALUES(?,?,?,?,?)",
         (op_date, period, w, notes, username))
     op_id = cur.lastrowid
-    op_no = f"SH-{op_id:05d}"
+    op_no = _numbering.next_no(conn, "SH")
     entry_id = post_entry(conn, op_date,
                           f"تسوية فاقد التصنيع {op_no} — فترة {period}", lines,
                           source_table="shrinkage_ops", source_id=op_id,
-                          username=username, note=notes)
+                          username=username, note=notes, doc_no=op_no)
     conn.execute("UPDATE shrinkage_ops SET op_no=?, entry_id=? WHERE id=?",
                  (op_no, entry_id, op_id))
     log_action(conn, username, "create", "shrinkage_ops", op_id,

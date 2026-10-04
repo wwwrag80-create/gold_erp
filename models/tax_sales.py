@@ -22,6 +22,7 @@
 **لا تعديل ولا حذف لفاتورةٍ ضريبية بعد ترحيلها** إلا بإشعار دائن يشير
 إليها — ولا يتجاوز الإشعار ما بقي من الأصل سطراً سطراً.
 """
+from models import numbering as _numbering
 from decimal import Decimal
 
 import config
@@ -182,7 +183,7 @@ def create_invoice(conn, customer_id, doc_date, lines, username,
         (customer_id, doc_date, pay_mode, t["rate"], t["net"], t["vat"],
          t["total"], (notes or "").strip(), username))
     sid = cur.lastrowid
-    no = f"TS-{sid:05d}"
+    no = _numbering.next_no(conn, "TS")
     _save_lines(conn, sid, rows)
     lines_je = [
         {"account_id": _party_account(conn, cust, pay_mode),
@@ -199,7 +200,7 @@ def create_invoice(conn, customer_id, doc_date, lines, username,
     entry_id = post_entry(conn, doc_date, f"فاتورة ضريبية {no} — "
                           f"{cust['name']}", lines_je,
                           source_table="tax_sales", source_id=sid,
-                          username=username, note=notes)
+                          username=username, note=notes, doc_no=no)
     conn.execute("UPDATE tax_sales SET doc_no=?, entry_id=? WHERE id=?",
                  (no, entry_id, sid))
     qr = _issue_einvoice(conn, sid, username)
@@ -268,7 +269,7 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
          t["rate"], t["net"], t["vat"], t["total"], original_id,
          reason.strip(), (notes or "").strip(), username))
     sid = cur.lastrowid
-    no = f"TSR-{sid:05d}"
+    no = _numbering.next_no(conn, "TSR")
     _save_lines(conn, sid, rows)
     if orig["rep_id"]:
         # عبر المندوب: الضريبة وحدها تُردّ لحسابه، والإشعار يظهر في كشف
@@ -295,7 +296,7 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
     entry_id = post_entry(conn, doc_date, f"إشعار دائن {no} — "
                           f"{cust['name']} — على {orig['doc_no']}", je,
                           source_table="tax_sales", source_id=sid,
-                          username=username, note=reason)
+                          username=username, note=reason, doc_no=no)
     conn.execute("UPDATE tax_sales SET doc_no=?, entry_id=? WHERE id=?",
                  (no, entry_id, sid))
     qr = _issue_einvoice(conn, sid, username)
@@ -505,7 +506,7 @@ def create_rep_invoice(conn, company_id, rep_id, doc_date, items, username,
         (company_id, rep_id, doc_date, t["rate"], t["net"], t["vat"],
          t["total"], (notes or "").strip(), username))
     sid = cur.lastrowid
-    no = f"TS-{sid:05d}"
+    no = _numbering.next_no(conn, "TS")
     _save_lines(conn, sid, rows)
     je = [{"account_id": rep["account_id"], "cash_debit": t["vat"],
            "line_desc": f"ضريبة الفاتورة الضريبية {no} — {comp['name']}"},
@@ -517,7 +518,7 @@ def create_rep_invoice(conn, company_id, rep_id, doc_date, items, username,
     entry_id = post_entry(conn, doc_date, f"فاتورة ضريبية {no} — "
                           f"{comp['name']} — المندوب {rep['name']}", je,
                           source_table="tax_sales", source_id=sid,
-                          username=username, note=notes)
+                          username=username, note=notes, doc_no=no)
     conn.execute("UPDATE tax_sales SET doc_no=?, entry_id=? WHERE id=?",
                  (no, entry_id, sid))
     qr = _issue_einvoice(conn, sid, username)
@@ -559,7 +560,7 @@ def create_debit_note(conn, original_id, doc_date, amount, reason, username,
          t["rate"], t["net"], t["vat"], t["total"], original_id,
          reason.strip(), (notes or "").strip(), username))
     sid = cur.lastrowid
-    no = f"TSD-{sid:05d}"
+    no = _numbering.next_no(conn, "TSD")
     _save_lines(conn, sid, rows)
     if orig["rep_id"]:
         rep = get_entity(conn, orig["rep_id"])
@@ -580,7 +581,7 @@ def create_debit_note(conn, original_id, doc_date, amount, reason, username,
     entry_id = post_entry(conn, doc_date, f"إشعار مدين {no} — "
                           f"{cust['name']} — على {orig['doc_no']}", je,
                           source_table="tax_sales", source_id=sid,
-                          username=username, note=reason)
+                          username=username, note=reason, doc_no=no)
     conn.execute("UPDATE tax_sales SET doc_no=?, entry_id=? WHERE id=?",
                  (no, entry_id, sid))
     qr = _issue_einvoice(conn, sid, username)

@@ -23,6 +23,7 @@
 (5110)، ولا يدخل ضمن لوحة فاقد الذهب في تقرير خزينة التصنيع.
 """
 import config
+from models import numbering as _numbering
 from models.accounts import acc_id
 from models.inventory import BOX_CODE, add_scrap_move
 from services import gold_math
@@ -90,10 +91,10 @@ def create_disbursement(conn, lines, op_date, username, notes=""):
                                 f"{ln['karat']}"})
     op_id = _insert_op(conn, "disbursement", op_date, total, notes, username,
                        lines)
-    op_no = f"MD-{op_id:05d}"
+    op_no = _numbering.next_no(conn, "MD")
     entry_id = post_entry(conn, op_date, f"سند صرف للصب {op_no}", jl,
                           source_table="melting_ops", source_id=op_id,
-                          username=username, note=notes)
+                          username=username, note=notes, doc_no=op_no)
     conn.execute("UPDATE melting_ops SET op_no=?, entry_id=? WHERE id=?",
                  (op_no, entry_id, op_id))
     for ln in lines:
@@ -117,10 +118,10 @@ def create_receipt(conn, lines, op_date, username, notes=""):
     jl.append({"account_id": acc_id(conn, REFINING), "gold_credit": total,
                "line_desc": f"قبض مصفى — إجمالي {total:.2f} جم مكافئ 18"})
     op_id = _insert_op(conn, "receipt", op_date, total, notes, username, lines)
-    op_no = f"MR-{op_id:05d}"
+    op_no = _numbering.next_no(conn, "MR")
     entry_id = post_entry(conn, op_date, f"سند قبض مصفى {op_no}", jl,
                           source_table="melting_ops", source_id=op_id,
-                          username=username, note=notes)
+                          username=username, note=notes, doc_no=op_no)
     conn.execute("UPDATE melting_ops SET op_no=?, entry_id=? WHERE id=?",
                  (op_no, entry_id, op_id))
     for ln in lines:
@@ -168,11 +169,11 @@ def close_cycle(conn, op_date, username, notes=""):
               {"account_id": acc_id(conn, TECH_LOSS), "gold_credit": abs(bal),
                "line_desc": "زيادة عن المتوقع (فرق موجب)"}]
     op_id = _insert_op(conn, "close", op_date, bal, notes, username)
-    op_no = f"MC-{op_id:05d}"
+    op_no = _numbering.next_no(conn, "MC")
     entry_id = post_entry(conn, op_date,
                           f"إقفال الفاقد الفني للصب {op_no}", jl,
                           source_table="melting_ops", source_id=op_id,
-                          username=username, note=notes)
+                          username=username, note=notes, doc_no=op_no)
     conn.execute("UPDATE melting_ops SET op_no=?, entry_id=? WHERE id=?",
                  (op_no, entry_id, op_id))
     log_action(conn, username, "create", "melting_ops", op_id,

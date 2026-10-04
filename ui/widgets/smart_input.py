@@ -49,7 +49,16 @@ def _ev(node):
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
         return float(node.value)
     if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
-        return _OPS[type(node.op)](_ev(node.left), _ev(node.right))
+        # سلسلةٌ طويلة «12+15+9+…» شجرةٌ مائلةٌ لليسار بعمق عدد الأرقام —
+        # تُمشى بحلقةٍ لا بعَوْدٍ، فلا يقف التقييم عند حدّ العمق في Python
+        chain = []
+        while isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            chain.append((node.op, node.right))
+            node = node.left
+        acc = _ev(node)
+        for op, right in reversed(chain):
+            acc = _OPS[type(op)](acc, _ev(right))
+        return acc
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd,
                                                               ast.USub)):
         v = _ev(node.operand)
@@ -60,7 +69,9 @@ def _ev(node):
 def evaluate(text):
     """ناتج العملية الحسابية — أو None إن لم تكن عمليةً صحيحة كاملة."""
     t = normalize(text).replace(",", "").strip()
-    if not t or not _EXPR_CHARS.match(t) or len(t) > 120:
+    # حدٌّ واسع: من يجمع أوزان دفعةٍ كاملة يكتب عشرات الأرقام (كان 120
+    # حرفاً — فتُرفض السلسلة الطويلة بصمت ويبقى الرقم القديم)
+    if not t or not _EXPR_CHARS.match(t) or len(t) > 20000:
         return None
     try:
         v = _ev(ast.parse(t, mode="eval"))

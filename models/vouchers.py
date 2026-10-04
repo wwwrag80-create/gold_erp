@@ -2,6 +2,7 @@
 """السندات: تسديد ذهب (بتحويل العيار) ونقد وفرق الصافي والخصومات —
 توجيه شامل: إلى (جهة تعامل: عميل/مورد/شريك/داخلي) أو (أي حساب مباشر
 من شجرة الحسابات) — سداد الموردين يتم حصراً عبر سندات الصرف."""
+from models import numbering as _numbering
 from models.accounts import acc_id
 from models.entities import get_entity
 from models.inventory import BOX_CODE, add_scrap_move
@@ -171,7 +172,8 @@ def create_voucher(conn, kind, voucher_date, username, *,
                    gold_weight=0.0, gold_karat=18, cash_amount=0.0,
                    cash_account_code="1400", net_diff=0.0,
                    disc_cash=0.0, disc_gold=0.0, notes="", rows=None,
-                   staff_expense=None, expense_account_id=None):
+                   staff_expense=None, expense_account_id=None,
+                   _number=None):
     """سند قبض/صرف يقبل **أسطراً متعددة** في السند الواحد.
 
     `expense_account_id` (سند صرفٍ لجهة): يُحمَّل المصروف على هذا
@@ -348,11 +350,14 @@ def create_voucher(conn, kind, voucher_date, username, *,
          notes, username, 1 if staff_exp else 0,
          staff_exp[0] if staff_exp else None))
     v_id = cur.lastrowid
-    v_no = f"V-{v_id:05d}"
+    # `_number`: سندٌ مؤقّت يبنيه التعديل في مكانه — لا يستهلك رقماً من
+    # التسلسل (وإلا ظهرت فجوةٌ في أرقام السندات بعد كل تعديل)
+    v_no = _number or _numbering.next_no(
+        conn, "RV" if kind == "receipt" else "PV")
     entry_id = post_entry(conn, voucher_date,
                           f"{label} {v_no} — {target_label}", lines,
                           source_table="vouchers", source_id=v_id,
-                          username=username, note=doc_note(notes, norm))
+                          username=username, note=doc_note(notes, norm), doc_no=v_no)
     conn.execute("UPDATE vouchers SET voucher_no=?, entry_id=? WHERE id=?",
                  (v_no, entry_id, v_id))
     if norm:
@@ -446,6 +451,14 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     _before = _de.totals(conn, entry_id)
 
     kind = kind or v["kind"]
+    # الرقم يحمل نوعه (RV قبض · PV صرف): سندُ قبضٍ لا يصير صرفاً
+    # بالتعديل وإلا حمل صرفٌ رقماً من دفتر القبض. الأرقام القديمة (V-)
+    # بلا نوع فيبقى تبديلها كما كان.
+    if kind != v["kind"] and str(v["voucher_no"] or "")[:3] in ("RV-",
+                                                                "PV-"):
+        raise ValueError(
+            f"لا يتغيّر نوع السند {v['voucher_no']} بالتعديل — لكل نوعٍ"
+            " دفتره وتسلسله. احذف السند وأنشئ سنداً جديداً بالنوع الصحيح.")
 
     # ══ تاريخُ السند يتبع ما أدخله المستخدم ══
     # الرقم يبقى — فهو هوية المستند — أما التاريخ فبيانٌ عن زمن
@@ -507,7 +520,8 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
         cash_account_code=cash_account_code, net_diff=net_diff,
         disc_cash=disc_cash, disc_gold=disc_gold, notes=notes,
         # التعديل يُبقي تحميل السند الأصلي (حسابه) ما لم يُغيَّر صراحةً
-        staff_expense=_staff_keep, expense_account_id=_exp_keep)
+        staff_expense=_staff_keep, expense_account_id=_exp_keep,
+        _number=f"~TMP-{voucher_id}")
 
     # أسطر السند تنتقل للسند الأصلي
     conn.execute("UPDATE voucher_lines SET voucher_id=? WHERE voucher_id=?",

@@ -70,6 +70,7 @@ def ensure_schema(conn):
         " BEGIN SELECT RAISE(IGNORE); END")
     if wcols:
         backfill(conn)
+        backfill_items(conn)
 
 
 def _gold_ids(conn):
@@ -172,3 +173,21 @@ def is_service(wo):
         return bool(wo["is_service"])
     except (IndexError, KeyError):
         return False
+
+
+def backfill_items(conn):
+    """أسطر فواتير ما قبل 4.45 بلا حسابٍ محفوظ: ما خرج منها من بيت طقمه
+    نفسه يُثبَّت عليه — فلا يجرّه تبديلُ «من حساب» في تعديلٍ لاحق إلى
+    حسابٍ آخر. وما خرج من غير بيته يبقى تابعاً لحساب فاتورته كما كان."""
+    return conn.execute(
+        "UPDATE invoice_items SET stock_account_id=("
+        " SELECT w.stock_account_id FROM work_orders w"
+        "  WHERE w.id=invoice_items.work_order_id AND w.is_deleted=0)"
+        " WHERE stock_account_id IS NULL AND EXISTS ("
+        " SELECT 1 FROM work_orders w JOIN invoices i"
+        "  ON i.id=invoice_items.invoice_id"
+        "  WHERE w.id=invoice_items.work_order_id AND w.is_deleted=0"
+        "  AND w.is_bulk=0"
+        "  AND COALESCE(w.is_service,0)=0"
+        "  AND w.stock_account_id IS NOT NULL"
+        "  AND w.stock_account_id=i.source_account_id)").rowcount

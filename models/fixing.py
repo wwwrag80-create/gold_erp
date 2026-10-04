@@ -9,6 +9,7 @@
   ويُتجاهَل الشق النقدي تماماً. القيد يبقى متوازناً لأن ميزان الذهب
   وميزان النقد مستقلان — فالوزن مدين/دائن متساوٍ، والنقد صفر على
   الطرفين."""
+from models import numbering as _numbering
 from models.accounts import acc_id
 from models.entities import get_entity
 from services.accounting_engine import post_entry
@@ -48,12 +49,12 @@ def create_fixing(conn, entity_id, weight, price, op_date, username,
         " VALUES(?,?,?,?,?,?)",
         (op_date, entity_id, weight, price, amount, username))
     op_id = cur.lastrowid
-    op_no = f"F-{op_id:05d}"
+    op_no = _numbering.next_no(conn, "F")
     label = ("تسكير ذهب فقط" if gold_only else "تسكير بسعر")
     entry_id = post_entry(conn, op_date,
                           f"{label} {op_no} — {ent['name']}", lines,
                           source_table="fixing_ops", source_id=op_id,
-                          username=username, note=notes)
+                          username=username, note=notes, doc_no=op_no)
     conn.execute("UPDATE fixing_ops SET op_no=?, entry_id=? WHERE id=?",
                  (op_no, entry_id, op_id))
     log_action(conn, username, "create", "fixing_ops", op_id, op_no)

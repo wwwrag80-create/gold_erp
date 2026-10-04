@@ -1448,6 +1448,10 @@ def migrate_schema() -> None:
         from models.stock_home import ensure_schema as _sh_schema
         _sh_schema(conn)
 
+        # 4.47: تسلسلٌ مستقل لكل نوع مستند (S · R · RV · PV · P · JV …)
+        from models.numbering import migrate as _nb_migrate
+        _nb_migrate(conn)
+
         # 4.44: قاعدةٌ قائمة بلا هويةٍ محفوظة تحفظ هويتها كما تظهر —
         # فالمصنع الجديد وحده يبدأ بهويةٍ فارغة
         from services import branding as _br
