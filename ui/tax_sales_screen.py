@@ -44,6 +44,11 @@ def _w(v18):
     return f"{kv.g(v18):,.3f}"
 
 
+def _wk(v18, karat):
+    """الوزن بعيار السطر (لا بعيار المصنع)."""
+    return f"{kv.g(v18, karat):,.3f}"
+
+
 def _vat(net):
     return round(float(net) * config.VAT_RATE, 2)
 
@@ -279,17 +284,34 @@ class TaxSalesScreen(QtWidgets.QWidget):
         self.l_wo = QtWidgets.QLineEdit()
         self.l_wo.setPlaceholderText("امسح الباركود أو اكتب رقم التشغيل")
         self.l_wo.editingFinished.connect(self._wo_lookup)
+        # العدد: قطع الطقم — بيانٌ على الفاتورة لا يغيّر المبلغ
+        self.l_pieces = QtWidgets.QSpinBox()
+        self.l_pieces.setRange(1, 999)
+        self.l_pieces.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        self.l_pieces.setAlignment(QtCore.Qt.AlignCenter)
         self.l_weight = QtWidgets.QLineEdit()
         self.l_weight.setReadOnly(True)
+        # العيار: الوزن والأجر/جم يُعرضان به (والأجور لا تتغيّر)
+        self.l_karat = QtWidgets.QComboBox()
+        for k in (18, 21, 22, 24):
+            self.l_karat.addItem(f"عيار {k}", k)
+        self.l_karat.currentIndexChanged.connect(self._karat_changed)
+        self._set_karat(kv.active())
         self.l_wage = mspin()
-        self.l_wage.valueChanged.connect(self._line_wages)
+        self.l_wage.valueChanged.connect(self._wage_typed)
+        # الأجر/جم بمكافئ 18 كما هو بلا تقريب — الخانة تعرضه بعيار السطر
+        # مقرّباً لمنزلتين، فلو حُسب منها لانحرفت الأجور هللاتٍ مع كل
+        # تبديل عيار
+        self._rate18 = 0.0
         self.l_wages = QtWidgets.QLineEdit()
         self.l_wages.setReadOnly(True)
         self.btn_add = QtWidgets.QPushButton("+ إضافة سطر")
         self.btn_add.clicked.connect(self.add_item)
         fields = [("رقم الموديل", self.l_model, 2),
                   ("رقم التشغيل", self.l_wo, 3),
-                  (f"الوزن المقيد ({kv.unit()})", self.l_weight, 2),
+                  ("العدد", self.l_pieces, 1),
+                  ("الوزن المقيد", self.l_weight, 2),
+                  ("العيار", self.l_karat, 2),
                   ("الأجر/جم", self.l_wage, 2),
                   ("الأجور", self.l_wages, 2)]
         g = QtWidgets.QGridLayout(box)
@@ -300,16 +322,17 @@ class TaxSalesScreen(QtWidgets.QWidget):
             g.addWidget(wd, 1, c)
             g.setColumnStretch(c, st)
         g.addWidget(self.btn_add, 1, len(fields))
-        enter_chain(self, [self.l_wo, self.l_wage],
+        enter_chain(self, [self.l_wo, self.l_pieces, self.l_karat,
+                           self.l_wage],
                     on_last=lambda: self.l_wo if self.add_item() else False,
                     require={self.l_wo: lambda: bool(
                         self.l_wo.text().strip())})
         return box
 
     # ══════════════════════════ ③ البنود ══════════════════════════
-    ITEM_COLS = ["", "م", "رقم الموديل", "رقم التشغيل", "الوزن المقيد",
-                 "الأجر/جم", "الأجور", "الخصم", "الصافي", "الضريبة 15%",
-                 "الإجمالي", "فاتورة البيع"]
+    ITEM_COLS = ["", "م", "رقم الموديل", "رقم التشغيل", "العدد",
+                 "الوزن المقيد", "العيار", "الأجر/جم", "الأجور", "الخصم",
+                 "الصافي", "الضريبة 15%", "الإجمالي", "فاتورة البيع"]
 
     def _build_items(self):
         box = QtWidgets.QGroupBox("③ بنود الفاتورة")
@@ -317,7 +340,8 @@ class TaxSalesScreen(QtWidgets.QWidget):
         self.items_tbl.setColumnCount(len(self.ITEM_COLS))
         self.items_tbl.setHorizontalHeaderLabels(self.ITEM_COLS)
         self.items_tbl.setMinimumHeight(200)
-        fit_columns(self.items_tbl, [7, 4, 11, 11, 10, 8, 9, 7, 9, 8, 9, 10])
+        fit_columns(self.items_tbl,
+                    [7, 4, 10, 10, 5, 9, 6, 7, 8, 6, 8, 7, 8, 9])
         self.p_weight = Card(f"الوزن ({kv.unit()})")
         self.p_wages = Card("الأجور")
         self.p_disc = Card("الخصم")
@@ -376,6 +400,8 @@ class TaxSalesScreen(QtWidgets.QWidget):
         self._found = None
         for f in (self.l_model, self.l_wo, self.l_weight, self.l_wages):
             f.clear()
+        self.l_pieces.setValue(1)
+        self._rate18 = 0.0
         self.l_wage.blockSignals(True)
         self.l_wage.setValue(0)
         self.l_wage.blockSignals(False)
@@ -402,15 +428,44 @@ class TaxSalesScreen(QtWidgets.QWidget):
             return
         self._found = it
         self.l_model.setText(it["model_no"] or "—")
-        self.l_weight.setText(_w(it["weight"]))
-        self.l_wage.setValue(kv.rate(it["wage_per_gram"]))
+        self._set_karat(tax_sales.line_karat(it.get("karat")))
+        self._rate18 = float(it["wage_per_gram"] or 0)
+        self._show_line()
+
+    def _k(self):
+        return int(self.l_karat.currentData() or kv.active())
+
+    def _set_karat(self, k):
+        i = self.l_karat.findData(int(k))
+        self.l_karat.blockSignals(True)
+        self.l_karat.setCurrentIndex(i if i >= 0 else 0)
+        self.l_karat.blockSignals(False)
+        self._k_shown = self._k()
+
+    def _karat_changed(self, *_):
+        """تبديل العيار يعيد كتابة الوزن والأجر/جم به — والأجور ثابتة."""
+        self._k_shown = self._k()
+        if self._found:
+            self._show_line()
+
+    def _show_line(self):
+        """الوزن والأجر/جم بعيار السطر — من القيم المخزَّنة بمكافئ 18."""
+        self.l_weight.setText(_wk(self._found["weight"], self._k()))
+        self.l_wage.blockSignals(True)
+        self.l_wage.setValue(kv.rate(self._rate18, self._k()))
+        self.l_wage.blockSignals(False)
+        self._line_wages()
+
+    def _wage_typed(self, *_):
+        """أجرٌ كتبه المستخدم بعيار السطر ← مكافئ 18 للحساب والحفظ."""
+        self._rate18 = kv.rate_store(self.l_wage.value(), self._k())
         self._line_wages()
 
     def _line_wages(self, *_):
         if not self._found:
             self.l_wages.clear()
             return
-        wages = kv.g(self._found["weight"]) * self.l_wage.value()
+        wages = float(self._found["weight"]) * self._rate18
         self.l_wages.setText(_m(wages))
 
     def add_item(self):
@@ -419,7 +474,9 @@ class TaxSalesScreen(QtWidgets.QWidget):
         if self._found is None:
             return False
         it = dict(self._found)
-        it["rate18"] = kv.rate_store(self.l_wage.value())
+        it["rate18"] = self._rate18
+        it["pieces"] = self.l_pieces.value()
+        it["karat"] = self._k()
         self.items.append(it)
         self._clear_entry()
         self._render_items()
@@ -439,6 +496,8 @@ class TaxSalesScreen(QtWidgets.QWidget):
             for it in dlg.selected():
                 it = dict(it)
                 it["rate18"] = float(it["wage_per_gram"])
+                it["pieces"] = 1
+                it["karat"] = tax_sales.line_karat(it.get("karat"))
                 self.items.append(it)
             self._render_items()
 
@@ -454,15 +513,18 @@ class TaxSalesScreen(QtWidgets.QWidget):
             self._found = it
             self.l_wo.setText(it["wo_no"])
             self.l_model.setText(it["model_no"] or "—")
-            self.l_weight.setText(_w(it["weight"]))
-            self.l_wage.setValue(kv.rate(it["rate18"]))
-            self._line_wages()
+            self.l_pieces.setValue(int(it.get("pieces") or 1))
+            self._set_karat(it.get("karat") or kv.active())
+            self._rate18 = float(it["rate18"])
+            self._show_line()
             self._render_items()
             self.l_wage.setFocus()
             self.l_wage.selectAll()
 
     def _render_items(self):
         t = self.items_tbl
+        for r in range(t.rowCount()):
+            t.removeCellWidget(r, 0)
         t.setRowCount(len(self.items))
         grosses = [round(float(it["weight"]) * float(it["rate18"]), 2)
                    for it in self.items]
@@ -480,12 +542,14 @@ class TaxSalesScreen(QtWidgets.QWidget):
             tw += float(it["weight"])
             tg += gross
             tn += net
+            k = int(it.get("karat") or kv.active())
             vals = [r + 1, it["model_no"] or "—", it["wo_no"],
-                    _w(it["weight"]), _m(kv.rate(it["rate18"])), _m(gross),
+                    str(it.get("pieces") or 1), _wk(it["weight"], k),
+                    str(k), _m(kv.rate(it["rate18"], k)), _m(gross),
                     _m(d) if d else "—", _m(net), _m(vat), _m(net + vat),
                     it["invoice_no"]]
             for c, v in enumerate(vals, 1):
-                t.setItem(r, c, num_item(v) if 4 <= c <= 10
+                t.setItem(r, c, num_item(v) if 4 <= c <= 12
                           else text_item(v))
         row_action_buttons(t, len(self.items), self._edit_item,
                            self._del_item, edit_tip="تصحيح الأجر",
@@ -533,7 +597,9 @@ class TaxSalesScreen(QtWidgets.QWidget):
                 res = tax_sales.create_rep_invoice(
                     conn, cid, rid, dstr(self.inv_date),
                     [{"sale_item_id": x["item_id"],
-                      "wage_per_gram": x["rate18"]} for x in self.items],
+                      "wage_per_gram": x["rate18"],
+                      "pieces": x.get("pieces") or 1,
+                      "karat": x.get("karat")} for x in self.items],
                     self.user["username"], self.notes.text(),
                     discount=self.disc.value())
             self.clear_invoice()

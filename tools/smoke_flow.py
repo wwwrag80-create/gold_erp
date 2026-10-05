@@ -3162,7 +3162,7 @@ def main():
     _html6 = _pm.build_body("mfg_salary", 0, period=_per,
                             salaries=list(_after.values()))
     check("وورقةُ الرواتب تحمل العمودين الجديدين",
-          "عليه (مدين)" in _html6 and "المستحق" in _html6
+          "الرصيد (عليه/له)" in _html6 and "المستحق" in _html6
           and "إضافية" in _html6, f"{len(_html6)} حرفاً")
 
     # ══ «عليه (مدين)»: رصيدُ كشف الحساب لا مسحوبات الشهر ══
@@ -3173,12 +3173,19 @@ def main():
         _owed_after = _mc2.owed_now(conn, _weid)
         _sal_after = {r["employee_id"]: r
                       for r in _mc2.list_salaries(conn, _per)}[_weid]
-    check("وبعد الترحيل يصير العامل دائناً فلا يظهر عليه شيء",
-          _owed_after == 0.0 and _sal_after["owed"] == 0.0,
-          f"رصيده {_wc2}")
-    check("والمستحق = الصافي − ما عليه",
-          abs(_sal_after["due"]
-              - (_sal_after["net_salary"] - _sal_after["owed"])) < 0.011,
+    # 4.48: عمود «الرصيد» بطرفه — بعد الترحيل دائنٌ (له) فيُعرض «دائن»
+    # بقيمته، والمستحق ما له في الكشف (فالصافي المُرحَّل داخلٌ فيه)
+    with db(readonly=True) as conn:
+        _bal_after = _mc2.balance_now(conn, _weid)
+    check("وبعد الترحيل يصير العامل دائناً: الرصيد «دائن» بما له، ولا"
+          " «عليه»",
+          _owed_after == 0.0 and _bal_after < 0
+          and abs(_sal_after["owed"] - _bal_after) < 0.011
+          and _mc2.bal_text(_sal_after["owed"]).endswith("دائن"),
+          f"رصيده {_wc2} · {_mc2.bal_text(_sal_after['owed'])}")
+    check("والمستحق بعد الترحيل = ما له في كشفه (لا الصافي مرةً ثانية)",
+          _sal_after.get("is_posted")
+          and abs(_sal_after["due"] + _sal_after["owed"]) < 0.011,
           f"{_sal_after['due']}")
 
     # ══ السالب في جدول الرواتب: قوسان يُقرآن ويُكتبان ══
@@ -6795,6 +6802,131 @@ def main():
           _ev81(_long81) == 12.5 * 1500
           and _ev81("10+20-5*2") == 20 and _ev81("1+") is None,
           str(_ev81(_long81)))
+
+    # ══════════════════════════════════════════════════════════════
+    step("82) تعديل نوع السند · العدد والعيار · أسطر المشتريات · الرصيد")
+    from models import vouchers as _vo82, tax_sales as _ts82
+    from models import purchases as _pu82, mfg_costs as _mc82
+    from models import entities as _en82, invoices as _iv82
+    from models.inventory import create_work_orders_batch as _b82
+    _d82 = date.today().isoformat()
+    with db() as conn:
+        _c82 = _en82.add_entity(conn, "عميل ٨٢", "customer", username="admin")
+        _v82 = _vo82.create_voucher(conn, "receipt", _d82, "admin",
+                                    entity_id=_c82, cash_amount=70)
+        _u82 = _vo82.update_voucher(conn, _v82["id"], "admin",
+                                    kind="payment", entity_id=_c82,
+                                    cash_amount=70)
+        _r82 = conn.execute(
+            "SELECT v.kind, v.voucher_no, e.doc_no, e.description FROM"
+            " vouchers v JOIN journal_entries e ON e.id=v.entry_id"
+            " WHERE v.id=?", (_v82["id"],)).fetchone()
+        _cb82 = account_balance(
+            conn, _en82.get_entity(conn, _c82)["account_id"])
+    check("تعديل سند قبض إلى صرف مسموح: يأخذ رقمه من دفتر الصرف (PV)،"
+          " وقيده نفسه يتبعه",
+          _r82["kind"] == "payment" and _r82["voucher_no"].startswith("PV-")
+          and _r82["doc_no"] == _r82["voucher_no"]
+          and "~TMP" not in _r82["description"]
+          and _u82["renumbered"][0] == _v82["voucher_no"]
+          and abs(_cb82[1] - 70) < 0.01,
+          f"{_v82['voucher_no']} → {_r82['voucher_no']} · {_cb82}")
+
+    with db() as conn:
+        _rep82 = _en82.add_entity(conn, "مندوب ٨٢", "customer",
+                                  username="admin")
+        _co82 = _en82.add_entity(conn, "شركة ٨٢", "customer",
+                                 username="admin",
+                                 vat_number="311111111100003")
+        _b82(conn, [{"wo_no": "TX82-1", "gold": 30.0,
+                     "wage_per_gram": 10.0}], _d82, "admin")
+        _w82 = conn.execute("SELECT id FROM work_orders WHERE"
+                            " work_order_no='TX82-1'").fetchone()["id"]
+        _iv82.create_sale(conn, _rep82, [{"work_order_id": _w82}], _d82,
+                          "admin", apply_vat=False)
+        _it82 = _ts82.find_rep_item(conn, _rep82, "TX82-1")
+        _t82 = _ts82.create_rep_invoice(
+            conn, _co82, _rep82, _d82,
+            [{"sale_item_id": _it82["item_id"], "pieces": 4,
+              "karat": 21}], "admin")
+        _l82 = conn.execute("SELECT pieces, karat, description, qty FROM"
+                            " tax_sale_lines WHERE sale_id=?",
+                            (_t82["id"],)).fetchone()
+    _h82 = _pm.build_body("tax_sales", _t82["id"])
+    check("المبيعات الضريبية: العدد والعيار يُحفظان في السطر ويظهران في"
+          " بيانه وفي الفاتورة المطبوعة — والمبلغ لا يتغيّر",
+          _l82["pieces"] == 4 and _l82["karat"] == 21
+          and "4 قطعة" in _l82["description"]
+          and "عيار 21" in _l82["description"]
+          and "العدد" in _h82 and "العيار" in _h82
+          and abs(_t82["net"] - 300) < 0.01,
+          f"{dict(_l82)} · {_t82['net']}")
+
+    with db() as conn:
+        _s82 = _en82.add_entity(conn, "مورد ٨٢", "supplier",
+                                vat_number="300000000000003",
+                                username="admin")
+        _p82 = _pu82.create_purchase(
+            conn, "expense", _s82, "مشتريات متعددة", 0, 0, _d82, "admin",
+            supplier_invoice_no="S82-1", tax_treatment="standard",
+            lines=[{"account_code": "5500", "qty": 2, "unit_price": 100,
+                    "discount": 20},
+                   {"account_code": "5810", "qty": 1, "unit_price": 50}])
+        _jl82 = {r["code"]: r["d"] for r in conn.execute(
+            "SELECT a.code, SUM(l.cash_debit) d FROM journal_lines l JOIN"
+            " accounts a ON a.id=l.account_id WHERE l.entry_id=?"
+            " GROUP BY a.code", (_p82["entry_id"],))}
+        _pl82 = _pu82.lines_of(conn, _p82["id"])
+        _pr82 = conn.execute("SELECT amount, vat_amount, total, discount"
+                             " FROM purchases WHERE id=?",
+                             (_p82["id"],)).fetchone()
+    _hp82 = _pm.build_body("purchases", _p82["id"])
+    check("فاتورة مورد بأكثر من حساب: كل سطرٍ على حسابه، والضريبة على"
+          " صافي كل سطر، والإجماليات من الأسطر",
+          abs(_jl82.get("5500", 0) - 180) < 0.01
+          and abs(_jl82.get("5810", 0) - 50) < 0.01
+          and abs(_jl82.get("1900", 0) - 34.5) < 0.01
+          and len(_pl82) == 2 and abs(_pr82["amount"] - 230) < 0.01
+          and abs(_pr82["discount"] - 20) < 0.01
+          and abs(_pr82["total"] - 264.5) < 0.01
+          and "حسب الأسطر" in _hp82 and "بعد الضريبة" in _hp82,
+          f"{_jl82} · {dict(_pr82)}")
+    with db() as conn:
+        _po82 = _pu82.create_purchase(
+            conn, "expense", _s82, "مبلغ واحد", 400, 60, _d82, "admin",
+            supplier_invoice_no="S82-2", account_code="5500",
+            discount=0)
+        _pol = _pu82.lines_of(conn, _po82["id"])
+    check("والمبلغ الواحد (بلا أسطر) يبقى فاتورةً بسطرٍ واحد كما كان",
+          len(_pol) == 1 and abs(_pol[0]["net"] - 400) < 0.01
+          and abs(_pol[0]["vat"] - 60) < 0.01, str(_pol))
+    check("رصيد العامل بطرفه: «مدين» عليه · «دائن» له · والصفر فراغ",
+          _mc82.bal_text(1200) == "1,200.00 مدين"
+          and _mc82.bal_text(-500) == "500.00 دائن"
+          and _mc82.bal_text(0) == ""
+          and _mc82.compute_salary_row(
+              {"basic_salary": 3000, "owed": -500})["due"] == 3500
+          and _mc82.compute_salary_row(
+              {"basic_salary": 3000, "owed": -500,
+               "is_posted": True})["due"] == 500)
+    try:
+        from ui.mfg_costs_screen import MfgCostsScreen as _M82
+        from ui.purchases_screen import PurchasesScreen as _P82
+        from ui.tax_sales_screen import TaxSalesScreen as _T82
+        _src82 = open(os.path.join(ROOT, "ui", "mfg_costs_screen.py"),
+                      encoding="utf-8").read()
+        check("رواتب التصنيع: لا زرّ «حفظ» — حفظٌ تلقائي عند التنقّل"
+              " والخروج",
+              hasattr(_M82, "autosave") and hasattr(_M82, "hideEvent")
+              and '"💾 حفظ"' not in _src82)
+        check("المشتريات: جدول أسطر، والمعالجة الضريبية في الرأس ·"
+              " والضريبية: العدد والعيار في الجدول",
+              hasattr(_P82, "add_line") and "العدد" in _P82.LINE_COLS
+              and "العدد" in _T82.ITEM_COLS and "العيار" in _T82.ITEM_COLS
+              and _T82.ITEM_COLS.index("العيار")
+              == _T82.ITEM_COLS.index("الوزن المقيد") + 1)
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

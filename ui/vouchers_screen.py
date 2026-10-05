@@ -488,11 +488,16 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                             conn, self.kind.currentData(), dstr(self.date),
                             self.user["username"], **kw)
             if res.get("in_place"):
+                _rn = res.get("renumbered")
                 info(self, f"عُدّل السند {res['voucher_no']} في مكانه.\n\n"
+                           + (f"تغيّر نوعه فأخذ رقمه من دفتر نوعه الجديد:"
+                              f" {_rn[0]} ← {_rn[1]} — وقيدُه نفسه.\n"
+                              if _rn else "")
                            + (f"رقم السند ثابت، وتاريخه نُقل من "
                               f"{res['moved_date'][0]} إلى "
                               f"{res['moved_date'][1]} — وقيدُه معه."
                               if res.get("moved_date")
+                              else "" if _rn
                               else "رقم السند وتاريخه وقيده لم تتغيّر."))
                 self.end_edit()
                 self._staff_touched = False

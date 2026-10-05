@@ -1452,6 +1452,10 @@ def migrate_schema() -> None:
         from models.numbering import migrate as _nb_migrate
         _nb_migrate(conn)
 
+        # 4.48: أسطر فاتورة المورد — أكثر من حساب في فاتورة واحدة
+        from models.purchases import ensure_schema as _pu_schema
+        _pu_schema(conn)
+
         # 4.44: قاعدةٌ قائمة بلا هويةٍ محفوظة تحفظ هويتها كما تظهر —
         # فالمصنع الجديد وحده يبدأ بهويةٍ فارغة
         from services import branding as _br

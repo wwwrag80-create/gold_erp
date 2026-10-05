@@ -451,14 +451,14 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     _before = _de.totals(conn, entry_id)
 
     kind = kind or v["kind"]
-    # الرقم يحمل نوعه (RV قبض · PV صرف): سندُ قبضٍ لا يصير صرفاً
-    # بالتعديل وإلا حمل صرفٌ رقماً من دفتر القبض. الأرقام القديمة (V-)
-    # بلا نوع فيبقى تبديلها كما كان.
+    # الرقم يحمل نوعه (RV قبض · PV صرف): سندُ قبضٍ صُحِّح إلى صرفٍ يأخذ
+    # رقمه من دفتر الصرف — فلا يحمل صرفٌ رقماً من دفتر القبض، ويُسجَّل
+    # الرقم السابق في سجل التعديل. الأرقام القديمة (V-) بلا نوعٍ فتبقى.
+    _renum = None
     if kind != v["kind"] and str(v["voucher_no"] or "")[:3] in ("RV-",
                                                                 "PV-"):
-        raise ValueError(
-            f"لا يتغيّر نوع السند {v['voucher_no']} بالتعديل — لكل نوعٍ"
-            " دفتره وتسلسله. احذف السند وأنشئ سنداً جديداً بالنوع الصحيح.")
+        _renum = _numbering.next_no(conn, "RV" if kind == "receipt"
+                                    else "PV")
 
     # ══ تاريخُ السند يتبع ما أدخله المستخدم ══
     # الرقم يبقى — فهو هوية المستند — أما التاريخ فبيانٌ عن زمن
@@ -587,12 +587,25 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
             f"(ذهب {chk['g']} · نقد {chk['c']}) — أُلغيت العملية")
 
     _mv = f" · التاريخ {_moved[0]} ← {_moved[1]}" if _moved else ""
+    v_no = v["voucher_no"]
+    if _renum:
+        conn.execute("UPDATE vouchers SET voucher_no=? WHERE id=?",
+                     (_renum, voucher_id))
+        conn.execute("UPDATE journal_entries SET doc_no=? WHERE id=?",
+                     (_renum, entry_id))
+        _mv += f" · النوع والرقم {v_no} ← {_renum}"
+        v_no = _renum
+    # الوصف الداخلي بُني في السند المؤقّت فحمل رقمه المؤقّت — يُعاد للرقم
+    conn.execute("UPDATE journal_entries SET description=REPLACE(description,"
+                 " ?, ?) WHERE id=?", (f"~TMP-{voucher_id}", v_no or "",
+                                       entry_id))
     log_action(conn, username, "update", "vouchers", voucher_id,
-               f"تعديل {v['voucher_no']} في مكانه — الرقم ثابت{_mv}")
+               f"تعديل {v_no} في مكانه{_mv}")
     _de.record(conn, "vouchers", voucher_id, username, _before,
-               doc_no=v["voucher_no"] or "", entry_id=entry_id,
+               doc_no=v_no or "", entry_id=entry_id,
                kind="inplace", note=_mv.strip(" ·"))
-    return {"id": voucher_id, "voucher_no": v["voucher_no"],
+    return {"id": voucher_id, "voucher_no": v_no,
+            "renumbered": (v["voucher_no"], _renum) if _renum else None,
             "moved_date": _moved,
             "entry_id": entry_id, "kind": kind,
             "target_label": tmp.get("target_label", ""),

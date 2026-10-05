@@ -16,8 +16,9 @@ from database.database import db
 from models import editing, entities, purchases
 from ui.widgets.common import (Card, date_edit, dstr, enter_chain, err,
                                make_table, mspin, num_item, posted,
-                               reload_combo, row_height, search_combo,
-                               tab_widget, text_item, title_label)
+                               reload_combo, row_action_buttons, row_height,
+                               search_combo, tab_widget, text_item,
+                               title_label)
 from ui.widgets.table_fit import fit_columns
 
 REG_COLS = ["", "الرقم", "التاريخ", "المورد", "الرقم الضريبي للمورد",
@@ -32,6 +33,14 @@ TREAT_SHORT = {"standard": "خاضعة 15%", "blocked": "لا تُسترد",
 
 def _m(v):
     return f"{float(v or 0):,.2f}"
+
+
+def _shrink(cb, chars=10):
+    cb.setSizeAdjustPolicy(
+        QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    cb.setMinimumContentsLength(chars)
+    cb.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                     QtWidgets.QSizePolicy.Fixed)
 
 
 def _sub(t):
@@ -102,16 +111,25 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         lay.addWidget(self.tabs)
 
     # ══════════════════════════ الفاتورة ══════════════════════════
+    LINE_COLS = ["", "م", "الحساب", "العدد", "السعر", "المبلغ قبل الضريبة",
+                 "الخصم", "الضريبة", "بعد الضريبة"]
+
     def _build_purchase_tab(self):
         w = QtWidgets.QWidget()
-        # ① فاتورة المورد: من · رقمها · متى · على أي حساب
+        self.p_lines = []          # أسطر الفاتورة: لكل سطرٍ حسابه
+        # ① فاتورة المورد: من · رقمها · متى · ومعالجتها الضريبية
         self.supplier = search_combo("اكتب اسم المورد…")
         self.supplier.currentIndexChanged.connect(self._on_supplier)
         btn_new_sup = QtWidgets.QPushButton("+ مورد جديد")
         btn_new_sup.setObjectName("ghost")
         btn_new_sup.clicked.connect(self.new_supplier)
         self.sup_vat = QtWidgets.QLabel("—")
-        self.sup_vat.setWordWrap(True)
+        # بلا لفّ: النصّ المُلتفّ يجعل الشاشة كلها «ارتفاعاً بحسب العرض»
+        # فتحجز للجدول ارتفاعه المفضّل وتظهر شريط تمريرٍ بلا داعٍ
+        self.sup_vat.setWordWrap(False)
+        self.sup_vat.setMinimumWidth(0)
+        self.sup_vat.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                                   QtWidgets.QSizePolicy.Preferred)
         self.inv_no = QtWidgets.QLineEdit()
         self.inv_no.setPlaceholderText("كما في ورقة المورد")
         self.p_date = date_edit()
@@ -119,7 +137,10 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.kind.addItem("مصروف تشغيلي", "expense")
         self.kind.addItem("أصل ثابت (مكينة/معدة)", "asset")
         self.kind.currentIndexChanged.connect(self._on_kind)
-        self.account = QtWidgets.QComboBox()
+        self.treat = QtWidgets.QComboBox()
+        for k, lbl in purchases.TAX_TREATMENTS:
+            self.treat.addItem(lbl, k)
+        self.treat.currentIndexChanged.connect(self._on_treat)
         self.desc = QtWidgets.QLineEdit()
         self.desc.setPlaceholderText("البيان (اسم الأصل إن كان أصلاً)")
         self.life = QtWidgets.QSpinBox()
@@ -138,6 +159,10 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             "ضريبية: باسم المصنع ورقمه الضريبي · مبسطة: إيصالٌ بلا بيانات "
             "المشتري (محطة، مطعم، محل تجزئة)")
 
+        # القوائم لا تأخذ عرض أطول خياراتها — وإلا جاوزت الشاشة نافذتها
+        # ومدّت الواجهة خارجها لليسار
+        for cb in (self.kind, self.treat, self.pay, self.inv_type):
+            _shrink(cb)
         sup_row = QtWidgets.QHBoxLayout()
         sup_row.addWidget(self.supplier, 1)
         sup_row.addWidget(btn_new_sup)
@@ -150,8 +175,8 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             (1, 0, "رقم فاتورة المورد:", self.inv_no),
             (1, 2, "نوع الفاتورة:", self.inv_type),
             (1, 4, "طريقة الدفع:", self.pay),
-            (2, 0, "نوع الشراء:", self.kind), (2, 2, "الحساب:",
-                                                self.account),
+            (2, 0, "نوع الشراء:", self.kind),
+            (2, 2, "المعالجة الضريبية:", self.treat),
             (2, 4, self.life_lbl, self.life))
         for r, c, lbl, wd in cells:
             g.addWidget(lbl if isinstance(lbl, QtWidgets.QWidget)
@@ -163,36 +188,56 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         g.addWidget(QtWidgets.QLabel("البيان:"), 3, 0)
         g.addWidget(self.desc, 3, 1, 1, 5)
         g.setColumnStretch(1, 3)
-        g.setColumnStretch(3, 2)
+        g.setColumnStretch(3, 3)
         g.setColumnStretch(5, 2)
 
-        # ② المبالغ — سطرٌ واحد بترتيب ورقة المورد: المبلغ ثم الخصم ثم
-        # الضريبة، وتحته الإجماليات
-        self.treat = QtWidgets.QComboBox()
-        for k, lbl in purchases.TAX_TREATMENTS:
-            self.treat.addItem(lbl, k)
-        self.treat.currentIndexChanged.connect(self._auto_vat)
-        self.gross = QtWidgets.QCheckBox("المبلغ شامل الضريبة")
-        self.gross.toggled.connect(self._auto_vat)
-        self.amount = mspin()
-        self.amount.valueChanged.connect(self._auto_vat)
+        # ② المبالغ والضريبة — سطر إدخالٍ بترتيب ورقة المورد: الحساب ثم
+        # العدد ثم السعر ثم المبلغ قبل الضريبة ثم الخصم ثم الضريبة ثم
+        # بعد الضريبة. وEnter أو «+ إضافة سطر» يُنزله في الجدول تحته —
+        # فاتورةٌ واحدة على أكثر من حساب.
+        self.account = QtWidgets.QComboBox()
+        _shrink(self.account, 14)
+        self.l_qty = mspin()
+        self.l_qty.setValue(1)
+        self.l_price = mspin()
+        self.l_gross = QtWidgets.QLineEdit()
+        self.l_gross.setReadOnly(True)
         self.discount = mspin()
-        self.discount.valueChanged.connect(self._auto_vat)
         self.vat = mspin()
-        self.vat.valueChanged.connect(self._recalc)
-        self.amount_lbl = _sub("المبلغ قبل الضريبة")
+        self.l_total = QtWidgets.QLineEdit()
+        self.l_total.setReadOnly(True)
+        for sp in (self.l_qty, self.l_price, self.discount):
+            sp.valueChanged.connect(self._line_auto_vat)
+        # خانات الأرقام لا تحجز عرض أكبر رقمٍ ممكن (مليار) — فيتّسع
+        # السطر في النافذة كلها بلا تمرير
+        for wd in (self.l_qty, self.l_price, self.l_gross, self.discount,
+                   self.vat, self.l_total):
+            wd.setMinimumWidth(64)
+        self.vat.valueChanged.connect(self._line_vat_typed)
+        self._vat_manual = False
+        self.btn_line = QtWidgets.QPushButton("+ إضافة سطر")
+        self.btn_line.clicked.connect(self.add_line)
         box_amt = QtWidgets.QGroupBox("② المبالغ والضريبة")
         a = QtWidgets.QGridLayout(box_amt)
         a.setHorizontalSpacing(8)
         for c, (lbl, wd, st) in enumerate((
-                (_sub("المعالجة الضريبية"), self.treat, 4),
-                (self.amount_lbl, self.amount, 2),
-                (_sub("الخصم"), self.discount, 2),
-                (_sub(f"الضريبة {config.VAT_RATE * 100:g}%"), self.vat, 2))):
-            a.addWidget(lbl, 0, c)
+                ("الحساب", self.account, 5),
+                ("العدد", self.l_qty, 1),
+                ("السعر", self.l_price, 2),
+                ("المبلغ قبل الضريبة", self.l_gross, 2),
+                ("الخصم", self.discount, 2),
+                (f"الضريبة {config.VAT_RATE * 100:g}%", self.vat, 2),
+                ("بعد الضريبة", self.l_total, 2))):
+            a.addWidget(_sub(lbl), 0, c)
             a.addWidget(wd, 1, c)
             a.setColumnStretch(c, st)
-        a.addWidget(self.gross, 1, 4)
+        a.addWidget(self.btn_line, 1, 7)
+        self.lines_tbl = make_table()
+        self.lines_tbl.setColumnCount(len(self.LINE_COLS))
+        self.lines_tbl.setHorizontalHeaderLabels(self.LINE_COLS)
+        self.lines_tbl.setMinimumHeight(104)
+        fit_columns(self.lines_tbl, [7, 4, 25, 7, 10, 12, 9, 11, 13])
+        a.addWidget(self.lines_tbl, 2, 0, 1, 8)
 
         self.c_amount = Card("المبلغ", "قبل الخصم")
         self.c_disc = Card("الخصم", "")
@@ -210,18 +255,20 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
 
         lay = QtWidgets.QVBoxLayout(w)
         lay.addWidget(box_head)
-        lay.addWidget(box_amt)
+        lay.addWidget(box_amt, 1)
         lay.addLayout(cards)
         lay.addWidget(self.edit_banner)
         srow = QtWidgets.QHBoxLayout()
         srow.addWidget(btn_save, 1)
         srow.addWidget(self.btn_cancel_edit)
         lay.addLayout(srow)
-        lay.addStretch(1)
-        enter_chain(self, [self.inv_no, self.desc, self.amount,
-                           self.discount, self.vat], self.save_purchase)
+        enter_chain(self, [self.inv_no, self.desc, self.account, self.l_qty,
+                           self.l_price, self.discount, self.vat],
+                    on_last=lambda: self.account if self.add_line()
+                    else False)
         self._on_kind()
-        self._auto_vat()
+        self._line_auto_vat()
+        self._render_lines()
         sa = QtWidgets.QScrollArea()
         sa.setWidgetResizable(True)
         sa.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -230,7 +277,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         return sa
 
     def _pmode(self):
-        return "gross" if self.gross.isChecked() else "net"
+        return "net"
 
     def _on_kind(self, *_):
         kind = self.kind.currentData()
@@ -253,6 +300,12 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         i = self.account.findData(want)
         self.account.setCurrentIndex(max(i, 0))
         self.account.blockSignals(False)
+        # أسطرٌ على حساباتٍ لا تصلح لنوع الشراء الجديد لا تبقى
+        ok = {acc["code"] for acc in accs}
+        if any(li["account_code"] not in ok for li in self.p_lines):
+            self.p_lines = [li for li in self.p_lines
+                            if li["account_code"] in ok]
+            self._render_lines()
 
     def _on_supplier(self, *_):
         from services.fatoora import profile as pf
@@ -266,36 +319,154 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.sup_vat.setText(
             f"✔ {v}" if pf.valid_vat(v) else
             f"⚠ {v or 'فارغ'} — غير صحيح: لا تُخصم ضريبة مدخلاته")
+        self.sup_vat.setToolTip(self.sup_vat.text())
 
-    def _auto_vat(self, *_):
-        """المبلغ أو الخصم أو المعالجة تغيّرت: الضريبة تُحسب من جديد.
-        وتعديلها يدوياً بعد ذلك مقبول (فاتورةٌ بأصنافٍ مختلطة)."""
-        tr = self.treat.currentData()
-        no_vat = tr in purchases.NO_VAT
-        _net, vat = purchases.split_amount(
-            self.amount.value(), self._pmode(), tr,
-            discount=self.discount.value())
-        self.vat.blockSignals(True)
-        self.vat.setValue(max(vat, 0))
-        self.vat.blockSignals(False)
+    # ── سطر الإدخال ──
+    def _calc(self, qty, price, disc, vat=None):
+        return purchases.compute_line(qty, price, disc,
+                                      self.treat.currentData(), vat)
+
+    def _line_auto_vat(self, *_):
+        """العدد أو السعر أو الخصم تغيّر: الضريبة تُحسب من جديد ما لم
+        تُكتب يدوياً (سطرٌ بأصنافٍ مختلطة)."""
+        no_vat = self.treat.currentData() in purchases.NO_VAT
+        c = self._calc(self.l_qty.value(), self.l_price.value(),
+                       self.discount.value(),
+                       None if not self._vat_manual else self.vat.value())
+        if not self._vat_manual or no_vat:
+            self.vat.blockSignals(True)
+            self.vat.setValue(max(c["vat"], 0))
+            self.vat.blockSignals(False)
+            self._vat_manual = False
         self.vat.setEnabled(not no_vat)
-        self.gross.setEnabled(not no_vat)
-        self.amount_lbl.setText(
-            "المبلغ شامل الضريبة" if self.gross.isChecked() and not no_vat
-            else "المبلغ قبل الضريبة")
+        self._line_show()
+
+    def _line_vat_typed(self, *_):
+        self._vat_manual = True
+        self._line_show()
+
+    def _line_show(self):
+        c = self._calc(self.l_qty.value(), self.l_price.value(),
+                       self.discount.value(), self.vat.value())
+        self.l_gross.setText(_m(c["gross"]))
+        self.l_total.setText(_m(c["total"]))
+        # البطاقات تشمل السطر الجاري قبل إنزاله — فالإجمالي يُرى وهو يُكتب
+        if hasattr(self, "c_total"):
+            self._recalc()
+
+    def _on_treat(self, *_):
+        """المعالجة للفاتورة كلها: ضريبة كل سطرٍ تُحسب بها من جديد."""
+        for li in self.p_lines:
+            if self.treat.currentData() in purchases.NO_VAT:
+                li["vat"], li["vat_manual"] = 0.0, False
+            elif not li.get("vat_manual"):
+                li["vat"] = self._calc(li["qty"], li["unit_price"],
+                                       li["discount"])["vat"]
+        self._vat_manual = False
+        self._line_auto_vat()
+        self._render_lines()
+
+    def _clear_line(self):
+        for sp, v in ((self.l_qty, 1), (self.l_price, 0),
+                      (self.discount, 0)):
+            sp.blockSignals(True)
+            sp.setValue(v)
+            sp.blockSignals(False)
+        self._vat_manual = False
+        self._line_auto_vat()
+
+    def add_line(self):
+        """ينزل سطر الإدخال في الجدول — ويبقى الحساب كما اختير."""
+        code = self.account.currentData()
+        if not code:
+            err(self, "اختر الحساب")
+            return False
+        c = self._calc(self.l_qty.value(), self.l_price.value(),
+                       self.discount.value(), self.vat.value())
+        if c["qty"] <= 0 or c["net"] <= 0:
+            if c["gross"] or self.discount.value():
+                err(self, "المبلغ بعد الخصم يجب أن يكون أكبر من صفر")
+            return False
+        self.p_lines.append({
+            "account_code": code, "account_label": self.account.currentText(),
+            "qty": c["qty"], "unit_price": c["unit_price"],
+            "discount": c["discount"], "vat": c["vat"],
+            "vat_manual": self._vat_manual})
+        self._clear_line()
+        self._render_lines()
+        return True
+
+    def _edit_line(self, r):
+        if not (0 <= r < len(self.p_lines)):
+            return
+        li = self.p_lines.pop(r)
+        i = self.account.findData(li["account_code"])
+        if i >= 0:
+            self.account.setCurrentIndex(i)
+        for sp, v in ((self.l_qty, li["qty"]), (self.l_price, li["unit_price"]),
+                      (self.discount, li["discount"])):
+            sp.blockSignals(True)
+            sp.setValue(v)
+            sp.blockSignals(False)
+        self.vat.blockSignals(True)
+        self.vat.setValue(li["vat"])
+        self.vat.blockSignals(False)
+        self._vat_manual = bool(li.get("vat_manual"))
+        self._line_show()
+        self._render_lines()
+        self.l_price.setFocus()
+
+    def _del_line(self, r):
+        if 0 <= r < len(self.p_lines):
+            del self.p_lines[r]
+            self._render_lines()
+
+    def _render_lines(self):
+        t = self.lines_tbl
+        # أزرار الصفوف المحذوفة تُرفع صراحةً — وإلا بقي زرٌّ يتيم مرسوماً
+        # في جدولٍ فارغ
+        for r in range(t.rowCount()):
+            t.removeCellWidget(r, 0)
+        t.setRowCount(len(self.p_lines))
+        for r, li in enumerate(self.p_lines):
+            c = self._calc(li["qty"], li["unit_price"], li["discount"],
+                           li["vat"])
+            vals = [str(r + 1), li["account_label"], f"{c['qty']:g}",
+                    _m(c["unit_price"]), _m(c["gross"]), _m(c["discount"]),
+                    _m(c["vat"]), _m(c["total"])]
+            for col, v in enumerate(vals, 1):
+                t.setItem(r, col, text_item(v) if col == 2 else num_item(v))
+        row_action_buttons(t, len(self.p_lines), self._edit_line,
+                           self._del_line, edit_tip="تعديل السطر",
+                           del_tip="حذف السطر")
+        t.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        t.verticalHeader().setDefaultSectionSize(row_height(t) + 6)
+        fit_columns(t)
+        t.viewport().update()
         self._recalc()
+
+    def _all_lines(self):
+        """أسطر الفاتورة — ومعها سطر الإدخال إن كُتب ولم يُنزَل بعد."""
+        out = [dict(li) for li in self.p_lines]
+        if self.l_price.value() > 0 and self.account.currentData():
+            out.append({"account_code": self.account.currentData(),
+                        "account_label": self.account.currentText(),
+                        "qty": self.l_qty.value(),
+                        "unit_price": self.l_price.value(),
+                        "discount": self.discount.value(),
+                        "vat": self.vat.value()})
+        return out
 
     def _values(self):
         """(الصافي الخاضع، الضريبة، الخصم قبل الضريبة) كما ستُرحَّل."""
-        tr = self.treat.currentData()
-        base = round(self.amount.value() - self.discount.value(), 2)
-        if tr in purchases.NO_VAT:
-            return base, 0.0, round(self.discount.value(), 2)
-        vat = round(self.vat.value(), 2)
-        if self._pmode() == "gross":
-            disc = round(self.discount.value() / (1 + config.VAT_RATE), 2)
-            return round(base - vat, 2), vat, disc
-        return base, vat, round(self.discount.value(), 2)
+        net = vat = disc = 0.0
+        for li in self._all_lines():
+            c = self._calc(li["qty"], li["unit_price"], li["discount"],
+                           li["vat"])
+            net += c["net"]
+            vat += c["vat"]
+            disc += c["discount"]
+        return round(net, 2), round(vat, 2), round(disc, 2)
 
     def _recalc(self, *_):
         net, vat, disc = self._values()
@@ -329,6 +500,10 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             sid = self.supplier.currentData()
             if sid is None:
                 raise ValueError("اختر المورد (أو أضف مورداً جديداً)")
+            lines = self._all_lines()
+            if not lines:
+                raise ValueError("أضف سطراً واحداً على الأقل: الحساب والعدد"
+                                 " والسعر")
             net, vat, disc = self._values()
             if net <= 0:
                 raise ValueError("المبلغ بعد الخصم يجب أن يكون أكبر من صفر")
@@ -340,12 +515,17 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                     dstr(self.p_date), self.user["username"])
             kw = {"supplier_invoice_no": self.inv_no.text(),
                   "tax_treatment": tr,
-                  "account_code": self.account.currentData(),
-                  "price_mode": self._pmode(),
+                  "account_code": lines[0]["account_code"],
+                  "price_mode": "net",
                   "life_months": self.life.value(),
                   "discount": disc,
                   "pay_mode": self.pay.currentData(),
-                  "invoice_type": self.inv_type.currentData()}
+                  "invoice_type": self.inv_type.currentData(),
+                  "lines": [{"account_code": li["account_code"],
+                             "qty": li["qty"],
+                             "unit_price": li["unit_price"],
+                             "discount": li["discount"],
+                             "vat": li["vat"]} for li in lines]}
             with db() as conn:
                 if self.is_editing:
                     res = editing.repost(
@@ -371,10 +551,10 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
     def _clear(self):
         self.desc.clear()
         self.inv_no.clear()
-        self.amount.setValue(0)
-        self.discount.setValue(0)
-        self.vat.setValue(0)
+        self.p_lines = []
+        self._clear_line()
         self.life.setValue(0)
+        self._render_lines()
 
     # ══════════════════════════ السجل الضريبي ══════════════════════════
     def _build_register_tab(self):
@@ -518,9 +698,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                 if not p:
                     raise ValueError("الفاتورة غير موجودة")
                 eid = editing.entry_of(conn, "purchases", source_id)
-                acc = conn.execute("SELECT code FROM accounts WHERE id=?",
-                                   (p["account_id"],)).fetchone() \
-                    if "account_id" in p.keys() and p["account_id"] else None
+                plines = purchases.lines_of(conn, source_id)
                 life = 0
                 if p["asset_id"]:
                     a = conn.execute("SELECT life_months FROM fixed_assets"
@@ -538,10 +716,6 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             i = self.kind.findData(p["kind"])
             if i >= 0:
                 self.kind.setCurrentIndex(i)
-            if acc is not None:
-                i = self.account.findData(acc["code"])
-                if i >= 0:
-                    self.account.setCurrentIndex(i)
             i = self.supplier.findData(p["supplier_id"])
             if i >= 0:
                 self.supplier.setCurrentIndex(i)
@@ -550,17 +724,24 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                                 if "supplier_invoice_no" in keys else "")
             tr = (p["tax_treatment"] if "tax_treatment" in keys else "") \
                 or "standard"
-            pm = (p["price_mode"] if "price_mode" in keys else "") or "net"
-            disc = float((p["discount"] if "discount" in keys else 0) or 0)
-            # الخصم مخزَّنٌ قبل الضريبة: فاتورةٌ شاملةٌ بخصمٍ تُفتح صافيةً
-            # (القيم نفسها بلا تقريبٍ ذهاباً وإياباً)
-            gross = pm == "gross" and not disc
+            self.treat.blockSignals(True)
             self.treat.setCurrentIndex(max(self.treat.findData(tr), 0))
-            self.gross.setChecked(gross)
-            self.amount.setValue((p["total"] if gross
-                                  else (p["amount"] or 0) + disc) or 0)
-            self.discount.setValue(disc)
-            self.vat.setValue(p["vat_amount"] or 0)      # كما رُحِّلت
+            self.treat.blockSignals(False)
+            # الأسطر كما رُحِّلت — وفاتورةٌ قديمة سطراً واحداً
+            self.p_lines = []
+            for li in plines:
+                code = li["acc_code"] or purchases.DEFAULT_ACCOUNT[p["kind"]]
+                ix = self.account.findData(code)
+                self.p_lines.append({
+                    "account_code": code,
+                    "account_label": (self.account.itemText(ix) if ix >= 0
+                                      else f"{code} — {li['acc_name'] or ''}"),
+                    "qty": float(li["qty"] or 1),
+                    "unit_price": float(li["unit_price"] or 0),
+                    "discount": float(li["discount"] or 0),
+                    "vat": float(li["vat"] or 0), "vat_manual": True})
+            self._clear_line()
+            self._render_lines()
             self.life.setValue(life)
             self._recalc()
             self.begin_edit(eid, source_id)

@@ -106,7 +106,11 @@ def ensure_tables(conn):
     for col, ddl in (("sale_item_id", "INTEGER"),
                      ("work_order_id", "INTEGER"),
                      ("wo_no", "TEXT DEFAULT ''"),
-                     ("model_no", "TEXT DEFAULT ''")):
+                     ("model_no", "TEXT DEFAULT ''"),
+                     # 4.48: عدد قطع الطقم وعياره — بيانٌ على الفاتورة لا
+                     # يغيّر المبالغ (الكمية تبقى الوزن بمكافئ 18)
+                     ("pieces", "INTEGER NOT NULL DEFAULT 1"),
+                     ("karat", "INTEGER NOT NULL DEFAULT 0")):
         if col not in cols:
             conn.execute(f"ALTER TABLE tax_sale_lines ADD COLUMN {col} {ddl}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tax_sales_date"
@@ -118,7 +122,8 @@ def ensure_tables(conn):
 
 
 # ══════════════════════════ الحساب ══════════════════════════
-_EXTRA = ("sale_item_id", "work_order_id", "wo_no", "model_no")
+_EXTRA = ("sale_item_id", "work_order_id", "wo_no", "model_no", "pieces",
+          "karat")
 
 
 def compute(lines, rate=None):
@@ -344,7 +349,8 @@ def _taxed_weight(conn, item_id):
 
 _ITEMS_SQL = (
     "SELECT ii.id item_id, ii.work_order_id, ii.registered_weight weight,"
-    " ii.wage_per_gram, ii.wages, i.id invoice_id, i.invoice_no,"
+    " ii.wage_per_gram, ii.wages, COALESCE(ii.karat,0) karat,"
+    " i.id invoice_id, i.invoice_no,"
     " i.invoice_date, i.vat_applied, i.customer_id, w.work_order_no wo_no,"
     " COALESCE(w.model_no,'') model_no, w.status, w.is_bulk"
     " FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id"
@@ -434,17 +440,26 @@ def find_rep_item(conn, rep_id, wo_no, exclude=()):
     raise ValueError(last_err or f"رقم التشغيل {wo_no} لا يصلح")
 
 
-def _rep_line(it, wage_per_gram=None):
+def line_karat(karat):
+    """عيار السطر: 0 = عيار المصنع الفعّال."""
+    from services import karat_view as kv
+    k = int(karat or 0)
+    return k if k in (18, 21, 22, 24) else int(kv.active())
+
+
+def _rep_line(it, wage_per_gram=None, pieces=None, karat=None):
     from services import karat_view as kv
     rate = float(it["wage_per_gram"] if wage_per_gram is None
                  else wage_per_gram)
+    k = line_karat(karat if karat is not None else it.get("karat"))
+    n = max(1, int(pieces or it.get("pieces") or 1))
     desc = (f"موديل {it['model_no'] or '—'} — رقم التشغيل {it['wo_no']} — "
-            f"{kv.g(it['weight']):,.3f} {kv.unit()}")
+            f"{n} قطعة — {kv.g(it['weight'], k):,.3f} جم عيار {k}")
     return {"description": desc, "qty": float(it["weight"]),
             "unit_price": rate, "discount": 0,
             "sale_item_id": it["item_id"],
             "work_order_id": it["work_order_id"], "wo_no": it["wo_no"],
-            "model_no": it["model_no"]}
+            "model_no": it["model_no"], "pieces": n, "karat": k}
 
 
 def spread_discount(grosses, discount):
@@ -492,7 +507,8 @@ def create_rep_invoice(conn, company_id, rep_id, doc_date, items, username,
         if not it:
             raise ValueError("سطرٌ لم يعد صالحاً (فُوتر أو أُرجع) — أعد "
                              "إضافته")
-        lines.append(_rep_line(it, x.get("wage_per_gram")))
+        lines.append(_rep_line(it, x.get("wage_per_gram"),
+                               x.get("pieces"), x.get("karat")))
     grosses = [float(money(li["qty"] * li["unit_price"])) for li in lines]
     for li, d in zip(lines, spread_discount(grosses, discount)):
         li["discount"] = d
@@ -596,13 +612,14 @@ def _save_lines(conn, sid, rows):
         conn.execute(
             "INSERT INTO tax_sale_lines(sale_id,line_no,description,qty,"
             "unit_price,discount,net,vat,total,src_line_id,sale_item_id,"
-            "work_order_id,wo_no,model_no)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "work_order_id,wo_no,model_no,pieces,karat)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (sid, li["line_no"], li["description"], li["qty"],
              li["unit_price"], li["discount"], li["net"], li["vat"],
              li["total"], li.get("src_line_id"), li.get("sale_item_id"),
              li.get("work_order_id"), li.get("wo_no") or "",
-             li.get("model_no") or ""))
+             li.get("model_no") or "", int(li.get("pieces") or 1),
+             int(li.get("karat") or 0)))
 
 
 # ══════════════════════════ الفاتورة الإلكترونية ══════════════════════════

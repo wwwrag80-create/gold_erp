@@ -991,13 +991,23 @@ def _tpl_purchase(conn, pid):
             ("المعالجة الضريبية", dict(_pu.TAX_TREATMENTS).get(tr, tr)),
             ("يُحمَّل على حساب", acc)]
     trs = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in info)
-    disc = float((p["discount"] if "discount" in keys else 0) or 0)
-    rows = "<tr>" + cells(
-        tdw(p["description"] or "—", align="right"),
-        tdw(_w(amount + disc, 2)), tdw(_w(disc, 2)), tdw(_w(amount, 2)),
-        tdw(_w(vat, 2)), tdw(_w(amount + vat, 2))) + "</tr>"
-    head = cells(thw("البيان"), thw("المبلغ"), thw("الخصم"),
-                 thw("الصافي الخاضع"), thw("الضريبة"), thw("الإجمالي"))
+    # أسطر الفاتورة (4.48): لكل سطرٍ حسابه وعدده وسعره — بترتيب الشاشة
+    plines = _pu.lines_of(conn, pid)
+    if len({li["account_id"] for li in plines}) > 1:
+        info[-1] = ("يُحمَّل على حساب", "حسب الأسطر")
+        trs = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>"
+                      for k, v in info)
+    rows = "".join("<tr>" + cells(
+        tdw(en(li["line_no"])),
+        tdw(f"{li['acc_code'] or ''} — {li['acc_name'] or ''}",
+            align="right"),
+        tdw(en(f"{float(li['qty'] or 0):g}")),
+        tdw(_w(li["unit_price"], 2)), tdw(_w(li["gross"], 2)),
+        tdw(_w(li["discount"], 2)), tdw(_w(li["vat"], 2)),
+        tdw(_w(li["total"], 2))) + "</tr>" for li in plines)
+    head = cells(thw("م"), thw("الحساب"), thw("العدد"), thw("السعر"),
+                 thw("المبلغ قبل الضريبة"), thw("الخصم"), thw("الضريبة"),
+                 thw("بعد الضريبة"))
     body = f"""
     {TBL}{trs}</table><br/>
     {TBL}<tr>{head}</tr>{rows}</table>
@@ -1095,16 +1105,25 @@ def _tpl_tax_sale(conn, sid):
         dcells = ((tdw(_w(li["net"] + li["discount"], 2)),
                    tdw(_w(li["discount"], 2))) if has_disc else ())
         if wo_mode and li["wo_no"]:
+            # 4.48: العدد والعيار — الوزن والأجر/جم بعيار السطر إن حُفظ
+            from services import karat_view as kv
+            _lk = int(li["karat"] or 0) if "karat" in li.keys() else 0
+            _np = int(li["pieces"] or 1) if "pieces" in li.keys() else 1
+            _wt = (f"{kv.g(li['qty'], _lk):,.3f}" if _lk
+                   else _gw(li["qty"], 3))
+            _rt = (kv.rate(li["unit_price"], _lk) if _lk
+                   else _krate(li["unit_price"]))
             body_rows += "<tr>" + cells(
                 tdw(en(li["line_no"])), tdw(en(li["model_no"] or "—")),
-                tdw(en(li["wo_no"])), tdw(_gw(li["qty"], 3)),
-                tdw(_w(_krate(li["unit_price"]), 2)), *dcells,
+                tdw(en(li["wo_no"])), tdw(en(_np)), tdw(en(_wt)),
+                tdw(en(_lk or kv.active())),
+                tdw(_w(_rt, 2)), *dcells,
                 tdw(_w(li["net"], 2)), tdw(_w(li["vat"], 2)),
                 tdw(_w(li["total"], 2))) + "</tr>"
         elif wo_mode:
             body_rows += "<tr>" + cells(
                 tdw(en(li["line_no"])),
-                f'<td class="r" colspan="4">{li["description"]}</td>',
+                f'<td class="r" colspan="6">{li["description"]}</td>',
                 *dcells, tdw(_w(li["net"], 2)), tdw(_w(li["vat"], 2)),
                 tdw(_w(li["total"], 2))) + "</tr>"
         else:
@@ -1116,7 +1135,8 @@ def _tpl_tax_sale(conn, sid):
                 tdw(_w(li["total"], 2))) + "</tr>"
     if wo_mode:
         head = cells(thw("م"), thw("رقم الموديل"), thw("رقم التشغيل"),
-                     thw(f"الوزن<br/>{_kunit()}"), thw("الأجر/جم"),
+                     thw("العدد"), thw("الوزن<br/>جم"), thw("العيار"),
+                     thw("الأجر/جم"),
                      *((thw("الأجور"), thw("الخصم")) if has_disc else ()),
                      thw("الصافي (الخاضع)" if has_disc
                          else "الأجور (الخاضع)"),
@@ -1568,28 +1588,30 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
         title = "رواتب عمال قسم التصنيع"
         if SALARY_COLS:
             keys = [c[0] for c in SALARY_COLS]
-            hdr = [c[1] for c in SALARY_COLS]
+            hdr = [("الرصيد (عليه/له)" if c[0] == "owed" else c[1])
+                   for c in SALARY_COLS]
         else:
             hdr = ["اسم العامل", "الأساسي", "إضافية", "معامل", "الإضافي",
                    "الغياب", "الخصم", "الفاقد/ذهب", "خصم/ذهب", "التارجت",
-                   "المكافأة", "الصافي", "عليه (مدين)", "المستحق"]
+                   "المكافأة", "الصافي", "الرصيد (عليه/له)", "المستحق"]
             keys = ["name", "basic_salary", "overtime_hours",
                     "overtime_rate", "overtime", "absence", "deduction",
                     "gold_loss", "gold_deduction", "target_amount",
                     "bonus", "net_salary", "owed", "due"]
         # عمود «عليه (مدين)» يُترك فارغاً عند الصفر كما على الشاشة:
         # الورقة تطابق ما يراه المستخدم، والصفر فيه يُقرأ خطأً.
+        # والرصيد بطرفه: «مدين» عليه · «دائن» له (4.48)
         def _cell(r, k):
             v = r.get(k, 0)
-            if k == "owed" and not float(v or 0):
-                return ""
+            if k == "owed":
+                return mfg_costs.bal_text(v)
             return _w(v, 2)
 
         rows = [[r.get("name")] + [_cell(r, k) for k in keys[1:]]
                 for r in (salaries or [])]
         tot = ["الإجمالي"] + [
-            _w(sum(float(r.get(k) or 0) for r in (salaries or [])), 2)
-            for k in keys[1:]]
+            _cell({k: sum(float(r.get(k) or 0) for r in (salaries or []))},
+                  k) for k in keys[1:]]
         body = _table(hdr, rows, tot)
 
     else:

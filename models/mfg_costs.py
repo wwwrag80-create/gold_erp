@@ -250,6 +250,27 @@ def owed_now(conn, employee_id):
     return round(cash, 2) if cash > 0.004 else 0.0
 
 
+def balance_now(conn, employee_id):
+    """رصيد العامل في كشف حسابه الآن — بإشارته: موجبٌ مدين (عليه)،
+    سالبٌ دائن (له). عمود «الرصيد» يعرضه كما هو بطرفه (4.48)."""
+    ent = conn.execute(
+        "SELECT account_id FROM entities"
+        " WHERE employee_id=? AND is_deleted=0", (employee_id,)).fetchone()
+    if not ent or not ent["account_id"]:
+        return 0.0
+    from services.accounting_engine import account_balance
+    _g, cash = account_balance(conn, ent["account_id"])
+    return round(cash, 2) if abs(cash) > 0.004 else 0.0
+
+
+def bal_text(v):
+    """«1,200.00 مدين» (عليه) · «500.00 دائن» (له) · فراغٌ للصفر."""
+    v = round(float(v or 0), 2)
+    if abs(v) < 0.005:
+        return ""
+    return f"{abs(v):,.2f} {'مدين' if v > 0 else 'دائن'}"
+
+
 def withdrawals(conn, employee_id, period):
     """سحوبات العامل خلال الشهر مفصولة: نقدي وبنكي.
 
@@ -344,10 +365,14 @@ def compute_salary_row(r):
     # العامل قد يدخل الشهر وعليه باقٍ من شهرٍ سابق، أو له رصيد.
     # وكشفُ حسابه يجمع ذلك كلَّه إلى هذه اللحظة، فهو أصدق أساسٍ
     # لسؤال «كم أدفع له الآن؟».
+    # و«owed» رصيدُه بإشارته (4.48): موجبٌ عليه، سالبٌ له. فإن رُحِّل
+    # راتبُ الشهر فقد دخل الرصيدَ نفسه — والمستحق حينها ما له فيه
+    # وحده، لا الصافي مرةً ثانية.
     owed = round(_f("owed"), 2)
+    base = 0.0 if r.get("is_posted") else net
     return {"overtime": overtime, "deduction": deduction,
             "net_salary": net, "draws": draws, "owed": owed,
-            "due": round(net - owed, 2)}
+            "due": round(base - owed, 2)}
 
 
 def _extra_cfg_path():
@@ -518,7 +543,7 @@ def list_salaries(conn, period):
             "bonus": saved["bonus"] if saved else 0,
             "draw_cash": w["cash"], "draw_bank": w["bank"],
             # رصيدُه في الدفتر الآن: المدين وحده يُعرض
-            "owed": owed_now(conn, e["id"]),
+            "owed": balance_now(conn, e["id"]),
             "is_posted": bool(saved["is_posted"]) if saved else False,
             # صفٌّ أُضيف يدوياً (موظفٌ من خارج عمال التصنيع)
             "is_extra": bool(e["id"] in _extra_set),

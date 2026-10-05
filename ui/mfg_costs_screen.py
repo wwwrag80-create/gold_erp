@@ -57,7 +57,8 @@ SALARY_COLS = [
     # الشهور السابقة أيضاً. والمستحق = الصافي − عليه.
     # الاثنان للعرض والطباعة وحدهما: **الصافي** هو ما يُنزَل في
     # حساب كل عامل عند الترحيل.
-    ("owed", "عليه (مدين)", True),
+    # 4.48: الرصيد بطرفه — «مدين» عليه · «دائن» له
+    ("owed", "الرصيد", True),
     ("due", "المستحق", True),
 ]
 
@@ -67,7 +68,7 @@ BLANK_IF_ZERO = {"owed"}
 # أوزان أعمدة الجدولين — تُوزَّع على العرض المتاح بلا تمرير أفقي
 # ولا سحبٍ باليد. الاسم أعرضها لأنه نصٌّ، والباقي أرقام.
 TARGET_W = [20, 7, 7, 7, 7, 7, 9, 9, 8, 8, 7, 8]
-SALARY_W = [19, 8, 7, 6, 7, 6, 7, 7, 7, 7, 7, 8, 8, 8]
+SALARY_W = [18, 8, 6, 5, 7, 6, 7, 7, 7, 7, 7, 8, 10, 8]
 
 
 class VerticalEnterTable(QtWidgets.QTableWidget):
@@ -171,10 +172,13 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self.year = QtWidgets.QSpinBox()
         self.year.setRange(2000, 2100)
         self.year.setValue(today.year())
-        self.month.currentIndexChanged.connect(self.reload)
-        self.year.valueChanged.connect(self.reload)
+        # تبديل الشهر يحفظ ما كُتب في الشهر السابق أولاً (حفظٌ تلقائي)
+        self.month.currentIndexChanged.connect(self._period_changed)
+        self.year.valueChanged.connect(self._period_changed)
         btn_reload = QtWidgets.QPushButton("↻ تحديث")
-        btn_reload.clicked.connect(self.reload)
+        btn_reload.clicked.connect(self._reload_saving)
+        self._dirty = {"t": False, "s": False}
+        self._loaded_period = None
 
         self.s_date = QtWidgets.QDateEdit()
         self.s_date.setCalendarPopup(True)
@@ -182,9 +186,10 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self.s_date.setDate(QtCore.QDate.currentDate())
         self.s_date.setMaximumWidth(130)
 
-        btn_save = QtWidgets.QPushButton("💾 حفظ")
-        btn_save.setToolTip("يحفظ التبويب المعروض — التارجت أو الرواتب")
-        btn_save.clicked.connect(self.save_current)
+        # لا زرّ «حفظ»: كل تعديلٍ يُحفظ تلقائياً عند الانتقال لتبويبٍ
+        # آخر أو لشهرٍ آخر أو الخروج من الشاشة (4.48)
+        self.save_state = QtWidgets.QLabel("")
+        self.save_state.setObjectName("cardSub")
         btn_post = QtWidgets.QPushButton("📥 إنزال رواتب العمال")
         btn_post.setObjectName("homeBtn")
         btn_post.clicked.connect(self.post_salaries)
@@ -209,6 +214,16 @@ class MfgCostsScreen(QtWidgets.QWidget):
         btn_dn.setToolTip("تحريك العامل المحدَّد لأسفل — الترتيب يُحفظ")
         btn_dn.clicked.connect(lambda: self.move_staff(1))
 
+        # ══ شريطان قصيران لا شريطٌ واحد طويل ══
+        # كان الشريط الواحد يحتاج ~1300 بكسل فيُجبر الشاشة كلها على
+        # عرضٍ أكبر من النافذة، فتمتدّ الجداول خارجها لليسار. الأول
+        # للفترة والعمليات، والثاني لترتيب الأسماء — وكلاهما ينضغط.
+        for b in (btn_reload, btn_post, btn_print, btn_add, btn_drop,
+                  btn_up, btn_dn):
+            b.setSizePolicy(QtWidgets.QSizePolicy.Maximum,
+                            QtWidgets.QSizePolicy.Fixed)
+            b.setMinimumWidth(0)
+        self.month.setMinimumWidth(90)
         head = QtWidgets.QHBoxLayout()
         head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("الشهر:"))
@@ -217,19 +232,24 @@ class MfgCostsScreen(QtWidgets.QWidget):
         head.addWidget(btn_reload)
         head.addWidget(QtWidgets.QLabel("تاريخ القيد:"))
         head.addWidget(self.s_date)
-        head.addWidget(btn_save)
+        head.addStretch(1)
+        head.addWidget(self.save_state)
         head.addWidget(btn_post)
         head.addWidget(btn_print)
-        head.addWidget(btn_add)
-        head.addWidget(btn_drop)
-        head.addWidget(btn_up)
-        head.addWidget(btn_dn)
-        head.addStretch(1)
+        head2 = QtWidgets.QHBoxLayout()
+        head2.setSpacing(6)
+        head2.addWidget(btn_add)
+        head2.addWidget(btn_drop)
+        head2.addStretch(1)
+        head2.addWidget(btn_up)
+        head2.addWidget(btn_dn)
 
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self._target_tab(), "التارجت")
         self.tabs.addTab(self._salary_tab(), "رواتب العمال")
         self.tabs.addTab(self._summary_tab(), "الملخص")
+        self._tab_now = 0
+        self.tabs.currentChanged.connect(self._tab_changed)
 
         # ══ الأزرار كلُّها في شريطٍ واحد أعلى الشاشة ══
         # كانت موزّعةً: شريطُ مسحٍ فوق، وأزرارُ التارجت تحت جدوله،
@@ -242,6 +262,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
         lay.setSpacing(4)
         lay.addWidget(title_label("تكاليف ورواتب قسم التصنيع"))
         lay.addLayout(head)
+        lay.addLayout(head2)
         lay.addWidget(self.tabs, 1)
 
     # ══════════ التبويب الأول: التارجت ══════════
@@ -256,6 +277,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
             "التي أسفلها في نفس العمود.")
         note.setObjectName("cardSub")
         note.setWordWrap(True)
+        note.setMinimumWidth(0)
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(0, 2, 0, 0)
         lay.setSpacing(3)
@@ -276,6 +298,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
         # من ارتفاعٍ الجدولُ أحوجُ إليه. وما يحتاج بياناً فتلميحةٌ
         # على رأس عموده تكفيه.
         self.s_total = big_label("")
+        self.s_total.setWordWrap(True)
+        self.s_total.setMinimumWidth(0)
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(0, 2, 0, 0)
         lay.setSpacing(3)
@@ -420,18 +444,18 @@ class MfgCostsScreen(QtWidgets.QWidget):
                     v = r.get(key, "")
                     if key == "name":
                         txt = v
-                    elif key in BLANK_IF_ZERO and not float(v or 0):
-                        # صفرٌ في خانةٍ معناها «عليه» يُقرأ رقماً
-                        # محسوباً؛ والفراغ يقول «لا شيء عليه» بصدق.
-                        txt = ""
+                    elif key == "owed":
+                        # الرصيد بطرفه: «مدين» عليه · «دائن» له — والصفر
+                        # فراغ
+                        txt = mfg_costs.bal_text(v)
                     else:
                         txt = _num(v)
                     it = QtWidgets.QTableWidgetItem(str(txt))
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     if key == "owed":
                         it.setToolTip(
-                            "رصيده في كشف حسابه الآن — يظهر إن كان "
-                            "مديناً، ويبقى فارغاً إن كان دائناً")
+                            "رصيده في كشف حسابه الآن: «مدين» ما عليه، "
+                            "و«دائن» ما له — نقرٌ مزدوج يفتح الكشف")
                     if not ro:
                         it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
                     if ro:
@@ -445,7 +469,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
                     txt = "الإجمالي"
                 else:
                     tot = sum(float(r.get(key) or 0) for r in rows)
-                    txt = _num(tot)
+                    txt = mfg_costs.bal_text(tot) if key == "owed" \
+                        else _num(tot)
                 it = QtWidgets.QTableWidgetItem(txt)
                 it.setTextAlignment(QtCore.Qt.AlignCenter)
                 it.setFlags(it.flags() & ~QtCore.Qt.ItemIsEditable)
@@ -484,6 +509,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
     def on_target_edit(self, *_):
         if self._loading:
             return
+        self._mark_dirty("t")
         self._read(self.t_table, TARGET_COLS, self.target_rows)
         for r in self.target_rows:
             r.update(mfg_costs.compute_target_row(r))
@@ -499,6 +525,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
         if edited == "name":
             self._rename_worker()
             return
+        self._mark_dirty("s")
         self._read(self.s_table, SALARY_COLS, self.salary_rows)
         for i, r in enumerate(self.salary_rows):
             # الكتابة في خانة الخصم تعني خصماً يدوياً يتجاوز المعادلة
@@ -548,12 +575,67 @@ class MfgCostsScreen(QtWidgets.QWidget):
             err(self, e)
         self.reload()
 
-    def save_current(self):
-        """يحفظ التبويب المعروض — فزرٌّ واحد يكفي التبويبين."""
-        if self.tabs.currentIndex() == 0:
-            self.save_targets()
-        else:
-            self.save_salaries()
+    # ══════════ الحفظ التلقائي ══════════
+    def _mark_dirty(self, which):
+        self._dirty[which] = True
+        self.save_state.setText("✎ تعديلٌ لم يُحفظ بعد")
+
+    def autosave(self, quiet=True):
+        """يحفظ ما عُدِّل في التارجت والرواتب — بلا زرّ ولا سؤال.
+
+        يُستدعى عند الانتقال بين التبويبين، وعند تبديل الشهر (قبل تحميل
+        الجديد، فيُحفظ في شهره هو)، وعند الخروج من الشاشة. وما لم يُعدَّل
+        لا يُكتب. ويعيد False إن تعذّر الحفظ (والخطأ يُعرض).
+        """
+        per = self._loaded_period or self.period()
+        if not (self._dirty["t"] or self._dirty["s"]):
+            return True
+        try:
+            if self._dirty["t"]:
+                self._read(self.t_table, TARGET_COLS, self.target_rows)
+                for r in self.target_rows:
+                    r.update(mfg_costs.compute_target_row(r))
+            if self._dirty["s"]:
+                self._read(self.s_table, SALARY_COLS, self.salary_rows)
+                for r in self.salary_rows:
+                    r.update(mfg_costs.compute_salary_row(r))
+            with db() as conn:
+                if self._dirty["t"]:
+                    mfg_costs.save_targets(conn, per, self.target_rows,
+                                           self.user["username"])
+                if self._dirty["s"]:
+                    mfg_costs.save_salaries(conn, per, self.salary_rows,
+                                            self.user["username"])
+            self._dirty = {"t": False, "s": False}
+            self.save_state.setText("✔ حُفظ تلقائياً")
+            return True
+        except Exception as e:
+            err(self, e)
+            return False
+
+    def _tab_changed(self, i):
+        prev, self._tab_now = self._tab_now, i
+        if prev != i and (self._dirty["t"] or self._dirty["s"]):
+            # التارجت يغذّي الرواتب: بعد حفظه يُعاد التحميل فيظهر أثره
+            self.reload()
+
+    def _period_changed(self, *_):
+        self.reload()
+
+    def _reload_saving(self):
+        self.reload()
+
+    def on_close(self):
+        """يُستدعى عند مغادرة الشاشة (`LazyScreen.release`)."""
+        self.autosave()
+
+    def hideEvent(self, e):
+        # الخروج من الشاشة إلى غيرها يُخفيها — فيُحفظ ما كُتب
+        try:
+            self.autosave()
+        except Exception:
+            pass
+        super().hideEvent(e)
 
     # ══════════ إضافة حسابٍ لجدول الرواتب ══════════
     def add_staff(self):
@@ -714,17 +796,25 @@ class MfgCostsScreen(QtWidgets.QWidget):
         ow = sum(float(r.get("owed") or 0) for r in self.salary_rows)
         n = len([r for r in self.salary_rows
                  if float(r.get("net_salary") or 0)])
+        due = sum(float(r.get("due") or 0) for r in self.salary_rows)
         self.s_total.setText(
-            f"{n} عامل   |   الصافي: {tot:,.2f}   |   عليهم (مدين): "
-            f"{ow:,.2f}   |   المستحق: {tot - ow:,.2f} ريال")
+            f"{n} عامل   |   الصافي: {tot:,.2f}   |   الرصيد: "
+            f"{mfg_costs.bal_text(ow) or '0.00'}   |   المستحق: "
+            f"{due:,.2f} ريال")
 
     # ══════════ الإجراءات ══════════
     def reload(self):
+        # كل إعادة تحميل (شهرٌ آخر · ترتيب · إضافة حساب) تحفظ ما كُتب
+        # أولاً في شهره — وإن تعذّر الحفظ لا يُمحى ما كُتب
+        if not self.autosave():
+            return
         try:
             per = self.period()
             with db() as conn:
                 self.target_rows = mfg_costs.list_targets(conn, per)
                 self.salary_rows = mfg_costs.list_salaries(conn, per)
+            self._loaded_period = per
+            self._dirty = {"t": False, "s": False}
             self._fill(self.t_table, TARGET_COLS, self.target_rows)
             self._fill(self.s_table, SALARY_COLS, self.salary_rows)
             self._update_total()
@@ -793,7 +883,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 n = mfg_costs.save_targets(conn, self.period(),
                                            self.target_rows,
                                            self.user["username"])
-            info(self, f"حُفظ تارجت {n} عامل.")
+            self._dirty["t"] = False
+            self.save_state.setText(f"✔ حُفظ تارجت {n} عامل")
             self.reload()
         except Exception as e:
             err(self, e)
@@ -807,7 +898,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 n = mfg_costs.save_salaries(conn, self.period(),
                                             self.salary_rows,
                                             self.user["username"])
-            info(self, f"حُفظت رواتب {n} عامل.")
+            self._dirty["s"] = False
+            self.save_state.setText(f"✔ حُفظت رواتب {n} عامل")
             self.reload()
         except Exception as e:
             err(self, e)
@@ -815,6 +907,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
     def post_salaries(self):
         """يرحّل الرواتب بقيد مفصّل بسطرين لكل عامل."""
         try:
+            if self._dirty["t"] and not self.autosave():
+                return
             self._read(self.s_table, SALARY_COLS, self.salary_rows)
             for r in self.salary_rows:
                 r.update(mfg_costs.compute_salary_row(r))
@@ -842,6 +936,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 res = mfg_costs.post_salaries(
                     conn, self.period(), self.user["username"],
                     entry_date=date, rows=self.salary_rows)
+            self._dirty["s"] = False
             info(self, f"تم الترحيل.\nعدد العمال: {res['count']}\n"
                        f"الإجمالي: {res['total']:,.2f} ريال\n\n"
                        f"يظهر في كشف مصروف رواتب العمال سطرٌ باسم كل "

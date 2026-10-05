@@ -136,6 +136,16 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
             p = conn.execute("SELECT * FROM purchases WHERE id=?", (sid,)).fetchone()
             if p and p["asset_id"]:
                 _mark(conn, "fixed_assets", p["asset_id"], username)
+            # فاتورةٌ بأكثر من أصل (4.48): كل أصلٍ أنشأته أسطرها يُلغى معها
+            try:
+                for ln in conn.execute(
+                        "SELECT DISTINCT asset_id FROM purchase_lines"
+                        " WHERE purchase_id=? AND asset_id IS NOT NULL"
+                        " AND asset_id<>?", (sid, p["asset_id"] if p
+                                              else 0)):
+                    _mark(conn, "fixed_assets", ln["asset_id"], username)
+            except Exception:       # قاعدةٌ قبل جدول الأسطر
+                pass
             if p:
                 _mark(conn, "purchases", sid, username)
         elif src == "payroll_ledger":
