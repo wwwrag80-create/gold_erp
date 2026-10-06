@@ -204,6 +204,19 @@ def panel_details(conn, panel, customer_id, date_from=None, date_to=None):
     return []
 
 
+def report_net(panels):
+    """الصافي بالمعادلة وحدها (عرض «تقرير»): المصروف − المرتجع.
+
+    التفصيلي يحسب الصافي رقمَ تشغيلٍ برقم (مرتجعُ طقمٍ بِيع قبل الفترة
+    لا يُطرح من مبيعاتها)؛ والتقرير يقرأ الرقمين كما في لوحتيهما — ما
+    صُرف في الفترة ناقص ما رجع فيها — فيطابق ما يحسبه المستخدم بيده.
+    """
+    s = float(panels["sales"]["weight"] or 0)
+    r = float(panels["returns"]["weight"] or 0)
+    return {"count": None, "weight": round(s - r, 3),
+            "returned_excluded": 0}
+
+
 def all_panels(conn, customer_id, date_from=None, date_to=None):
     return {
         "sales": sales_panel(conn, customer_id, date_from, date_to),

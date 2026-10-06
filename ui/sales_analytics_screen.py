@@ -36,6 +36,7 @@ class PanelColumn(QtWidgets.QFrame):
         box.setFixedHeight(96)   # المربع الرئيسي ثابت لا يختفي أبداً
         bl = QtWidgets.QVBoxLayout(box)
         t = QtWidgets.QLabel(title)
+        self.title = t
         t.setObjectName("panelTitle")
         t.setAlignment(QtCore.Qt.AlignCenter)
         self.value = QtWidgets.QLabel("—")
@@ -55,6 +56,11 @@ class PanelColumn(QtWidgets.QFrame):
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["رقم التشغيل", "الوزن المقيد"])
         lay.addWidget(self.table, 1)
+        # حشوةٌ تظهر في «تقرير» وحده: اللوحات بلا جداول تبقى في أعلى
+        # الشاشة لا في وسطها
+        self.filler = QtWidgets.QWidget()
+        self.filler.setVisible(False)
+        lay.addWidget(self.filler, 1)
 
     def _toggle(self):
         """يطوي/يفرد الجدول التفصيلي فقط — المربع الرئيسي (الوزن
@@ -65,6 +71,9 @@ class PanelColumn(QtWidgets.QFrame):
 
     def set_value(self, text):
         self.value.setText(text)
+
+    def set_title(self, text):
+        self.title.setText(text)
 
     def set_rows(self, rows, headers=None):
         fill(self.table, headers or ["رقم التشغيل", "الوزن المقيد"], rows)
@@ -88,8 +97,18 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         # العيارات: اللوحات والتقرير المطبوع يخرجان بالعيار المختار
         self.karat = karat_combo()
         self.karat.currentIndexChanged.connect(self._karat_changed)
-        btn_run = QtWidgets.QPushButton("تحديث اللوحات")
-        btn_run.clicked.connect(self.reload_panels)
+        # «تحديث اللوحات» بخيارين (4.50): تفصيلي — اللوحات وتحتها أرقام
+        # التشغيل وأوزانها كما كان · تقرير — اللوحات وحدها بالمعادلة:
+        # المصروف − المرتجع = المباع الفعلي، بلا أرقام تشغيل
+        self.mode = "detail"
+        btn_run = QtWidgets.QPushButton("تحديث اللوحات ▾")
+        menu = QtWidgets.QMenu(btn_run)
+        menu.addAction("تفصيلي — اللوحات وأرقام التشغيل والأوزان",
+                       lambda: self.run_mode("detail"))
+        menu.addAction("تقرير — المصروف والمرتجع والصافي بأرقامها فقط",
+                       lambda: self.run_mode("report"))
+        btn_run.setMenu(menu)
+        self.btn_run = btn_run
         btn_print = QtWidgets.QPushButton("🖨 طباعة تقرير العميل")
         btn_print.clicked.connect(self.print_report)
 
@@ -117,6 +136,24 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         lay.addLayout(filt)
         lay.addLayout(cols, 1)
         lay.addWidget(self.remaining)
+
+    def run_mode(self, mode):
+        """يبدّل بين التفصيلي والتقرير ثم يحدّث اللوحات."""
+        self.mode = mode if mode in ("detail", "report") else "detail"
+        report = self.mode == "report"
+        for key, c in self.columns.items():
+            # التقرير: المصروف والمرتجع والصافي وحدها — بلا جداول
+            c.setVisible(not report or key != "collection")
+            c.table.setVisible(not report)
+            c.toggle.setVisible(not report)
+            c.filler.setVisible(report)
+            c.toggle.setText("إخفاء الجدول")
+        self.columns["sales"].set_title(
+            "المصروف (المبيعات)" if report else "إجمالي المبيعات")
+        self.columns["net_sold"].set_title(
+            "الصافي = المصروف − المرتجع" if report
+            else "إجمالي المباع الفعلي")
+        self.reload_panels()
 
     def on_customer(self):
         self.customer_id = self.customer.currentData()
@@ -154,12 +191,21 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                                                dstr(self.d_from), dstr(self.d_to))
                            for k, _ in PANELS}
             k = self._k()
+            if self.mode == "report":
+                p["net_sold"] = sa.report_net(p)
             self.columns["sales"].set_value(
                 f"{self._g(p['sales']['weight']):,.2f} جم {k}")
             self.columns["returns"].set_value(
                 f"{self._g(p['returns']['weight']):,.2f} جم {k}")
-            self.columns["net_sold"].set_value(
-                f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
+            if self.mode == "report":
+                # المعادلة نفسها في لوحة الصافي: 100 − 50 = 50
+                self.columns["net_sold"].set_value(
+                    f"{self._g(p['sales']['weight']):,.2f} − "
+                    f"{self._g(p['returns']['weight']):,.2f} = "
+                    f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
+            else:
+                self.columns["net_sold"].set_value(
+                    f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
             coll = p["collection"]
             self.columns["collection"].set_value(
                 f"ذهب {self._g(coll['gold']):,.2f} · "
@@ -222,7 +268,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                 date_from=dstr(self.d_from), date_to=dstr(self.d_to),
                 visible=self._visible_panels(),
                 expanded=self._expanded_panels(),
-                karat=self._k())
+                karat=self._k(), mode=self.mode)
         except Exception as e:
             err(self, e)
 

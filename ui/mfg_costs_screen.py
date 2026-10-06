@@ -10,7 +10,7 @@
 **تسريع الإدخال**: زر Enter ينقل المؤشر للخلية **أسفلها في نفس
 العمود** بدل الانتقال أفقياً — وهو ما يناسب إدخال عمود كامل دفعةً.
 """
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from database.database import db
 from models import mfg_costs
@@ -445,7 +445,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                     if key == "name":
                         txt = v
                     elif key == "owed":
-                        # الرصيد بطرفه: «مدين» عليه · «دائن» له — والصفر
+                        # الرصيد بإشارته: سالبٌ عليه · موجبٌ له — والصفر
                         # فراغ
                         txt = mfg_costs.bal_text(v)
                     else:
@@ -454,8 +454,11 @@ class MfgCostsScreen(QtWidgets.QWidget):
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     if key == "owed":
                         it.setToolTip(
-                            "رصيده في كشف حسابه الآن: «مدين» ما عليه، "
-                            "و«دائن» ما له — نقرٌ مزدوج يفتح الكشف")
+                            "رصيده في كشف حسابه الآن: بالسالب ما عليه، "
+                            "وبالموجب ما له — نقرٌ مزدوج يفتح الكشف")
+                        if float(v or 0) > 0.004:      # عليه: بالأحمر
+                            it.setForeground(QtGui.QBrush(
+                                QtGui.QColor("#a4262c")))
                     if not ro:
                         it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
                     if ro:

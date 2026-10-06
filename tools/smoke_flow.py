@@ -3162,7 +3162,7 @@ def main():
     _html6 = _pm.build_body("mfg_salary", 0, period=_per,
                             salaries=list(_after.values()))
     check("وورقةُ الرواتب تحمل العمودين الجديدين",
-          "الرصيد (عليه/له)" in _html6 and "المستحق" in _html6
+          "الرصيد (− عليه · + له)" in _html6 and "المستحق" in _html6
           and "إضافية" in _html6, f"{len(_html6)} حرفاً")
 
     # ══ «عليه (مدين)»: رصيدُ كشف الحساب لا مسحوبات الشهر ══
@@ -3177,11 +3177,11 @@ def main():
     # بقيمته، والمستحق ما له في الكشف (فالصافي المُرحَّل داخلٌ فيه)
     with db(readonly=True) as conn:
         _bal_after = _mc2.balance_now(conn, _weid)
-    check("وبعد الترحيل يصير العامل دائناً: الرصيد «دائن» بما له، ولا"
-          " «عليه»",
+    check("وبعد الترحيل يصير العامل دائناً: الرصيد موجبٌ بما له",
           _owed_after == 0.0 and _bal_after < 0
           and abs(_sal_after["owed"] - _bal_after) < 0.011
-          and _mc2.bal_text(_sal_after["owed"]).endswith("دائن"),
+          and not _mc2.bal_text(_sal_after["owed"]).startswith("\u200e-")
+          and _mc2.bal_text(_sal_after["owed"]) != "",
           f"رصيده {_wc2} · {_mc2.bal_text(_sal_after['owed'])}")
     check("والمستحق بعد الترحيل = ما له في كشفه (لا الصافي مرةً ثانية)",
           _sal_after.get("is_posted")
@@ -6900,9 +6900,9 @@ def main():
     check("والمبلغ الواحد (بلا أسطر) يبقى فاتورةً بسطرٍ واحد كما كان",
           len(_pol) == 1 and abs(_pol[0]["net"] - 400) < 0.01
           and abs(_pol[0]["vat"] - 60) < 0.01, str(_pol))
-    check("رصيد العامل بطرفه: «مدين» عليه · «دائن» له · والصفر فراغ",
-          _mc82.bal_text(1200) == "1,200.00 مدين"
-          and _mc82.bal_text(-500) == "500.00 دائن"
+    check("رصيد العامل بإشارته: عليه بالسالب · له بالموجب · والصفر فراغ",
+          _mc82.bal_text(1200) == "\u200e-1,200.00"
+          and _mc82.bal_text(-500) == "500.00"
           and _mc82.bal_text(0) == ""
           and _mc82.compute_salary_row(
               {"basic_salary": 3000, "owed": -500})["due"] == 3500
@@ -6999,6 +6999,44 @@ def main():
         check("لوحة التحكم: قائمة «المدة» بدل «تحديد فترة» اليدوي",
               "self.period = QtWidgets.QComboBox()" in _src83
               and "use_period" not in _src83 and hasattr(_D83, "refresh"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    # ══════════════════════════════════════════════════════════════
+    step("84) تحليل مبيعات العميل: «تقرير» بالمعادلة وحدها")
+    from models import sales_analytics as _sa84, invoices as _iv84
+    from models import entities as _en84
+    from models.inventory import create_work_orders_batch as _b84
+    _d84 = date.today().isoformat()
+    with db() as conn:
+        _c84 = _en84.add_entity(conn, "عميل ٨٤", "customer", username="admin")
+        _b84(conn, [{"wo_no": "R84-1", "gold": 60.0, "wage_per_gram": 5},
+                    {"wo_no": "R84-2", "gold": 40.0, "wage_per_gram": 5}],
+             _d84, "admin")
+        _ws84 = [r["id"] for r in conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no LIKE 'R84-%'"
+            " ORDER BY work_order_no")]
+        _iv84.create_sale(conn, _c84, [{"work_order_id": w} for w in _ws84],
+                          _d84, "admin", apply_vat=False)
+        _iv84.create_sale_return(conn, _c84, [{"work_order_id": _ws84[0]}],
+                                 _d84, "admin", apply_vat=False)
+        _p84 = _sa84.all_panels(conn, _c84, _d84, _d84)
+    _n84 = _sa84.report_net(_p84)
+    _hr84 = _pm.build_body("customer_analytics", _c84, date_from=_d84,
+                           date_to=_d84, mode="report")
+    _hd84 = _pm.build_body("customer_analytics", _c84, date_from=_d84,
+                           date_to=_d84)
+    check("«تقرير»: المصروف − المرتجع = الصافي بالأرقام (100 − 60 = 40)،"
+          " والورقة لوحاتٌ بلا أرقام تشغيل ولا سداد",
+          abs(_p84["sales"]["weight"] - 100) < 0.001
+          and abs(_p84["returns"]["weight"] - 60) < 0.001
+          and abs(_n84["weight"] - 40) < 0.001
+          and "R84-2" not in _hr84 and "السداد" not in _hr84
+          and "R84-2" in _hd84, f"{_n84}")
+    try:
+        from ui.sales_analytics_screen import SalesAnalyticsScreen as _S84
+        check("«تحديث اللوحات» بخيارين: تفصيلي · تقرير",
+              hasattr(_S84, "run_mode"))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

@@ -1383,7 +1383,7 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
 
 def _tpl_customer_analytics(conn, customer_id, date_from=None,
                             date_to=None, visible=None, expanded=None,
-                            karat=None):
+                            karat=None, mode="detail"):
     """قالب طبق الأصل من شاشة تحليل المبيعات (WYSIWYG).
 
     يحاكي الشاشة تماماً: اللوحة المخفية لا تُطبع، والجدول المطويّ
@@ -1403,6 +1403,10 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     if not ent:
         raise ValueError("العميل غير موجود")
     p = sa.all_panels(conn, customer_id, date_from, date_to)
+    report = mode == "report"
+    if report:
+        # «تقرير» (4.50): المعادلة بالأرقام وحدها — المصروف − المرتجع
+        p["net_sold"] = sa.report_net(p)
     from services import karat_view
     k = int(karat or karat_view.active())
 
@@ -1414,8 +1418,10 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     panels = [
         ("المصروف", f"{_w(_g(p['sales']['weight']))} جم", "sales"),
         ("المرتجع", f"{_w(_g(p['returns']['weight']))} جم", "returns"),
-        ("المباع الصافي", f"{_w(_g(p['net_sold']['weight']))} جم",
-         "net_sold"),
+        ("المباع الصافي",
+         (f"{_w(_g(p['sales']['weight']))} − "
+          f"{_w(_g(p['returns']['weight']))} = " if report else "")
+         + f"{_w(_g(p['net_sold']['weight']))} جم", "net_sold"),
         ("السداد",
          f"ذهب {_w(_g(coll['gold']))}<br/>نقد {_w(coll['cash'], 2)}",
          "collection"),
@@ -1424,6 +1430,9 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     # اللوحات المخفية على الشاشة لا تُطبع إطلاقاً
     vis = set(visible) if visible is not None else {k for _t, _v, k in panels}
     exp = set(expanded) if expanded is not None else set(vis)
+    if report:
+        vis -= {"collection"}
+        exp = set()
     panels = [x for x in panels if x[2] in vis]
 
     head_cells, detail_cells = [], []
@@ -1465,9 +1474,10 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
             foot = ("<tr class=\"total\">" + cells(
                 f'<td>الإجمالي</td>', f'<td>{_w(_g(total))}</td>')
                 + "</tr>")
-        detail_cells.append(
-            f'<td class="ca-detail"><table class="ca-tbl">'
-            f'{head}{body_rows}{foot}</table></td>')
+        if not report:          # التقرير لوحاتٌ بلا جداول أرقام التشغيل
+            detail_cells.append(
+                f'<td class="ca-detail"><table class="ca-tbl">'
+                f'{head}{body_rows}{foot}</table></td>')
 
     # الرصيد المتبقي = رصيد حساب العميل في الدليل (لا الفترة وحدها)
     rem_g = rem_c = 0.0
@@ -1588,12 +1598,13 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
         title = "رواتب عمال قسم التصنيع"
         if SALARY_COLS:
             keys = [c[0] for c in SALARY_COLS]
-            hdr = [("الرصيد (عليه/له)" if c[0] == "owed" else c[1])
+            hdr = [("الرصيد (− عليه · + له)" if c[0] == "owed" else c[1])
                    for c in SALARY_COLS]
         else:
             hdr = ["اسم العامل", "الأساسي", "إضافية", "معامل", "الإضافي",
                    "الغياب", "الخصم", "الفاقد/ذهب", "خصم/ذهب", "التارجت",
-                   "المكافأة", "الصافي", "الرصيد (عليه/له)", "المستحق"]
+                   "المكافأة", "الصافي", "الرصيد (− عليه · + له)",
+                   "المستحق"]
             keys = ["name", "basic_salary", "overtime_hours",
                     "overtime_rate", "overtime", "absence", "deduction",
                     "gold_loss", "gold_deduction", "target_amount",
@@ -1760,7 +1771,7 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("visible"), kw.get("expanded"),
-                _karat_kw(kw)))
+                _karat_kw(kw), kw.get("mode") or "detail"))
         if doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             return en(_tpl_mfg(conn, doc_id, kw.get("period"),
                                kw.get("targets"), kw.get("salaries"),
@@ -4242,7 +4253,7 @@ def build_html(doc_type, doc_id, **kw):
             html = _tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("visible"), kw.get("expanded"),
-                _karat_kw(kw))
+                _karat_kw(kw), kw.get("mode") or "detail")
         elif doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             html = _tpl_mfg(conn, doc_id, kw.get("period"),
                             kw.get("targets"), kw.get("salaries"),

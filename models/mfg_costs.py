@@ -264,11 +264,18 @@ def balance_now(conn, employee_id):
 
 
 def bal_text(v):
-    """«1,200.00 مدين» (عليه) · «500.00 دائن» (له) · فراغٌ للصفر."""
+    """الرصيد رقماً بإشارته (4.50): عليه ← سالب «-1,200.00» · له ← موجب
+    «500.00» · والصفر فراغ.
+
+    `v` رصيد الدفتر (موجبٌ مدين = عليه)، فيُعرض بعكس إشارته. وعلامة
+    اتجاهٍ (LRM) قبل الرقم تُبقي السالب أمامه في السطر العربي — فلا يُقرأ
+    «1,200.00-».
+    """
     v = round(float(v or 0), 2)
     if abs(v) < 0.005:
         return ""
-    return f"{abs(v):,.2f} {'مدين' if v > 0 else 'دائن'}"
+    shown = -v
+    return f"\u200e-{abs(shown):,.2f}" if shown < 0 else f"{shown:,.2f}"
 
 
 def withdrawals(conn, employee_id, period):
