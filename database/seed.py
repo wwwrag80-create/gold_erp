@@ -86,7 +86,7 @@ ACCOUNTS = [
     ("5111", "فاقد البوليش", "expense", "5110", 1, "gold"),
     ("5112", "فاقد الصب", "expense", "5110", 1, "gold"),
     ("5113", "فاقد الكاستنج", "expense", "5110", 1, "gold"),
-    ("5114", "فاقد التلميع النهائي", "expense", "5110", 1, "gold"),
+    ("5114", "بوليش 2", "expense", "5110", 1, "gold"),
     ("5115", "فاقد الالترا بوليش", "expense", "5110", 1, "gold"),
     ("5120", "الفاقد الفني للصب (الصهر والتصفية)", "expense", "5100", 1, "gold"),
     # الذهب المرسل للصب والتصفية ولم يعد: فاقدٌ لا مخزون (كان 1350 تحت
@@ -469,6 +469,49 @@ def recode_gold_cost(conn) -> bool:
     return True
 
 
+POLISH2 = "بوليش 2"
+_POLISH2_OLD = "التلميع النهائي"
+
+
+def rename_polish2(conn):
+    """4.49: «التلميع النهائي» (فاقده أو صندوق خياسه) صار «بوليش 2».
+
+    مرةً واحدة لكل قاعدة: كل حسابٍ في اسمه «التلميع النهائي» — بأي
+    رقمٍ كان، ولو سمّاه المستخدم بنفسه — يصير اسمه «بوليش 2»، ويُقفل
+    الاسم فلا تفرض عليه التسمياتُ القياسية غيرَه. والاسم يُقرأ من الدليل
+    في كل مكان (المبيعات · الفواتير · فواقد الورشة · الصناديق · القوائم
+    والقوالب)، فيتبعه كلُّ ما يعرضه. وبعد هذه المرة لا يُمسّ: من سمّى
+    حساباً بعدها كما يشاء بقي اسمه.
+    """
+    from models import fiscal
+    key = "rename_polish2_449"
+    if fiscal.get_setting(conn, key) == "1":
+        return 0
+    rows = conn.execute(
+        "SELECT id, code FROM accounts WHERE name LIKE ? ORDER BY"
+        " CASE WHEN code='5114' THEN 0 ELSE 1 END, code",
+        (f"%{_POLISH2_OLD}%",)).fetchall()
+    taken = {r["name"] for r in conn.execute(
+        "SELECT name FROM accounts WHERE name LIKE ?", (f"{POLISH2}%",))}
+    n = 0
+    for r in rows:
+        name, k = POLISH2, 2
+        while name in taken:          # حسابان بالاسم القديم: لا تكرار
+            name = f"{POLISH2} ({k})"
+            k += 1
+        taken.add(name)
+        conn.execute("UPDATE accounts SET name=?, name_locked=1 WHERE id=?",
+                     (name, r["id"]))
+        n += 1
+    try:            # لوحات لوحة التحكم التي سمّاها المستخدم بالاسم القديم
+        from models import dash_panels as _dp
+        _dp.rename_titles(_POLISH2_OLD, POLISH2)
+    except Exception:
+        pass
+    fiscal.set_setting(conn, key, "1")
+    return n
+
+
 def ensure_new_accounts() -> None:
     """يضيف الحسابات الناقصة ويعيد هيكلة الشجرة دون المساس بالأرصدة."""
     with db() as conn:
@@ -528,6 +571,7 @@ def ensure_new_accounts() -> None:
                 conn.execute(
                     "UPDATE accounts SET name=? WHERE code=?"
                     " AND COALESCE(name_locked,0)=0", (name, code))
+        rename_polish2(conn)
 
         # 4.37: الحساب الذي له فروع مجموعةٌ لا يُرحَّل عليها — ما لم تكن
         # عليه حركةٌ تاريخية (تحميه الضمانة التالية). كان «الأصول

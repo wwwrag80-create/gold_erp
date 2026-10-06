@@ -166,13 +166,17 @@ class DashboardScreen(QtWidgets.QWidget):
         self.d_from.setDate(
             QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
         self.d_to = date_edit()
-        self.use_period = QtWidgets.QCheckBox("تحديد فترة")
-        self.use_period.setToolTip(
-            "بلا تحديد تُعرض كل الحركة منذ بداية النشاط")
+        # الفترة تُختار باسمها فتُحسب تواريخها وتظهر الأرقام فوراً — والكتابة
+        # باليد في «فترة مخصّصة» وحدها (4.49)
+        self.period = QtWidgets.QComboBox()
+        for k, lbl in dp.PERIODS:
+            self.period.addItem(lbl, k)
+        self.period.setToolTip("اختر المدة فتظهر أرقامها مباشرةً —"
+                               " «كل الحركة» منذ بداية النشاط")
         try:
             for w in (self.d_from, self.d_to):
                 w.dateChanged.connect(self._period_changed)
-            self.use_period.stateChanged.connect(self._period_changed)
+            self.period.currentIndexChanged.connect(self._period_changed)
         except Exception:
             pass          # بيئة بلا إشارات Qt حقيقية
         # مقارنة بالفترة السابقة المساوية طولاً — الرقم وحده لا يقول
@@ -189,7 +193,8 @@ class DashboardScreen(QtWidgets.QWidget):
         lbl_to = QtWidgets.QLabel("إلى:")
         per = QtWidgets.QHBoxLayout()
         per.setSpacing(6)
-        per.addWidget(self.use_period)
+        per.addWidget(QtWidgets.QLabel("المدة:"))
+        per.addWidget(self.period)
         per.addWidget(lbl_from)
         per.addWidget(self.d_from)
         per.addWidget(lbl_to)
@@ -198,8 +203,9 @@ class DashboardScreen(QtWidgets.QWidget):
         per.addStretch(1)
         self._period_row = per
         # صفُّ الفترة كلُّه — ليُخفى مع عناوينه، لا حقولُه وحدها
-        self._period_tools = [self.use_period, lbl_from, self.d_from,
+        self._period_tools = [self.period, lbl_from, self.d_from,
                               lbl_to, self.d_to, self.compare]
+        self._date_tools = [lbl_from, self.d_from, lbl_to, self.d_to]
 
         # أشرطة النسب البارزة أسفل الجدول
         self.ratio_box = QtWidgets.QWidget()
@@ -534,12 +540,13 @@ class DashboardScreen(QtWidgets.QWidget):
             if getattr(self, "_loading", False):
                 return
             p = self.panels[self.current]
-            if self.use_period.isChecked():
+            k = self.period.currentData() or "all"
+            p["period"] = k
+            if k == "custom":
                 p["date_from"] = dstr(self.d_from)
                 p["date_to"] = dstr(self.d_to)
             else:
-                p["date_from"] = ""
-                p["date_to"] = ""
+                dp.apply_period(p)
             dp.save_panels(self.panels)
             self.refresh()
         except Exception:
@@ -634,16 +641,20 @@ class DashboardScreen(QtWidgets.QWidget):
             # مزامنة حقول الفترة مع اللوحة الحالية بلا إطلاق حدث
             self._loading = True
             try:
-                has = bool(p.get("date_from") or p.get("date_to"))
-                self.use_period.setChecked(has)
+                # الفترة باسمها تُحسب من جديد في كل فتح («هذا الشهر»
+                # يبقى الشهرَ الجاري)
+                k = dp.apply_period(p)
+                self.period.setCurrentIndex(
+                    max(self.period.findData(k), 0))
                 if p.get("date_from"):
                     self.d_from.setDate(QtCore.QDate.fromString(
                         p["date_from"], "yyyy-MM-dd"))
                 if p.get("date_to"):
                     self.d_to.setDate(QtCore.QDate.fromString(
                         p["date_to"], "yyyy-MM-dd"))
-                self.d_from.setEnabled(has)
-                self.d_to.setEnabled(has)
+                custom = k == "custom"
+                self.d_from.setEnabled(custom)
+                self.d_to.setEnabled(custom)
             finally:
                 self._loading = False
             self._sync_tools()
@@ -794,6 +805,12 @@ class DashboardScreen(QtWidgets.QWidget):
             w.setVisible(not on)
         for w in getattr(self, "_period_tools", []):
             w.setVisible(not on)
+        # «من/إلى» تظهر للفترة المخصّصة وحدها — وغيرها تقول تواريخها
+        # في عنوان الجدول
+        custom = (getattr(self, "period", None) is not None
+                  and self.period.currentData() == "custom")
+        for w in getattr(self, "_date_tools", []):
+            w.setVisible(not on and custom)
 
     def _render_stock(self, conn, p):
         """كل ما يُباع اليوم: رقم التشغيل وموديله وأوزانه."""

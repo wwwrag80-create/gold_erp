@@ -73,6 +73,105 @@ def _seed_new(panels):
     return panels
 
 
+# ══ الفترة: يُختار اسمُها فتُحسب تواريخها تلقائياً (4.49) ══
+# كان المستخدم يكتب «من» و«إلى» بيده لكل لوحة. والفترة المختارة تُحفظ
+# باسمها لا بتواريخها: «هذا الشهر» يبقى هذا الشهر في كل يومٍ تُفتح فيه
+# اللوحة، ولا يتجمّد على الشهر الذي اختيرت فيه.
+PERIODS = (
+    ("all", "كل الحركة"),
+    ("today", "اليوم"),
+    ("yesterday", "أمس"),
+    ("week", "هذا الأسبوع"),
+    ("month", "هذا الشهر"),
+    ("prev_month", "الشهر الماضي"),
+    ("last3", "آخر 3 أشهر"),
+    ("last6", "آخر 6 أشهر"),
+    ("quarter", "هذا الربع"),
+    ("year", "هذه السنة"),
+    ("prev_year", "السنة الماضية"),
+    ("custom", "فترة مخصّصة…"),
+)
+
+
+def _month_start(d, back=0):
+    import datetime as _dt
+    y, m = d.year, d.month - back
+    while m <= 0:
+        m += 12
+        y -= 1
+    return _dt.date(y, m, 1)
+
+
+def period_range(key, today=None):
+    """(من، إلى) نصّاً لفترةٍ باسمها — أو (None, None) لكل الحركة.
+
+    الأسبوع يبدأ السبت كما في التقويم المعمول به. و«آخر 3 أشهر» تشمل
+    الشهر الجاري وشهرين قبله، حتى اليوم.
+    """
+    import datetime as _dt
+    t = today or _dt.date.today()
+    if key in (None, "", "all", "custom"):
+        return None, None
+    if key == "today":
+        a = b = t
+    elif key == "yesterday":
+        a = b = t - _dt.timedelta(days=1)
+    elif key == "week":
+        a, b = t - _dt.timedelta(days=(t.weekday() - 5) % 7), t
+    elif key == "month":
+        a, b = _month_start(t), t
+    elif key == "prev_month":
+        a = _month_start(t, 1)
+        b = _month_start(t) - _dt.timedelta(days=1)
+    elif key == "last3":
+        a, b = _month_start(t, 2), t
+    elif key == "last6":
+        a, b = _month_start(t, 5), t
+    elif key == "quarter":
+        a, b = _dt.date(t.year, 3 * ((t.month - 1) // 3) + 1, 1), t
+    elif key == "year":
+        a, b = _dt.date(t.year, 1, 1), t
+    elif key == "prev_year":
+        a, b = _dt.date(t.year - 1, 1, 1), _dt.date(t.year - 1, 12, 31)
+    else:
+        return None, None
+    return a.isoformat(), b.isoformat()
+
+
+def panel_period(p):
+    """اسم فترة اللوحة — والمحفوظة قبل 4.49 بتواريخ يدوية «مخصّصة»."""
+    k = p.get("period")
+    if k in dict(PERIODS):
+        return k
+    return "custom" if (p.get("date_from") or p.get("date_to")) else "all"
+
+
+def apply_period(p, today=None):
+    """يكتب تواريخ اللوحة من اسم فترتها (والمخصّصة تبقى كما كُتبت)."""
+    k = panel_period(p)
+    if k != "custom":
+        d1, d2 = period_range(k, today)
+        p["date_from"], p["date_to"] = d1 or "", d2 or ""
+    return k
+
+
+def rename_titles(old, new):
+    """يستبدل نصّاً في عناوين اللوحات المحفوظة (إعادة تسمية مصطلح)."""
+    p = _cfg_path()
+    if not p.exists():
+        return 0
+    panels = load_panels()
+    n = 0
+    for x in panels:
+        t = str(x.get("title") or "")
+        if old in t:
+            x["title"] = t.replace(old, new)
+            n += 1
+    if n:
+        save_panels(panels)
+    return n
+
+
 def load_panels():
     """لوحات المستخدم — أو الافتراضية عند أول تشغيل."""
     try:
@@ -95,6 +194,8 @@ def load_panels():
                         # نطاق التاريخ المحفوظ لهذه اللوحة
                         "date_from": d.get("date_from") or "",
                         "date_to": d.get("date_to") or "",
+                        # المدة باسمها (4.49) — تُحسب تواريخها عند كل فتح
+                        "period": d.get("period") or "",
                         # وحدة الرقم المعروض على واجهة اللوحة
                         "unit": d.get("unit") or "gold",
                     })

@@ -114,6 +114,8 @@ class ConsignmentTab(QtWidgets.QWidget):
         s, e = period_range(kind, date.today())
         self.d_from.setDate(QtCore.QDate(s.year, s.month, s.day))
         self.d_to.setDate(QtCore.QDate(e.year, e.month, e.day))
+        # اختيار المدة يكفي: الأرقام تظهر فوراً بلا ضغط «إعداد» (4.49)
+        self.load()
 
     def load(self):
         try:
@@ -272,6 +274,8 @@ class StandardIncomeTab(QtWidgets.QWidget):
         s, e = period_range(kind, date.today())
         self.d_from.setDate(QtCore.QDate(s.year, s.month, s.day))
         self.d_to.setDate(QtCore.QDate(e.year, e.month, e.day))
+        # اختيار المدة يكفي: الأرقام تظهر فوراً بلا ضغط «إعداد» (4.49)
+        self.load()
 
     def _params(self):
         f, t = dstr(self.d_from), dstr(self.d_to)

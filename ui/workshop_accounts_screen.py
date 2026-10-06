@@ -35,6 +35,14 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
         self.d_from.setDate(
             QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
         self.d_to = date_edit()
+        # المدة تُختار باسمها فتُحسب تواريخها وتتحدّث الأرصدة فوراً (4.49)
+        from models import dash_panels as _dp
+        self._dp = _dp
+        self.period = QtWidgets.QComboBox()
+        for k, lbl in _dp.PERIODS:
+            self.period.addItem(lbl, k)
+        self.period.setCurrentIndex(self.period.findData("year"))
+        self.period.currentIndexChanged.connect(self._period_picked)
 
         btn_add = QtWidgets.QPushButton("➕ إضافة الحساب للمقارنة")
         btn_add.setObjectName("homeBtn")
@@ -52,6 +60,8 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
         head.setSpacing(6)
         head.addWidget(QtWidgets.QLabel("الحساب:"))
         head.addWidget(self.account, 0)
+        head.addWidget(QtWidgets.QLabel("المدة:"))
+        head.addWidget(self.period, 0)
         head.addWidget(QtWidgets.QLabel("من:"))
         head.addWidget(self.d_from, 0)
         head.addWidget(QtWidgets.QLabel("إلى:"))
@@ -82,6 +92,20 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
         lay.addWidget(self.table, 1)
         lay.addWidget(self.summary)
         self.refresh()
+
+    def _period_picked(self, *_):
+        k = self.period.currentData()
+        if k == "custom":
+            return
+        if k == "all":
+            self.d_from.setDate(QtCore.QDate(2000, 1, 1))
+            self.d_to.setDate(QtCore.QDate.currentDate())
+        else:
+            d1, d2 = self._dp.period_range(k)
+            self.d_from.setDate(QtCore.QDate.fromString(d1, "yyyy-MM-dd"))
+            self.d_to.setDate(QtCore.QDate.fromString(d2, "yyyy-MM-dd"))
+        if self.rows:
+            self.reload_all()
 
     # ══════════ الحفظ بين الجلسات ══════════
     def _state_path(self):

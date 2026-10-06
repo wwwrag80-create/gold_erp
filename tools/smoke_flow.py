@@ -6928,6 +6928,80 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    # ══════════════════════════════════════════════════════════════
+    step("83) «بوليش 2» بدل «التلميع النهائي» · الفترة تُختار باسمها")
+    from database import seed as _sd83
+    from models import dash_panels as _dp83, fiscal as _fs83
+    import datetime as _dt83
+    with db(readonly=True) as conn:
+        _n83 = conn.execute("SELECT name FROM accounts WHERE code='5114'"
+                            ).fetchone()["name"]
+    check("الحساب 5114 اسمه «بوليش 2» في المصنع الجديد", _n83 == "بوليش 2",
+          _n83)
+    with db() as conn:
+        # قاعدةٌ قديمة: 5114 باسمه القديم، وصندوقٌ سمّاه المستخدم بنفسه
+        conn.execute("UPDATE accounts SET name='فاقد التلميع النهائي',"
+                     " name_locked=0 WHERE code='5114'")
+        _x83 = _coa79.add_sub_account(conn, acc_id(conn, "5110"),
+                                      "صندوق خياس التلميع النهائي",
+                                      "admin")["id"]
+        _fs83.set_setting(conn, "rename_polish2_449", "0")
+        _pn83 = _dp83.load_panels()
+        _pn83.append({"key": "p83", "title": "خياس التلميع النهائي",
+                      "accounts": ["5114"]})
+        _dp83.save_panels(_pn83)
+        _r83 = _sd83.rename_polish2(conn)
+        _nm83 = {r["code"]: (r["name"], r["name_locked"]) for r in
+                 conn.execute("SELECT code, name, name_locked FROM accounts"
+                              " WHERE code='5114' OR id=?", (_x83,))}
+        _again = _sd83.rename_polish2(conn)
+        _left = conn.execute("SELECT COUNT(*) FROM accounts WHERE name LIKE"
+                             " '%التلميع النهائي%'").fetchone()[0]
+    _t83 = [x["title"] for x in _dp83.load_panels() if x.get("key") == "p83"]
+    check("الترقية: كل حسابٍ باسم «التلميع النهائي» صار «بوليش 2» (بلا"
+          " تكرار) ومقفلاً، ولوحته كذلك — مرةً واحدة",
+          _r83 == 2 and _again == 0 and _left == 0
+          and _nm83["5114"] == ("بوليش 2", 1)
+          and any(v[0] == "بوليش 2 (2)" for k, v in _nm83.items()
+                  if k != "5114")
+          and _t83 == ["خياس بوليش 2"], f"{_nm83} · {_t83}")
+    _pn83 = [x for x in _dp83.load_panels() if x.get("key") != "p83"]
+    _dp83.save_panels(_pn83)
+    _today83 = _dt83.date(2026, 10, 6)          # الثلاثاء
+    _pr = lambda k: _dp83.period_range(k, _today83)  # noqa: E731
+    check("الفترات تُحسب تلقائياً: الأسبوع من السبت · الشهر · الماضي ·"
+          " آخر 3 أشهر · الربع · السنة",
+          _pr("all") == (None, None)
+          and _pr("today") == ("2026-10-06", "2026-10-06")
+          and _pr("week") == ("2026-10-03", "2026-10-06")
+          and _pr("month") == ("2026-10-01", "2026-10-06")
+          and _pr("prev_month") == ("2026-09-01", "2026-09-30")
+          and _pr("last3") == ("2026-08-01", "2026-10-06")
+          and _pr("quarter") == ("2026-10-01", "2026-10-06")
+          and _pr("year") == ("2026-01-01", "2026-10-06")
+          and _pr("prev_year") == ("2025-01-01", "2025-12-31")
+          and _dp83.period_range("prev_month", _dt83.date(2026, 1, 15))
+          == ("2025-12-01", "2025-12-31"))
+    _old83 = {"date_from": "2026-02-01", "date_to": "2026-02-28"}
+    _new83 = {"period": "month"}
+    _dp83.apply_period(_new83, _today83)
+    check("لوحةٌ محفوظة بتواريخ يدوية تبقى «مخصّصة»، والمختارة باسمها"
+          " تُحسب تواريخها",
+          _dp83.panel_period(_old83) == "custom"
+          and _dp83.apply_period(_old83) == "custom"
+          and _old83["date_from"] == "2026-02-01"
+          and _new83["date_from"] == "2026-10-01"
+          and _new83["date_to"] == "2026-10-06")
+    try:
+        from ui.dashboard_screen import DashboardScreen as _D83
+        _src83 = open(os.path.join(ROOT, "ui", "dashboard_screen.py"),
+                      encoding="utf-8").read()
+        check("لوحة التحكم: قائمة «المدة» بدل «تحديد فترة» اليدوي",
+              "self.period = QtWidgets.QComboBox()" in _src83
+              and "use_period" not in _src83 and hasattr(_D83, "refresh"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
