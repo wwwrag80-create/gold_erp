@@ -115,6 +115,48 @@ def model_items(conn, model_no, branch):
             for r in rows]
 
 
+def full_catalog(conn):
+    """الدليل كاملاً في استعلامٍ واحد: {الموديل: {"sold": […], "in_stock": […]}}.
+
+    القيم كما يعيدها `model_items` تماماً — لكن بلا استعلامين لكل موديل:
+    صفحة المدير على الجوال (`services.models_web`) تعرض الدليل كلّه دفعةً
+    واحدة، ومصنعٌ بخمسمئة موديل كان يعني ألف استعلام لكل فتح.
+    """
+    rows = conn.execute(
+        "SELECT w.id, w.work_order_no wo, w.registered_weight reg,"
+        " w.standing_gold standing, w.gold_weight gold, w.status st,"
+        " COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') mno,"
+        " substr(w.created_at,1,10) created"
+        " FROM work_orders w WHERE w.is_deleted=0"
+        " AND w.status IN ('sold','in_stock')"
+        " ORDER BY w.work_order_no").fetchall()
+    sold_ids = [r["id"] for r in rows if r["st"] == "sold"]
+    names = _holders(conn, sold_ids)
+    dates = {}
+    for i in range(0, len(sold_ids), 400):
+        chunk = sold_ids[i:i + 400]
+        ph = ",".join("?" * len(chunk))
+        for r in conn.execute(
+                "SELECT it.work_order_id wid, i.invoice_date d"
+                " FROM invoice_items it JOIN invoices i ON i.id=it.invoice_id"
+                f" WHERE it.work_order_id IN ({ph}) AND i.is_deleted=0"
+                " AND i.kind='sale' ORDER BY i.invoice_date, i.id", chunk):
+            dates[r["wid"]] = r["d"]         # الأحدث يغلب كما في `_holders`
+    out = {}
+    for r in rows:
+        g = out.setdefault(r["mno"], {"sold": [], "in_stock": []})
+        sold = r["st"] == "sold"
+        g["sold" if sold else "in_stock"].append({
+            "id": r["id"], "wo": r["wo"],
+            "reg": round(r["reg"] or 0, 2),
+            "standing": round(r["standing"] or 0, 2),
+            "gold": round(r["gold"] or 0, 2),
+            "holder": (names.get(r["id"]) or "—") if sold else "—",
+            "date": (dates.get(r["id"]) or r["created"] or "") if sold
+            else (r["created"] or "")})
+    return out
+
+
 # ══════════════════════════════════════════════════════════════════
 # الوارد من التصنيع بتاريخ — ماذا دخل ذلك اليوم، وأين هو الآن
 # ══════════════════════════════════════════════════════════════════

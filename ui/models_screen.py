@@ -75,6 +75,13 @@ class ModelsScreen(QtWidgets.QWidget):
             "صور الموديلات بالعدد الذي تختاره في كل صفحة A4 — تحت كل\n"
             "صورة اسم الموديل وكم بالخزنة وكم عند المناديب")
         btn_photos.clicked.connect(self.print_photos)
+        # 4.52: رابطٌ ثابت يفتح هذه الشاشة كاملةً على جوال المدير — من
+        # هذا الجهاز مباشرةً بلا سحابة (services.models_web)
+        btn_link = self.btn_link = QtWidgets.QPushButton("🔗 رابط المدير")
+        btn_link.setToolTip(
+            "رابطٌ ثابت مجاني يفتح الدليل كاملاً بصوره وتفاصيله على جوال\n"
+            "المدير — يعمل والبرنامج مفتوح ومتصل، بلا رفعٍ ولا مساحة سحابية")
+        btn_link.clicked.connect(self.open_link)
 
         # ── الوارد بتاريخ: ماذا دخل ذلك اليوم وأين هو الآن ──
         self.by_date = QtWidgets.QCheckBox("الوارد بتاريخ")
@@ -124,6 +131,7 @@ class ModelsScreen(QtWidgets.QWidget):
         head.addWidget(btn_collapse)
         head.addWidget(btn_print)
         head.addWidget(btn_photos)
+        head.addWidget(btn_link)
         head.addStretch(1)
 
         self.tree = QtWidgets.QTreeView()
@@ -498,7 +506,7 @@ class ModelsScreen(QtWidgets.QWidget):
                     node[0].appendRow(stock)
                     for i in data[m["model"]]["in_stock"]:
                         stock[0].appendRow(self._cells(
-                            [i["wo"], "", f"{i['reg']:,.2f}",
+                            [i["wo"], "", f"{kv.g(i['reg']):,.2f}",
                              f"أُدخل: {i['date']}"],
                             data=("wo", i["id"])))
             # مطوية عند الفتح: القائمة قد تطول، والمستخدم يفتح ما
@@ -776,6 +784,14 @@ class ModelsScreen(QtWidgets.QWidget):
         save_pref("models.photos_per_page", str(per.value()),
                   user.get("username"))
         return mn.value(), per.value()
+
+    def open_link(self):
+        """نافذة رابط المدير: توليده ونسخه ونوعه ورمز دخوله."""
+        try:
+            from ui.models_link_dialog import ModelsLinkDialog
+            ModelsLinkDialog(self, self.user).exec_()
+        except Exception as e:
+            err(self, e)
 
     def print_catalog(self):
         """يطبع الدليل **كما يظهر على الشاشة**.

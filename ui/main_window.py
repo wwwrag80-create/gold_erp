@@ -265,6 +265,9 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة
         QtCore.QTimer.singleShot(400, self._load_quick_index)
+        # 4.52: رابط دليل الموديلات للمدير — إن كان مفعّلاً يعود مع البرنامج
+        # (في خيطٍ خلفي: أوامر Tailscale قد تستغرق ثواني)
+        QtCore.QTimer.singleShot(3000, self._start_models_link)
 
         # ── عيار المصنع ──
         # وحدة القراءة والكتابة في النظام كله. التخزين يبقى بمكافئ 18
@@ -2050,6 +2053,15 @@ class MainWindow(QtWidgets.QMainWindow):
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.quit()
+
+    def _start_models_link(self):
+        try:
+            import threading
+            from services import models_web
+            threading.Thread(target=models_web.autostart, daemon=True,
+                             name="models-link").start()
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         # ضمان أخير: يُحفظ ترتيب القائمة وأسماؤها قبل الإغلاق

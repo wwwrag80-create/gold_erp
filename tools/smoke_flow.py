@@ -7087,6 +7087,90 @@ def main():
           == _labels85.index(_st85.IS_MEMO[0][1]) + 1
           and "خسائر الورشة" in _labels85, str(_labels85[-4:]))
 
+    # ══════════════════════════════════════════════════════════════
+    step("86) رابط دليل الموديلات للمدير — ثابت ومجاني وبلا سحابة")
+    import json as _js86
+    import urllib.error as _ue86
+    import urllib.request as _ur86
+    from models import models_catalog as _mc86
+    from services import models_web as _mw86, photo_server as _ps86
+
+    def _get86(url, data=None, jar=None):
+        # مع وعاء «كعكات» كالمتصفح: الدخول بالرمز يُحفظ ثم يُعاد توجيهه
+        op = (_ur86.build_opener(_ur86.HTTPCookieProcessor(jar))
+              if jar is not None else _ur86.build_opener())
+        try:
+            with op.open(_ur86.Request(url, data=data), timeout=10) as r:
+                return r.status, r.read().decode("utf-8", "replace")
+        except _ue86.HTTPError as e:
+            return e.code, e.read().decode("utf-8", "replace")
+    with db(readonly=True) as conn:
+        _full86 = _mc86.full_catalog(conn)
+        _m86 = next((m for m in _full86 if _full86[m]["sold"]), None)
+        _same86 = _m86 is not None and (
+            [i["wo"] for i in _full86[_m86]["sold"]]
+            == [i["wo"] for i in _mc86.model_items(conn, _m86, "sold")]
+            and [i["holder"] for i in _full86[_m86]["sold"]]
+            == [i["holder"] for i in _mc86.model_items(conn, _m86, "sold")])
+    check("الدليل كاملاً في استعلامٍ واحد يطابق الشاشة (الأطقم ومع من)",
+          _same86, str(_m86))
+    _mw86.RUNNER = lambda a, timeout=25: None          # بلا Tailscale
+    with db() as conn:
+        _mw86.set_mode(conn, "funnel", "admin")
+    _r86 = _mw86.activate("admin")
+    _addr86 = _ps86.current()
+    _u86 = (_r86["lan"].replace(_addr86[0], "127.0.0.1")
+            if _addr86 else "")
+    _s1, _p1 = _get86(_u86) if _u86 else (0, "")
+    check("بلا Tailscale: الرابط يعمل على شبكة المصنع ويقول السبب، والصفحة"
+          " تعرض الموديلات ومع من",
+          _r86["reason"] == "no_ts" and _s1 == 200
+          and str(_m86) in _p1 and "طرف المناديب" in _p1, str(_s1))
+    _s2, _p2 = _get86(_u86 + "x")
+    check("رمزٌ خاطئ لا يُفتح", _s2 == 404)
+    with db() as conn:
+        _mw86.set_pin(conn, "5566", "admin")
+    _s3, _p3 = _get86(_u86)
+    _s4, _p4 = _get86(_u86 + "/login", b"pin=0000")
+    import http.cookiejar as _cj86
+    _s5, _p5 = _get86(_u86 + "/login", b"pin=5566", _cj86.CookieJar())
+    check("رمز الدخول: الصفحة تُطلب به، والخاطئ يُرفض، والصحيح يفتحها",
+          "أدخل رمز" in _p3 and str(_m86) not in _p3 and _s4 == 401
+          and _s5 == 200 and str(_m86) in _p5)
+    _mw86._fails.clear()
+    with db() as conn:
+        _mw86.set_pin(conn, "", "admin")
+    _calls86 = []
+
+    def _ts86(args, timeout=25):
+        _calls86.append(list(args))
+        if args[:2] == ["status", "--json"]:
+            return 0, _js86.dumps({"BackendState": "Running", "Self": {
+                "DNSName": "factory.tail9.ts.net."}})
+        return 0, ""
+    _mw86.RUNNER = _ts86
+    _a86 = _mw86.activate("admin")
+    _b86 = _mw86.activate("admin")
+    with db(readonly=True) as conn:
+        _tok86 = _mw86.settings(conn)["token"]
+    check("Tailscale: رابطٌ ثابت https بعنوان الجهاز لا يتغيّر بإعادة"
+          " التشغيل، والتوجيه إلى منفذ الخادم",
+          _a86["ok"] and _a86["url"] == _b86["url"]
+          == f"https://factory.tail9.ts.net/m/{_tok86}"
+          and ["funnel", "--bg", str(_addr86[1])] in _calls86,
+          str(_a86))
+    with db() as conn:
+        _mw86.regenerate(conn, "admin")
+    _s6, _ = _get86(_u86)
+    _mw86.deactivate("admin")
+    with db(readonly=True) as conn:
+        _tok86b = _mw86.settings(conn)["token"]
+    _s7, _ = _get86(_u86.rsplit("/", 1)[0] + "/" + _tok86b)
+    check("«رابط جديد» يُبطل القديم، و«إيقاف» يُغلق الرابط ويلغي العنوان"
+          " العام", _s6 == 404 and _s7 == 404
+          and ["serve", "reset"] in _calls86)
+    _mw86.RUNNER = _mw86._run_ts
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -32,6 +32,22 @@ TTL_SECONDS = 12 * 3600          # الرابط يعيش يوم عمل واحد
 _lock = threading.Lock()
 _state = {"server": None, "port": None, "host": None}
 _docs = {}                       # token → {"no":…, "items":[…], "at":…}
+# 4.52: مساراتٌ إضافية تسجّلها خدماتٌ أخرى على الخادم نفسه والمنفذ نفسه
+# (رابط دليل الموديلات للمدير — `services.models_web`). المفتاح أول جزء
+# من المسار، والدالة تعيد {code, body, ctype, headers}.
+_routes = {}
+MAX_POST = 4096                  # أكبر جسم طلبٍ يُقبل (نموذج رمز الدخول)
+
+
+def add_route(prefix, fn):
+    """يسجّل معالجاً لمسارٍ يبدأ بـ `/prefix/…`.
+
+    `fn(method, parts, query, headers, body)` — `parts` بقية أجزاء المسار
+    بعد البادئة، و`query` قاموس معاملات الرابط. ويعيد قاموساً فيه
+    `code` و`body` واختيارياً `ctype` و`headers`.
+    """
+    with _lock:
+        _routes[str(prefix)] = fn
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -125,19 +141,67 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *_a):
         pass                    # لا نلوّث سجل النظام بكل طلب صورة
 
-    def _send(self, code, body, ctype="text/html; charset=utf-8"):
+    def _send(self, code, body, ctype="text/html; charset=utf-8",
+              headers=None):
         data = body if isinstance(body, bytes) else str(body).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        extra = dict(headers or {})
+        if "Cache-Control" not in extra:
+            self.send_header("Cache-Control", "no-store")
+        for k, v in extra.items():
+            if isinstance(v, (list, tuple)):
+                for x in v:
+                    self.send_header(k, x)
+            else:
+                self.send_header(k, v)
         self.end_headers()
         try:
             self.wfile.write(data)
         except Exception:
             pass
 
+    def _route(self, method, body=None):
+        """يمرّر الطلب لمعالجٍ مسجَّل — True إن وُجد له معالج."""
+        from urllib.parse import parse_qs, unquote, urlsplit
+        sp = urlsplit(self.path)
+        parts = [unquote(p) for p in sp.path.split("/") if p]
+        fn = _routes.get(parts[0]) if parts else None
+        if fn is None:
+            return False
+        query = {k: v[-1] for k, v in parse_qs(sp.query).items()}
+        try:
+            res = fn(method, parts[1:], query, self.headers, body) or {}
+        except Exception:
+            res = {"code": 500, "body": "<h3>تعذّر عرض الصفحة</h3>"}
+        finally:
+            # كل طلبٍ في خيطٍ مستقل — يُغلق اتصاله بالقاعدة بانتهائه فلا
+            # تتراكم الاتصالات مع كثرة فتح الصفحة
+            try:
+                from database.database import _drop_thread_conn
+                _drop_thread_conn()
+            except Exception:
+                pass
+        self._send(res.get("code", 200), res.get("body", b""),
+                   res.get("ctype", "text/html; charset=utf-8"),
+                   res.get("headers"))
+        return True
+
+    def do_POST(self):                                 # noqa: N802
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        if n < 0 or n > MAX_POST:
+            return self._send(413, "<h3>الطلب أكبر من المسموح</h3>")
+        body = self.rfile.read(n) if n else b""
+        if not self._route("POST", body):
+            self._send(404, "<h3>غير موجود</h3>")
+
     def do_GET(self):                                  # noqa: N802
+        if self._route("GET"):
+            return
         parts = [p for p in self.path.split("?")[0].split("/") if p]
         if len(parts) == 2 and parts[0] == "inv":
             return self._page(parts[1])
@@ -181,6 +245,14 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(404, "لا توجد صورة", "text/plain")
         ctype = mimetypes.guess_type(str(path))[0] or "image/jpeg"
         self._send(200, raw, ctype)
+
+
+def current():
+    """(العنوان, المنفذ) إن كان الخادم يعمل، وإلا None."""
+    with _lock:
+        if _state["server"] is None:
+            return None
+        return _state["host"], _state["port"]
 
 
 def ensure_running(port=DEFAULT_PORT):
