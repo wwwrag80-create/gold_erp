@@ -6416,8 +6416,6 @@ def main():
                              "يُطرح: الخصم المسموح به والمدفوع للعملاء",
                              "يُضاف: فرق الصافي",
                              "إيرادات التحصيل والإيرادات العرضية",
-                             "يُطرح: تكلفة الذهب المباع (المسلَّم من"
-                             " المخزون)",
                              "فواقد الورشة",
                              "يُخصم: المسترجع من التصفية",
                              "المصاريف الإدارية والعمومية",
@@ -6443,18 +6441,30 @@ def main():
             # 4.46: المبيعات والمردودات بوزنها، وصافي المبيعات يطرحهما،
             # ثم «تكلفة الذهب المباع» (4950) تحتها — فالمجمل ربح الوزن
             _v75 = _g75["values"]
+            # 4.51: لا سطر «تكلفة الذهب المباع» — فصافي عمود الذهب يزيد
+            # على ربح الدفتر بالذهب المسلَّم (4950) وحده، والنقد كما هو
+            _d4950 = conn.execute(
+                "SELECT COALESCE(SUM(l.gold_debit-l.gold_credit),0) FROM"
+                " journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+                " AND e.is_deleted=0 JOIN accounts a ON a.id=l.account_id"
+                " WHERE a.code='4950' AND e.entry_date BETWEEN"
+                " '2026-01-01' AND '2026-12-31'"
+                " AND COALESCE(e.source_table,'')<>'year_close'"
+                ).fetchone()[0]
             check("قائمة الدخل: المبيعات والمردودات بوزنها من الفواتير،"
-                  " وصافي المبيعات يطرحهما، وتكلفة الذهب المباع تحتها —"
-                  " وربح الذهب ربح الدفتر",
+                  " وصافي المبيعات يطرحهما — بلا سطر تكلفة الذهب المباع،"
+                  " والنقد ربحُ الدفتر نفسه",
                   abs(_v75["sales"] - _w75["s"]) < 0.001
                   and abs(_v75["returns"] + _w75["r"]) < 0.001
-                  and abs(_v75["cogs"] + _w75["s"] - _w75["r"]) < 0.001
+                  and "cogs" not in _v75
                   and abs(_g75["totals"]["net_sales"]
                           - (_v75["sales"] + _v75["returns"]
                              + _v75["discounts"] + _v75["net_diff"])) < 0.001
-                  and abs(_g75["totals"]["net"] - _st74._pl(
-                      conn, "2026-01-01", "2026-12-31", "gold")) < 0.001,
-                  str((_v75["sales"], _v75["returns"], _v75["cogs"],
+                  and abs(_g75["totals"]["net"] - _d4950 - _st74._pl(
+                      conn, "2026-01-01", "2026-12-31", "gold")) < 0.001
+                  and abs(_is75["cash"]["totals"]["net"] - _st74._pl(
+                      conn, "2026-01-01", "2026-12-31", "cash")) < 0.01,
+                  str((_v75["sales"], _v75["returns"], _d4950,
                        _w75["s"], _w75["r"])))
 
         # ── 76) كشف صندوق الكسر لكل عيارٍ وحده من لوحة التحكم (4.41)
@@ -6648,10 +6658,11 @@ def main():
     check("قائمة الدخل: المبيعات · الإيرادات الأخرى والتحصيلية · العمال ·"
           " رواتب الإدارة — وبيانات للعلم (الذهب المباع والتحصيلات)",
           "gold_out" not in _keys79 and "other_rev" in _keys79
-          and _keys79.index("net_diff") < _keys79.index("cogs")
+          and "cogs" not in _keys79
+          and _keys79.index("net_diff") < _keys79.index("workshop")
           and _keys79.index("admin") < _keys79.index("labor")
           < _keys79.index("mgmt") < _keys79.index("materials")
-          and set(_is79["memo"]) == {"m_collect", "m_paid_sup"})
+          and set(_is79["memo"]) == {"m_collect", "m_cash_out"})
     with db() as conn:
         _w79 = _en79.add_entity(conn, "عامل ٧٩", "worker", username="admin",
                                 basic_salary=2000)
@@ -6700,10 +6711,11 @@ def main():
           " به والمدفوع للعملاء» — وكشف العميل لا يتغيّر رصيده",
           _dc == -200 and _dg == -3 and abs(_bc80[0]) < 0.001
           and abs(_bc80[1]) < 0.01, f"{_dc} · {_dg} · {_bc80}")
-    _ms = round(_i1["memo"]["m_paid_sup"]["cash"]
-                - _i0["memo"]["m_paid_sup"]["cash"], 2)
-    check("السداد للمورد لا يدخل المصروفات ويظهر في «بيانات للعلم»",
-          _ms == 500 and abs(_i1["cash"]["totals"]["opex"]
+    _ms = round(_i1["memo"]["m_cash_out"]["cash"]
+                - _i0["memo"]["m_cash_out"]["cash"], 2)
+    check("السداد للمورد لا يدخل المصروفات، و«الخارج من النقدية» في"
+          " «بيانات للعلم» يجمع كل ما خرج (200 للعميل + 500 للمورد)",
+          _ms == 700 and abs(_i1["cash"]["totals"]["opex"]
                              - _i0["cash"]["totals"]["opex"]) < 0.01, str(_ms))
     with db() as conn:
         _r80 = _coa80.move_account(conn, _ce80["account_id"],
@@ -7039,6 +7051,41 @@ def main():
               hasattr(_S84, "run_mode"))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    # ══════════════════════════════════════════════════════════════
+    step("85) قائمة الدخل: بلا تكلفة الذهب المباع · «الخارج من النقدية»")
+    from models import statements as _st85, vouchers as _vo85
+    from models import entities as _en85
+    _d85 = date.today().isoformat()
+    _y85 = f"{_d85[:4]}-01-01"
+    with db(readonly=True) as conn:
+        _o0 = _st85.cash_out(conn, _y85, _d85)
+    with db() as conn:
+        _c85 = _en85.add_entity(conn, "عميل ٨٥", "customer", username="admin")
+        _vo85.create_voucher(conn, "payment", _d85, "admin", entity_id=_c85,
+                             cash_amount=120)
+        _vo85.create_voucher(conn, "receipt", _d85, "admin", entity_id=_c85,
+                             cash_amount=90)
+        # تحويلٌ من الصندوق إلى البنك: ليس خروجاً من النقدية
+        post_entry(conn, _d85, "تحويل للبنك", [
+            {"account_id": acc_id(conn, "1500"), "cash_debit": 1000},
+            {"account_id": acc_id(conn, "1400"), "cash_credit": 1000}],
+            source_table="manual", username="admin")
+    with db(readonly=True) as conn:
+        _o1 = _st85.cash_out(conn, _y85, _d85)
+        _is85 = _st85.income_statement(conn, _y85, _d85, compare=False)
+    _lay85 = _st85.is_layout(_is85)
+    _labels85 = [r["label"] for r in _lay85]
+    check("«الخارج من النقدية»: الصرف وحده (120) — لا القبض ولا التحويل"
+          " بين الصندوق والبنك",
+          round(_o1 - _o0, 2) == 120, f"{_o0} → {_o1}")
+    check("قائمة الدخل: لا «تكلفة المبيعات» ولا سطر يطرح الذهب المباع، ولا"
+          " «المدفوع للموردين» — و«الخارج من النقدية» تحت «المقبوض»",
+          not any("تكلفة" in x for x in _labels85)
+          and not any("المدفوع للموردين" in x for x in _labels85)
+          and _labels85.index(_st85.IS_MEMO[1][1])
+          == _labels85.index(_st85.IS_MEMO[0][1]) + 1
+          and "خسائر الورشة" in _labels85, str(_labels85[-4:]))
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

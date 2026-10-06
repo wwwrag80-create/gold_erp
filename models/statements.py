@@ -542,10 +542,11 @@ IS_LINES = [
     # ثم بقية حسابات الإيرادات — ومنها إيرادات التحصيل (4500): ما
     # يُقبض إيراداً لا سداداً لذمّة
     ("other_rev", "إيرادات التحصيل والإيرادات العرضية", "orev"),
-    # 4.46: تكلفة الذهب المباع — الذهب المسلَّم من المخزون (4950) مقابل
-    # مبيعات الذهب وزناً. يأتي **بعد** صافي المبيعات لا داخلها: فيظهر
-    # وزن المبيع والمردود وصافيهما، ثم تكلفتها، والمجمل ربحُ الوزن الحقيقي
-    ("cogs", "يُطرح: تكلفة الذهب المباع (المسلَّم من المخزون)", "cos"),
+    # 4.51: لا سطر «تكلفة الذهب المباع» — «الذهب المسلَّم من المخزون»
+    # (4950) لا يدخل القائمة بطلب صاحب المنشأة: عمود الذهب يعرض وزن
+    # المبيعات والمردودات وصافيها، ثم خسائر الورشة. (فصافي عمود الذهب
+    # هنا لا يطرح الذهب المسلَّم — وربحُ الذهب في الدفتر وقائمة المركز
+    # المالي يطرحه.)
     # 4.40: «خسائر الورشة» — الفواقد كاملةً ثم المسترجع منها وحده
     ("workshop", "فواقد الورشة", "cos"),
     ("recovered", "يُخصم: المسترجع من التصفية", "cos"),
@@ -565,7 +566,7 @@ IS_SUBTOTALS = [
     ("zakat", "net", "صافي ربح (خسارة) الفترة"),
 ]
 IS_SECTIONS = {"rev": "المبيعات", "orev": "الإيرادات الأخرى والتحصيلية",
-               "cos": "تكلفة المبيعات وخسائر الورشة",
+               "cos": "خسائر الورشة",
                "opex": "المصاريف التشغيلية",
                "zakat": "الزكاة"}
 
@@ -574,7 +575,7 @@ IS_SECTIONS = {"rev": "المبيعات", "orev": "الإيرادات الأخر
 # الإهلاك والخسائر الائتمانية).
 _IS_MAP = {
     "4100": "sales", "4110": "sales", "4120": "sales", "4130": "sales",
-    "4950": "cogs",                  # الذهب المسلَّم ← تكلفة الذهب المباع
+    "4950": None,                    # الذهب المسلَّم — خارج القائمة (4.51)
     "4900": "returns", "5200": "discounts", "5300": "discounts",
     "5250": "discounts",             # المدفوع للعملاء يُطرح من الإيراد
     "5600": "net_diff",
@@ -622,6 +623,8 @@ def _is_period(conn, d1, d2, dim, rows, by_id):
         if rtype not in ("revenue", "expense"):
             continue
         key = _is_classify(node, by_id, rtype)
+        if key is None:                     # حسابٌ خارج القائمة
+            continue
         v[key] += -b                        # أثرها على الربح
         detail[key].append((node["code"], node["name"], -b))
     rnd = 3 if dim == "gold" else 2
@@ -676,8 +679,35 @@ def income_statement(conn, date_from, date_to, compare=True):
 
 IS_MEMO = [
     ("m_collect", "المقبوض من العملاء والجهات (سندات القبض) — سدادٌ لذمم"),
-    ("m_paid_sup", "المدفوع للموردين (سندات الصرف) — سدادٌ لذمم"),
+    # 4.51: بدل «المدفوع للموردين» — كل ما خرج من الصندوق والبنك
+    ("m_cash_out", "الخارج من النقدية (الصندوق والبنك)"),
 ]
+
+
+def cash_out(conn, d1, d2):
+    """كل ما خرج من النقدية في الفترة: لكل قيدٍ صافي حركته على حسابات
+    «النقد وما في حكمه» (1010 وفروعه)، فإن نقص كان خروجاً.
+
+    **صافي القيد لا سطوره**: التحويل من الصندوق إلى البنك يُنقص هذا
+    ويزيد ذاك في القيد نفسه — فصافيه صفرٌ ولا يُعدّ خروجاً. وقيد عكس
+    عمليةٍ محذوفة يُلغي خروجها لأن الأصل والعكس كلاهما محذوفان منطقياً.
+    """
+    from models.accounts import subtree_ids_by_code
+    ids = list(subtree_ids_by_code(conn, "1010") or [])
+    if not ids:
+        return 0.0
+    q = ",".join("?" * len(ids))
+    out = 0.0
+    for r in conn.execute(
+            "SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0) n"
+            " FROM journal_lines l JOIN journal_entries e"
+            " ON e.id=l.entry_id AND e.is_deleted=0"
+            f" WHERE l.account_id IN ({q}) AND e.entry_date BETWEEN ? AND ?"
+            " AND COALESCE(e.source_table,'')<>'year_close'"
+            " GROUP BY e.id", (*ids, d1, d2)):
+        if (r["n"] or 0) < -0.004:
+            out += -r["n"]
+    return round(out, 2)
 
 
 def _is_memo(conn, d1, d2):
@@ -688,10 +718,9 @@ def _is_memo(conn, d1, d2):
     يضاعف الإيراد. وما يُقبض إيراداً حقيقياً (لا ذمّة له) يُقبض على
     «إيرادات التحصيل» 4500 فيدخل القائمة بنده.
 
-    **المدفوع للموردين**: السداد لموردٍ **ليس مصروفاً** — المصروف أُثبت
-    يوم فاتورة المشتريات في بنده (مواد التشغيل، الإدارية…). وما يُصرف
-    لمورد مصروفاً بلا فاتورةٍ يُحمَّل مصروفاً من السند نفسه فيظهر في
-    بنده لا هنا.
+    **الخارج من النقدية** (4.51): كل ما نقص من الصندوق والبنك في الفترة
+    — مصروفاً كان أو سداداً لمورّد أو سلفةً — ليُقرأ مع المقبوض. وهو
+    حركة نقدٍ لا مصروف: المصروف في بنده أعلاه.
     """
     r = conn.execute(
         "SELECT COALESCE(SUM(v.cash_amount),0) c,"
@@ -701,19 +730,9 @@ def _is_memo(conn, d1, d2):
         " WHERE v.kind='receipt' AND v.is_deleted=0"
         " AND v.voucher_date BETWEEN ? AND ? AND a.type<>'revenue'",
         (d1, d2)).fetchone()
-    p = conn.execute(
-        "SELECT COALESCE(SUM(v.cash_amount),0) c,"
-        " COALESCE(SUM(v.gold_equiv18),0) g FROM vouchers v"
-        " JOIN journal_entries e ON e.id=v.entry_id AND e.is_deleted=0"
-        " JOIN entities en ON en.id=v.customer_id"
-        " AND en.entity_type='supplier'"
-        " WHERE v.kind='payment' AND v.is_deleted=0"
-        " AND COALESCE(v.staff_expense,0)=0"
-        " AND v.voucher_date BETWEEN ? AND ?", (d1, d2)).fetchone()
     return {"m_collect": {"cash": round(float(r["c"] or 0), 2),
                           "gold": round(float(r["g"] or 0), 3)},
-            "m_paid_sup": {"cash": round(float(p["c"] or 0), 2),
-                           "gold": round(float(p["g"] or 0), 3)}}
+            "m_cash_out": {"cash": cash_out(conn, d1, d2), "gold": 0.0}}
 
 
 def is_layout(st, accounts=False):

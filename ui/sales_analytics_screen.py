@@ -151,8 +151,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         self.columns["sales"].set_title(
             "المصروف (المبيعات)" if report else "إجمالي المبيعات")
         self.columns["net_sold"].set_title(
-            "الصافي = المصروف − المرتجع" if report
-            else "إجمالي المباع الفعلي")
+            "المباع الصافي" if report else "إجمالي المباع الفعلي")
         self.reload_panels()
 
     def on_customer(self):
@@ -197,15 +196,10 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                 f"{self._g(p['sales']['weight']):,.2f} جم {k}")
             self.columns["returns"].set_value(
                 f"{self._g(p['returns']['weight']):,.2f} جم {k}")
-            if self.mode == "report":
-                # المعادلة نفسها في لوحة الصافي: 100 − 50 = 50
-                self.columns["net_sold"].set_value(
-                    f"{self._g(p['sales']['weight']):,.2f} − "
-                    f"{self._g(p['returns']['weight']):,.2f} = "
-                    f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
-            else:
-                self.columns["net_sold"].set_value(
-                    f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
+            # الصافي ناتجاً مباشرةً (4.51) — في «تقرير» يُحسب: المصروف −
+            # المرتجع، ويُعرض رقمه وحده بلا المعادلة
+            self.columns["net_sold"].set_value(
+                f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
             coll = p["collection"]
             self.columns["collection"].set_value(
                 f"ذهب {self._g(coll['gold']):,.2f} · "

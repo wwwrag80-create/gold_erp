@@ -1418,10 +1418,8 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     panels = [
         ("المصروف", f"{_w(_g(p['sales']['weight']))} جم", "sales"),
         ("المرتجع", f"{_w(_g(p['returns']['weight']))} جم", "returns"),
-        ("المباع الصافي",
-         (f"{_w(_g(p['sales']['weight']))} − "
-          f"{_w(_g(p['returns']['weight']))} = " if report else "")
-         + f"{_w(_g(p['net_sold']['weight']))} جم", "net_sold"),
+        ("المباع الصافي", f"{_w(_g(p['net_sold']['weight']))} جم",
+         "net_sold"),
         ("السداد",
          f"ذهب {_w(_g(coll['gold']))}<br/>نقد {_w(coll['cash'], 2)}",
          "collection"),
