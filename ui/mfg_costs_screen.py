@@ -913,6 +913,10 @@ class MfgCostsScreen(QtWidgets.QWidget):
             if self._dirty["t"] and not self.autosave():
                 return
             self._read(self.s_table, SALARY_COLS, self.salary_rows)
+            # قيدٌ حُذف من كشف العامل والشاشة مفتوحة: الوسم يُقرأ الآن
+            with db(readonly=True) as conn:
+                mfg_costs.refresh_posted(conn, self.period(),
+                                         self.salary_rows)
             for r in self.salary_rows:
                 r.update(mfg_costs.compute_salary_row(r))
             pending = [r for r in self.salary_rows

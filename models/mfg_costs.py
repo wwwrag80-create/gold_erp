@@ -513,6 +513,31 @@ def _salary_people(conn):
     return sort_people(people)
 
 
+def _posted(conn, saved):
+    """مرحّلٌ فعلاً: موسومٌ بالترحيل **وقيدُه قائم**. صفٌّ رُحّل بقيدٍ
+    حُذف لاحقاً (قاعدةٌ سبقت عكسَ الحذف لوسم الترحيل) يعود معلّقاً
+    فيُنزَل راتب الشهر من جديد."""
+    if not saved or not saved["is_posted"]:
+        return False
+    if not saved["entry_id"]:
+        return True
+    return bool(conn.execute(
+        "SELECT 1 FROM journal_entries WHERE id=? AND is_deleted=0",
+        (saved["entry_id"],)).fetchone())
+
+
+def refresh_posted(conn, period, rows):
+    """يحدّث وسم «مرحّل» في صفوفٍ محمّلة من قبل من القاعدة الآن —
+    فقيدٌ حُذف من كشف العامل والشاشة مفتوحة لا يمنع إنزال الشهر."""
+    for r in rows:
+        if r.get("employee_id"):
+            r["is_posted"] = _posted(conn, conn.execute(
+                "SELECT is_posted, entry_id FROM mfg_salaries"
+                " WHERE period=? AND employee_id=?",
+                (period, r["employee_id"])).fetchone())
+    return rows
+
+
 def list_salaries(conn, period):
     """صفوف الرواتب مرتبطة ديناميكياً بالتارجت وسندات الصرف."""
     ensure_schema(conn)
@@ -551,7 +576,7 @@ def list_salaries(conn, period):
             "draw_cash": w["cash"], "draw_bank": w["bank"],
             # رصيدُه في الدفتر الآن: المدين وحده يُعرض
             "owed": balance_now(conn, e["id"]),
-            "is_posted": bool(saved["is_posted"]) if saved else False,
+            "is_posted": _posted(conn, saved),
             # صفٌّ أُضيف يدوياً (موظفٌ من خارج عمال التصنيع)
             "is_extra": bool(e["id"] in _extra_set),
         }
@@ -610,6 +635,7 @@ def post_salaries(conn, period, username, entry_date=None, rows=None):
     import datetime as _dt
     ensure_schema(conn)
     rows = rows if rows is not None else list_salaries(conn, period)
+    refresh_posted(conn, period, rows)
     pending = [r for r in rows
                if float(r.get("net_salary") or 0) != 0
                and not r.get("is_posted")]

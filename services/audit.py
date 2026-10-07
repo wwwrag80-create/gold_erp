@@ -148,6 +148,14 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                 pass
             if p:
                 _mark(conn, "purchases", sid, username)
+        elif src == "mfg_salaries":
+            # قيد رواتب عمال التصنيع: حذفه يعيد صفوف الشهر «غير مرحّلة»
+            # فيمكن إنزال رواتب الشهر نفسه من جديد.
+            n = conn.execute(
+                "UPDATE mfg_salaries SET is_posted=0, entry_id=NULL"
+                " WHERE entry_id=?", (entry_id,)).rowcount
+            log_action(conn, username, "unpost", "mfg_salaries", entry_id,
+                       f"إلغاء ترحيل رواتب {n} عامل بحذف القيد")
         elif src == "payroll_ledger":
             rows = conn.execute(
                 "SELECT * FROM payroll_ledger WHERE entry_id=? AND is_deleted=0",

@@ -7171,6 +7171,62 @@ def main():
           and ["serve", "reset"] in _calls86)
     _mw86.RUNNER = _mw86._run_ts
 
+    # ══ 87) حذف قيد رواتب التصنيع يعيد الشهر معلّقاً فيُنزَل من جديد ══
+    # كان الحذف يُلغي القيد ويُبقي صفوف الشهر موسومةً «مرحّلة»، فيرفض
+    # الإنزال مجدداً بـ«ربما رُحّلت مسبقاً» رغم أن القيد لم يعد قائماً.
+    from models import mfg_costs as _mc87
+    from services.audit import reverse_entry as _rev87
+    _per87 = "2026-09"
+    with db() as conn:
+        _mc87.save_salaries(conn, _per87,
+                            _mc87.list_salaries(conn, _per87), "admin")
+        _p1 = _mc87.post_salaries(conn, _per87, "admin",
+                                  entry_date="2026-09-30")
+    with db(readonly=True) as conn:
+        _posted87 = {r["employee_id"]: r["is_posted"]
+                     for r in _mc87.list_salaries(conn, _per87)}[_weid]
+    with db() as conn:
+        _rev87(conn, _p1["entry_id"], "admin")
+    with db(readonly=True) as conn:
+        _r87b = [r for r in _mc87.list_salaries(conn, _per87)
+                 if r["employee_id"] == _weid]
+        _row87 = conn.execute(
+            "SELECT is_posted, entry_id FROM mfg_salaries"
+            " WHERE period=? AND employee_id=?",
+            (_per87, _weid)).fetchone()
+    check("حذف قيد رواتب الشهر يعيد صفوفه «غير مرحّلة»",
+          _posted87 and not _r87b[0]["is_posted"]
+          and not _row87["is_posted"] and _row87["entry_id"] is None,
+          f"{_posted87} → {_r87b[0]['is_posted']} · {dict(_row87)}")
+    try:
+        with db() as conn:
+            _p2 = _mc87.post_salaries(conn, _per87, "admin",
+                                      entry_date="2026-09-30")
+        _ok87 = (abs(_p2["total"] - _p1["total"]) < 0.011
+                 and _p2["count"] == _p1["count"])
+    except ValueError as _e87:
+        _p2, _ok87 = {"err": str(_e87)}, False
+    check("ويُنزَل راتب الشهر نفسه من جديد بالمبلغ ذاته", _ok87, str(_p2))
+    with db(readonly=True) as conn:
+        _live87 = conn.execute(
+            "SELECT COUNT(*) n FROM journal_entries WHERE is_deleted=0"
+            " AND source_table='mfg_salaries' AND description LIKE ?",
+            (f"%{_per87}%",)).fetchone()["n"]
+    check("ويبقى للشهر قيدٌ قائم واحد لا قيدان", _live87 == 1,
+          f"{_live87}")
+    # قاعدةٌ حُذف فيها القيد قبل هذا الإصلاح: الوسم باقٍ والقيد محذوف
+    with db() as conn:
+        conn.execute("UPDATE journal_entries SET is_deleted=1 WHERE id=?",
+                     (_p2["entry_id"],))
+    with db(readonly=True) as conn:
+        _old87 = {r["employee_id"]: r["is_posted"]
+                  for r in _mc87.list_salaries(conn, _per87)}[_weid]
+    with db() as conn:
+        _p3 = _mc87.post_salaries(conn, _per87, "admin",
+                                  entry_date="2026-09-30")
+    check("وقاعدةٌ قديمة حُذف قيدها قبل الإصلاح تُنزَل أيضاً",
+          not _old87 and _p3["count"] >= 1, str(_p3))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
