@@ -173,7 +173,7 @@ def _page_setup(doc_type):
                         "dash_panel", "aging", "day_close", "customer_board",
                         "mfg_target", "mfg_salary", "tax_sales_register",
                         "purchases_register", "trial_balance",
-                        "equity_changes")
+                        "equity_changes", "doc_edits")
     if wide:
         # تقارير التصنيع عريضة الأعمدة — هوامش أضيق لتتسع الصفحة
         margin = "5mm" if doc_type in ("mfg_target", "mfg_salary") else "8mm"
@@ -281,4 +281,143 @@ def save_html(doc_type, doc_id, path, **kw):
     """يحفظ المستند ملف HTML في مسار يختاره المستخدم."""
     html = build_page(doc_type, doc_id, auto_print=False, **kw)
     Path(path).write_text(html, encoding="utf-8")
+    return str(path)
+
+
+# ══════════════════════════════════════════════════════════════════
+# المستند قبل التعديل وبعده (4.54)
+# ══════════════════════════════════════════════════════════════════
+COMPARE_CSS = """
+<style>
+  .cmp-head { width: 194mm; max-width: 100%; margin: 0 auto 10px;
+              border: 1.5px solid #3A342A; border-radius: 6px;
+              padding: 8px 12px; background: #FBF8F1; }
+  .cmp-head h2 { margin: 0 0 6px; font-size: 14pt; }
+  .cmp-head table td, .cmp-head table th { border: 1px solid #C9BFA6;
+              padding: 4px 6px; font-size: 10pt; }
+  .cmp-head table th { background: #F1ECE0; white-space: nowrap; }
+  .cmp-grid { display: block; }
+  .cmp-side { margin: 0 auto 14px; }
+  .cmp-badge { width: 194mm; max-width: 100%; margin: 0 auto 4px;
+               padding: 5px 10px; border-radius: 6px; font-weight: bold;
+               font-size: 12pt; color: #fff; }
+  .cmp-before .cmp-badge { background: #9B2C2C; }
+  .cmp-after  .cmp-badge { background: #2F6B3A; }
+  .cmp-missing { padding: 30px 10px; text-align: center; color: #7A6A4A;
+                 font-size: 12pt; }
+  .up { color: #2F6B3A; font-weight: bold; }
+  .dn { color: #9B2C2C; font-weight: bold; }
+  /* شاشةٌ عريضة: القالبان جنباً إلى جنب للمقارنة بالعين */
+  @media screen and (min-width: 1500px) {
+    .cmp-grid { display: flex; gap: 14px; justify-content: center;
+                align-items: flex-start; }
+    .cmp-side { margin: 0; }
+  }
+  /* الورق: كل قالبٍ في صفحته */
+  @media print {
+    .cmp-after { page-break-before: always; break-before: page; }
+  }
+</style>
+"""
+
+
+def build_compare_page(edit_id, auto_print=False):
+    """صفحة «قبل التعديل · بعد التعديل» لسطرٍ من سجل التعديلات."""
+    import html as _h
+
+    from database.database import db
+    from models import doc_edits
+    from services import karat_view as kv
+    from services import print_fonts
+    with db(readonly=True) as conn:
+        snap = doc_edits.snapshots(conn, edit_id)
+        rows = doc_edits.report(conn, edit_id=edit_id)
+    r = rows[0] if rows else None
+    raw = snap["row"]
+
+    def _signed(v, d):
+        cls = "up" if v > 0 else "dn" if v < 0 else ""
+        txt = f"({abs(v):,.{d}f})" if v < 0 else f"{v:,.{d}f}"
+        return f"<span class='{cls}'>{txt}</span>" if cls else txt
+
+    u = kv.unit()
+    og, ng = kv.g(raw["old_gold"]), kv.g(raw["new_gold"])
+    head = (
+        "<div class='cmp-head'>"
+        f"<h2>{_h.escape((r or {}).get('label', raw['source_table']))} "
+        f"{_h.escape((r or {}).get('doc_label', raw['doc_no'] or ''))}</h2>"
+        "<table>"
+        f"<tr><th>الطرف</th><td>{_h.escape((r or {}).get('party') or '—')}"
+        f"</td><th>تاريخ المستند</th><td>{_h.escape(raw['doc_date'] or '—')}"
+        "</td></tr>"
+        f"<tr><th>عدّله</th><td>{_h.escape(raw['username'] or '—')}</td>"
+        f"<th>وقت التعديل</th><td>{_h.escape(str(raw['edited_at'])[:16])}"
+        "</td></tr>"
+        f"<tr><th>الطريقة</th><td>"
+        f"{_h.escape(doc_edits.KINDS.get(raw['kind'], raw['kind']))}</td>"
+        f"<th>ما الذي تغيّر</th><td>"
+        f"{_h.escape((r or {}).get('change') or '—')}</td></tr>"
+        f"<tr><th>الوزن ({u})</th><td>{og:,.3f} ← {ng:,.3f} "
+        f"(الفرق {_signed(ng - og, 3)})</td>"
+        f"<th>النقد (ريال)</th><td>{raw['old_cash']:,.2f} ← "
+        f"{raw['new_cash']:,.2f} (الفرق "
+        f"{_signed(raw['new_cash'] - raw['old_cash'], 2)})</td></tr>"
+        "</table></div>")
+
+    def _side(cls, title, body, missing):
+        inner = body or f"<div class='cmp-missing'>{missing}</div>"
+        return (f"<div class='cmp-side {cls}'>"
+                f"<div class='cmp-badge'>{title}</div>"
+                f"<div class='sheet'><div class='sheet-body'>{inner}"
+                "</div></div></div>")
+
+    setup = _page_setup("invoices")
+    setup["family"] = print_fonts.family_css()
+    toolbar = (
+        '<div class="toolbar noprint">'
+        '<button onclick="window.print()">🖨 طباعة</button>'
+        '<button onclick="window.close()">إغلاق</button>'
+        ' &nbsp; المستند كما كان قبل التعديل وكما صار بعده</div>')
+    script = ("<script>window.addEventListener('load',function(){"
+              "setTimeout(function(){window.print();},350);});</script>"
+              if auto_print else "")
+    return (
+        "<!DOCTYPE html>\n"
+        "<html dir='rtl' lang='ar'><head><meta charset='utf-8'>"
+        f"<title>{config.COMPANY_NAME} — قبل التعديل وبعده</title>"
+        + print_fonts.style_block() + (PRINT_CSS % setup) + COMPARE_CSS
+        + f"</head><body dir='rtl'>{toolbar}{head}<div class='cmp-grid'>"
+        + _side("cmp-before", "قبل التعديل", snap["before"],
+                "لم تُحفظ صورة المستند قبل هذا التعديل — سُجّل قبل "
+                "الإصدار 4.54 وعُدّل في مكانه. قيمته قبل التعديل في "
+                "الجدول أعلاه.")
+        + _side("cmp-after", "بعد التعديل", snap["after"],
+                "تعذّر رسم المستند بعد التعديل.")
+        + f"</div>{FIT_SCRIPT}{script}</body></html>")
+
+
+def open_compare(edit_id):
+    """يفتح صفحة «قبل التعديل · بعد التعديل» في المتصفح."""
+    html = build_compare_page(edit_id)
+    out_dir = Path(tempfile.gettempdir()) / "jadeite_print"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"doc_edit_{int(edit_id)}.html"
+    path.write_text(html, encoding="utf-8")
+    url = path.resolve().as_uri()
+
+    def _launch():
+        try:
+            webbrowser.open_new_tab(url)
+        except Exception:
+            try:
+                if hasattr(os, "startfile"):
+                    os.startfile(str(path))
+            except Exception:
+                pass
+
+    try:
+        threading.Thread(target=_launch, daemon=True,
+                         name="JadeiteCompareOpen").start()
+    except Exception:
+        _launch()
     return str(path)

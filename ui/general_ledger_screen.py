@@ -684,6 +684,17 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         if not rows:
             info(self, f"لا توجد عمليات بين {d1} و{d2}.")
 
+    def _reload_keep_place(self):
+        try:
+            sb = self.table.verticalScrollBar()
+            pos, row = sb.value(), self.table.currentRow()
+            self.load()
+            if 0 <= row < self.table.rowCount():
+                self.table.setCurrentCell(row, 0)
+            sb.setValue(min(pos, sb.maximum()))
+        except Exception:
+            pass
+
     def refresh(self):
         with db(readonly=True) as conn:
             self.accounts = list_postable(conn)
@@ -700,6 +711,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             idx = self.account.findData(current)
             if idx >= 0:
                 self.account.setCurrentIndex(idx)
+                # العودة بـ«رجوع» بعد تعديل مستندٍ من الكشف: يُعاد
+                # الكشف بأرقامه الجديدة في الموضع نفسه من الجدول
+                if self.table.rowCount():
+                    QtCore.QTimer.singleShot(0, self._reload_keep_place)
         else:
             # عند فتح الشاشة تبقى قائمة البحث فارغة تماماً حتى يبحث
             # المستخدم ويختار حساباً بنفسه.

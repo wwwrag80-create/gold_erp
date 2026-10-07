@@ -1536,7 +1536,7 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
 
 def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
              kind="mfg_summary"):
-    """قوالب طباعة شاشة تكاليف ورواتب قسم التصنيع (ثلاثة تبويبات)."""
+    """قوالب طباعة شاشة رواتب العمال والإدارة (ثلاثة تبويبات)."""
     from models import mfg_costs
     period = period or ""
     today = _qd(QtCore.QDate.currentDate())
@@ -1593,7 +1593,7 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
         body = _table(hdr, rows, tot)
 
     elif kind == "mfg_salary":
-        title = "رواتب عمال قسم التصنيع"
+        title = "رواتب العمال والإدارة"
         if SALARY_COLS:
             keys = [c[0] for c in SALARY_COLS]
             hdr = [("الرصيد (− عليه · + له)" if c[0] == "owed" else c[1])
@@ -4110,21 +4110,25 @@ def _tpl_doc_edits(conn, _id=0, date_from=None, date_to=None,
     def _row(r):
         return "<tr>" + cells(
             tdw(en(r["edited_at"])), tdw(r["user"], align="right"),
-            tdw(r["label"], align="right"), tdw(en(r["doc_no"])),
+            tdw(f"{r['label']} {en(r.get('doc_label') or r['doc_no'])}",
+                align="right"),
+            tdw(r.get("party") or "—", align="right"),
             tdw(en(r["doc_date"])),
             tdw(en(f"{r['lag']:,}") if r["lag"] is not None else "—"),
+            tdw(r.get("change") or "—", align="right"),
             tdw(_g(r["old_gold"])), tdw(_g(r["new_gold"])),
             tdw(_g(r["d_gold"])), tdw(_m(r["old_cash"])),
             tdw(_m(r["new_cash"])), tdw(_m(r["d_cash"]))) + "</tr>"
 
     late = [r for r in rows if r["lag"] is not None
             and r["lag"] >= doc_edits.LATE_DAYS]
-    head = cells(thw("وقت التعديل"), thw("المستخدم"), thw("النوع"),
-                 thw("المستند"), thw("تاريخ المستند"), thw("التأخّر"),
+    head = cells(thw("وقت التعديل"), thw("المستخدم"), thw("المستند"),
+                 thw("الطرف"), thw("تاريخه"), thw("التأخّر"),
+                 thw("ما الذي تغيّر"),
                  thw(f"قبل ({u})"), thw(f"بعد ({u})"), thw(f"الفرق ({u})"),
                  thw("قبل (ريال)"), thw("بعد (ريال)"), thw("الفرق (ريال)"))
     body = "".join(_row(r) for r in rows) \
-        or f'<tr><td {TD} colspan="12">لا تعديلات في هذه الفترة</td></tr>'
+        or f'<tr><td {TD} colspan="13">لا تعديلات في هذه الفترة</td></tr>'
     late_block = ""
     if late:
         late_block = (
@@ -4180,11 +4184,6 @@ def _tpl_doc_edits(conn, _id=0, date_from=None, date_to=None,
       {users}
     </table>
 
-    <div class="note">قيمة المستند = مجموع الطرف المدين من قيده —
-      مقياسٌ واحد يصلح لكل نوع لأن القيد متوازنٌ بالضرورة. والفرق رقمٌ
-      محفوظٌ لحظة التعديل لا نصٌّ يُحلَّل بعده. والتأخّر يُقاس من لحظة
-      الترحيل لا من تاريخ المستند. والتعديل مشروعٌ في هذا النظام؛
-      المقصود أن يكون مرئياً.</div>
     '''
     return (_header("من عدّل ماذا بعد الترحيل", "—", today,
                     show_meta=False) + html + _footer(""))
@@ -4397,7 +4396,7 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
                         "customer_analytics", "turnover", "aging",
                         "day_close", "mfg_target", "mfg_salary",
                         "customer_board", "trial_balance",
-                        "equity_changes")
+                        "equity_changes", "doc_edits")
     printer = _printer(wide if landscape is None else landscape)
     dlg = QtPrintSupport.QPrintPreviewDialog(printer, parent)
     dlg.setWindowTitle("معاينة قبل الطباعة")

@@ -23,7 +23,6 @@ from ui.entities_screen import EntitiesScreen
 from ui.fixing_screen import FixingScreen
 from ui.general_ledger_screen import GeneralLedgerScreen
 from ui.journal_screen import JournalScreen
-from ui.payroll_run_screen import PayrollRunScreen
 from ui.opening_balances_screen import OpeningBalancesScreen
 from ui.mfg_costs_screen import MfgCostsScreen
 from ui.operations_screen import OperationsScreen
@@ -70,6 +69,13 @@ NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
 NAV_VERSION = 13      # 4.46: «التحليل والدراسات» إلى القائمة الرئيسية
+
+# ══ شاشاتٌ أُعيدت تسميتها — بلا إهمال ترتيب المستخدم ══
+# المفتاح القديم يُطابَق بالجديد، والاسم القديم المعروض يُستبدل —
+# فتبقى الشاشة في موضعها الذي رتّبه صاحب النظام.
+NAV_RENAMES = {
+    "تكاليف ورواتب قسم التصنيع": "رواتب العمال والإدارة",
+}
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -183,8 +189,9 @@ class MainWindow(QtWidgets.QMainWindow):
                           "من عدّل ماذا بعد الترحيل")),
                     # الأصول الثابتة والإهلاك صارت تبويباً في شاشة
                     # المشتريات: الأصل يُشترى هناك، فإهلاكُه بجانبه
-                    ("تكاليف ورواتب قسم التصنيع", self.mfg_screen),
-                    ("إنزال رواتب الموظفين (نهاية الشهر)", Lazy(lambda: PayrollRunScreen(user), "إنزال رواتب الموظفين (نهاية الشهر)")),
+                    # 4.54: شاشة «إنزال رواتب الموظفين» أُلغيت — كل
+                    # موظفٍ عاملاً أو إدارياً تُنزَل رواتبه من هنا
+                    ("رواتب العمال والإدارة", self.mfg_screen),
                     ("الإقرار الضريبي (VAT)", Lazy(lambda: VatReturnScreen(user), "الإقرار الضريبي (VAT)")),
                     # ══ القوائم المالية في بندٍ واحد (4.37) ══
                     # ميزان المراجعة والقوائم الأربع وتسويات نهاية
@@ -357,9 +364,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # الشريط الجانبي لأن switch() تستخدم self.crumb و self.btn_close.
         self.crumb = QtWidgets.QLabel(config.COMPANY_NAME)
         self.crumb.setObjectName("crumb")
-        self.btn_close = QtWidgets.QPushButton("✖  إغلاق الشاشة")
+        # «رجوع» لا «إغلاق» (4.54): يعود إلى الشاشة التي جاء منها كما
+        # تركها — كشفُ الحساب بحسابه بعد تعديل فاتورةٍ منه — لا إلى
+        # الرئيسية ثم دخولٍ من جديد. ومن شاشةٍ فُتحت من القائمة يعود
+        # إلى الرئيسية.
+        self._history = []
+        self.btn_close = QtWidgets.QPushButton("→  رجوع")
         self.btn_close.setObjectName("closeBtn")
         self.btn_close.clicked.connect(self._close_screen)
+        for _seq in ("Alt+Left", "Alt+Right"):
+            _sc = QtWidgets.QShortcut(QtGui.QKeySequence(_seq), self)
+            _sc.setContext(QtCore.Qt.WindowShortcut)
+            _sc.activated.connect(self._back_shortcut)
         self.btn_close.setVisible(False)
         subbar = QtWidgets.QFrame()
         subbar.setObjectName("subbar")
@@ -666,6 +682,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     idx = n.get("idx")
                     text = n.get("text", "")
                     key = n.get("key") or ""
+                    key = NAV_RENAMES.get(key, key)
+                    text = NAV_RENAMES.get(text, text)
                     if idx is not None and idx >= 0:
                         # المفتاح الثابت أولاً، ثم الاسم المعروض.
                         real = by_key.get(key)
@@ -748,9 +766,54 @@ class MainWindow(QtWidgets.QMainWindow):
                            QtWidgets.QSizePolicy.Expanding)
         return area
 
+    # عدد الشاشات التي تبقى حيّةً خلف الحالية — حدٌّ صغير: «شاشة واحدة
+    # حيّة» هي ما يمنع التجمّد، والرجوع يحتاج سلسلةً قصيرة لا القائمة كلها
+    HISTORY_MAX = 4
+
     def _close_screen(self):
-        """يغلق الشاشة الحالية ويعود لواجهة الشعار الفارغة."""
+        """«رجوع»: إلى الشاشة السابقة كما تُركت، وإلا إلى الرئيسية."""
+        hist = getattr(self, "_history", [])
+        while hist:
+            row = hist.pop()
+            if 0 < row < len(self.screens) and row != self._current_row:
+                self.switch(row, _back=True)
+                return
         self.switch(0)
+
+    def _back_shortcut(self):
+        if getattr(self, "_current_row", 0) > 0:
+            self._close_screen()
+
+    def _release(self, row):
+        """يُغلق شاشةً غادرها المستخدم نهائياً (لا شاشةً في سلسلة الرجوع)."""
+        if row <= 0 or row in getattr(self, "_history", []):
+            return
+        try:
+            rel = getattr(self.screens[row], "release", None)
+            if callable(rel):
+                rel()
+        except Exception:
+            pass
+
+    def _release_old(self, row):
+        if row != getattr(self, "_current_row", 0):
+            self._release(row)
+
+    def _update_back_btn(self):
+        hist = getattr(self, "_history", [])
+        prev = hist[-1] if hist else 0
+        name = ""
+        if prev > 0:
+            node = self._items.get(self.screens[prev])
+            name = node.text(0) if node is not None else ""
+        if name:
+            short = name if len(name) <= 22 else name[:21] + "…"
+            self.btn_close.setText(f"→  رجوع: {short}")
+            self.btn_close.setToolTip(f"العودة إلى «{name}» كما تركتها"
+                                      "  (Alt+←)")
+        else:
+            self.btn_close.setText("→  رجوع")
+            self.btn_close.setToolTip("العودة إلى الواجهة الرئيسية  (Alt+←)")
 
     def _guard_screen(self, row):
         """يحرس الشاشات الحسّاسة برمز دخول قبل فتحها."""
@@ -769,7 +832,7 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         return True
 
-    def switch(self, row):
+    def switch(self, row, _back=False):
         """ينتقل لشاشة — ويُغلق السابقة تماماً.
 
         **شاشة واحدة حيّة في كل لحظة**: إبقاء كل الشاشات في الذاكرة
@@ -787,15 +850,29 @@ class MainWindow(QtWidgets.QMainWindow):
         prev = getattr(self, "_current_row", 0)
         self._current_row = row
         self.stack.setCurrentIndex(row)
-        # أغلق الشاشة السابقة (لا نُغلق شاشة الترحيب فهي خفيفة)
-        if prev != row and prev > 0:
-            try:
-                old = self.screens[prev]
-                rel = getattr(old, "release", None)
-                if callable(rel):
-                    rel()
-            except Exception:
-                pass
+        # ══ سلسلة الرجوع ══
+        # الانتقال من شاشةٍ إلى أخرى يُبقي الأولى حيّةً خلفها (فيعود
+        # إليها «رجوع» كما تُركت). والرجوع يُغلق الشاشة المغادَرة،
+        # والرئيسية تُغلق السلسلة كلها. وما زاد عن الحدّ يُغلق أقدمه.
+        hist = self.__dict__.setdefault("_history", [])
+        if row == 0:
+            dropped = hist[:]
+            hist.clear()
+            for r in dropped + [prev]:
+                if r != row:
+                    self._release(r)
+        else:
+            if row in hist:
+                hist.remove(row)
+            if prev != row and prev > 0:
+                if _back:
+                    self._release(prev)
+                else:
+                    if prev in hist:
+                        hist.remove(prev)
+                    hist.append(prev)
+                    while len(hist) > self.HISTORY_MAX:
+                        self._release_old(hist.pop(0))
         screen = self.screens[row]
         node = self._items.get(screen)
         self.crumb.setText(
@@ -816,7 +893,9 @@ class MainWindow(QtWidgets.QMainWindow):
             panel.setVisible(not is_sub)
         else:
             self._panel_visible = not is_sub
-        self.btn_close.setVisible(is_sub)      # زر الإغلاق في كل شاشة فرعية
+        self.btn_close.setVisible(is_sub)      # زر الرجوع في كل شاشة فرعية
+        if is_sub and hasattr(self, "_items"):
+            self._update_back_btn()
         # ══ الشريط الأسود العلوي في الرئيسية وحدها (4.31) ══
         # العنوان والبحث والعيار و«تحديث» و«عرض» أدوات الواجهة، لا
         # الشاشة: داخلها يُطوى الشريط فترتفع الشاشة وتأخذ جداولها

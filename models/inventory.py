@@ -1302,6 +1302,8 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     # قيمة الدفعة **قبل** أن يُعدَّل قيدها
     from models import doc_edits as _de
     _before = _de.totals(conn, entry_id)
+    # وصورة قالبه قبل التعديل: ما يُعدَّل في مكانه لا يُستعاد بعده
+    _before_html = _de.capture(conn, "work_orders", entry_id, entry_id)
 
     # ══ الحالة الحالية: أطقم الدفعة كما هي الآن ══
     # الدفعات المُنشأة قبل وجود جدول السطور لا سطور لها؛ ولو اعتمدنا
@@ -1556,7 +1558,7 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
                f"صافي الوزن {delta:+.3f} جم")
     _de.record(conn, "work_orders", entry_id, username, _before,
                doc_no=entry["doc_no"] or "", entry_id=entry_id,
-               kind="inplace",
+               kind="inplace", before_html=_before_html,
                note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}")
     # ══ `total_registered` — مفتاحٌ كان ناقصاً ══
     # الشاشة تعرضه في رسالة «تم الترحيل» للمسارين معاً: الإنشاء

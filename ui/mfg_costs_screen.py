@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""شاشة تكاليف ورواتب قسم التصنيع.
+"""شاشة رواتب العمال والإدارة (وتكاليف قسم التصنيع).
 
 ثلاثة تبويبات:
 * **التارجت** — جدول إدخال بأعمدة محسوبة تلقائياً.
@@ -190,18 +190,20 @@ class MfgCostsScreen(QtWidgets.QWidget):
         # آخر أو لشهرٍ آخر أو الخروج من الشاشة (4.48)
         self.save_state = QtWidgets.QLabel("")
         self.save_state.setObjectName("cardSub")
-        btn_post = QtWidgets.QPushButton("📥 إنزال رواتب العمال")
+        btn_post = QtWidgets.QPushButton("📥 إنزال الرواتب")
         btn_post.setObjectName("homeBtn")
         btn_post.clicked.connect(self.post_salaries)
         btn_print = QtWidgets.QPushButton("🖨 طباعة")
         btn_print.clicked.connect(self.print_current)
-        btn_add = QtWidgets.QPushButton("➕ إضافة حساب")
+        btn_add = QtWidgets.QPushButton("➕ إضافة / إعادة")
         btn_add.setObjectName("ghost")
-        btn_add.setToolTip("يضيف موظفاً من خارج عمال التصنيع لجدول الرواتب")
+        btn_add.setToolTip("يعيد من أُزيل من هذا الجدول (عاد من إجازته "
+                           "مثلاً)، أو يضيف موظفاً إليه")
         btn_add.clicked.connect(self.add_staff)
-        btn_drop = QtWidgets.QPushButton("➖ رفع المضاف")
+        btn_drop = QtWidgets.QPushButton("➖ إزالة من الجدول")
         btn_drop.setObjectName("ghost")
-        btn_drop.setToolTip("يرفع الصف المضاف يدوياً — لا يمسّ عمال القسم")
+        btn_drop.setToolTip("يُزيل العامل أو الموظف المحدَّد من هذا الجدول "
+                            "فلا ينزل له راتب — حسابه وقيوده باقية")
         btn_drop.clicked.connect(self.drop_staff)
         btn_up = QtWidgets.QPushButton("▲ أعلى")
         btn_up.setObjectName("ghost")
@@ -246,7 +248,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
 
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self._target_tab(), "التارجت")
-        self.tabs.addTab(self._salary_tab(), "رواتب العمال")
+        self.tabs.addTab(self._salary_tab(), "الرواتب")
         self.tabs.addTab(self._summary_tab(), "الملخص")
         self._tab_now = 0
         self.tabs.currentChanged.connect(self._tab_changed)
@@ -260,7 +262,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
-        lay.addWidget(title_label("تكاليف ورواتب قسم التصنيع"))
+        lay.addWidget(title_label("رواتب العمال والإدارة"))
         lay.addLayout(head)
         lay.addLayout(head2)
         lay.addWidget(self.tabs, 1)
@@ -640,54 +642,72 @@ class MfgCostsScreen(QtWidgets.QWidget):
             pass
         super().hideEvent(e)
 
-    # ══════════ إضافة حسابٍ لجدول الرواتب ══════════
+    # ══════════ من يظهر في كل جدول (4.54) ══════════
+    def _section(self):
+        """الجدول المعروض: التارجت أو الرواتب."""
+        i = self.tabs.currentIndex()
+        if i == 0:
+            return "target", self.t_table, self.target_rows
+        if i == 1:
+            return "salary", self.s_table, self.salary_rows
+        raise ValueError("الإضافة والإزالة في جدولَي التارجت والرواتب")
+
     def add_staff(self):
-        """يضيف موظفاً من خارج عمال التصنيع لجدول الرواتب."""
+        """يعيد من أُزيل من الجدول المعروض، أو يضيف إليه موظفاً."""
         try:
-            from models import payroll
-            with db() as conn:
-                have = {r.get("employee_id") for r in self.salary_rows}
-                people = [e for e in payroll.list_employees(conn)
-                          if e["id"] not in have]
-            if not people:
-                raise ValueError("كل الموظفين مضافون مسبقاً")
-            items = [f"{e['name']}   (#{e['id']})" for e in people]
-            txt, ok = QtWidgets.QInputDialog.getItem(
-                self, "إضافة حساب لجدول الرواتب",
-                "اختر الموظف — يُضاف صفُّه ويبقى حتى ترفعه:",
-                items, 0, True)
-            if not ok or not txt:
+            sec, _t, _rows = self._section()
+            if not self.autosave():
                 return
-            pick = people[items.index(txt)] if txt in items else None
-            if pick is None:
-                raise ValueError("اختر اسماً من القائمة")
-            ids = mfg_costs.load_extra_staff()
-            if pick["id"] not in ids:
-                ids.append(pick["id"])
-            mfg_costs.save_extra_staff(ids)
+            with db(readonly=True) as conn:
+                people = mfg_costs.available_people(conn, sec)
+            label = mfg_costs.SECTIONS[sec]
+            if not people:
+                raise ValueError(f"كل العمال والموظفين ظاهرون في جدول "
+                                 f"{label}")
+            items = [f"{p['name']}"
+                     + ("   — مُزال (إعادة)" if p["hidden"] else "")
+                     + ("" if p["kind"] == "worker" else "   · إدارة")
+                     for p in people]
+            txt, ok = QtWidgets.QInputDialog.getItem(
+                self, f"إضافة إلى جدول {label}",
+                "اختر من يُعاد أو يُضاف — يظهر صفُّه حتى تزيله:",
+                items, 0, False)
+            if not ok or not txt or txt not in items:
+                return
+            pick = people[items.index(txt)]
+            with db() as conn:
+                mfg_costs.add_person(conn, sec, pick["id"],
+                                     self.user["username"])
             self.reload()
-            info(self, f"أُضيف «{pick['name']}» لجدول الرواتب.")
+            self.save_state.setText(f"✔ أُضيف «{pick['name']}» لجدول "
+                                    f"{label}")
         except Exception as e:
             err(self, e)
 
     def drop_staff(self):
-        """يرفع صفاً مضافاً يدوياً — ولا يمسّ عمال القسم."""
+        """يُزيل المحدَّد من الجدول المعروض — حسابُه وقيودُه باقية."""
         try:
-            r = self.s_table.currentRow()
-            if not (0 <= r < len(self.salary_rows)):
-                raise ValueError("اختر صفاً من جدول الرواتب أولاً")
-            row = self.salary_rows[r]
-            if not row.get("is_extra"):
-                raise ValueError(
-                    f"«{row.get('name')}» من عمال قسم التصنيع — "
-                    "يُرفع من دليل الجهات لا من هنا")
-            if not ask(self, f"رفع «{row.get('name')}» من جدول الرواتب؟\n"
-                             "لا يُحذف الموظف ولا قيوده — يُرفع صفُّه فقط."):
+            sec, table, rows = self._section()
+            r = table.currentRow()
+            if not (0 <= r < len(rows)):
+                raise ValueError("اختر عاملاً أو موظفاً من الجدول أولاً")
+            row = rows[r]
+            label = mfg_costs.SECTIONS[sec]
+            extra = ("\nلا ينزل له راتبٌ ما دام مُزالاً."
+                     if sec == "salary" else "")
+            if not ask(self, f"إزالة «{row.get('name')}» من جدول {label}؟"
+                             f"{extra}\n\nلا يُحذف حسابه ولا قيوده — "
+                             "ويعود بزرّ «➕ إضافة / إعادة» متى شئت "
+                             "(بعد عودته من الإجازة مثلاً)."):
                 return
-            ids = [i for i in mfg_costs.load_extra_staff()
-                   if i != row.get("employee_id")]
-            mfg_costs.save_extra_staff(ids)
+            if not self.autosave():
+                return
+            with db() as conn:
+                mfg_costs.remove_person(conn, sec, row.get("employee_id"),
+                                        self.user["username"])
             self.reload()
+            self.save_state.setText(f"✔ أُزيل «{row.get('name')}» من جدول "
+                                    f"{label}")
         except Exception as e:
             err(self, e)
 
@@ -800,8 +820,12 @@ class MfgCostsScreen(QtWidgets.QWidget):
         n = len([r for r in self.salary_rows
                  if float(r.get("net_salary") or 0)])
         due = sum(float(r.get("due") or 0) for r in self.salary_rows)
+        adm = len([r for r in self.salary_rows
+                   if float(r.get("net_salary") or 0)
+                   and r.get("staff_kind", "worker") != "worker"])
+        who = (f"{n - adm} عامل · {adm} إدارة" if adm else f"{n} عامل")
         self.s_total.setText(
-            f"{n} عامل   |   الصافي: {tot:,.2f}   |   الرصيد: "
+            f"{who}   |   الصافي: {tot:,.2f}   |   الرصيد: "
             f"{mfg_costs.bal_text(ow) or '0.00'}   |   المستحق: "
             f"{due:,.2f} ريال")
 
@@ -928,13 +952,13 @@ class MfgCostsScreen(QtWidgets.QWidget):
             tot = sum(float(r["net_salary"]) for r in pending)
             date = dstr(self.s_date)
             if not ask(self,
-                       f"ترحيل رواتب عمال التصنيع لشهر {self.period()}؟\n\n"
-                       f"عدد العمال: {len(pending)}\n"
+                       f"إنزال رواتب شهر {self.period()}؟\n\n"
+                       f"عدد العمال والموظفين: {len(pending)}\n"
                        f"إجمالي الصافي: {tot:,.2f} ريال\n"
                        f"تاريخ القيد: {date}\n\n"
-                       f"سيُنشأ قيد واحد بسطرين لكل عامل:\n"
-                       f"  مدين حـ/ مصروف رواتب عمال التصنيع\n"
-                       f"  دائن حـ/ حساب العامل"):
+                       f"سيُنشأ قيد واحد بسطرين لكل شخص:\n"
+                       f"  مدين حـ/ مصروف الرواتب (عمال التصنيع أو الإدارة)\n"
+                       f"  دائن حـ/ حسابه الشخصي"):
                 return
             with db() as conn:
                 mfg_costs.save_salaries(conn, self.period(),

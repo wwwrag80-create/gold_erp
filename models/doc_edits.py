@@ -74,9 +74,148 @@ def _entry_meta(conn, entry_id):
     return (str(r["entry_date"])[:10], str(r["created_at"])) if r else ("", "")
 
 
+# ══════════════════════════════════════════════════════════════════
+# صورة المستند قبل التعديل وبعده (4.54)
+# ══════════════════════════════════════════════════════════════════
+# الرقمان (قبل · بعد) يقولان **كم** تغيّر، ولا يقولان **ماذا**: أيُّ
+# طقمٍ رُفع من الفاتورة، وأيُّ أجرٍ تبدّل. والتعديل في مكانه يمحو
+# الصورة القديمة من القاعدة — فلا تُستعاد بعده أبداً. لذلك يُلتقط
+# **قالب الطباعة نفسه** لحظة التعديل: قبل أن يُمسّ المستند وبعد أن
+# يستقرّ، فيُرى المستند كما طُبع وكما صار.
+_SNAP_SQL = (
+    "CREATE TABLE IF NOT EXISTS doc_edit_snaps("
+    " edit_id INTEGER PRIMARY KEY,"
+    " before_html BLOB, after_html BLOB)")
+
+# نوع المستند ← قالب طباعته (ما لا قالب له يُطبع قيدُه)
+_TPL = {"invoices": "invoices", "vouchers": "vouchers",
+        "purchases": "purchases", "tax_sales": "tax_sales",
+        "fixing_ops": "fixing_ops", "melting_ops": "melting_ops"}
+_WO = ("work_orders", "wo_supply", "wo_adjust")
+
+
+def _ensure_snaps(conn):
+    conn.execute(_SNAP_SQL)
+
+
+def _target(conn, source_table, source_id, entry_id):
+    """القالب ومعرّف المستند فيه — وإلا قيدُ اليومية نفسه."""
+    try:
+        if source_table in _TPL and source_id:
+            return _TPL[source_table], int(source_id)
+        if source_table in _WO:
+            r = None
+            if source_id and entry_id:
+                r = conn.execute(
+                    "SELECT id FROM work_orders WHERE id=? AND entry_id=?",
+                    (source_id, entry_id)).fetchone()
+            if not r and entry_id:
+                r = conn.execute(
+                    "SELECT id FROM work_orders WHERE entry_id=?"
+                    " ORDER BY id LIMIT 1", (entry_id,)).fetchone()
+            if r:
+                return "work_orders", int(r["id"])
+    except Exception:
+        pass
+    return ("journal", int(entry_id)) if entry_id else (None, None)
+
+
+def render(conn, source_table, source_id, entry_id):
+    """جسم قالب المستند كما يُطبع في المتصفح — أو "" إن تعذّر."""
+    kind, did = _target(conn, source_table, source_id, entry_id)
+    if not kind:
+        return ""
+    try:
+        from services import print_manager as pm
+    except Exception:
+        return ""
+    prev = pm.RTL_ORDER_OVERRIDE
+    pm.RTL_ORDER_OVERRIDE = True        # نسخة المتصفح: RTL صحيح
+    try:
+        try:
+            return pm.en(pm.BUILDERS[kind](conn, did))
+        except Exception:
+            if kind != "journal" and entry_id:
+                try:
+                    return pm.en(pm.BUILDERS["journal"](conn, entry_id))
+                except Exception:
+                    return ""
+            return ""
+    finally:
+        pm.RTL_ORDER_OVERRIDE = prev
+
+
+def capture(conn, source_table, source_id, entry_id):
+    """صورة القالب الآن مضغوطةً للحفظ — `None` إن تعذّرت."""
+    import zlib
+    html = render(conn, source_table, source_id, entry_id)
+    return zlib.compress(html.encode("utf-8"), 6) if html else None
+
+
+def _save_snap(conn, edit_id, before=None, after=None):
+    """لا يُفشل التعديل أبداً — الصورة رقابةٌ لا شرطُ صحة."""
+    if not edit_id or (before is None and after is None):
+        return
+    try:
+        _ensure_snaps(conn)
+        conn.execute("INSERT OR IGNORE INTO doc_edit_snaps(edit_id)"
+                     " VALUES(?)", (edit_id,))
+        if before is not None:
+            conn.execute("UPDATE doc_edit_snaps SET before_html=?"
+                         " WHERE edit_id=?", (before, edit_id))
+        if after is not None:
+            conn.execute("UPDATE doc_edit_snaps SET after_html=?"
+                         " WHERE edit_id=?", (after, edit_id))
+    except Exception:
+        pass
+
+
+def snapshots(conn, edit_id):
+    """صورتا المستند قبل التعديل وبعده لسطرٍ من السجل.
+
+    المحفوظ لحظة التعديل أولاً. وما سبق هذا الإصدار: المُعاد ترحيله
+    مستندُه القديم محذوفٌ حذفاً منطقياً لا فعلياً فيُرسم من القاعدة،
+    والمعدَّل في مكانه لا صورة له قبل التعديل — فيقال ذلك صراحةً.
+    """
+    import zlib
+    r = conn.execute("SELECT * FROM doc_edits WHERE id=?",
+                     (edit_id,)).fetchone()
+    if not r:
+        raise ValueError("سطر التعديل غير موجود")
+    snap = None
+    try:
+        _ensure_snaps(conn)
+        snap = conn.execute("SELECT * FROM doc_edit_snaps WHERE edit_id=?",
+                            (edit_id,)).fetchone()
+    except Exception:
+        snap = None
+
+    def _un(b):
+        try:
+            return zlib.decompress(b).decode("utf-8") if b else ""
+        except Exception:
+            return ""
+
+    before = _un(snap["before_html"]) if snap else ""
+    after = _un(snap["after_html"]) if snap else ""
+    stored_before = bool(before)
+    if not before and r["kind"] == "repost" and r["entry_id"]:
+        old = conn.execute(
+            "SELECT source_table, source_id FROM journal_entries"
+            " WHERE id=?", (r["entry_id"],)).fetchone()
+        if old:
+            before = render(conn, old["source_table"] or r["source_table"],
+                            old["source_id"], r["entry_id"])
+    if not after:
+        after = render(conn, r["source_table"], r["source_id"],
+                       r["new_entry_id"] or r["entry_id"])
+    return {"row": dict(r), "before": before, "after": after,
+            "stored_before": stored_before}
+
+
 def record(conn, source_table, source_id, username, before,
            after=None, doc_no="", entry_id=None, new_entry_id=None,
-           kind="inplace", note=""):
+           kind="inplace", note="", before_html=None, snap_after=True):
     """يسجّل تعديلاً وقع على مستندٍ مُرحَّل.
 
     `before` زوج (وزن، نقد) قبل التعديل — يُلتقط قبل أن يُمسّ القيد.
@@ -91,7 +230,7 @@ def record(conn, source_table, source_id, username, before,
         if after is None:
             after = totals(conn, tgt)
         d_date, posted = _entry_meta(conn, entry_id or tgt)
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO doc_edits(source_table,source_id,doc_no,entry_id,"
             " new_entry_id,doc_date,posted_at,username,kind,"
             " old_gold,new_gold,old_cash,new_cash,note)"
@@ -104,7 +243,11 @@ def record(conn, source_table, source_id, username, before,
              round(float(before[1] or 0.0), 2),
              round(float(after[1] or 0.0), 2), str(note or "")))
     except Exception:
-        pass
+        return None
+    _save_snap(conn, cur.lastrowid, before_html,
+               capture(conn, source_table, source_id, tgt)
+               if snap_after else None)
+    return cur.lastrowid
 
 
 def begin(conn, source_table, source_id, username, entry_id,
@@ -118,7 +261,9 @@ def begin(conn, source_table, source_id, username, entry_id,
     """
     record(conn, source_table, source_id, username,
            totals(conn, entry_id), after=(0.0, 0.0), doc_no=doc_no,
-           entry_id=entry_id, new_entry_id=None, kind=kind, note=note)
+           entry_id=entry_id, new_entry_id=None, kind=kind, note=note,
+           before_html=capture(conn, source_table, source_id, entry_id),
+           snap_after=False)
 
 
 def finish(conn, source_table, source_id, new_entry_id, new_id=None):
@@ -136,7 +281,9 @@ def finish(conn, source_table, source_id, new_entry_id, new_id=None):
             " source_id=COALESCE(?, source_id) WHERE id=?",
             (new_entry_id, round(g, 3), round(c, 2), new_id, r["id"]))
     except Exception:
-        pass
+        return
+    _save_snap(conn, r["id"], after=capture(
+        conn, source_table, new_id or source_id, new_entry_id))
 
 
 def _days(a, b):
@@ -148,8 +295,67 @@ def _days(a, b):
         return None
 
 
+def _party(conn, entry_id):
+    """الطرف في المستند: أول جهةٍ لها سطرٌ في قيده (عميل · مورد · عامل)."""
+    if not entry_id:
+        return ""
+    try:
+        r = conn.execute(
+            "SELECT en.name FROM journal_lines l"
+            " JOIN entities en ON en.account_id=l.account_id"
+            "  AND en.is_deleted=0"
+            " WHERE l.entry_id=? AND COALESCE(en.entity_type,'')"
+            "  NOT IN ('internal') ORDER BY l.id LIMIT 1",
+            (entry_id,)).fetchone()
+        return r["name"] if r else ""
+    except Exception:
+        return ""
+
+
+def _doc_no_of(conn, entry_id):
+    if not entry_id:
+        return ""
+    try:
+        r = conn.execute("SELECT doc_no FROM journal_entries WHERE id=?",
+                         (entry_id,)).fetchone()
+        return (r["doc_no"] or "") if r else ""
+    except Exception:
+        return ""
+
+
+def describe(note, dg=0.0, dc=0.0):
+    """ما الذي تغيّر — بكلامٍ يُقرأ لا برموز.
+
+    السجل يحفظ «+1 · ~2 · -0» اختصاراً؛ وهنا يُقال: أُضيف سطر، وعُدّل
+    سطران. وما لا ملاحظة له يُوصف بأثره على القيمة.
+    """
+    import re
+    parts = []
+    txt = str(note or "").strip(" ·")
+    m = re.match(r"^\+(\d+) · ~(\d+) · -(\d+)\s*(?:·\s*)?(.*)$", txt)
+    if m:
+        a, u, d, rest = int(m.group(1)), int(m.group(2)), \
+            int(m.group(3)), m.group(4)
+        if a:
+            parts.append(f"أُضيف {a} سطر")
+        if u:
+            parts.append(f"عُدّل {u} سطر")
+        if d:
+            parts.append(f"حُذف {d} سطر")
+        txt = rest.strip(" ·")
+    if txt:
+        parts.extend("تعديل البيان" if x.strip() == "البيان" else x.strip()
+                     for x in txt.split("·") if x.strip())
+    if not parts:
+        if abs(dg) > 0.0005 or abs(dc) > 0.005:
+            parts.append("تغيّرت قيمة المستند")
+        else:
+            parts.append("بلا تغيير في القيمة")
+    return " · ".join(parts)
+
+
 def report(conn, date_from=None, date_to=None, username=None,
-           source_table=None, min_lag=0):
+           source_table=None, min_lag=0, edit_id=None):
     """التعديلات في فترة — الأكبر أثراً أولاً.
 
     `date_from`/`date_to` على **لحظة التعديل** لا على تاريخ المستند:
@@ -170,6 +376,9 @@ def report(conn, date_from=None, date_to=None, username=None,
     if source_table:
         q += " AND source_table=?"
         p.append(source_table)
+    if edit_id:
+        q += " AND id=?"
+        p.append(int(edit_id))
     q += " ORDER BY edited_at DESC, id DESC"
     try:
         rows = conn.execute(q, p).fetchall()
@@ -196,7 +405,17 @@ def report(conn, date_from=None, date_to=None, username=None,
             "d_gold": dg, "d_cash": dc, "lag": lag,
             "changed": abs(dg) > 0.0005 or abs(dc) > 0.005,
             "note": r["note"] or "",
+            "change": describe(r["note"], dg, dc),
+            "party": _party(conn, r["new_entry_id"] or r["entry_id"]),
+            "entry_id": r["entry_id"], "new_entry_id": r["new_entry_id"],
         })
+        # المُعاد ترحيله قد يأخذ رقماً جديداً: يُعرض القديم ← الجديد
+        nd = _doc_no_of(conn, r["new_entry_id"]) \
+            if r["kind"] == "repost" else ""
+        out[-1]["new_doc_no"] = nd
+        out[-1]["doc_label"] = (
+            f"{out[-1]['doc_no']} ← {nd}"
+            if nd and nd != (r["doc_no"] or "") else out[-1]["doc_no"])
     return out
 
 

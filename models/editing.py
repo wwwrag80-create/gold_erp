@@ -30,7 +30,7 @@ EDITABLE = {
     "shrinkage_ops": ("تسوية فاقد", "shrinkage"),
     "purchases": ("فاتورة مشتريات", "purchases"),
     "manual": ("قيد يومية يدوي", "journal"),
-    "mfg_salaries": ("رواتب عمال التصنيع", "mfg_costs"),
+    "mfg_salaries": ("رواتب العمال والإدارة", "mfg_costs"),
     "payroll": ("رواتب الموظفين", "payroll"),
 }
 

@@ -3123,23 +3123,49 @@ def main():
         _eeid = conn.execute(
             "SELECT employee_id FROM entities WHERE id=?",
             (_emp,)).fetchone()["employee_id"]
-    with db(readonly=True) as conn:
-        _before = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
-    check("الموظف الإداري ليس في جدول رواتب التصنيع افتراضاً",
-          _eeid not in _before)
-    _mc2.save_extra_staff(_mc2.load_extra_staff() + [_eeid])
+    # 4.54: «رواتب العمال والإدارة» — كل موظفٍ يظهر في الرواتب افتراضاً
     with db(readonly=True) as conn:
         _after = {r["employee_id"]: r
                   for r in _mc2.list_salaries(conn, _per)}
-    check("وإضافتُه تُدرج صفَّه ويُعلَّم بأنه مضاف",
+        _tg = {r["employee_id"] for r in _mc2.list_targets(conn, _per)}
+    check("الموظف الإداري يظهر في جدول الرواتب افتراضاً (لا التارجت)",
           _eeid in _after and _after[_eeid]["is_extra"]
-          and not _after[_weid]["is_extra"],
-          f"{len(_after)} صفاً")
-    _mc2.save_extra_staff([])
+          and not _after[_weid]["is_extra"] and _eeid not in _tg
+          and _weid in _tg, f"{len(_after)} صفاً")
+    # إجازة: يُزال من الرواتب فلا ينزل له راتب — وحسابُه باقٍ
+    with db() as conn:
+        _mc2.remove_person(conn, "salary", _eeid, "admin")
+    with db(readonly=True) as conn:
+        _gone = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
+        _acc_ok = conn.execute(
+            "SELECT 1 FROM entities e JOIN accounts a ON a.id=e.account_id"
+            " WHERE e.id=? AND e.is_deleted=0",
+            (_emp,)).fetchone()
+        _avail = {p["id"]: p for p in
+                  _mc2.available_people(conn, "salary")}
+    check("إزالتُه من الرواتب تُخفي صفَّه وحسابُه باقٍ — ويظهر «مُزالاً»"
+          " في قائمة الإعادة",
+          _eeid not in _gone and _weid in _gone and bool(_acc_ok)
+          and _avail.get(_eeid, {}).get("hidden"))
+    with db() as conn:
+        _mc2.add_person(conn, "salary", _eeid, "admin")
+        # والإزالة لكل جدولٍ وحده: العامل يُزال من الرواتب ويبقى في التارجت
+        _mc2.remove_person(conn, "salary", _weid, "admin")
+    with db(readonly=True) as conn:
+        _back = {r["employee_id"] for r in
+                 _mc2.list_salaries(conn, "2026-08")}
+        _tg2 = {r["employee_id"] for r in _mc2.list_targets(conn, _per)}
+        # شهرٌ نزل راتبه فعلاً لا تنقص منه رواتبُ نزلت
+        _kept = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
+    check("وإعادتُه تُرجع صفَّه — والإزالة من جدولٍ لا تمسّ الآخر",
+          _eeid in _back and _weid not in _back and _weid in _tg2)
+    check("ومن أُزيل بعد نزول راتب شهرٍ يبقى ظاهراً في ذلك الشهر وحده",
+          _weid in _kept)
+    with db() as conn:
+        _mc2.add_person(conn, "salary", _weid, "admin")
     with db(readonly=True) as conn:
         _back = {r["employee_id"] for r in _mc2.list_salaries(conn, _per)}
-    check("ورفعُه يُعيد الجدول لعمال القسم وحدهم",
-          _eeid not in _back and _weid in _back)
+    check("والعامل يعود لجدول الرواتب بزرّ الإعادة", _weid in _back)
 
     # ══ الاسم يُعدَّل في دليل الحسابات ══
     from models import coa as _coa
@@ -7226,6 +7252,124 @@ def main():
                                   entry_date="2026-09-30")
     check("وقاعدةٌ قديمة حُذف قيدها قبل الإصلاح تُنزَل أيضاً",
           not _old87 and _p3["count"] >= 1, str(_p3))
+
+    step("88) 4.54: رواتب العمال والإدارة · القالب قبل/بعد التعديل · رجوع")
+    from models import mfg_costs as _mc88, payroll as _pr88
+    from models import vouchers as _vo88, editing as _ed88
+    from models import doc_edits as _de88
+    from models.entities import add_entity as _ae88
+    _per88 = "2026-11"
+    with db() as conn:
+        _adm88 = _ae88(conn, "محاسبة الإدارة ٨٨", "employee",
+                       username="admin", basic_salary=4000.0)
+        _aeid88 = conn.execute("SELECT employee_id FROM entities WHERE id=?",
+                               (_adm88,)).fetchone()["employee_id"]
+        _rows88 = _mc88.list_salaries(conn, _per88)
+        _mc88.save_salaries(conn, _per88, _rows88, "admin")
+        _p88 = _mc88.post_salaries(conn, _per88, "admin",
+                                   entry_date="2026-11-30")
+        _lines88 = conn.execute(
+            "SELECT a.code, l.line_desc, l.cash_debit FROM journal_lines l"
+            " JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=?"
+            " AND l.cash_debit>0", (_p88["entry_id"],)).fetchall()
+    _adm_line = [x for x in _lines88 if "محاسبة الإدارة ٨٨" in x["line_desc"]]
+    _wk_line = [x for x in _lines88 if "عامل" in x["line_desc"]
+                and x["code"] == "5710"]
+    check("راتب الإداري على «مصروف الرواتب والأجور» 5700 والعامل على 5710",
+          _adm_line and _adm_line[0]["code"] == "5700" and _wk_line,
+          str([(x["code"], x["line_desc"]) for x in _lines88]))
+    # راتبٌ نزل من الشاشة الملغاة لا يُنزَل مرةً ثانية من هنا
+    _per88b = "2026-12"
+    with db() as conn:
+        _pr88.run_accrual(conn, _per88b, "admin", entry_date="2026-12-31")
+        _r88b = {r["employee_id"]: r
+                 for r in _mc88.list_salaries(conn, _per88b)}
+    check("ومن نزل راتبه من شاشة الموظفين القديمة يظهر «مرحّلاً» فلا يتكرّر",
+          _r88b[_aeid88]["is_posted"], str(_r88b[_aeid88]["is_posted"]))
+
+    # ── القالب قبل/بعد: تعديلٌ في المكان ──
+    with db() as conn:
+        _c88 = _ae88(conn, "عميل القالب ٨٨", "customer", username="admin")
+        _v88 = _vo88.create_voucher(conn, "receipt", "2026-11-05", "admin",
+                                    entity_id=_c88, cash_amount=100)
+        _vo88.update_voucher(conn, _v88["id"], "admin", entity_id=_c88,
+                             cash_amount=175)
+        _eid88 = conn.execute(
+            "SELECT id FROM doc_edits WHERE source_table='vouchers'"
+            " AND source_id=? ORDER BY id DESC", (_v88["id"],)).fetchone()["id"]
+        _sn88 = _de88.snapshots(conn, _eid88)
+        _rep88 = _de88.report(conn, edit_id=_eid88)[0]
+    check("التعديل في المكان يحفظ قالب السند قبل التعديل وبعده",
+          _sn88["stored_before"] and "100.00" in _sn88["before"]
+          and "175.00" in _sn88["after"]
+          and "175.00" not in _sn88["before"],
+          f"{len(_sn88['before'])}/{len(_sn88['after'])}")
+    check("وسطر السجل يذكر الطرف وما تغيّر بكلامٍ يُقرأ",
+          _rep88["party"] == "عميل القالب ٨٨" and _rep88["change"],
+          f"{_rep88['party']} · {_rep88['change']}")
+    # ── وتعديلٌ بإلغاءٍ وإعادة ترحيل ──
+    with db() as conn:
+        _ve88 = conn.execute("SELECT entry_id FROM vouchers WHERE id=?",
+                             (_v88["id"],)).fetchone()["entry_id"]
+        _nv88 = _ed88.repost(conn, _ve88, "admin", _vo88.create_voucher,
+                             "receipt", "2026-11-06", "admin",
+                             entity_id=_c88, cash_amount=260)
+        _eid88b = conn.execute(
+            "SELECT id FROM doc_edits WHERE kind='repost'"
+            " ORDER BY id DESC").fetchone()["id"]
+        _sn88b = _de88.snapshots(conn, _eid88b)
+    check("والإلغاء وإعادة الترحيل: القديم قبلُ والجديد بعدُ",
+          "175.00" in _sn88b["before"] and "260.00" in _sn88b["after"],
+          f"{len(_sn88b['before'])}/{len(_sn88b['after'])}")
+    from services import browser_print as _bp88
+    _pg88 = _bp88.build_compare_page(_eid88b)
+    check("وصفحة المقارنة تحمل القالبين بعنوانيهما",
+          "قبل التعديل" in _pg88 and "بعد التعديل" in _pg88
+          and "175.00" in _pg88 and "260.00" in _pg88
+          and "عميل القالب ٨٨" in _pg88, f"{len(_pg88)} حرفاً")
+    # تعديلٌ سُجّل قبل 4.54 (بلا صورة): يُقال ذلك صراحةً ولا ينهار
+    with db() as conn:
+        conn.execute("DELETE FROM doc_edit_snaps WHERE edit_id=?", (_eid88,))
+    _pg88b = _bp88.build_compare_page(_eid88)
+    check("وتعديلٌ قديم بلا صورة: تُقال صراحةً ويُعرض ما بعده",
+          "لم تُحفظ صورة المستند" in _pg88b and "175.00" in _pg88b)
+
+    # ── رجوع لا إغلاق ──
+    try:
+        from PyQt5 import QtWidgets as _QW88
+        _QW88.QApplication.instance() or _QW88.QApplication([])
+        from ui.main_window import MainWindow as _MW88
+        _w88 = _MW88({"id": 1, "username": "admin", "role": "admin",
+                      "role_local": "accountant", "full_name": "م"})
+        _names88 = [it.text(0) for it, _p in _w88._iter_nav()]
+        check("شاشة «إنزال رواتب الموظفين» أُلغيت و«رواتب العمال والإدارة»"
+              " في القائمة",
+              "رواتب العمال والإدارة" in _names88
+              and not any("إنزال رواتب الموظفين" in n for n in _names88))
+        _gl = _w88.screens.index(_w88.gl_screen)
+        _sa = _w88.screens.index(_w88.sales_screen)
+        _w88.switch(_gl)
+        _QW88.QApplication.processEvents()
+        _w88.gl_screen.ensure()
+        _w88.switch(_sa)
+        _QW88.QApplication.processEvents()
+        _alive = _w88.gl_screen.built
+        _txt = _w88.btn_close.text()
+        _w88._close_screen()
+        _QW88.QApplication.processEvents()
+        check("«رجوع» يعود إلى الشاشة السابقة حيّةً كما تُركت",
+              _w88._current_row == _gl and _alive
+              and _w88._items[_w88.gl_screen].text(0)[:20] in _txt
+              and not _w88.sales_screen.built,
+              f"{_w88._current_row}/{_gl} · {_txt}")
+        _w88._close_screen()
+        _QW88.QApplication.processEvents()
+        check("ومن شاشةٍ فُتحت من القائمة يعود إلى الرئيسية",
+              _w88._current_row == 0 and not _w88._history
+              and not _w88.gl_screen.built)
+        _w88.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

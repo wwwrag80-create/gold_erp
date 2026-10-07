@@ -973,6 +973,9 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     # قيمة الفاتورة **قبل** أن يُمسّ قيدها — سطرُ «من عدّل ماذا»
     from models import doc_edits as _de
     _before = _de.totals(conn, inv["entry_id"])
+    # وصورة قالبه قبل التعديل: ما يُعدَّل في مكانه لا يُستعاد بعده
+    _before_html = _de.capture(conn, "invoices", invoice_id,
+                               inv["entry_id"])
     internal = ent["entity_type"] == "internal"
     vat = bool(inv["vat_applied"]) if apply_vat is None else bool(apply_vat)
 
@@ -1167,6 +1170,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
             _de.record(conn, "invoices", invoice_id, username, _before,
                        doc_no=inv["invoice_no"] or "",
                        entry_id=inv["entry_id"], kind="inplace",
+                       before_html=_before_html,
                        note=" · ".join(_notes))
         return {"id": invoice_id, "invoice_no": inv["invoice_no"],
                 "added": [], "updated": [], "removed": [],
@@ -1235,7 +1239,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                f"وزن {dw:+.3f} · أجور {dg:+.2f}{_mv}")
     _de.record(conn, "invoices", invoice_id, username, _before,
                doc_no=inv["invoice_no"] or "", entry_id=inv["entry_id"],
-               kind="inplace",
+               kind="inplace", before_html=_before_html,
                note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}"
                     + _mv)
     return {"id": invoice_id, "invoice_no": inv["invoice_no"],

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""تكاليف ورواتب قسم التصنيع.
+"""رواتب العمال والإدارة — وتكاليف قسم التصنيع.
 
 **المنطق المحاسبي**: العمال جهات من نوع `employee` تماماً كالموظفين،
 فلكلٍّ حسابه الشخصي في شجرة الحسابات. وقيد الرواتب مفصّل بسطرين لكل
@@ -166,9 +166,8 @@ def compute_target_row(r):
 
 def list_targets(conn, period):
     """صفوف التارجت لكل العمال النشطين — تُنشأ فارغة إن لم توجد."""
-    from models import payroll
     rows = []
-    for e in sort_people(payroll.list_workers(conn)):
+    for e in section_people(conn, "target", period):
         r = conn.execute(
             "SELECT * FROM mfg_targets WHERE period=? AND employee_id=?",
             (period, e["id"])).fetchone()
@@ -481,36 +480,170 @@ def sort_people(people):
             pid = int(p["id"])
         except Exception:
             pid = -1
-        return (order.get(pid, big), str(p["name"] or ""))
+        try:
+            admin = 0 if (p["staff_kind"] or "employee") == "worker" else 1
+        except (KeyError, IndexError, TypeError):
+            admin = 0
+        return (order.get(pid, big), admin, str(p["name"] or ""))
 
     return sorted(people, key=_key)
 
 
-def _salary_people(conn):
-    """عمال التصنيع، ومعهم من أُضيف يدوياً من الموظفين.
+# ══════════════════════════════════════════════════════════════════
+# من يظهر في كل جدول — رواتب العمال والإدارة (4.54)
+# ══════════════════════════════════════════════════════════════════
+# شاشة «إنزال رواتب الموظفين» أُلغيت: كل موظفٍ — عاملاً كان أو
+# إدارياً — يظهر هنا وتُنزَل رواتبه من مكانٍ واحد. والتارجت لعمال
+# التصنيع أصلاً.
+#
+# **والإزالة ليست حذفاً**: موظفٌ في إجازة يُزال من جدول الرواتب فلا
+# ينزل له راتب، وحسابُه وقيودُه وكشفُه باقيةٌ كما هي. فإذا عاد أُضيف
+# بزرّ «إضافة» فعاد صفُّه. والإزالة لكل جدولٍ وحده: من أُزيل من
+# الرواتب قد يبقى في التارجت، والعكس.
+SECTIONS = {"target": "التارجت", "salary": "الرواتب"}
+_SECT_KEY = "mfg_staff_sections"
 
-    الجدول لعمال التصنيع أصلاً، لكنّ الشهر قد يعمل فيه موظفٌ إداري
-    مع القسم فيستحقّ تارجتاً أو مكافأةً معه. فبدل أن يُحوَّل نوعُه
-    في الدليل — وهو تغييرٌ دائم لأجل شهر — يُضاف صفُّه هنا، ويُرفع
-    متى شاء صاحب النظام.
-    """
+
+def load_sections(conn):
+    """{"target": {"add": [...], "hide": [...]}, "salary": {...}}"""
+    import json
+    out = {k: {"add": [], "hide": []} for k in SECTIONS}
+    try:
+        from models import fiscal
+        raw = fiscal.get_setting(conn, _SECT_KEY, "")
+        d = json.loads(raw) if raw else {}
+        for k in SECTIONS:
+            for part in ("add", "hide"):
+                out[k][part] = sorted({int(x) for x in
+                                       (d.get(k, {}).get(part) or [])
+                                       if str(x).lstrip("-").isdigit()})
+    except Exception:
+        pass
+    return out
+
+
+def save_sections(conn, d, username=None):
+    import json
+    from models import fiscal
+    clean = {k: {"add": sorted({int(x) for x in d.get(k, {}).get("add", [])}),
+                 "hide": sorted({int(x) for x in
+                                 d.get(k, {}).get("hide", [])})}
+             for k in SECTIONS}
+    fiscal.set_setting(conn, _SECT_KEY, json.dumps(clean), username)
+    return clean
+
+
+def _default_ids(conn, section):
+    """أهل الجدول افتراضاً: التارجت لعمال التصنيع، والرواتب للجميع."""
     from models import payroll
-    people = list(payroll.list_workers(conn))
-    have = {e["id"] for e in people}
-    extra = [i for i in load_extra_staff() if i not in have]
-    if extra:
-        ph = ",".join("?" * len(extra))
-        try:
-            people += list(conn.execute(
-                "SELECT e.*, en.job_title job_title, en.id entity_id,"
-                " en.account_id account_id FROM employees e"
-                " LEFT JOIN entities en ON en.employee_id=e.id"
-                "   AND en.is_deleted=0"
-                f" WHERE e.is_deleted=0 AND e.id IN ({ph})"
-                " ORDER BY e.name", extra))
-        except Exception:
-            pass
-    return sort_people(people)
+    people = (payroll.list_workers(conn) if section == "target"
+              else payroll.list_employees(conn, active_only=True))
+    return {e["id"] for e in people}
+
+
+def _people_by_ids(conn, ids):
+    ids = [int(i) for i in ids]
+    if not ids:
+        return []
+    ph = ",".join("?" * len(ids))
+    try:
+        return list(conn.execute(
+            "SELECT e.*, en.job_title job_title, en.id entity_id,"
+            " en.account_id account_id FROM employees e"
+            " LEFT JOIN entities en ON en.employee_id=e.id"
+            "   AND en.is_deleted=0"
+            f" WHERE e.is_deleted=0 AND e.id IN ({ph})", ids))
+    except Exception:
+        return []
+
+
+def _posted_in(conn, period, employee_id):
+    """هل نزل راتبُه لهذا الشهر بقيدٍ قائم؟ (فيبقى صفُّه ولو أُزيل)"""
+    if not period:
+        return False
+    try:
+        r = conn.execute(
+            "SELECT is_posted, entry_id FROM mfg_salaries"
+            " WHERE period=? AND employee_id=?",
+            (period, employee_id)).fetchone()
+    except Exception:
+        return False
+    return _posted(conn, r) or _payroll_accrued(conn, employee_id, period)
+
+
+def section_people(conn, section, period=None):
+    """من يظهر في الجدول: أهلُه افتراضاً + المضاف − المُزال.
+
+    ومن أُزيل بعد أن نزل راتب شهرٍ له يبقى ظاهراً **في ذلك الشهر
+    وحده** — فكشفُ شهرٍ مضى لا تنقص منه رواتبُ نزلت فعلاً.
+    """
+    sec = load_sections(conn).get(section, {"add": [], "hide": []})
+    hide = set(sec["hide"])
+    ids = (_default_ids(conn, section) | set(sec["add"])) - hide
+    if section == "salary" and period:
+        ids |= {i for i in hide if _posted_in(conn, period, i)}
+    return sort_people(_people_by_ids(conn, ids))
+
+
+def available_people(conn, section):
+    """من يمكن إضافته للجدول: المُزالون أولاً ثم بقية الموظفين."""
+    from models import payroll
+    sec = load_sections(conn).get(section, {"add": [], "hide": []})
+    shown = {e["id"] for e in section_people(conn, section)}
+    hidden = set(sec["hide"])
+    out = []
+    for e in payroll.list_employees(conn, active_only=True):
+        if e["id"] in shown:
+            continue
+        out.append({"id": e["id"], "name": e["name"],
+                    "hidden": e["id"] in hidden,
+                    "kind": (e["staff_kind"] or "employee")})
+    out.sort(key=lambda x: (not x["hidden"], x["kind"] != "worker",
+                            x["name"]))
+    return out
+
+
+def remove_person(conn, section, employee_id, username):
+    """يُزيل الشخص من جدولٍ — لا يمسّ حسابه ولا قيوده."""
+    d = load_sections(conn)
+    sec = d[section]
+    eid = int(employee_id)
+    sec["add"] = [i for i in sec["add"] if i != eid]
+    if eid in _default_ids(conn, section) and eid not in sec["hide"]:
+        sec["hide"].append(eid)
+    save_sections(conn, d, username)
+    log_action(conn, username, "update", "mfg_staff", eid,
+               f"إزالة من جدول {SECTIONS[section]} (الحساب باقٍ)")
+
+
+def add_person(conn, section, employee_id, username):
+    """يعيد المُزال أو يضيف موظفاً للجدول."""
+    d = load_sections(conn)
+    sec = d[section]
+    eid = int(employee_id)
+    sec["hide"] = [i for i in sec["hide"] if i != eid]
+    if eid not in _default_ids(conn, section) and eid not in sec["add"]:
+        sec["add"].append(eid)
+    save_sections(conn, d, username)
+    log_action(conn, username, "update", "mfg_staff", eid,
+               f"إضافة إلى جدول {SECTIONS[section]}")
+
+
+def _salary_people(conn, period=None):
+    """أهل جدول الرواتب (توافقٌ مع ما قبل 4.54)."""
+    return section_people(conn, "salary", period)
+
+
+def _payroll_accrued(conn, employee_id, period):
+    """راتبٌ نزل لهذا الشهر من شاشة «إنزال رواتب الموظفين» الملغاة —
+    فلا يُنزَل مرةً ثانية من هنا."""
+    try:
+        return bool(conn.execute(
+            "SELECT 1 FROM payroll_ledger WHERE employee_id=? AND period=?"
+            " AND kind='accrual' AND is_deleted=0",
+            (employee_id, period)).fetchone())
+    except Exception:
+        return False
 
 
 def _posted(conn, saved):
@@ -531,20 +664,16 @@ def refresh_posted(conn, period, rows):
     فقيدٌ حُذف من كشف العامل والشاشة مفتوحة لا يمنع إنزال الشهر."""
     for r in rows:
         if r.get("employee_id"):
-            r["is_posted"] = _posted(conn, conn.execute(
-                "SELECT is_posted, entry_id FROM mfg_salaries"
-                " WHERE period=? AND employee_id=?",
-                (period, r["employee_id"])).fetchone())
+            r["is_posted"] = _posted_in(conn, period, r["employee_id"])
     return rows
 
 
 def list_salaries(conn, period):
     """صفوف الرواتب مرتبطة ديناميكياً بالتارجت وسندات الصرف."""
     ensure_schema(conn)
-    _extra_set = set(load_extra_staff())
     targets = {t["employee_id"]: t for t in list_targets(conn, period)}
     rows = []
-    for e in _salary_people(conn):
+    for e in _salary_people(conn, period):
         saved = conn.execute(
             "SELECT * FROM mfg_salaries WHERE period=? AND employee_id=?",
             (period, e["id"])).fetchone()
@@ -576,9 +705,11 @@ def list_salaries(conn, period):
             "draw_cash": w["cash"], "draw_bank": w["bank"],
             # رصيدُه في الدفتر الآن: المدين وحده يُعرض
             "owed": balance_now(conn, e["id"]),
-            "is_posted": _posted(conn, saved),
-            # صفٌّ أُضيف يدوياً (موظفٌ من خارج عمال التصنيع)
-            "is_extra": bool(e["id"] in _extra_set),
+            "is_posted": (_posted(conn, saved)
+                          or _payroll_accrued(conn, e["id"], period)),
+            # عاملُ تصنيع أم موظفٌ إداري — ومنه حسابُ مصروف راتبه
+            "staff_kind": (e["staff_kind"] or "employee"),
+            "is_extra": (e["staff_kind"] or "employee") != "worker",
         }
         r.update(compute_salary_row(r))
         rows.append(r)
@@ -644,23 +775,33 @@ def post_salaries(conn, period, username, entry_date=None, rows=None):
             f"لا توجد رواتب معلّقة لشهر {period} — ربما رُحّلت مسبقاً")
 
     date = entry_date or _dt.date.today().isoformat()
-    exp_acc = acc_id(conn, WORKER_EXPENSE)
+    # عامل التصنيع على «مصروف رواتب عمال التصنيع»، والإداري على
+    # «مصروف الرواتب والأجور» — فتبقى قائمة الدخل تفصل الصنفين
+    from models import payroll as _pr
+    exp_worker = acc_id(conn, WORKER_EXPENSE)
+    exp_admin = acc_id(conn, _pr.SALARY_EXP)
     lines, total = [], 0.0
     for r in pending:
         net = round(float(r["net_salary"]), 2)
-        ent = conn.execute(
-            "SELECT account_id FROM entities WHERE employee_id=?"
-            " AND is_deleted=0", (r["employee_id"],)).fetchone()
-        if not ent:
-            raise ValueError(f"العامل «{r['name']}» بلا حساب في الشجرة")
-        desc = f"راتب عمال شهر {period} - {r['name']}"
-        lines.append({"account_id": exp_acc, "cash_debit": net,
-                      "line_desc": desc})
+        emp = conn.execute(
+            "SELECT COALESCE(staff_kind,'employee') k FROM employees"
+            " WHERE id=?", (r["employee_id"],)).fetchone()
+        # حسابه الشخصي في الدليل — وموظفٌ قديم غير مُكوَّد يُقيَّد على
+        # الحساب الأب «سلف الموظفين» كما كانت تفعل شاشة الموظفين
+        acc = _pr.advance_account_id(conn, r["employee_id"])
+        if not emp or not acc:
+            raise ValueError(f"الموظف «{r['name']}» بلا حساب في الشجرة")
+        ent = {"account_id": acc}
+        worker = emp["k"] == "worker"
+        desc = (f"راتب عمال شهر {period} - {r['name']}" if worker
+                else f"راتب شهر {period} - {r['name']}")
+        lines.append({"account_id": exp_worker if worker else exp_admin,
+                      "cash_debit": net, "line_desc": desc})
         lines.append({"account_id": ent["account_id"], "cash_credit": net,
                       "line_desc": desc})
         total += net
 
-    entry_id = post_entry(conn, date, f"رواتب عمال التصنيع {period}",
+    entry_id = post_entry(conn, date, f"رواتب العمال والإدارة {period}",
                           lines, source_table="mfg_salaries",
                           source_id=None, username=username)
     for r in pending:
@@ -669,7 +810,7 @@ def post_salaries(conn, period, username, entry_date=None, rows=None):
             " WHERE period=? AND employee_id=?",
             (entry_id, period, r["employee_id"]))
     log_action(conn, username, "create", "mfg_salaries", entry_id,
-               f"ترحيل رواتب عمال {period}: {len(pending)} عامل"
+               f"ترحيل رواتب {period}: {len(pending)} موظف"
                f" بإجمالي {total:,.2f}")
     return {"entry_id": entry_id, "count": len(pending),
             "total": round(total, 2)}
@@ -696,7 +837,10 @@ def summary(conn, period):
     """
     from models.accounts import acc_id
     d1, d2 = _period_range(period)
-    sal = list_salaries(conn, period)
+    # ملخص **قسم التصنيع**: رواتب الإدارة ظاهرةٌ في جدول الرواتب لكنها
+    # ليست من تكلفة القسم
+    sal = [r for r in list_salaries(conn, period)
+           if r.get("staff_kind", "worker") == "worker"]
     net = round(sum(float(r.get("net_salary") or 0) for r in sal), 2)
     target = round(sum(float(r.get("target_amount") or 0) for r in sal), 2)
     gold_loss_w = round(sum(float(r.get("gold_loss") or 0) for r in sal), 2)

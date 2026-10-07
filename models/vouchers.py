@@ -449,6 +449,8 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     # قيمة السند **قبل** أن يُستبدل محتوى قيده
     from models import doc_edits as _de
     _before = _de.totals(conn, entry_id)
+    # وصورة قالبه قبل التعديل: ما يُعدَّل في مكانه لا يُستعاد بعده
+    _before_html = _de.capture(conn, "vouchers", voucher_id, entry_id)
 
     kind = kind or v["kind"]
     # الرقم يحمل نوعه (RV قبض · PV صرف): سندُ قبضٍ صُحِّح إلى صرفٍ يأخذ
@@ -603,7 +605,8 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
                f"تعديل {v_no} في مكانه{_mv}")
     _de.record(conn, "vouchers", voucher_id, username, _before,
                doc_no=v_no or "", entry_id=entry_id,
-               kind="inplace", note=_mv.strip(" ·"))
+               kind="inplace", before_html=_before_html,
+               note=_mv.strip(" ·"))
     return {"id": voucher_id, "voucher_no": v_no,
             "renumbered": (v["voucher_no"], _renum) if _renum else None,
             "moved_date": _moved,
