@@ -7438,6 +7438,18 @@ def main():
           and not any(n.startswith("gold_erp/data/") for n in _nm89))
     shutil.rmtree(_b89, ignore_errors=True)
 
+    step("90) 4.57: رابط المدير بتصميم الكمبيوتر — خمس صور في الصف")
+    from services import models_web as _mw90
+    with db(readonly=True) as conn:
+        _h90 = _mw90.page_html(conn, {}, "/m/t90")
+    check("الصفحة بعرض الكمبيوتر على الجوال، والتكبير بالأصابع غير ممنوع",
+          f'content="width={_mw90.DESKTOP_W}"' in _h90
+          and "user-scalable" not in _h90 and "maximum-scale" not in _h90)
+    check("وخمس صور في الصف افتراضاً مع اختيار 4/5/6",
+          _mw90.DEFAULT_COLS == 5
+          and all(f'data-c="{c}"' in _h90 for c in (4, 5, 6))
+          and "repeat(var(--cols)" in _h90)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

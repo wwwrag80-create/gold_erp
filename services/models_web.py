@@ -59,7 +59,9 @@ MODES = (
 )
 COOKIE = "mw"
 COOKIE_DAYS = 30
-THUMB_W, FULL_W = 520, 1400
+# المصغّرة أكبر قليلاً (4.57): الجوال يكبّر الشبكة بالأصابع فتُرى الصورة
+# بأضعاف حجمها في الصف، وكاملُها يُفتح بالنقر عليها
+THUMB_W, FULL_W = 640, 1600
 CACHE_CAP = 40 * 1024 * 1024         # ذاكرة الصور المصغّرة (في الذاكرة)
 LOCK_AFTER, LOCK_WINDOW = 10, 15 * 60
 
@@ -554,62 +556,88 @@ def thumb(path, width):
 #  الصفحة
 # ══════════════════════════════════════════════════════════════════
 
+# ══ تصميم الكمبيوتر حتى على الجوال (4.57) ══
+# الصفحة تُرسم بعرضٍ ثابت كموقع كمبيوتر (`DESKTOP_W`)، فيفتحها الجوال
+# مصغّرةً كاملة: خمس صورٍ في الصف (أو أربع/ست بالاختيار)، والتكبير
+# والتصغير بالأصابع والتمرير في كل اتجاه كما في أي موقع كمبيوتر — لا
+# صورةً واحدة في الشاشة يُسحب بعدها إلى الأسفل.
+DESKTOP_W = 1280
+COLS = (4, 5, 6)
+DEFAULT_COLS = 5
+
 _CSS = """
 :root{--bg:#F6F2EA;--card:#fff;--ink:#2b2723;--muted:#776b5e;--line:#e7dfd1;
---brown:#5A3E1B;--gold:#A8822E;--in:#1E6B33;--out:#8B5E1E}
+--brown:#5A3E1B;--gold:#A8822E;--in:#1E6B33;--out:#8B5E1E;--cols:5}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-font-family:system-ui,"Segoe UI",Tahoma,sans-serif;font-size:15px}
-header{position:sticky;top:0;z-index:5;background:var(--brown);color:#fff;
-padding:10px 14px 12px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-header h1{font-size:17px;margin:0}
-header .sub{font-size:12px;opacity:.85;margin-top:2px}
-.bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
-.bar input[type=search]{flex:1 1 200px;min-width:0;padding:9px 11px;
-border:0;border-radius:9px;font-size:15px}
-main{padding:12px;max-width:1200px;margin:auto}
-.tabs,.seg{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
-.tabs a,.seg a{padding:7px 13px;border-radius:20px;background:#fff;
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);min-width:1200px;
+font-family:system-ui,"Segoe UI",Tahoma,sans-serif;font-size:14px}
+header{background:var(--brown);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+header .hi{max-width:1500px;margin:auto;padding:12px 22px;display:flex;
+align-items:center;gap:20px}
+header h1{font-size:20px;margin:0;white-space:nowrap}
+header .sub{font-size:12px;opacity:.85;margin-top:3px;white-space:nowrap}
+.bar{flex:1 1 auto;display:flex;justify-content:flex-end}
+.bar input[type=search]{width:460px;padding:9px 12px;border:0;
+border-radius:9px;font-size:14px}
+main{padding:16px 22px;max-width:1500px;margin:auto}
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+margin:0 0 12px}
+.tabs,.seg{display:flex;gap:6px;flex-wrap:wrap}
+.tabs a,.seg a{padding:7px 14px;border-radius:20px;background:#fff;
 border:1px solid var(--line);color:var(--ink);text-decoration:none;
-font-size:14px}
+font-size:13.5px;white-space:nowrap}
 .tabs a.on,.seg a.on{background:var(--gold);border-color:var(--gold);
 color:#fff;font-weight:600}
-form.tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;
-margin:0 0 10px}
-form.tools select,form.tools input,form.tools button{padding:7px 9px;
-border:1px solid var(--line);border-radius:8px;background:#fff;font-size:14px}
+.sep{width:1px;height:26px;background:var(--line)}
+form.tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0}
+form.tools select,form.tools input,form.tools button{padding:6px 9px;
+border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px}
 form.tools button{background:var(--brown);color:#fff;border-color:var(--brown)}
-.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-gap:8px;margin:0 0 12px}
+.cols{display:flex;align-items:center;gap:4px;margin-inline-start:auto;
+color:var(--muted);font-size:13px;white-space:nowrap}
+.cols button{min-width:34px;padding:5px 0;border:1px solid var(--line);
+border-radius:8px;background:#fff;color:var(--ink);font-weight:600;
+font-size:13px;cursor:pointer}
+.cols button.on{background:var(--brown);color:#fff;border-color:var(--brown)}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+gap:10px;margin:0 0 14px}
 .sum div{background:#fff;border:1px solid var(--line);border-radius:12px;
-padding:10px 12px}
-.sum b{display:block;font-size:19px;margin-top:3px}
+padding:9px 12px}
+.sum b{display:block;font-size:18px;margin-top:2px}
 .sum .in b{color:var(--in)} .sum .out b{color:var(--out)}
-.grid{display:grid;gap:12px;
-grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+.grid{display:grid;gap:14px;align-items:start;
+grid-template-columns:repeat(var(--cols),minmax(0,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
 overflow:hidden;display:flex;flex-direction:column}
-.ph{display:block;background:#efe9dc;aspect-ratio:4/3}
-.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph{display:block;background:#fff;aspect-ratio:1/1;
+border-bottom:1px solid var(--line)}
+.ph img{width:100%;height:100%;object-fit:contain;display:block}
 .noimg{display:flex;align-items:center;justify-content:center;
-color:var(--muted);font-size:13px;aspect-ratio:4/3;background:#f1ece2}
-.b{padding:10px 12px 12px}
-.b h2{font-size:16px;margin:0 0 6px;color:var(--brown)}
-.chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{font-size:13px;padding:3px 9px;border-radius:12px;background:#f3efe6}
+color:var(--muted);font-size:13px;aspect-ratio:1/1;background:#f1ece2}
+.b{padding:8px 10px 10px}
+.b h2{font-size:15px;margin:0 0 6px;color:var(--brown)}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{font-size:12px;padding:2px 8px;border-radius:11px;background:#f3efe6;
+white-space:nowrap}
 .chip.in{color:var(--in);background:#e8f3ea}
 .chip.out{color:var(--out);background:#f7eddd}
 .chip.pick{color:#fff;background:#8a6d1d;font-weight:bold}
 .sum .pick{grid-column:1/-1;border-color:#8a6d1d}
-details{margin-top:8px;border-top:1px dashed var(--line);padding-top:6px}
-summary{cursor:pointer;color:var(--gold);font-weight:600;font-size:14px}
-h3{font-size:13.5px;margin:9px 0 4px}
+details{margin-top:7px;border-top:1px dashed var(--line);padding-top:5px}
+summary{cursor:pointer;color:var(--gold);font-weight:600;font-size:13px}
+h3{font-size:12.5px;margin:7px 0 3px}
 h3.in{color:var(--in)} h3.out{color:var(--out)}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:5px 4px;border-bottom:1px solid #f0ebe1;text-align:right}
-th{color:var(--muted);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:4px 3px;border-bottom:1px solid #f0ebe1;text-align:right;
+vertical-align:top}
+td .who{display:block}
+td .d{display:block;color:var(--muted);font-size:10.5px;direction:ltr;
+text-align:right;white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:11.5px;line-height:1.25}
+details{overflow-x:auto}
 td.n{direction:ltr;text-align:left;white-space:nowrap}
-.empty{padding:30px;text-align:center;color:var(--muted)}
+.empty{padding:30px;text-align:center;color:var(--muted);grid-column:1/-1}
 footer{padding:16px;text-align:center;color:var(--muted);font-size:12px}
 footer a{color:var(--muted)}
 """
@@ -650,7 +678,18 @@ _JS = """
    sum.innerHTML='نتيجة البحث «'+v.replace(/[<>&"]/g,'')+'»<b>'+n+
     ' موديل · '+tn+' طقم · '+fmt(tw)+'</b>';}
  }
- if(q){q.addEventListener('input',run);}
+ if(q){q.addEventListener('input',run); if(q.value){run();}}
+ // عدد الصور في الصف — يُحفظ في الجهاز نفسه
+ var cb=document.querySelectorAll('.cols button[data-c]');
+ function setCols(n){
+  document.documentElement.style.setProperty('--cols',n);
+  cb.forEach(function(b){b.classList.toggle('on',b.getAttribute('data-c')==n);});
+  try{localStorage.setItem('mw_cols',n);}catch(e){}}
+ var sv=null; try{sv=localStorage.getItem('mw_cols');}catch(e){}
+ if(cb.length){setCols(sv&&/^[3-8]$/.test(sv)?sv:
+  (document.documentElement.getAttribute('data-cols')||'5'));}
+ cb.forEach(function(b){b.addEventListener('click',function(){
+  setCols(b.getAttribute('data-c'));});});
  document.querySelectorAll('select[data-auto]').forEach(function(s){
   s.addEventListener('change',function(){s.form.submit();});});
 })();
@@ -664,6 +703,14 @@ def _e(v):
 def _w(v):
     from services import karat_view as kv
     return f"{kv.g(float(v or 0)):,.2f}"
+
+
+def _who(holder, date, bulk=False):
+    """الجهة وتحتها التاريخ بخطٍّ صغير — ثلاثة أعمدة تتّسع لها البطاقة
+    في صفٍّ من خمس، فلا يُقصّ التاريخ ولا يُكسر الاسم بين حروفه."""
+    extra = " · رصيد مجمّع" if bulk else ""
+    return (f'<span class="who">{_e(holder)}{extra}</span>'
+            f'<small class="d">{_e(date)}</small>')
 
 
 def _rk(i, with_holder):
@@ -719,7 +766,8 @@ def _photo(base, model, have):
 
 
 def page_html(conn, query, base):
-    """الشاشة كاملةً للجوال — الدليل، أو البضاعة الواردة بتاريخ."""
+    """الشاشة كاملةً بتصميم الكمبيوتر (يُفتح كذلك على الجوال ويُكبَّر
+    بالأصابع) — الدليل، أو البضاعة الواردة بتاريخ."""
     from datetime import datetime
 
     from models import models_catalog as mc
@@ -758,20 +806,24 @@ def page_html(conn, query, base):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     co = _company().strip()
     title = "دليل الموديلات" + (f" — {_e(co)}" if co else "")
+    cols = "".join(f'<button type="button" data-c="{c}">{c}</button>'
+                   for c in COLS)
     return f"""<!DOCTYPE html>
-<html dir="rtl" lang="ar"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<html dir="rtl" lang="ar" data-cols="{DEFAULT_COLS}"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">
 <title>{title}</title>
 <style>{_CSS}</style></head><body>
-<header><h1>{title}</h1>
-<div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div>
+<header><div class="hi"><div class="t"><h1>{title}</h1>
+<div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
 <div class="bar"><input id="q" type="search"
  placeholder="ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…"></div>
-</header><main>
-<nav class="tabs">{tabs}</nav>
-<nav class="seg">{seg}</nav>
+</div></header><main>
+<div class="top"><nav class="tabs">{tabs}</nav><span class="sep"></span>
+<nav class="seg">{seg}</nav><span class="sep"></span>
 {tools}
+<div class="cols">الصور في الصف: {cols}</div></div>
 <section class="sum">{summary}<div id="pick" class="pick"
  style="display:none"></div></section>
 <section class="grid">{body}</section>
@@ -810,12 +862,11 @@ def _guide(conn, base, view, sort, imgs, unit, sort_sel):
         det = []
         if sold:
             det.append('<h3 class="out">طرف المناديب</h3><table><tr>'
-                       '<th>رقم التشغيل</th><th>الوزن</th><th>مع من</th>'
-                       '<th>التاريخ</th></tr>' + "".join(
+                       '<th>رقم التشغيل</th><th>الوزن</th>'
+                       '<th>مع من · التاريخ</th></tr>' + "".join(
                            f'<tr{_rk(i, True)}><td>{_e(i["wo"])}</td>'
                            f'<td class="n">{_w(i["reg"])}</td>'
-                           f'<td>{_e(i["holder"])}</td>'
-                           f'<td class="n">{_e(i["date"])}</td></tr>'
+                           f'<td>{_who(i["holder"], i["date"])}</td></tr>'
                            for i in sold) + '</table>')
         if stock:
             det.append('<h3 class="in">الموجود (متاح للبيع)</h3><table><tr>'
@@ -902,8 +953,7 @@ def _received(conn, query, base, view, sort, imgs, unit, sort_sel):
         rows = "".join(
             f'<tr{_rk(i, True)}><td>{_e(i["wo"])}</td>'
             f'<td class="n">{_w(i["reg"])}</td>'
-            f'<td>{_e(i["holder"])}{" · رصيد مجمّع" if i["bulk"] else ""}'
-            f'</td><td class="n">{_e(i["date"])}</td></tr>'
+            f'<td>{_who(i["holder"], i["date"], i["bulk"])}</td></tr>'
             for i in m["items"])
         cards.append(
             f'<article class="card" data-s="{_e(keys)}"'
@@ -919,7 +969,7 @@ def _received(conn, query, base, view, sort, imgs, unit, sort_sel):
                if m["out_count"] else "")
             + f'</div><details open><summary>أرقام التشغيل</summary>'
               f'<table><tr><th>رقم التشغيل</th><th>الوزن</th>'
-              f'<th>مع من الآن</th><th>الوارد</th></tr>{rows}</table>'
+              f'<th>مع من الآن · الوارد</th></tr>{rows}</table>'
               f'</details></div></article>')
     span = d1 if d1 == d2 else f"{d1} ← {d2}"
     n_in = sum(m["in_count"] for m in models)
