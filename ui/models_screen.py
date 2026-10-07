@@ -38,7 +38,7 @@ class ModelsScreen(QtWidgets.QWidget):
         self._sync = False          # يمنع ارتداد الإشارات بين التاريخ والقائمة
 
         self.search = QtWidgets.QLineEdit()
-        self.search.setPlaceholderText("ابحث برقم الموديل أو رقم التشغيل…")
+        self.search.setPlaceholderText("ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…")
         self.search.setMaximumWidth(280)
         self.search.textChanged.connect(self.apply_filter)
 
@@ -84,7 +84,7 @@ class ModelsScreen(QtWidgets.QWidget):
         btn_link.clicked.connect(self.open_link)
 
         # ── الوارد بتاريخ: ماذا دخل ذلك اليوم وأين هو الآن ──
-        self.by_date = QtWidgets.QCheckBox("الوارد بتاريخ")
+        self.by_date = QtWidgets.QCheckBox("البضاعة الواردة بتاريخ")
         self.by_date.setToolTip(
             "يعرض الموديلات التي وردت من التصنيع في اليوم المحدَّد —\n"
             "كل موديل وأرقام تشغيله، ومع من كل قطعة اليوم:\n"
@@ -366,11 +366,15 @@ class ModelsScreen(QtWidgets.QWidget):
         if not models:
             self.summary.setText(
                 f"لا وارد من التصنيع في {span} — جرّب يوماً من القائمة.")
+            self._sum_base = self.summary.text()
             return
         self.summary.setText(
             f"{len(models)} موديل   |   الوارد في {span}: "
             f"{n_in + n_out} طقم · {kv.g(w_tot):,.2f} {kv.unit()}"
             f"   |   بالخزنة: {n_in} · عند الجهات: {n_out}")
+        self._sum_base = self.summary.text()
+        if self.search.text().strip():
+            self.apply_filter(self.search.text())
 
     def _size_columns(self):
         try:
@@ -535,29 +539,107 @@ class ModelsScreen(QtWidgets.QWidget):
                    f"{kv.g(tot_in):,.2f} {kv.unit()}   |   المباع: "
                    f"{n_out} طقم · {kv.g(tot_out):,.2f} {kv.unit()}")
         self.summary.setText(txt)
+        self._sum_base = txt
+        if self.search.text().strip():
+            self.apply_filter(self.search.text())
 
     # ══════════ الإجراءات ══════════
     def apply_filter(self, text):
+        """البحث (4.56): برقم الموديل يُعرض الموديل كاملاً؛ وباسم الجهة
+        أو رقم التشغيل تُعرض **أرقام التشغيل المطابقة وحدها** تحت
+        موديلاتها، والعدد والوزن في الرؤوس لها هي.
+
+        كان البحث باسم جهةٍ يُظهر الموديل كاملاً — بقطع الجهات الأخرى
+        التي أخذت الموديل نفسه — فيضيع ما عند الجهة المطلوبة بينها.
+        """
         text = (text or "").strip()
+        root = self.model.invisibleRootItem()
+        n_all = w_all = 0
+        hits = 0
         for i in range(self.model.rowCount()):
             node = self.model.item(i)
-            show = not text or text in node.text()
-            if not show:
-                for b in range(node.rowCount()):
-                    br = node.child(b)
-                    # في وضع التاريخ يكون الابنُ رقمَ تشغيلٍ مباشرةً
-                    # لا فرعاً — فيُفحص نصُّه هو أيضاً.
-                    if text in br.text():
-                        show = True
-                        break
-                    for k in range(br.rowCount()):
-                        if text in br.child(k).text():
-                            show = True
-                            break
-                    if show:
-                        break
-            self.tree.setRowHidden(i, self.model.invisibleRootItem().index(),
-                                   not show)
+            if not text or text in node.text():
+                self._unfilter(root, i)
+                show = True
+            else:
+                n, w = self._filter_rows(node, text)
+                show = n > 0
+                if show:
+                    self._set_counts(root, i, n, w)
+                    self.tree.expand(node.index())
+                    n_all += n
+                    w_all += w
+                    hits += 1
+            self.tree.setRowHidden(i, root.index(), not show)
+        base = getattr(self, "_sum_base", None)
+        if base is not None:
+            if text and hits:
+                self.summary.setText(
+                    f"البحث «{text}»: {hits} موديل · {n_all} طقم · "
+                    f"{w_all:,.2f} {kv.unit()}")
+            else:
+                self.summary.setText(base)
+
+    _ORIG = QtCore.Qt.UserRole + 7
+
+    @staticmethod
+    def _num(txt):
+        try:
+            return float(str(txt).replace(",", "").strip() or 0)
+        except ValueError:
+            return 0.0
+
+    def _set_counts(self, parent, row, n, w):
+        """عدد ووزن ما طابق البحث في رأس الموديل أو الفرع (والأصل محفوظ)."""
+        for col, val in ((1, n), (2, f"{w:,.2f}")):
+            it = (parent.child(row, col) if parent is not None
+                  else self.model.item(row, col))
+            if it is None:
+                continue
+            if it.data(self._ORIG) is None:
+                it.setData(it.text(), self._ORIG)
+            it.setText(str(val))
+
+    def _unfilter(self, parent, row):
+        """يُعيد الصف وما تحته كما رُسم: كل الأبناء ظاهرة والأرقام أصلها."""
+        for col in (1, 2):
+            it = parent.child(row, col)
+            if it is not None and it.data(self._ORIG) is not None:
+                it.setText(it.data(self._ORIG))
+                it.setData(None, self._ORIG)
+        item = parent.child(row, 0)
+        if item is None:
+            return
+        for r in range(item.rowCount()):
+            self.tree.setRowHidden(r, item.index(), False)
+            self._unfilter(item, r)
+
+    def _filter_rows(self, item, text):
+        """يُخفي من أبناء `item` ما لا يطابق — ويعيد (العدد، الوزن)."""
+        n = 0
+        w = 0.0
+        for r in range(item.rowCount()):
+            c0 = item.child(r, 0)
+            if c0 is None:
+                continue
+            if c0.rowCount():                      # فرع: طرف المناديب/الموجود
+                bn, bw = self._filter_rows(c0, text)
+                hide = bn == 0
+                if not hide:
+                    self._set_counts(item, r, bn, bw)
+                    self.tree.expand(c0.index())
+                n += bn
+                w += bw
+            else:                                  # رقم تشغيل
+                c3 = item.child(r, 3)
+                hide = not (text in c0.text()
+                            or (c3 is not None and text in c3.text()))
+                if not hide:
+                    n += 1
+                    c2 = item.child(r, 2)
+                    w += self._num(c2.text() if c2 is not None else 0)
+            self.tree.setRowHidden(r, item.index(), hide)
+        return n, round(w, 2)
 
     def _menu(self, pos):
         idx = self.tree.indexAt(pos)

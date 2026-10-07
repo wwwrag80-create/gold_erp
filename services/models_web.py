@@ -5,7 +5,7 @@
 (`services.photo_server`) يعرض صور الفواتير على شبكة المصنع؛ وهنا يُضاف
 إليه مسارٌ واحد `/m/<رمز>` يعرض **الشاشة كاملةً** للمدير على جواله:
 كل موديل بصورته، وكم بالخزنة وكم عند المناديب، وكل رقم تشغيل بوزنه ومع
-من هو ومتى — والوارد بتاريخ. البيانات تُقرأ لحظةَ الفتح من قاعدة المصنع:
+من هو ومتى — والبضاعة الواردة بتاريخ. البيانات تُقرأ لحظةَ الفتح من قاعدة المصنع:
 طقمٌ بِيع الآن يظهر مباعاً في الصفحة الآن.
 
 **لا سحابة ولا مساحة**: لا يُرفع شيءٌ إلى أي مكان. الصور تُصغَّر عند
@@ -599,6 +599,8 @@ color:var(--muted);font-size:13px;aspect-ratio:4/3;background:#f1ece2}
 .chip{font-size:13px;padding:3px 9px;border-radius:12px;background:#f3efe6}
 .chip.in{color:var(--in);background:#e8f3ea}
 .chip.out{color:var(--out);background:#f7eddd}
+.chip.pick{color:#fff;background:#8a6d1d;font-weight:bold}
+.sum .pick{grid-column:1/-1;border-color:#8a6d1d}
 details{margin-top:8px;border-top:1px dashed var(--line);padding-top:6px}
 summary{cursor:pointer;color:var(--gold);font-weight:600;font-size:14px}
 h3{font-size:13.5px;margin:9px 0 4px}
@@ -614,14 +616,41 @@ footer a{color:var(--muted)}
 
 _JS = """
 (function(){
+ // 4.56: برقم الموديل يُعرض الموديل كاملاً؛ وباسم الجهة أو رقم التشغيل
+ // تُعرض الأسطر المطابقة وحدها، وفي رأس البطاقة عددها ووزنها هي
  var q=document.getElementById('q');
- if(q){q.addEventListener('input',function(){
-  var v=q.value.trim().toLowerCase(),n=0;
+ var sum=document.getElementById('pick');
+ function fmt(x){return x.toLocaleString('en-US',{minimumFractionDigits:2,
+  maximumFractionDigits:2});}
+ function run(){
+  var v=q.value.trim().toLowerCase(),n=0,tn=0,tw=0;
   document.querySelectorAll('.card').forEach(function(c){
-   var hit=!v||(c.getAttribute('data-s')||'').indexOf(v)>=0;
-   c.style.display=hit?'':'none'; if(hit)n++;});
+   var rows=c.querySelectorAll('tr[data-r]'),whole=!v||
+    (c.getAttribute('data-m')||'').indexOf(v)>=0,cn=0,cw=0;
+   rows.forEach(function(r){
+    var hit=whole||(r.getAttribute('data-r')||'').indexOf(v)>=0;
+    r.style.display=hit?'':'none';
+    if(hit&&!whole){cn++;cw+=parseFloat(r.getAttribute('data-w')||0);}});
+   c.querySelectorAll('table').forEach(function(t){
+    var vis=whole||t.querySelector('tr[data-r]:not([style*="none"])');
+    t.style.display=vis?'':'none';
+    var h=t.previousElementSibling;
+    if(h&&h.tagName==='H3'){h.style.display=vis?'':'none';}});
+   var show=whole||cn>0, pk=c.querySelector('.chip.pick');
+   c.style.display=show?'':'none'; if(show)n++;
+   var d=c.querySelector('details');
+   if(pk){pk.style.display=(!whole&&cn)?'':'none';
+    pk.textContent='نتيجة البحث: '+cn+' طقم · '+fmt(cw);}
+   c.querySelectorAll('.chip:not(.pick)').forEach(function(x){
+    x.style.display=(!whole&&cn)?'none':'';});
+   if(d&&!whole&&cn){d.open=true;}
+   if(!whole){tn+=cn;tw+=cw;}});
   var e=document.getElementById('none'); if(e)e.style.display=n?'none':'';
- });}
+  if(sum){sum.style.display=(v&&tn)?'':'none';
+   sum.innerHTML='نتيجة البحث «'+v.replace(/[<>&"]/g,'')+'»<b>'+n+
+    ' موديل · '+tn+' طقم · '+fmt(tw)+'</b>';}
+ }
+ if(q){q.addEventListener('input',run);}
  document.querySelectorAll('select[data-auto]').forEach(function(s){
   s.addEventListener('change',function(){s.form.submit();});});
 })();
@@ -635,6 +664,14 @@ def _e(v):
 def _w(v):
     from services import karat_view as kv
     return f"{kv.g(float(v or 0)):,.2f}"
+
+
+def _rk(i, with_holder):
+    """مفتاح بحث السطر ووزنه (بعيار العرض) — للبحث داخل البطاقة."""
+    from services import karat_view as kv
+    key = str(i["wo"]) + (" " + str(i["holder"]) if with_holder else "")
+    return (f' data-r="{_e(key.lower())}"'
+            f' data-w="{kv.g(float(i["reg"] or 0)):.2f}"')
 
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -682,7 +719,7 @@ def _photo(base, model, have):
 
 
 def page_html(conn, query, base):
-    """الشاشة كاملةً للجوال — الدليل، أو الوارد بتاريخ."""
+    """الشاشة كاملةً للجوال — الدليل، أو البضاعة الواردة بتاريخ."""
     from datetime import datetime
 
     from models import models_catalog as mc
@@ -699,7 +736,8 @@ def page_html(conn, query, base):
     tabs = "".join(
         f'<a class="{"on" if tab == k else ""}"'
         f' href="{_e(_link(base, tab=k, view=view, sort=sort))}">{t}</a>'
-        for k, t in (("guide", "الدليل"), ("received", "الوارد بتاريخ")))
+        for k, t in (("guide", "الدليل"),
+                     ("received", "البضاعة الواردة بتاريخ")))
     seg = "".join(
         f'<a class="{"on" if view == k else ""}" href="'
         f'{_e(_link(base, tab=tab, view=k, sort=sort, day=query.get("day")))}'
@@ -734,7 +772,8 @@ def page_html(conn, query, base):
 <nav class="tabs">{tabs}</nav>
 <nav class="seg">{seg}</nav>
 {tools}
-<section class="sum">{summary}</section>
+<section class="sum">{summary}<div id="pick" class="pick"
+ style="display:none"></div></section>
 <section class="grid">{body}</section>
 <div id="none" class="empty" style="display:none">لا نتائج للبحث</div>
 </main>
@@ -773,7 +812,7 @@ def _guide(conn, base, view, sort, imgs, unit, sort_sel):
             det.append('<h3 class="out">طرف المناديب</h3><table><tr>'
                        '<th>رقم التشغيل</th><th>الوزن</th><th>مع من</th>'
                        '<th>التاريخ</th></tr>' + "".join(
-                           f'<tr><td>{_e(i["wo"])}</td>'
+                           f'<tr{_rk(i, True)}><td>{_e(i["wo"])}</td>'
                            f'<td class="n">{_w(i["reg"])}</td>'
                            f'<td>{_e(i["holder"])}</td>'
                            f'<td class="n">{_e(i["date"])}</td></tr>'
@@ -782,16 +821,18 @@ def _guide(conn, base, view, sort, imgs, unit, sort_sel):
             det.append('<h3 class="in">الموجود (متاح للبيع)</h3><table><tr>'
                        '<th>رقم التشغيل</th><th>الوزن</th><th>أُدخل</th>'
                        '</tr>' + "".join(
-                           f'<tr><td>{_e(i["wo"])}</td>'
+                           f'<tr{_rk(i, False)}><td>{_e(i["wo"])}</td>'
                            f'<td class="n">{_w(i["reg"])}</td>'
                            f'<td class="n">{_e(i["date"])}</td></tr>'
                            for i in stock) + '</table>')
         n = len(sold) + len(stock)
         cards.append(
-            f'<article class="card" data-s="{_e(keys)}">'
+            f'<article class="card" data-s="{_e(keys)}"'
+            f' data-m="{_e(str(name).lower())}">'
             f'{_photo(base, name, mc._safe_name(name) in imgs)}'
             f'<div class="b"><h2>الموديل {_e(name)}</h2>'
-            f'<div class="chips">{"".join(chips)}</div>'
+            f'<div class="chips">{"".join(chips)}'
+            f'<span class="chip pick" style="display:none"></span></div>'
             + (f'<details><summary>التفاصيل — {n} قطعة</summary>'
                f'{"".join(det)}</details>' if det else "")
             + '</div></article>')
@@ -859,15 +900,18 @@ def _received(conn, query, base, view, sort, imgs, unit, sort_sel):
         keys = " ".join([str(name)] + [str(i["wo"]) for i in m["items"]]
                         + [str(i["holder"]) for i in m["items"]]).lower()
         rows = "".join(
-            f'<tr><td>{_e(i["wo"])}</td><td class="n">{_w(i["reg"])}</td>'
+            f'<tr{_rk(i, True)}><td>{_e(i["wo"])}</td>'
+            f'<td class="n">{_w(i["reg"])}</td>'
             f'<td>{_e(i["holder"])}{" · رصيد مجمّع" if i["bulk"] else ""}'
             f'</td><td class="n">{_e(i["date"])}</td></tr>'
             for i in m["items"])
         cards.append(
-            f'<article class="card" data-s="{_e(keys)}">'
+            f'<article class="card" data-s="{_e(keys)}"'
+            f' data-m="{_e(str(name).lower())}">'
             f'{_photo(base, name, mc._safe_name(name) in imgs)}'
             f'<div class="b"><h2>الموديل {_e(name)}</h2>'
-            f'<div class="chips"><span class="chip">{m["count"]} طقم ·'
+            f'<div class="chips"><span class="chip pick" style="display:none">'
+            f'</span><span class="chip">{m["count"]} طقم ·'
             f' {_w(m["weight"])}</span>'
             + (f'<span class="chip in">بالخزنة {m["in_count"]}</span>'
                if m["in_count"] else "")
