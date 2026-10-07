@@ -142,6 +142,17 @@ def _restore(snapshot, root):
             pass
 
 
+def _frozen():
+    import sys
+    return bool(getattr(sys, "frozen", False))
+
+
+def _code_dir():
+    """مجلد كود التحديث في نسخة الـexe: `<مجلد البيانات>/app_code`."""
+    import code_overlay
+    return _root() / code_overlay.DIRNAME
+
+
 def apply_update(package_path, allow_older=False, on_step=None):
     """يثبّت الحزمة — مع نسخة احتياطية واستعادة تلقائية عند الفشل."""
     def step(msg):
@@ -151,6 +162,8 @@ def apply_update(package_path, allow_older=False, on_step=None):
             except Exception:
                 pass
 
+    if _frozen():
+        return _apply_frozen(package_path, allow_older, step)
     info = inspect(package_path)
     if info["is_older"] and not allow_older:
         raise ValueError(
@@ -220,6 +233,130 @@ def apply_update(package_path, allow_older=False, on_step=None):
             "rollback": str(snap), "notes": info["notes"]}
 
 
+def _apply_frozen(package_path, allow_older, step):
+    """نسخة الـexe (4.55): الكود في داخل الملف التنفيذي، فالتحديث يُثبَّت
+    في `app_code` بجوار البيانات ويقرؤه الـexe عند التشغيل التالي.
+
+    يُفكّ في مجلدٍ جديد، ويفحصه **الـexe نفسه** (ترجمةً واستيراداً
+    بمكتباته)، ثم يُبدَّل بالقائم دفعةً واحدة — والقائم يُحفظ للرجوع.
+    فإن فشل الفحص بقي النظام على حاله تماماً.
+    """
+    info = inspect(package_path)
+    if info["is_older"] and not allow_older:
+        raise ValueError(
+            f"الحزمة إصدار {info['version']} أقدم من المثبَّت "
+            f"{info['current']} — التثبيت يُرجع النظام للخلف.")
+    if info["declared_sha"] and info["declared_sha"] != info["sha256"]:
+        raise ValueError(
+            "بصمة الحزمة لا تطابق المعلنة — الملف تالف أو معدَّل.")
+    root = _root()
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    live = _code_dir()
+    new = live.with_name(live.name + ".new")
+    tmp = root / "_update_tmp" / stamp
+
+    step("أخذ نسخة احتياطية من البيانات…")
+    try:
+        from services import storage
+        storage.make_backup(f"before_update_{stamp}")
+    except Exception:
+        pass
+
+    step("فكّ حزمة التحديث…")
+    for d in (new, tmp):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(str(package_path)) as z:
+            z.extractall(str(tmp))
+        src = tmp / info["root"] if info["root"] else tmp
+        if not (src / "core" / "config.py").exists():
+            raise ValueError("الحزمة لا تحمل كود النظام (core/config.py)")
+        new.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        for item in src.iterdir():
+            if item.name in PROTECTED or item.name in WORKDIRS \
+                    or item.name == MANIFEST:
+                continue
+            if item.is_dir():
+                shutil.copytree(item, new / item.name)
+            else:
+                shutil.copy2(item, new / item.name)
+            copied += 1
+
+        step("فحص التحديث داخل البرنامج…")
+        ok, detail = _verify_frozen(new)
+        if not ok:
+            shutil.rmtree(new, ignore_errors=True)
+            raise ValueError(
+                "لم يُثبَّت التحديث: فشل فحصه داخل البرنامج، والنظام باقٍ "
+                f"على حاله.\n{detail}")
+
+        step("تثبيت الملفات الجديدة…")
+        import code_overlay
+        (new / code_overlay.READY).write_text(stamp, encoding="utf-8")
+        snap = None
+        try:
+            snap = code_overlay.swap_in(root, stamp)
+        except Exception:
+            # ويندوز قد يمنع إعادة تسمية مجلدٍ قيد الاستعمال: يبقى الجديد
+            # جاهزاً بعلامته ويُبدَّل أول التشغيل التالي قبل أي استيراد
+            snap = None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    _prune_rollbacks(root)
+    return {"version": info["version"], "files": copied,
+            "rollback": str(snap or ""), "notes": info["notes"],
+            "restart": True}
+
+
+def _verify_frozen(code_dir):
+    """يشغّل الـexe نفسه بوضع الفحص على المجلد الجديد."""
+    import os
+    import subprocess
+    import sys
+    import tempfile
+    out = Path(tempfile.gettempdir()) / f"jadeite_verify_{os.getpid()}.txt"
+    env = dict(os.environ)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"   # فكٌّ مستقل للعملية
+    env.pop("_MEIPASS2", None)
+    env.pop("JADEITE_CODE_DIR", None)
+    kw = {}
+    if os.name == "nt":
+        kw["creationflags"] = 0x08000000            # CREATE_NO_WINDOW
+    try:
+        r = subprocess.run(
+            [sys.executable, "--verify-code", str(code_dir), str(out)],
+            env=env, timeout=300, capture_output=True, **kw)
+        txt = ""
+        try:
+            txt = out.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        if r.returncode == 0:
+            return True, txt[-600:]
+        return False, (txt or "")[-900:] or f"رمز الخروج {r.returncode}"
+    except subprocess.TimeoutExpired:
+        return False, "انتهت مهلة الفحص"
+    except Exception as e:                          # noqa: BLE001
+        return False, f"تعذّر تشغيل الفحص: {type(e).__name__}: {e}"
+    finally:
+        try:
+            out.unlink()
+        except Exception:
+            pass
+
+
+def _prune_rollbacks(root, keep=3):
+    r = root / "_update_rollback"
+    if not r.exists():
+        return
+    olds = sorted(d for d in r.iterdir() if d.is_dir())
+    for d in olds[:-keep]:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _post_check(root):
     """يشغّل فحوص السلامة البنيوية بعد التثبيت."""
     # يُشغَّل في عملية فرعية بمهلة 180 ثانية، ويظهر للمستخدم في حوار
@@ -253,5 +390,30 @@ def rollback(stamp):
     snap = _root() / "_update_rollback" / str(stamp)
     if not snap.exists():
         raise ValueError("النسخة المطلوبة غير موجودة")
+    if _frozen():
+        live = _code_dir()
+        old = snap / live.name
+        if live.exists():
+            keep = (_root() / "_update_rollback"
+                    / datetime.now().strftime("%Y%m%d_%H%M%S_replaced"))
+            keep.mkdir(parents=True, exist_ok=True)
+            live.rename(keep / live.name)
+        if old.exists():
+            old.rename(live)
+        return str(snap)
     _restore(snap, _root())
     return str(snap)
+
+
+def remove_overlay():
+    """نسخة الـexe: إلغاء التحديثات المثبَّتة والعودة لكود الـexe نفسه."""
+    if not _frozen():
+        raise ValueError("هذا الخيار لنسخة الـexe وحدها")
+    live = _code_dir()
+    if not live.exists():
+        return ""
+    keep = (_root() / "_update_rollback"
+            / datetime.now().strftime("%Y%m%d_%H%M%S_removed"))
+    keep.mkdir(parents=True, exist_ok=True)
+    live.rename(keep / live.name)
+    return str(keep)

@@ -14,6 +14,8 @@ def _close_splash():
     if _SPLASH["closed"]:
         return
     _SPLASH["closed"] = True
+    if not __import__("os").environ.get("_PYI_SPLASH_IPC"):
+        return                                 # exe بلا شاشة بدء
     try:
         import pyi_splash                      # داخل الـexe فقط
         pyi_splash.close()
@@ -84,6 +86,12 @@ def main():
     crash_guard.trace("عُرضت البوابة")
     gate.prepare([(lbl, crash_guard.traced(lbl, fn))
                   for lbl, fn in prepare_steps()])
+    # البوابة ظهرت والقاعدة جُهّزت بالكود المحدَّث: الإقلاع سليم
+    try:
+        import code_overlay
+        code_overlay.boot_ok()
+    except Exception:
+        pass
 
     wire_gate(app, gate)
     crash_guard.trace("حلقة الأحداث")
@@ -313,20 +321,113 @@ def start_background_workers():
                 pass
 
 
+def _verify_code_cli():
+    """`gold_erp.exe --verify-code <مجلد> [ملف-النتيجة]`
+
+    يفحص الـexe نفسه حزمةَ تحديثٍ فُكّت قبل اعتمادها (4.55): تُترجم
+    ملفاتها وتُستورد وحداتها بمكتبات الـexe. لا نافذة ولا بيانات.
+    """
+    import io
+    import traceback
+    i = sys.argv.index("--verify-code")
+    cdir = sys.argv[i + 1] if len(sys.argv) > i + 1 else ""
+    out = sys.argv[i + 2] if len(sys.argv) > i + 2 else ""
+    buf = io.StringIO()
+    sys.stdout = sys.stderr = buf            # الـexe بلا نافذة سوداء
+    _close_splash()
+    try:
+        import code_overlay
+        ok = code_overlay.verify(cdir, out=lambda m: buf.write(f"{m}\n"))
+    except BaseException:                    # noqa: BLE001
+        traceback.print_exc()
+        ok = False
+    if out:
+        try:
+            with open(out, "w", encoding="utf-8") as f:
+                f.write(buf.getvalue())
+        except Exception:
+            pass
+    return 0 if ok else 1
+
+
+def _about_cli():
+    """`gold_erp.exe --about [ملف]`: أي كودٍ يعمل الآن — للتشخيص.
+
+    يكتب الإصدار الفعلي ومصدره (مدمج أم تحديثٌ مثبَّت) ثم يخرج.
+    """
+    import json
+    out = ""
+    i = sys.argv.index("--about")
+    if len(sys.argv) > i + 1:
+        out = sys.argv[i + 1]
+    try:
+        import code_overlay
+        import config
+        info = {"version": config.APP_VERSION,
+                "config_file": str(getattr(config, "__file__", "")),
+                "bundle_dir": str(config.BUNDLE_DIR),
+                "overlay": dict(code_overlay.STATE)}
+    except Exception as e:                       # noqa: BLE001
+        info = {"error": f"{type(e).__name__}: {e}"}
+    txt = json.dumps(info, ensure_ascii=False, indent=1)
+    if out:
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(txt)
+    elif sys.stdout:
+        print(txt)
+    return 0
+
+
+def _relaunch():
+    """يعيد تشغيل الـexe (بعد تعطيل تحديثٍ لم يُقلع)."""
+    try:
+        import subprocess
+        env = dict(__import__("os").environ)
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        env.pop("_MEIPASS2", None)
+        subprocess.Popen([sys.executable] + sys.argv[1:], env=env,
+                         close_fds=True)
+        return True
+    except Exception:
+        return False
+
+
 def run():
     """التشغيل من الملف التنفيذي أو `START.bat`: بحارس الأعطال.
 
     أي عطلٍ يمنع الإقلاع يُغلق شاشة البدء أولاً ثم يُقال في رسالة
     ويُكتب في `logs/crash.log` — بدل أن يختفي البرنامج بلا أثر.
+
+    **ونسخة الـexe** تقرأ أولاً التحديث المثبَّت بالزر (`code_overlay`)
+    إن كان أحدث من كودها المدمج. وإن منع التحديثُ الإقلاع عُطّل وأُعيد
+    تشغيل الـexe بكوده المدمج — فلا يبقى المصنع بلا نظام بسبب تحديث.
     """
-    from services import crash_guard
-    crash_guard.install()
+    if "--verify-code" in sys.argv:
+        sys.exit(_verify_code_cli())
+    overlay = None
+    try:
+        import code_overlay
+        overlay = code_overlay.activate(count="--about" not in sys.argv)
+    except Exception:
+        overlay = None
+    if "--about" in sys.argv:
+        sys.exit(_about_cli())
+    try:
+        from services import crash_guard
+        crash_guard.install()
+    except BaseException as e:                   # noqa: BLE001
+        if overlay and code_overlay.on_fatal(repr(e)) and _relaunch():
+            _close_splash()
+            sys.exit(0)
+        raise
     try:
         main()
     except SystemExit:
         raise
     except BaseException as e:                   # noqa: BLE001
         _close_splash()
+        if overlay and code_overlay.on_fatal(repr(e)) and _relaunch():
+            sys.exit(0)
         crash_guard.fatal(e)
         sys.exit(1)
 

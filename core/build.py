@@ -53,6 +53,33 @@ HIDDEN = [
     "ui.backups_dialog", "ui.factory_identity_dialog",
     "app_config", "core.app_config", "core.config",
     "qrcode", "PIL", "barcode",
+    # مُحمِّل التحديثات بالزر (4.55) — يُقرأ قبل أي وحدة أخرى
+    "code_overlay",
+]
+
+# ══ مكتبات بايثون القياسية تُضمّ كلها تحسّباً للتحديثات (4.55) ══
+# التحديث بالزر يحمل كوداً جديداً لا مكتبات: إن احتاج كودٌ لاحق وحدةً
+# قياسية لم يستعملها كود يوم البناء لما وجدها في الـexe. فتُضمّ هنا
+# مسبقاً — وفحصُ ما قبل التثبيت يكشف أي نقصٍ آخر ويرفض التحديث.
+STDLIB_EXTRA = [
+    "html", "html.parser", "zlib", "gzip", "bz2", "lzma", "zipfile",
+    "tarfile", "csv", "difflib", "statistics", "decimal", "fractions",
+    "secrets", "hmac", "hashlib", "uuid", "base64", "binascii",
+    "bisect", "heapq", "textwrap", "unicodedata", "calendar", "locale",
+    "glob", "fnmatch", "tempfile", "shutil", "queue", "threading",
+    "concurrent.futures", "dataclasses", "enum", "typing", "functools",
+    "itertools", "collections", "json", "re", "string", "struct",
+    "pickle", "copy", "pprint", "logging", "logging.handlers",
+    "traceback", "platform", "subprocess", "webbrowser", "socket",
+    "socketserver", "selectors", "ipaddress", "ssl", "http.client",
+    "http.server", "http.cookies", "email", "email.message",
+    "email.utils", "mimetypes", "xml.etree.ElementTree", "xml.dom.minidom",
+    "sqlite3", "ctypes", "ctypes.wintypes", "wave", "array", "io",
+    "contextlib", "weakref", "inspect", "ast", "tokenize", "random",
+    "math", "cmath", "numbers", "datetime", "zoneinfo", "time",
+    "smtplib", "imaplib", "ftplib", "urllib.request", "urllib.parse",
+    "urllib.error", "configparser", "argparse", "getpass", "codecs",
+    "encodings.idna", "colorsys", "operator", "abc", "graphlib",
 ]
 
 
@@ -207,7 +234,10 @@ def build_app(onefile=False, console=False):
     env_file = _bundled_env()
     if env_file:
         args += ["--add-data", f"{env_file}{_sep()}."]
-    for h in HIDDEN:
+    for h in HIDDEN + STDLIB_EXTRA:
+        args += ["--hidden-import", h]
+    # وحدات Qt التي قد يحتاجها تحديثٌ لاحق
+    for h in ("PyQt5.QtSql", "PyQt5.QtMultimedia"):
         args += ["--hidden-import", h]
     # الوحدة الجديدة تُضمّ صراحةً — هي التي تُظهر أي عطل إقلاع
     args += ["--hidden-import", "services.crash_guard"]

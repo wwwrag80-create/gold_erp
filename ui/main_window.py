@@ -982,11 +982,36 @@ class MainWindow(QtWidgets.QMainWindow):
                 info, on_progress=on_prog, on_step=on_step)
         finally:
             prog.close()
-        QtWidgets.QMessageBox.information(
-            self, "تم التحديث",
-            f"اكتمل التحديث إلى الإصدار {res['version']}.\n"
-            f"ملفات مُحدَّثة: {res['files']}\n\n"
-            f"أعد تشغيل النظام لتفعيل التحديث.")
+        self._update_done(res)
+
+    def _update_done(self, res):
+        """اكتمل التثبيت: إعادة التشغيل الآن تفعّل الإصدار الجديد."""
+        if ask(self, f"اكتمل التحديث إلى الإصدار {res['version']}.\n\n"
+                     "يعمل الإصدار الجديد بعد إعادة تشغيل البرنامج.\n"
+                     "إعادة التشغيل الآن؟"):
+            self._restart_app()
+
+    def _restart_app(self):
+        """يُغلق البرنامج ويفتحه من جديد (exe أو من المصدر)."""
+        import os
+        import subprocess
+        import sys
+        try:
+            env = dict(os.environ)
+            env.pop("JADEITE_CODE_DIR", None)
+            if getattr(sys, "frozen", False):
+                env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+                env.pop("_MEIPASS2", None)
+                cmd = [sys.executable]
+            else:
+                import main as _m
+                cmd = [sys.executable, os.path.abspath(_m.__file__)]
+            subprocess.Popen(cmd, env=env, close_fds=True,
+                             cwd=os.path.dirname(cmd[-1]))
+        except Exception as e:                      # noqa: BLE001
+            err(self, f"أعد تشغيل البرنامج يدوياً لتفعيل التحديث.\n{e}")
+            return
+        QtWidgets.QApplication.quit()
 
     def do_update(self):
         """يرفع حزمة تحديث على النسخة القائمة — بضمانات كاملة."""
@@ -1086,10 +1111,7 @@ class MainWindow(QtWidgets.QMainWindow):
             finally:
                 prog.close()
 
-            info2 = (f"اكتمل التحديث إلى الإصدار {res['version']}.\n"
-                     f"ملفات مُحدَّثة: {res['files']}\n\n"
-                     f"أعد تشغيل النظام لتفعيل التحديث.")
-            QtWidgets.QMessageBox.information(self, "تم التحديث", info2)
+            self._update_done(res)
         except Exception as e:
             err(self, e)
 

@@ -14,6 +14,11 @@ def _bundle_dir():
     يُحذف عند الإغلاق، ويشير إليه `sys._MEIPASS`. لذلك يُستخدم للقراءة
     فقط (الأصول والقوالب) ولا تُحفظ فيه بيانات أبداً.
     """
+    # تحديثٌ مثبَّت بالزر في نسخة الـexe (4.55): أصوله (الخطوط · الشعار
+    # · ملفات الترقية) من مجلده هو، فما أضافه التحديث يُقرأ
+    over = os.environ.get("JADEITE_CODE_DIR", "")
+    if over and (Path(over) / "assets").is_dir():
+        return Path(over)
     mei = getattr(sys, "_MEIPASS", None)
     if mei:
         return Path(mei)
@@ -184,7 +189,7 @@ ICONS_DIR = (BUNDLE_DIR / "assets" / "icons"
              else BASE_DIR / "assets" / "icons")
 
 APP_NAME = "نظام محاسبة مصنع الذهب — عيار 18"
-APP_VERSION = "4.54.0"
+APP_VERSION = "4.55.0"
 # بصمة تتغيّر مع كل بناء — تكشف تشغيل نسخة قديمة فوراً
 BUILD_STAMP = "2026-09-28"
 

@@ -55,7 +55,9 @@ def _files():
             continue
         if p.suffix.lower() in SKIP_SUFFIX:
             continue
-        if p.name in SKIP_FILES:
+        # الملفات المحمية في **جذر** المشروع وحده: `core/app_config.py`
+        # كودٌ يُحدَّث، و`app_config.py` في الجذر إعداداتُ الجهاز
+        if len(rel.parts) == 1 and p.name in SKIP_FILES:
             continue
         yield p, rel
 

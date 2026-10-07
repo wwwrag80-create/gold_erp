@@ -7371,6 +7371,73 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("89) 4.55: التحديث بالزر في نسخة الـexe — طبقة الكود المحدَّث")
+    import json as _js89
+    import re
+    from pathlib import Path
+    _R89 = Path(ROOT)
+    import subprocess as _sp89
+    import tempfile as _tf89
+    import zipfile as _zf89
+    _b89 = Path(_tf89.mkdtemp(prefix="ovl89_"))
+    _ov89 = _b89 / "app_code"
+    shutil.copytree(_R89, _ov89, ignore=shutil.ignore_patterns(
+        "data", "logs", "backups", "branding", ".git", "__pycache__",
+        "dist", "build", "_update_*", "*.db", "*.jup"))
+    _cf89 = _ov89 / "core" / "config.py"
+    _cf89.write_text(re.sub(r'APP_VERSION = "[^"]+"',
+                            'APP_VERSION = "99.0.0"',
+                            _cf89.read_text(encoding="utf-8")),
+                     encoding="utf-8")
+    _env89 = dict(os.environ, JADEITE_OVERLAY_ANYWAY="1",
+                  JADEITE_DATA_DIR=str(_b89), QT_QPA_PLATFORM="offscreen")
+    _out89 = _b89 / "about.json"
+    _sp89.run([sys.executable, str(_R89 / "main.py"), "--about",
+               str(_out89)], env=_env89, cwd=str(_R89), timeout=120)
+    _ab89 = _js89.loads(_out89.read_text(encoding="utf-8"))
+    check("الـexe يقرأ التحديث المثبَّت إن كان أحدث من كوده المدمج",
+          _ab89.get("version") == "99.0.0"
+          and str(_ov89) in _ab89.get("config_file", "")
+          and _ab89["overlay"]["active"], str(_ab89)[:300])
+    _cf89.write_text(re.sub(r'APP_VERSION = "[^"]+"',
+                            'APP_VERSION = "0.0.1"',
+                            _cf89.read_text(encoding="utf-8")),
+                     encoding="utf-8")
+    _sp89.run([sys.executable, str(_R89 / "main.py"), "--about",
+               str(_out89)], env=_env89, cwd=str(_R89), timeout=120)
+    _ab89b = _js89.loads(_out89.read_text(encoding="utf-8"))
+    check("وتحديثٌ أقدم من المدمج يُتجاهل",
+          not _ab89b["overlay"]["active"]
+          and _ab89b.get("version") != "0.0.1", str(_ab89b)[:200])
+    _vt89 = _b89 / "verify.txt"
+    _r89 = _sp89.run([sys.executable, str(_R89 / "main.py"),
+                      "--verify-code", str(_ov89), str(_vt89)],
+                     env=_env89, cwd=str(_R89), timeout=300)
+    check("وفحص ما قبل التثبيت: كل الوحدات تُستورد من مجلد التحديث",
+          _r89.returncode == 0,
+          _vt89.read_text(encoding="utf-8")[-300:]
+          if _vt89.exists() else "")
+    (_ov89 / "services" / "broken89.py").write_text(
+        "import not_a_real_module_89\n", encoding="utf-8")
+    _r89b = _sp89.run([sys.executable, str(_R89 / "main.py"),
+                       "--verify-code", str(_ov89), str(_vt89)],
+                      env=_env89, cwd=str(_R89), timeout=300)
+    check("وتحديثٌ يحتاج مكتبةً غير موجودة يُرفض قبل التثبيت",
+          _r89b.returncode == 1
+          and "broken89" in _vt89.read_text(encoding="utf-8"))
+    # الحزمة تحمل core/app_config.py (كانت تُسقطه بالاسم) لا إعدادات الجهاز
+    sys.path.insert(0, str(_R89 / "tools"))
+    import make_update as _mu89
+    _pk89 = _mu89.build(_b89 / "pkg")
+    with _zf89.ZipFile(_pk89["path"]) as _z89:
+        _nm89 = set(_z89.namelist())
+    check("حزمة التحديث تحمل core/app_config.py ولا تحمل إعدادات الجهاز",
+          "gold_erp/core/app_config.py" in _nm89
+          and "gold_erp/app_config.py" not in _nm89
+          and "gold_erp/code_overlay.py" in _nm89
+          and not any(n.startswith("gold_erp/data/") for n in _nm89))
+    shutil.rmtree(_b89, ignore_errors=True)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
