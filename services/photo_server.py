@@ -31,6 +31,22 @@ TTL_SECONDS = 12 * 3600          # الرابط يعيش يوم عمل واحد
 
 _lock = threading.Lock()
 _state = {"server": None, "port": None, "host": None}
+# آخر خطأٍ وقع أثناء عرض صفحة (4.58) — كان يُبتلع فيرى الجوال «تعذّر
+# عرض الصفحة» ولا أثر لسببه في أي مكان؛ الآن يُحفظ ويُكتب في السجل
+# ويعرضه «فحص الرابط».
+_last_error = {"at": "", "path": "", "error": ""}
+
+
+def last_error():
+    with _lock:
+        return dict(_last_error) if _last_error["error"] else None
+
+
+class _Server(ThreadingHTTPServer):
+    # ويندوز يسمح مع SO_REUSEADDR لبرنامجين بالمنفذ نفسه معاً، فتذهب
+    # طلبات الجوال إلى نسخةٍ تُغلق — المنفذ هنا حصريٌّ لنسخةٍ واحدة
+    allow_reuse_address = not __import__("sys").platform.startswith("win")
+    daemon_threads = True
 _docs = {}                       # token → {"no":…, "items":[…], "at":…}
 # 4.52: مساراتٌ إضافية تسجّلها خدماتٌ أخرى على الخادم نفسه والمنفذ نفسه
 # (رابط دليل الموديلات للمدير — `services.models_web`). المفتاح أول جزء
@@ -173,8 +189,26 @@ class _Handler(BaseHTTPRequestHandler):
         query = {k: v[-1] for k, v in parse_qs(sp.query).items()}
         try:
             res = fn(method, parts[1:], query, self.headers, body) or {}
-        except Exception:
-            res = {"code": 500, "body": "<h3>تعذّر عرض الصفحة</h3>"}
+        except Exception as e:                          # noqa: BLE001
+            import traceback
+            tb = traceback.format_exc(limit=6)
+            with _lock:
+                _last_error.update(
+                    at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    path="/" + "/".join(parts[:1]) + "/…",
+                    error=f"{type(e).__name__}: {e}\n{tb}")
+            try:
+                from services.health import log_error
+                log_error("photo_server/route", e)
+            except Exception:
+                pass
+            res = {"code": 500,
+                   "body": "<meta name='viewport' content='width=device-"
+                           "width,initial-scale=1'><div style='font-family:"
+                           "system-ui,Tahoma;padding:30px;text-align:center;"
+                           "color:#555'><h3>تعذّر عرض الصفحة</h3><p>حدث خطأ"
+                           " في البرنامج على جهاز المصنع — افتح «رابط المدير"
+                           "» ثم «🔎 فحص الرابط» لمعرفة السبب.</p></div>"}
         finally:
             # كل طلبٍ في خيطٍ مستقل — يُغلق اتصاله بالقاعدة بانتهائه فلا
             # تتراكم الاتصالات مع كثرة فتح الصفحة
@@ -255,19 +289,34 @@ def current():
         return _state["host"], _state["port"]
 
 
-def ensure_running(port=DEFAULT_PORT):
-    """يشغّل الخادم مرة واحدة ويعيد (العنوان, المنفذ) أو None عند العجز."""
+def _bind(p):
+    try:
+        return _Server(("0.0.0.0", p), _Handler)
+    except Exception:            # مشغول · ممنوع · عنوانٌ غير متاح
+        return None
+
+
+def ensure_running(port=DEFAULT_PORT, wait=0.0):
+    """يشغّل الخادم مرة واحدة ويعيد (العنوان, المنفذ) أو None عند العجز.
+
+    `wait`: ثوانٍ يُنتظر فيها المنفذ المعتاد إن كان مشغولاً — بعد «إعادة
+    التشغيل الآن» تكون النسخة السابقة ما زالت تُغلق وتمسكه لحظات. ولو
+    انتقل الخادم فوراً إلى منفذٍ آخر لتغيّر رابط شبكة المصنع الذي حفظه
+    المدير (المنفذ جزءٌ منه).
+    """
     with _lock:
         if _state["server"] is not None:
             return _state["host"], _state["port"]
-    for p in range(port, port + 10):
-        try:
-            srv = ThreadingHTTPServer(("0.0.0.0", p), _Handler)
-        except OSError:
-            continue             # المنفذ مشغول — جرّب التالي
-        except Exception:
-            return None
-        srv.daemon_threads = True
+    srv = _bind(port)
+    deadline = time.time() + max(0.0, float(wait or 0))
+    while srv is None and time.time() < deadline:
+        time.sleep(0.5)
+        srv = _bind(port)
+    for p in ([port] if srv is not None else range(port + 1, port + 10)):
+        if srv is None:
+            srv = _bind(p)
+            if srv is None:
+                continue             # المنفذ مشغول — جرّب التالي
         t = threading.Thread(target=srv.serve_forever, daemon=True,
                              name="photo-server")
         t.start()

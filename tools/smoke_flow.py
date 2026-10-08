@@ -7450,6 +7450,28 @@ def main():
           and all(f'data-c="{c}"' in _h90 for c in (4, 5, 6))
           and "repeat(var(--cols)" in _h90)
 
+    step("91) 4.58: فحص رابط المدير طبقةً طبقة")
+    from services import models_web as _mw91, photo_server as _ps91
+    _r91 = _mw91.RUNNER
+    _mw91.RUNNER = lambda args, timeout=25: None        # بلا Tailscale
+    try:
+        with db() as conn:
+            _mw91.set_mode(conn, "funnel", "admin")
+        _mw91.activate("admin")
+        _d91 = {i["key"]: i for i in _mw91.diagnose()}
+        check("الفحص يجرّب الخادم والصفحة فعلاً ويقف عند Tailscale المفقود",
+              _d91["server"]["ok"] and _d91["page"]["ok"]
+              and _d91["local"]["ok"] and _d91["ts"]["ok"] is False
+              and _d91["ts"]["fix"] == "ts_install",
+              str([(k, v["ok"]) for k, v in _d91.items()]))
+        _mw91.deactivate("admin")
+        _d91b = {i["key"]: i for i in _mw91.diagnose()}
+        check("والرابط الموقوف يقال إنه موقوف وإصلاحه التفعيل",
+              _d91b["enabled"]["ok"] is False
+              and _d91b["enabled"]["fix"] == "activate")
+    finally:
+        _mw91.RUNNER = _r91
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

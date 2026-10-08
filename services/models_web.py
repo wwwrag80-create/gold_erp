@@ -289,7 +289,7 @@ def activate(username=None):
                 set_enabled(conn, True, username)
             st = settings(conn)
     tok = st["token"]
-    addr = photo_server.ensure_running()
+    addr = photo_server.ensure_running(wait=8)
     if not addr:
         return {"ok": False, "url": "", "lan": "", "mode": st["mode"],
                 "reason": "server",
@@ -370,6 +370,206 @@ def _remember_ts(mode):
             _set(conn, K_TS, mode or "")
     except Exception:
         pass
+
+
+# ══════════════════════════════════════════════════════════════════
+#  فحص الرابط طبقةً طبقة (4.58)
+# ══════════════════════════════════════════════════════════════════
+# «الرابط لا يعمل على الجوال» جملةٌ واحدة لأعطالٍ مختلفة تماماً: البرنامج
+# مغلق · الصفحة فيها خطأ · جدار الحماية · Tailscale غير متصل · العنوان
+# الثابت غير موجَّه إلى البرنامج · الجوال يفتح رابط الشبكة المحلية من
+# خارجها. والفحص يجرّب كل طبقة بالترتيب من جهاز المصنع نفسه ويقول أين
+# انقطع الطريق وما إصلاحه — بدل التخمين.
+
+FW_RULE = "Jadeite Models Link"
+
+
+def _http_get(url, timeout, local=False):
+    """(رمز HTTP أو None, نصّ قصير) — بلا وكيل للعناوين المحلية."""
+    import urllib.error
+    import urllib.request
+    handlers = [urllib.request.ProxyHandler({})] if local else []
+    op = urllib.request.build_opener(*handlers)
+    req = urllib.request.Request(url, headers={"User-Agent":
+                                               "Jadeite-LinkCheck"})
+    try:
+        with op.open(req, timeout=timeout) as r:
+            return r.status, r.read(1500).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read(1500).decode("utf-8", "replace")
+        except Exception:
+            body = ""
+        return e.code, body
+    except Exception as e:                          # noqa: BLE001
+        return None, f"{type(e).__name__}: {e}"
+
+
+def ts_targets():
+    """المنافذ المحلية التي وجّه إليها Tailscale عنوانَ الجهاز الثابت."""
+    out = set()
+    funnel = False
+    for cmd in (["funnel", "status", "--json"], ["serve", "status",
+                                                  "--json"]):
+        res = RUNNER(cmd, 15)
+        if not res:
+            continue
+        _c, txt = res
+        for m in re.finditer(r"127\.0\.0\.1:(\d+)|localhost:(\d+)", txt):
+            out.add(int(m.group(1) or m.group(2)))
+        if '"AllowFunnel"' in txt and "true" in txt.split(
+                '"AllowFunnel"', 1)[1][:200]:
+            funnel = True
+    return out, funnel
+
+
+def firewall_ok(port):
+    """هل لقاعدة البرنامج في جدار حماية ويندوز أثر؟ (None خارج ويندوز)."""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        r = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule",
+             f"name={FW_RULE}"], capture_output=True, timeout=10,
+            creationflags=0x08000000)
+        return r.returncode == 0 and str(port).encode() in (r.stdout or b"")
+    except Exception:
+        return None
+
+
+def firewall_allow(first_port=None):
+    """يضيف استثناءً في جدار حماية ويندوز (يطلب موافقة المسؤول).
+
+    يفتح نافذة «هل تسمح لهذا البرنامج بإجراء تغييرات؟» — بلا موافقتها
+    لا يتغيّر شيء. المنافذ وحدها التي يستعملها الخادم (8733–8742).
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    from services import photo_server
+    a = int(first_port or photo_server.DEFAULT_PORT)
+    args = (f'advfirewall firewall add rule name="{FW_RULE}" dir=in '
+            f'action=allow protocol=TCP localport={a}-{a + 9} profile=any')
+    try:
+        import ctypes
+        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", "netsh",
+                                                 args, None, 0)
+        return int(rc) > 32
+    except Exception:
+        return False
+
+
+def diagnose():
+    """يجرّب الرابط طبقةً طبقة — قائمة {key, ok, title, detail, fix}.
+
+    `ok`: True نجح · False انقطع هنا · None معلومة/تنبيه.
+    `fix`: activate · firewall · ts_install · ts_login · ts_enable · report
+    """
+    import config
+    from database.database import db
+    from services import photo_server
+    out = []
+
+    def add(key, ok, title, detail="", fix="", url=""):
+        out.append({"key": key, "ok": ok, "title": title,
+                    "detail": str(detail or ""), "fix": fix, "url": url})
+
+    add("version", None, f"الإصدار الذي يعرض الرابط: "
+                         f"{getattr(config, 'APP_VERSION', '?')}")
+    with db(readonly=True) as conn:
+        st = settings(conn)
+    if not (st["enabled"] and st["token"]):
+        add("enabled", False, "الرابط موقوف في البرنامج",
+            "لا يُفتح من أي مكان حتى يُفعَّل.", "activate")
+        return out
+    add("enabled", True, "الرابط مفعّل في البرنامج")
+    addr = photo_server.current()
+    if not addr:
+        add("server", False, "الخادم لا يعمل على هذا الجهاز",
+            "اضغط «تفعيل الرابط» لتشغيله.", "activate")
+        return out
+    port = addr[1]
+    add("server", True, f"الخادم يعمل على المنفذ {port}")
+    tok = st["token"]
+    try:
+        with db(readonly=True) as conn:
+            body = page_html(conn, {}, f"/{PREFIX}/{tok}")
+        add("page", True, f"الصفحة تُبنى بلا أخطاء ({len(body) // 1024}"
+                          " ك.ب)")
+    except Exception as e:                          # noqa: BLE001
+        import traceback
+        add("page", False, "الصفحة فيها خطأ في البرنامج",
+            f"{type(e).__name__}: {e}\n"
+            + traceback.format_exc(limit=4), "report")
+    le = photo_server.last_error()
+    if le:
+        add("last_error", None, f"آخر خطأ أثناء فتح الصفحة ({le['at']})",
+            le["error"], "report")
+    code, txt = _http_get(f"http://127.0.0.1:{port}/{PREFIX}/{tok}", 10,
+                          local=True)
+    add("local", code == 200, "الصفحة تُفتح على هذا الجهاز"
+        if code == 200 else "الصفحة لا تُفتح حتى على هذا الجهاز",
+        "" if code == 200 else f"HTTP {code or '—'} {txt[:200]}", "report")
+    lan = f"http://{addr[0]}:{port}/{PREFIX}/{tok}"
+    if str(addr[0]).startswith("127."):
+        add("lan", False, "الجهاز غير متصل بشبكة محلية",
+            "رابط شبكة المصنع لا يعمل — يلزم الرابط الثابت عبر الإنترنت.")
+    else:
+        fw = firewall_ok(port)
+        add("lan", None, "رابط شبكة المصنع (يعمل فقط والجوال على Wi-Fi"
+                         " المصنع نفسه)", lan, url=lan)
+        if fw is False:
+            add("firewall", False, "جدار حماية ويندوز قد يمنع الجوال على"
+                                   " شبكة المصنع",
+                "يحتاجه رابط شبكة المصنع وحده (الرابط الثابت عبر الإنترنت"
+                " لا يتأثر به). «السماح عبر الجدار» يطلب موافقة المسؤول.",
+                "firewall")
+        elif fw:
+            add("firewall", True, "جدار حماية ويندوز يسمح بالرابط")
+    if st["mode"] == "lan":
+        add("mode", None, "نوع الرابط: «شبكة المصنع» — لا يُفتح من خارجها",
+            "لرابطٍ يُفتح من أي مكان اختر «ثابت عبر الإنترنت» ثم «تفعيل"
+            " الرابط».")
+        return out
+    ts = ts_status()
+    if not ts["installed"]:
+        add("ts", False, "برنامج Tailscale غير مثبّت على هذا الجهاز",
+            "بدونه لا يوجد رابط ثابت عبر الإنترنت، ويعمل الرابط على شبكة"
+            " المصنع وحدها. نزّله مجاناً ثم سجّل الدخول وفعّل الرابط.",
+            "ts_install", "https://tailscale.com/download/windows")
+        return out
+    if not (ts["running"] and ts["dns"]):
+        add("ts", False, "Tailscale مثبّت لكنه غير متصل",
+            f"الحالة: {ts.get('state') or '—'} — افتحه وسجّل الدخول ثم"
+            " «تفعيل الرابط».", "ts_login", ts.get("login_url") or "")
+        return out
+    add("ts", True, f"Tailscale متصل — اسم الجهاز {ts['dns']}")
+    targets, funnel_on = ts_targets()
+    if port not in targets:
+        add("route", False, "العنوان الثابت غير موجَّه إلى البرنامج",
+            ("موجّه إلى المنفذ " + ", ".join(map(str, sorted(targets)))
+             if targets else "لا توجيه مسجّل في Tailscale")
+            + " — «تفعيل الرابط» يعيد توجيهه.", "activate")
+    else:
+        add("route", True, f"العنوان الثابت موجَّه إلى المنفذ {port}")
+    if st["mode"] == "funnel" and not funnel_on:
+        add("funnel", False, "ميزة Funnel (الفتح من الإنترنت) غير مفعّلة"
+                             " في حساب Tailscale",
+            "«تفعيل الرابط» يُظهر رابط الموافقة عليها — افتحه ووافق.",
+            "activate")
+    url = ts_url(ts["dns"], tok)
+    code, txt = _http_get(url, 25)
+    if code == 200:
+        add("public", True, "الرابط الثابت يُفتح عبر الإنترنت", url,
+            url=url)
+    else:
+        why = txt[:220] if code is None else f"HTTP {code}"
+        if code is None and ("getaddrinfo" in txt or "Name or service"
+                             in txt or "11001" in txt):
+            why += " — اسم الرابط لم ينتشر بعد (قد يستغرق دقائق بعد أول" \
+                   " تفعيل)"
+        add("public", False, "الرابط الثابت لا يُفتح عبر الإنترنت", why,
+            "activate", url)
+    return out
 
 
 def autostart():
@@ -713,6 +913,14 @@ def _who(holder, date, bulk=False):
             f'<small class="d">{_e(date)}</small>')
 
 
+def _version():
+    try:
+        import config
+        return str(getattr(config, "APP_VERSION", ""))
+    except Exception:
+        return ""
+
+
 def _rk(i, with_holder):
     """مفتاح بحث السطر ووزنه (بعيار العرض) — للبحث داخل البطاقة."""
     from services import karat_view as kv
@@ -831,6 +1039,7 @@ def page_html(conn, query, base):
 </main>
 <footer><a href="{_e(_link(base, tab=tab, view=view, sort=sort,
                                 day=query.get('day')))}">↻ تحديث</a>
+ · إصدار {_e(_version())}
  · <a href="{_e(base)}/logout">خروج</a></footer>
 <script>{_JS}</script></body></html>"""
 

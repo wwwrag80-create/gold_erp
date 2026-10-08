@@ -69,6 +69,11 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         self.btn_new = QtWidgets.QPushButton("↻ رابط جديد (يُبطل القديم)")
         self.btn_new.setObjectName("ghost")
         self.btn_new.clicked.connect(self.new_link)
+        # 4.58: يجرّب الرابط فعلاً من هذا الجهاز طبقةً طبقة ويقول أين انقطع
+        self.btn_check = QtWidgets.QPushButton("🔎 فحص الرابط")
+        self.btn_check.setToolTip("يجرّب الرابط من البرنامج إلى الإنترنت "
+                                  "ويقول أين ينقطع وما إصلاحه")
+        self.btn_check.clicked.connect(self.check)
 
         self.status = QtWidgets.QLabel("")
         self.status.setWordWrap(True)
@@ -105,6 +110,7 @@ class ModelsLinkDialog(QtWidgets.QDialog):
 
         acts = QtWidgets.QHBoxLayout()
         acts.addWidget(self.btn_on, 1)
+        acts.addWidget(self.btn_check)
         acts.addWidget(self.btn_off)
         acts.addWidget(self.btn_new)
 
@@ -183,8 +189,10 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         where = {"funnel": "يُفتح من أي جوال عبر الإنترنت",
                  "serve": "يُفتح على أجهزة المدير التي عليها Tailscale",
                  "lan": "يُفتح من أي جهاز على شبكة المصنع"}[mode]
-        return (f"<span style='color:#1E6B33'><b>✔ الرابط يعمل</b> — "
-                f"{where}. يبقى ثابتاً ما دام لم يُضغط «رابط جديد».</span>")
+        return (f"<span style='color:#1E6B33'><b>✔ الرابط مفعّل</b> — "
+                f"{where}. يبقى ثابتاً ما دام لم يُضغط «رابط جديد».</span>"
+                "<br><span style='color:#776b5e'>للتأكد أنه يُفتح فعلاً"
+                " اضغط «🔎 فحص الرابط».</span>")
 
     def _show_activate(self, res):
         if res.get("ok"):
@@ -213,7 +221,8 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             except Exception as e:                  # noqa: BLE001
                 box["err"] = e
         self._job = (threading.Thread(target=work, daemon=True), box, done)
-        for b in (self.btn_on, self.btn_off, self.btn_new):
+        for b in (self.btn_on, self.btn_off, self.btn_new,
+                  self.btn_check):
             b.setEnabled(False)
         self.status.setText(f"<span style='color:#776b5e'>{wait_text}</span>")
         self._job[0].start()
@@ -225,7 +234,8 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         _t, box, done = self._job
         self._job = None
         self._timer.stop()
-        for b in (self.btn_on, self.btn_off, self.btn_new):
+        for b in (self.btn_on, self.btn_off, self.btn_new,
+                  self.btn_check):
             b.setEnabled(True)
         if "err" in box:
             self._show(None, f"<span style='color:#a4262c'>{box['err']}</span>")
@@ -266,6 +276,112 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             err(self, e)
             return
         self.enable()
+
+    # ══════════ فحص الرابط ══════════
+    def check(self):
+        self._run(mw.diagnose, self._show_diag,
+                  "جارٍ فحص الرابط من البرنامج إلى الإنترنت… "
+                  "(قد يستغرق نصف دقيقة)")
+
+    @staticmethod
+    def diag_text(items):
+        """النتيجة نصّاً — تُنسخ وتُرسل كما هي."""
+        mark = {True: "✔", False: "✘", None: "•"}
+        out = []
+        for it in items:
+            out.append(f"{mark[it['ok']]} {it['title']}")
+            if it["detail"]:
+                out.append("    " + it["detail"].replace("\n", "\n    "))
+        return "\n".join(out)
+
+    @staticmethod
+    def verdict(items):
+        """جملة الخلاصة: أين انقطع الطريق — أو أن الرابط سليم."""
+        bad = [i for i in items if i["ok"] is False]
+        pub = [i for i in items if i["key"] == "public"]
+        if not bad and pub and pub[0]["ok"]:
+            return (True, "الرابط يعمل من الإنترنت ✔ — إن لم يُفتح على "
+                    "جوال المدير: تأكّد أنه يفتح الرابط الذي يبدأ بـ "
+                    "https:// (لا رابط 192.168) وأن الإنترنت في الجوال "
+                    "يعمل، وجرّب متصفحاً آخر (كروم/سفاري).")
+        if not bad:
+            return (True, "لا عطل في البرنامج — الرابط المتاح الآن رابط "
+                    "شبكة المصنع، فيُفتح والجوال على Wi-Fi المصنع نفسه.")
+        b = bad[0]
+        return (False, f"موضع الانقطاع: {b['title']}.")
+
+    def _show_diag(self, items):
+        import html as _h
+        ok, head = self.verdict(items)
+        color = {True: "#1E6B33", False: "#a4262c", None: "#776b5e"}
+        mark = {True: "✔", False: "✘", None: "•"}
+        rows = []
+        for it in items:
+            det = ""
+            if it["detail"]:
+                det = ("<div style='color:#555;font-size:12px;"
+                       "white-space:pre-wrap' dir='auto'>"
+                       f"{_h.escape(it['detail'][:1500])}</div>")
+            rows.append(
+                f"<div style='margin:6px 0'><b style='color:"
+                f"{color[it['ok']]}'>{mark[it['ok']]}</b> "
+                f"<b>{_h.escape(it['title'])}</b>{det}</div>")
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("فحص رابط المدير")
+        dlg.resize(720, 560)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        top = QtWidgets.QLabel(head)
+        top.setWordWrap(True)
+        top.setStyleSheet(f"font-weight:bold;font-size:15px;color:"
+                          f"{color[ok]}")
+        lay.addWidget(top)
+        view = QtWidgets.QTextBrowser()
+        view.setOpenExternalLinks(True)
+        view.setHtml("".join(rows))
+        lay.addWidget(view, 1)
+        btns = QtWidgets.QHBoxLayout()
+        fixes = {it["fix"]: it for it in items if it["fix"]
+                 and it["ok"] is not True}
+
+        def _btn(text, fn):
+            b = QtWidgets.QPushButton(text)
+            b.clicked.connect(fn)
+            btns.addWidget(b)
+            return b
+
+        if "firewall" in fixes:
+            def _fw():
+                if mw.firewall_allow():
+                    info(dlg, "وافق على نافذة ويندوز التي ظهرت، ثم اضغط "
+                              "«🔎 فحص الرابط» مرةً أخرى.")
+                else:
+                    err(dlg, "تعذّر طلب الإذن من ويندوز — شغّل البرنامج "
+                             "كمسؤول وأعد المحاولة.")
+            _btn("🛡 السماح عبر جدار الحماية", _fw)
+        if "activate" in fixes:
+            def _act():
+                dlg.accept()
+                self.enable()
+            _btn("↻ إعادة تفعيل الرابط", _act)
+        for key, label in (("ts_install", "⬇ تنزيل Tailscale"),
+                           ("ts_login", "🔑 تسجيل الدخول في Tailscale")):
+            if key in fixes:
+                u = fixes[key].get("url") or "https://tailscale.com/download"
+                _btn(label, lambda _=False, u=u:
+                     QtGui.QDesktopServices.openUrl(QtCore.QUrl(u)))
+        txt = self.diag_text(items)
+
+        def _copy():
+            QtWidgets.QApplication.clipboard().setText(txt)
+            top.setText(head + "  —  📋 نُسخت النتيجة، أرسلها للدعم.")
+        _btn("📋 نسخ النتيجة", _copy)
+        btns.addStretch(1)
+        close = QtWidgets.QPushButton("إغلاق")
+        close.clicked.connect(dlg.accept)
+        btns.addWidget(close)
+        lay.addLayout(btns)
+        self._diag = dlg
+        dlg.exec_()
 
     def save_pin(self, clear=False):
         try:
