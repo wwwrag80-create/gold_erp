@@ -739,7 +739,7 @@ class SalesScreen(QtWidgets.QWidget):
         # يزاحم الجدول
         box = QtWidgets.QGroupBox("② إدخال الطقم")
         box.setToolTip("Enter ينتقل للخانة التالية · الأسهم ← → تتنقّل · "
-                       "Enter على آخر خانة يضيف السطر")
+                       "وعند خانة الأجر يقف: Enter مرةً ثانية يضيف السطر")
         # رقم الموديل أولاً: يُملأ تلقائياً من دليل الموديلات عند
         # إدخال رقم تشغيل مسجّل، ويُكتب يدوياً للأطقم الجديدة فيُسجَّل
         # في الدليل ويبقى مرتبطاً بالطقم.
@@ -805,7 +805,8 @@ class SalesScreen(QtWidgets.QWidget):
         self.btn_wage_only.setObjectName("ghost")
         self.btn_wage_only.setToolTip(
             "سطر أجرٍ بلا طقم ولا ذهب — يُضاف إلى أجور العميل وحدها.\n"
-            "أو: اكتب المبلغ في خانة الأجر ورقم التشغيل فارغ ثم Enter.")
+            "أو: اكتب المبلغ في خانة الأجر ورقم التشغيل فارغ ثم Enter"
+            " مرتين.")
         self.btn_wage_only.clicked.connect(self.add_wage_only)
 
         def _sub(t):
@@ -816,7 +817,7 @@ class SalesScreen(QtWidgets.QWidget):
 
         # الترتيب كما طلبه صاحب النظام: الموديل والرقم ثم المكوّنات،
         # وفي الآخر المقيد والقائم والعيار والأجر — ما يُراجَع قبل
-        # الإضافة مباشرةً، والأجرُ آخرها لأن Enter عليه يضيف السطر.
+        # الإضافة مباشرةً، والأجرُ آخرها: Enter يقف عنده، والثانية تضيف.
         fields = [
             ("رقم الموديل", self.model_no, 2),
             ("رقم التشغيل", self.barcode, 3),
@@ -851,15 +852,66 @@ class SalesScreen(QtWidgets.QWidget):
         enter_chain(self, self._chain, on_last=self._add_from_enter,
                     require={self.barcode:
                              lambda: bool(self.barcode.text().strip())})
+        # 4.60: «وقفةٌ» عند الأجر — تُلغى بأي كتابةٍ فيه أو بمغادرته
+        self._wage_armed = False
+        self._add_text = self.btn_add_line.text()
+        try:
+            self.line_wage.lineEdit().textEdited.connect(
+                lambda *_: self._arm_wage(False))
+        except Exception:
+            pass
+        QtWidgets.QApplication.instance().focusChanged.connect(
+            self._entry_focus_moved)
         return box
 
     def _add_from_enter(self):
-        """Enter على آخر خانة: يُضاف السطر ويعود المؤشر لرقم التشغيل.
+        """Enter على خانة الأجر (آخر السطر): **الأولى تقف، والثانية تضيف**.
 
-        وإن رُفض السطر يبقى المؤشر حيث هو ليُصحَّح — لا يقفز إلى أول
-        السطر فيضيع موضع الخطأ.
+        طلب صاحب النظام (4.60): Enter من رقم التشغيل يمشي على الخانات حتى
+        الأجر ثم **يقف عنده** — فيُراجَع الأجر أو يُكتب — ولا يُضاف السطر
+        إلا بضغطةٍ ثانية. كانت ضغطةٌ واحدة تضيفه قبل أن تقع العين على
+        الأجر. والأولى تعتمد ما كُتب («12+3» تصير 15) فيُرى قبل الإضافة،
+        وأي كتابةٍ في الخانة بعدها تعيدها «أولى» من جديد.
+
+        وبعد الإضافة يعود المؤشر لرقم التشغيل. وإن رُفض السطر يبقى حيث
+        هو ليُصحَّح — لا يقفز إلى أول السطر فيضيع موضع الخطأ.
         """
+        if not self._wage_armed:
+            try:
+                self.line_wage.interpretText()
+            except Exception:
+                pass
+            self.line_wage.selectAll()
+            self._arm_wage(True)
+            return False             # يبقى المؤشر في خانة الأجر
+        self._arm_wage(False)
         return self.barcode if self.add_item() else False
+
+    def _arm_wage(self, on):
+        """الوقفة عند الأجر: الزرّ يقول إن Enter التالية تضيف السطر."""
+        on = bool(on)
+        if on == self._wage_armed and not on:
+            return
+        self._wage_armed = on
+        self.btn_add_line.setText("↵ " + self._add_text.lstrip("+ ").strip()
+                                  if on else self._add_text)
+        if on:
+            w = self.line_wage
+            QtWidgets.QToolTip.showText(
+                w.mapToGlobal(QtCore.QPoint(0, w.height())),
+                "↵ Enter مرةً ثانية يضيف السطر", w)
+        else:
+            QtWidgets.QToolTip.hideText()
+
+    def _entry_focus_moved(self, _old, new):
+        if not getattr(self, "_wage_armed", False):
+            return
+        try:
+            inner = self.line_wage.lineEdit()
+            if new is not self.line_wage and new is not inner:
+                self._arm_wage(False)
+        except RuntimeError:          # الشاشة أُغلقت وحُرِّر كائنها
+            pass
 
     # ══════════════════════════════════════════════════════════════
     #  ③ البنود والخلاصة
