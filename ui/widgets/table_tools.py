@@ -317,6 +317,22 @@ def attach_menu(table, key=None):
         def _menu(pos):
             key = table.property("_tt_key")
             m = QtWidgets.QMenu(table)
+            # أفعال الشاشة نفسها على الصفّ (إن عرّفتها) قبل النسخ والتصدير:
+            # `table._tt_extra(pos)` ← [(النص، الدالة)] — قائمةٌ واحدة لا
+            # قائمتان تتعاقبان على النقرة نفسها
+            extra = getattr(table, "_tt_extra", None)
+            if callable(extra):
+                try:
+                    acts = extra(pos) or []
+                except Exception:
+                    acts = []
+                for label, fn in acts:
+                    if fn is None:
+                        m.addAction(label).setEnabled(False)
+                    else:
+                        m.addAction(label, fn)
+                if acts:
+                    m.addSeparator()
             a_copy = m.addAction("📋 نسخ الجدول (يُلصق في Excel)")
             a_csv = m.addAction("⬇ تصدير إلى Excel/CSV…")
             a_reset = None

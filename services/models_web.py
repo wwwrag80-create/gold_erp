@@ -838,6 +838,31 @@ th{color:var(--muted);font-weight:600;font-size:11.5px;line-height:1.25}
 details{overflow-x:auto}
 td.n{direction:ltr;text-align:left;white-space:nowrap}
 .empty{padding:30px;text-align:center;color:var(--muted);grid-column:1/-1}
+.orders{display:flex;flex-direction:column;gap:16px}
+.order{background:#fff;border:1px solid var(--line);border-radius:14px;
+padding:12px 14px}
+.oh{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;
+margin:0 0 10px;font-size:14px}
+.oh .no{font-size:16px;font-weight:700;color:var(--brown)}
+.oh .cu{font-size:16px;font-weight:700}
+.oh .m{color:var(--muted);font-size:13px}
+.st{padding:2px 10px;border-radius:11px;font-size:12px;font-weight:600}
+.st.open{background:#f7eddd;color:var(--out)}
+.st.done{background:#e8f3ea;color:var(--in)}
+.st.cancelled{background:#eee;color:#777}
+.og{display:grid;gap:10px;grid-template-columns:repeat(var(--cols),minmax(0,1fr))}
+.oc{border:1px solid var(--line);border-radius:10px;overflow:hidden;
+background:#fff}
+.oc .b h2{font-size:14px;margin:0 0 5px}
+.chip.q{color:#fff;background:var(--gold);font-weight:700}
+.chip.short{color:#a4262c;background:#fbeaea}
+.onote{margin-top:8px;color:var(--muted);font-size:13px}
+.prod{background:#fff;border:1px solid var(--line);border-radius:14px;
+padding:8px 14px}
+.prod table{font-size:13px;margin-top:6px}
+.prod th,.prod td,.prod td.n{text-align:center}
+.prod th:first-child,.prod td:first-child,.prod th:last-child,
+.prod td:last-child{text-align:right}
 footer{padding:16px;text-align:center;color:var(--muted);font-size:12px}
 footer a{color:var(--muted)}
 """
@@ -873,6 +898,10 @@ _JS = """
     x.style.display=(!whole&&cn)?'none':'';});
    if(d&&!whole&&cn){d.open=true;}
    if(!whole){tn+=cn;tw+=cw;}});
+  // 4.59: الطلبات — بالعميل أو رقم الطلب أو رقم موديلٍ فيه
+  document.querySelectorAll('.order').forEach(function(o){
+   var hit=!v||(o.getAttribute('data-s')||'').indexOf(v)>=0;
+   o.style.display=hit?'':'none'; if(hit)n++;});
   var e=document.getElementById('none'); if(e)e.style.display=n?'none':'';
   if(sum){sum.style.display=(v&&tn)?'':'none';
    sum.innerHTML='نتيجة البحث «'+v.replace(/[<>&"]/g,'')+'»<b>'+n+
@@ -980,8 +1009,8 @@ def page_html(conn, query, base):
 
     from models import models_catalog as mc
     from services import karat_view as kv
-    tab = query.get("tab") if query.get("tab") in ("guide", "received") \
-        else "guide"
+    tab = query.get("tab") if query.get("tab") in (
+        "guide", "received", "orders") else "guide"
     view = query.get("view") if query.get("view") in (
         "all", "in_stock", "sold") else "all"
     sort = query.get("sort") if query.get("sort") in (
@@ -989,17 +1018,32 @@ def page_html(conn, query, base):
     imgs = mc.models_with_images(conn)
     unit = _e(kv.unit())
 
+    try:
+        from models import model_orders as _mo
+        n_orders = _mo.count_open(conn)
+    except Exception:
+        n_orders = 0
     tabs = "".join(
         f'<a class="{"on" if tab == k else ""}"'
         f' href="{_e(_link(base, tab=k, view=view, sort=sort))}">{t}</a>'
         for k, t in (("guide", "الدليل"),
-                     ("received", "البضاعة الواردة بتاريخ")))
+                     ("received", "البضاعة الواردة بتاريخ"),
+                     ("orders", "طلبات العملاء"
+                      + (f" ({n_orders})" if n_orders else ""))))
     seg = "".join(
         f'<a class="{"on" if view == k else ""}" href="'
         f'{_e(_link(base, tab=tab, view=k, sort=sort, day=query.get("day")))}'
         f'">{t}</a>'
         for k, t in (("all", "الكل"), ("in_stock", "المتاح للبيع"),
                      ("sold", "طرف المناديب")))
+    if tab == "orders":
+        st = query.get("st") if query.get("st") in (
+            "open", "done", "all") else "open"
+        seg = "".join(
+            f'<a class="{"on" if st == k else ""}" href="'
+            f'{_e(_link(base, tab="orders", st=k))}">{t}</a>'
+            for k, t in (("open", "المفتوحة"), ("done", "المُسلَّمة"),
+                         ("all", "الكل")))
     sort_sel = "".join(
         f'<option value="{k}"{" selected" if sort == k else ""}>{t}</option>'
         for k, t in (("az", "أ ← ي"), ("za", "ي ← أ"),
@@ -1008,6 +1052,8 @@ def page_html(conn, query, base):
     if tab == "received":
         body, summary, tools = _received(conn, query, base, view, sort,
                                          imgs, unit, sort_sel)
+    elif tab == "orders":
+        body, summary, tools = _orders(conn, base, st, imgs)
     else:
         body, summary, tools = _guide(conn, base, view, sort, imgs, unit,
                                       sort_sel)
@@ -1034,11 +1080,11 @@ def page_html(conn, query, base):
 <div class="cols">الصور في الصف: {cols}</div></div>
 <section class="sum">{summary}<div id="pick" class="pick"
  style="display:none"></div></section>
-<section class="grid">{body}</section>
+<section class="{"orders" if tab == "orders" else "grid"}">{body}</section>
 <div id="none" class="empty" style="display:none">لا نتائج للبحث</div>
 </main>
 <footer><a href="{_e(_link(base, tab=tab, view=view, sort=sort,
-                                day=query.get('day')))}">↻ تحديث</a>
+                                day=query.get('day'), st=query.get('st')))}">↻ تحديث</a>
  · إصدار {_e(_version())}
  · <a href="{_e(base)}/logout">خروج</a></footer>
 <script>{_JS}</script></body></html>"""
@@ -1190,6 +1236,76 @@ def _received(conn, query, base, view, sort, imgs, unit, sort_sel):
     body = "".join(cards) or (f'<div class="empty">لا وارد في {_e(span)}'
                               f'</div>')
     return body, summary, tools
+
+
+def _orders(conn, base, status, imgs):
+    """طلبات العملاء (4.59) — للعرض فقط: كل طلبٍ بعميله وتاريخه، وتحته
+    صور موديلاته بالعدد المطلوب وما بالخزنة منه وما يلزم تصنيعه. وفي
+    أعلاها «خلاصة التصنيع» للطلبات المفتوحة مجتمعةً."""
+    from models import model_orders as mo
+    from models import models_catalog as mc
+    rows = mo.list_orders(conn, status)
+    arts = []
+    tot_pieces = tot_short = 0
+    for r in rows:
+        o = mo.get_order(conn, r["id"])
+        if not o:
+            continue
+        tot_pieces += o["pieces"]
+        tot_short += o["short"] if o["status"] == "open" else 0
+        keys = " ".join([o["order_no"], o["customer_name"]]
+                        + [ln["model"] for ln in o["lines"]]).lower()
+        cards = []
+        for ln in o["lines"]:
+            chips = [f'<span class="chip q">العدد {ln["qty"]}</span>']
+            if o["status"] == "open":
+                chips.append(f'<span class="chip in">بالخزنة'
+                             f' {ln["in_count"]}</span>')
+                if ln["short"]:
+                    chips.append(f'<span class="chip short">للتصنيع'
+                                 f' {ln["short"]}</span>')
+            note = (f'<div class="onote">{_e(ln["note"])}</div>'
+                    if ln.get("note") else "")
+            cards.append(
+                f'<div class="oc">'
+                f'{_photo(base, ln["model"], mc._safe_name(ln["model"]) in imgs)}'
+                f'<div class="b"><h2>{_e(ln["model"])}</h2>'
+                f'<div class="chips">{"".join(chips)}</div>{note}</div></div>')
+        due = (f'<span class="m">التسليم {_e(o["due_date"])}</span>'
+               if o.get("due_date") else "")
+        arts.append(
+            f'<article class="order" data-s="{_e(keys)}">'
+            f'<div class="oh"><span class="no">{_e(o["order_no"])}</span>'
+            f'<span class="cu">{_e(o["customer_name"])}</span>'
+            f'<span class="m">{_e(o["order_date"])}</span>{due}'
+            f'<span class="m">{o["models"]} موديل · {o["pieces"]} قطعة</span>'
+            f'<span class="st {_e(o["status"])}">{_e(o["status_label"])}'
+            f'</span></div><div class="og">{"".join(cards)}</div>'
+            + (f'<div class="onote">ملاحظات: {_e(o["notes"])}</div>'
+               if o.get("notes") else "")
+            + '</article>')
+    prod = mo.production(conn) if status in ("open", "all") else []
+    if prod:
+        trs = "".join(
+            f'<tr><td>{_e(p["model"])}</td><td class="n">{p["qty"]}</td>'
+            f'<td class="n">{p["in_count"]}</td>'
+            f'<td class="n">{"<b>%d</b>" % p["short"] if p["short"] else "✔"}'
+            f'</td><td>{_e("، ".join(p["customers"]))}</td></tr>'
+            for p in prod)
+        arts.insert(0, (
+            '<details class="prod"><summary>🏭 خلاصة التصنيع — ما تطلبه'
+            ' الطلبات المفتوحة كلها مجتمعةً</summary><table><tr>'
+            '<th>الموديل</th><th>المطلوب</th><th>بالخزنة</th>'
+            '<th>للتصنيع</th><th>العملاء</th></tr>' + trs
+            + '</table></details>'))
+    label = {"open": "الطلبات المفتوحة", "done": "الطلبات المُسلَّمة",
+             "all": "كل الطلبات"}[status]
+    summary = (f'<div>{label}<b>{len(rows)}</b></div>'
+               f'<div>القطع المطلوبة<b>{tot_pieces}</b></div>'
+               + (f'<div class="out">يلزم تصنيعه<b>{tot_short} قطعة</b></div>'
+                  if status != "done" else ""))
+    body = "".join(arts) or '<div class="empty">لا طلبات</div>'
+    return body, summary, ""
 
 
 def login_page(base, error=""):

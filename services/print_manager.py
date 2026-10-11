@@ -3538,6 +3538,161 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
             + css + meta + pages)
 
 
+def _tpl_model_order(conn, order_id=0, per_page=4, show_stock=False):
+    """طلب العميل بصور موديلاته (4.59).
+
+    في رأس **كل صفحة** اسم العميل ورقم الطلب — فالورقة الثالثة إن
+    انفصلت عن الأولى بقيت تقول لمن هي. وتحت كل صورة اسم الموديل
+    و**العدد المطلوب** بخطٍّ بارز. وعدد الصور في الصفحة يختاره
+    المستخدم (`photo_grid`) كطباعة صور الدليل.
+
+    `show_stock`: ورقة الورشة — يُضاف تحت كل صورة ما بالخزنة منه وما
+    يلزم تصنيعه، وجدولٌ خلاصةٌ في آخرها. ورقة العميل تُطبع بدونها.
+    """
+    from html import escape as _x
+
+    from models import model_orders as mo
+    from models import models_catalog as mc
+    o = mo.get_order(conn, int(order_id or 0))
+    if not o:
+        raise ValueError("الطلب غير موجود")
+    per_page = max(1, min(int(per_page or 4), 60))
+    cols, rows, cw, ch = photo_grid(per_page, height_mm=240.0)
+    fs = max(8.5, min(13.0, cw / 6.0))
+    cap_mm = max(12.0, fs * 1.5) + (4.0 if show_stock else 0.0)
+    img_h = max(15.0, ch - cap_mm - 4)
+
+    boxes = []
+    for ln in o["lines"]:
+        p_img = mc.image_path(ln["model"])
+        uri = _img_uri(p_img) if p_img else ""
+        img = (f'<img src="{uri}" />' if uri
+               else '<span class="noimg">لا صورة لهذا الموديل</span>')
+        stock = ""
+        if show_stock:
+            stock = (f'<br/><span class="st">بالخزنة {en(ln["in_count"])}'
+                     + (f' · للتصنيع <b>{en(ln["short"])}</b>'
+                        if ln["short"] else " · متوفّر ✔") + "</span>")
+        note = (f'<br/><span class="nt">{_x(ln["note"])}</span>'
+                if ln.get("note") else "")
+        boxes.append(
+            '<td class="ph"><div class="phbox">' + img + '</div>'
+            '<div class="phcap"><b class="mn">' + _x(str(ln["model"]))
+            + '</b> &nbsp;—&nbsp; العدد: <b class="q">'
+            + en(ln["qty"]) + '</b>' + stock + note + '</div></td>')
+
+    total_pages = max(1, (len(boxes) + per_page - 1) // per_page)
+    head_txt = (f'طلب <b>{en(o["order_no"])}</b> &nbsp;·&nbsp; العميل: '
+                f'<b class="cust">{_x(o["customer_name"])}</b> &nbsp;·&nbsp; '
+                f'{en(o["order_date"])}')
+    pages = ""
+    for pg in range(total_pages):
+        chunk = boxes[pg * per_page:(pg + 1) * per_page]
+        while len(chunk) < rows * cols:
+            chunk.append('<td class="ph"></td>')
+        brk = ' style="page-break-before:always"' if pg else ""
+        trs = "".join(
+            "<tr>" + "".join(chunk[r * cols:(r + 1) * cols]) + "</tr>"
+            for r in range(rows)
+            if any("phbox" in c for c in chunk[r * cols:(r + 1) * cols])
+            or r == 0)
+        pages += (f'<div class="ordhead"{brk}>{head_txt}'
+                  f'<span class="pg">صفحة {en(pg + 1)} من '
+                  f'{en(total_pages)}</span></div>'
+                  '<table class="photos" width="100%" cellspacing="0"'
+                  ' cellpadding="0">' + trs + "</table>")
+
+    summary = ""
+    if show_stock:
+        body_rows = "".join(
+            "<tr>" + cells(
+                tdw(_x(ln["model"]), align="right"), tdw(en(ln["qty"])),
+                tdw(en(ln["in_count"])),
+                tdw(en(ln["short"]) if ln["short"] else "✔"),
+                tdw(_x(ln.get("note") or ""), align="right")) + "</tr>"
+            for ln in o["lines"])
+        summary = (
+            '<div class="party" style="page-break-before:always">'
+            'خلاصة الطلب للورشة</div>' + TBL + "<tr>"
+            + cells(thw("الموديل"), thw("العدد"), thw("بالخزنة"),
+                       thw("للتصنيع"), thw("ملاحظة")) + "</tr>"
+            + body_rows + "<tr>" + cells(
+                thw("الإجمالي"), thw(en(o["pieces"])), thw(""),
+                thw(en(o["short"])), thw("")) + "</tr></table>")
+
+    # العميل والرقم والتاريخ في رأس كل صفحة — وهنا ما سواها مرةً واحدة
+    info_line = (
+        f'<div {WIDE}>{en(o["models"])} موديل · <b>{en(o["pieces"])}</b>'
+        ' قطعة'
+        + (f' &nbsp;·&nbsp; موعد التسليم: <b>{en(o["due_date"])}</b>'
+           if o.get("due_date") else "")
+        + (f'<br/>ملاحظات: {_x(o["notes"])}' if o.get("notes") else "")
+        + "</div>")
+    css = f"""
+    <style>
+      .ordhead {{ border-bottom: 1.5px solid #B99B33; padding: 1mm 0 1.2mm;
+                  margin: 0 0 1.5mm; font-size: 10.5pt; }}
+      .ordhead .cust {{ font-size: 12pt; }}
+      .ordhead .pg {{ float: left; color: #776b5e; font-size: 9pt; }}
+      table.photos {{ table-layout: fixed; width: 100%; }}
+      table.photos td.ph {{
+        width: {100.0 / cols:.3f}%; height: {ch:.1f}mm; vertical-align: top;
+        padding: 1.5mm; text-align: center;
+      }}
+      .phbox {{
+        height: {img_h:.1f}mm; border: 1px solid #D8CDB4; border-radius: 4px;
+        display: flex; align-items: center; justify-content: center;
+        background: #FFFFFF; overflow: hidden;
+      }}
+      .phbox img {{ max-width: 96%; max-height: {img_h - 2:.1f}mm;
+                   object-fit: contain; }}
+      .phbox .noimg {{ color: #9a8f7c; font-size: 9pt; }}
+      .phcap {{ margin-top: 1mm; font-size: {fs:.1f}pt; line-height: 1.3;
+                color: #4A3A1E; }}
+      .phcap b.mn {{ font-size: {fs * 1.12:.1f}pt; }}
+      .phcap b.q {{ font-size: {fs * 1.3:.1f}pt; color: #8a6d1d; }}
+      .phcap .st {{ font-size: {fs * 0.85:.1f}pt; color: #5a5040; }}
+      .phcap .nt {{ font-size: {fs * 0.85:.1f}pt; color: #776b5e; }}
+    </style>
+    """
+    today = _qd(QtCore.QDate.currentDate())
+    return (_slim_title("طلب عميل" + (" — ورقة الورشة" if show_stock
+                                      else ""), today)
+            + css + info_line + pages + summary)
+
+
+def _tpl_orders_production(conn, _id=0):
+    """خلاصة التصنيع: ما تطلبه الطلبات المفتوحة كلها مجتمعةً (4.59)."""
+    from html import escape as _x
+
+    from models import model_orders as mo
+    rows = mo.production(conn)
+    today = _qd(QtCore.QDate.currentDate())
+    if not rows:
+        return (_slim_title("خلاصة التصنيع للطلبات المفتوحة", today)
+                + '<div style="text-align:center;padding:40px">'
+                  'لا طلبات مفتوحة</div>')
+    body = "".join(
+        "<tr>" + cells(
+            tdw(_x(r["model"]), align="right"), tdw(en(r["qty"])),
+            tdw(en(r["in_count"])),
+            tdw(f'<b>{en(r["short"])}</b>' if r["short"] else "✔"),
+            tdw(_x("، ".join(r["customers"])), align="right")) + "</tr>"
+        for r in rows)
+    tq = sum(r["qty"] for r in rows)
+    ts = sum(r["short"] for r in rows)
+    return (_slim_title("خلاصة التصنيع للطلبات المفتوحة", today)
+            + f'<div {WIDE}>موديلات مطلوبة: <b>{en(len(rows))}</b> '
+              f'&nbsp;·&nbsp; قطع مطلوبة: <b>{en(tq)}</b> &nbsp;·&nbsp; '
+              f'يلزم تصنيعه: <b>{en(ts)}</b> قطعة — الأكثر نقصاً أولاً'
+              '</div>'
+            + TBL + "<tr>" + cells(
+                thw("الموديل"), thw("المطلوب"), thw("بالخزنة"),
+                thw("للتصنيع"), thw("العملاء")) + "</tr>" + body
+            + "<tr>" + cells(thw("الإجمالي"), thw(en(tq)), thw(""),
+                                thw(en(ts)), thw("")) + "</tr></table>")
+
+
 # خريطة نوع المستند ← قالبه. تُبنى من الدوال الموجودة فعلاً،
 # فلا تنكسر إن أُعيد ترتيب الملف.
 def _tpl_aging(conn, _id=0, entity_type="customer", as_of=None, dim="both",
@@ -4219,6 +4374,8 @@ BUILDERS = {
     "models_received_photos": _tpl_models_received_photos,
     "dossier_models": _tpl_dossier_models,
     "invoice_models": _tpl_invoice_models,
+    "model_order": _tpl_model_order,
+    "orders_production": _tpl_orders_production,
     "dash_panel": _tpl_dash_panel,
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,

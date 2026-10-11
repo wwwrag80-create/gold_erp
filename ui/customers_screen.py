@@ -666,7 +666,8 @@ class CustomersScreen(QtWidgets.QWidget):
         for i in range(t.rowCount()):
             it = t.item(i, 0)
             if it is not None and it.data(ACC_ROLE) == aid:
-                t.selectRow(i)
+                # setCurrentCell لا selectRow: الأخير لا يحدّد شيئاً في RTL
+                t.setCurrentCell(i, 0)
                 t.scrollToItem(it)
                 return
 

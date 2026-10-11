@@ -22,6 +22,7 @@ DATA_TABLES = [
     "shrinkage_ops",
     "payroll_ledger", "employees",
     "mfg_targets", "mfg_salaries",
+    "model_order_lines", "model_orders",
     "entities", "accounts",
     "sync_queue", "audit_log",
     "stock_moves", "scrap_moves",

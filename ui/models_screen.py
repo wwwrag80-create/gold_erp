@@ -82,6 +82,13 @@ class ModelsScreen(QtWidgets.QWidget):
             "رابطٌ ثابت مجاني يفتح الدليل كاملاً بصوره وتفاصيله على جوال\n"
             "المدير — يعمل والبرنامج مفتوح ومتصل، بلا رفعٍ ولا مساحة سحابية")
         btn_link.clicked.connect(self.open_link)
+        # 4.59: طلبات العملاء — يختار العميل من الصور ويُحفظ طلبه بعدده
+        # ويُطبع بصور موديلاته (models.model_orders · بلا أثر محاسبي)
+        btn_orders = self.btn_orders = QtWidgets.QPushButton("📝 الطلبات")
+        btn_orders.setToolTip(
+            "تسجيل طلب عميل: اسمه والموديلات التي يختارها من الصور وعدد\n"
+            "كلٍّ منها — ثم معاينته وطباعته بالصور، والطلبات المحفوظة")
+        btn_orders.clicked.connect(lambda: self.open_orders())
 
         # ── الوارد بتاريخ: ماذا دخل ذلك اليوم وأين هو الآن ──
         self.by_date = QtWidgets.QCheckBox("البضاعة الواردة بتاريخ")
@@ -131,6 +138,7 @@ class ModelsScreen(QtWidgets.QWidget):
         head.addWidget(btn_collapse)
         head.addWidget(btn_print)
         head.addWidget(btn_photos)
+        head.addWidget(btn_orders)
         head.addWidget(btn_link)
         head.addStretch(1)
 
@@ -388,6 +396,7 @@ class ModelsScreen(QtWidgets.QWidget):
 
     def refresh(self, force=False):
         """يبني الشجرة — فقط إن تغيّرت الأطقم."""
+        self._orders_badge()
         try:
             if self.by_date.isChecked():
                 return self._refresh_received(force)
@@ -667,6 +676,9 @@ class ModelsScreen(QtWidgets.QWidget):
             act = m.addAction("🗑 حذف الصورة",
                               lambda: self.del_image(val))
             act.setEnabled(has)
+            m.addSeparator()
+            m.addAction("📝 طلب عميل بهذا الموديل",
+                        lambda: self.open_orders(preset=[val]))
         elif kind == "wo":
             m.addAction("✎ تغيير موديل هذا الطقم",
                         lambda: self.assign_model(val))
@@ -866,6 +878,29 @@ class ModelsScreen(QtWidgets.QWidget):
         save_pref("models.photos_per_page", str(per.value()),
                   user.get("username"))
         return mn.value(), per.value()
+
+    def _orders_badge(self):
+        """عدد الطلبات المفتوحة على الزر — يُرى دون فتح النافذة."""
+        try:
+            from models import model_orders as mo
+            with db(readonly=True) as conn:
+                n = mo.count_open(conn)
+        except Exception:
+            n = 0
+        self.btn_orders.setText(f"📝 الطلبات ({n})" if n else "📝 الطلبات")
+
+    def open_orders(self, preset=None, order_id=None):
+        """نافذة الطلبات: تسجيل طلب عميل بالصور، والطلبات المحفوظة."""
+        try:
+            from ui.model_orders_dialog import ModelOrdersDialog
+            self._orders_dlg = ModelOrdersDialog(
+                self, self.user, order_id=order_id, preset_models=preset)
+            self._orders_dlg.exec_()
+        except Exception as e:
+            err(self, e)
+        finally:
+            self._orders_dlg = None
+            self._orders_badge()
 
     def open_link(self):
         """نافذة رابط المدير: توليده ونسخه ونوعه ورمز دخوله."""

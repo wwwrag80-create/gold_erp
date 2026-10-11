@@ -29,6 +29,121 @@ from ui.widgets.table_fit import fit_columns
 DRAFT_KEY = "sales"
 
 
+class _WageDelegate(QtWidgets.QStyledItemDelegate):
+    """خانتا الأجر في جدول البنود تُكتبان في مكانهما (4.59).
+
+    كان تصحيح أجر سطرٍ يمرّ بنافذة «✎» كاملة، ومراجعةُ أجور فاتورةٍ من
+    عشرة أسطر عشرُ نوافذ. الآن نقرةٌ على الخانة تفتحها للكتابة، وEnter
+    يحفظ وينزل إلى خانة الأجر في السطر التالي مفتوحةً — فتُراجَع أجور
+    الفاتورة كلها متتابعةً بلوحة المفاتيح. ↑ ↓ تصعد وتنزل كذلك، وEsc
+    يتراجع عمّا كُتب. والخانة حقلٌ ذكي كخانات الإدخال: «120+35» تُحسب،
+    والأرقام العربية تُقبل.
+
+    ما يُكتب يدخل بيانات السطر **فوراً** (`_set_inline_wage`)؛ وإعادةُ رسم
+    الجدول والنزول للسطر التالي تتأخّر لحظةً حتى تُغلق الخانة — فترحيلٌ
+    بـF2 والخانة مفتوحة لا يفوته الرقم الجديد.
+    """
+
+    def __init__(self, screen):
+        super().__init__(screen.items_table)
+        self.screen = screen
+        self.editor = None
+        self.index = None
+        self.move = 0
+        self.cancelled = False
+
+    def createEditor(self, parent, option, index):
+        ed = mspin()
+        ed.setParent(parent)
+        ed.setAlignment(QtCore.Qt.AlignCenter)
+        ed.setFrame(False)
+        ed.setToolTip("Enter يحفظ وينزل للسطر التالي · ↑ ↓ تنقّل · "
+                      "Esc تراجع")
+        self.editor = ed
+        self.index = QtCore.QPersistentModelIndex(index)
+        self.move = 0
+        self.cancelled = False
+        return ed
+
+    def setEditorData(self, editor, index):
+        # Qt يحدّد النص كله عند الفتح، فالكتابة تستبدل القيمة كلها
+        editor.setValue(self.screen._inline_value(index.row(),
+                                                  index.column()))
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+    def setModelData(self, editor, model, index):
+        """لا يُكتب نصٌّ في الخانة: السطر يُحدَّث ثم يُعاد رسم الجدول."""
+        if self.cancelled:
+            return
+        self.cancelled = True          # مرةً واحدة لكل فتح
+        try:
+            editor.interpretText()
+            val = editor.value()
+        except RuntimeError:
+            return
+        row, col, move = index.row(), index.column(), self.move
+        self.move = 0
+        changed = self.screen._set_inline_wage(row, col, val)
+        QtCore.QTimer.singleShot(
+            0, lambda: self.screen._after_inline_wage(row, col, move,
+                                                     changed))
+
+    def eventFilter(self, editor, ev):
+        if ev.type() == QtCore.QEvent.KeyPress:
+            k = ev.key()
+            if k in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                self.move = 1
+            elif k in (QtCore.Qt.Key_Down, QtCore.Qt.Key_Up,
+                       QtCore.Qt.Key_Tab, QtCore.Qt.Key_Backtab):
+                # السهمان يزيدان قيمة الحقل وينقصانها في العادة — وهنا
+                # يتنقّلان بين الأسطر. وTab لا يتجوّل في خانات السطر
+                # الأخرى (لا تُكتب): يحفظ ويبقى.
+                self.move = {QtCore.Qt.Key_Down: 1,
+                             QtCore.Qt.Key_Up: -1}.get(k, 0)
+                self.commitData.emit(editor)
+                self.closeEditor.emit(
+                    editor, QtWidgets.QAbstractItemDelegate.NoHint)
+                return True
+        return super().eventFilter(editor, ev)
+
+    def is_open(self):
+        try:
+            return self.editor is not None and self.editor.isVisible()
+        except RuntimeError:
+            self.editor = None
+            return False
+
+    def flush(self):
+        """ما كُتب في الخانة المفتوحة يُعتمد الآن — قبل الترحيل أو التعليق
+        أو تفريغ الفاتورة."""
+        if not self.is_open() or self.cancelled or self.index is None:
+            return False
+        ed = self.editor
+        try:
+            ed.interpretText()
+            val = ed.value()
+        except RuntimeError:
+            return False
+        row, col = self.index.row(), self.index.column()
+        self.cancelled = True
+        self.closeEditor.emit(ed, QtWidgets.QAbstractItemDelegate.NoHint)
+        if self.screen._set_inline_wage(row, col, val):
+            self.screen._after_inline_wage(row, col, 0, True)
+        return True
+
+    def cancel(self):
+        """Esc والخانة مفتوحة: تُغلق كما كانت بلا حفظ."""
+        if not self.is_open():
+            return False
+        self.cancelled = True
+        self.closeEditor.emit(
+            self.editor, QtWidgets.QAbstractItemDelegate.RevertModelCache)
+        self.screen.items_table.setFocus()
+        return True
+
+
 class NewCustomerDialog(QtWidgets.QDialog):
     def __init__(self, parent, username):
         super().__init__(parent)
@@ -444,6 +559,9 @@ class SalesScreen(QtWidgets.QWidget):
             "الأحجار بعد الخصم", "الأجر/جم", "الأجرة (ريال)"]
     # أوزان العرض (مجموعها 100): عمود الأزرار يكفيه القليل
     COL_W = [5, 9, 9, 6, 10, 8, 8, 7, 7, 7, 8, 7, 9]
+    # خانتا الأجر — تُكتبان في مكانهما (4.59)
+    C_WAGE, C_AMOUNT = 11, 12
+    WAGE_COLS = (C_WAGE, C_AMOUNT)
 
     def __init__(self, user):
         super().__init__()
@@ -560,6 +678,15 @@ class SalesScreen(QtWidgets.QWidget):
         self.wage_note.setObjectName("cardSub")
         self.wage_note.setProperty("live", True)     # تنبيهٌ حيّ لا شرح
         self.wage_note.setWordWrap(True)
+        # 4.59: للعميل طلبٌ مفتوح من دليل الموديلات؟ يظهر هنا عند اختياره
+        # برابطٍ يفتحه — فلا يُباع له وطلبه منسيّ في الدفتر
+        self.order_note = QtWidgets.QLabel("")
+        self.order_note.setObjectName("cardSub")
+        self.order_note.setProperty("live", True)
+        self.order_note.setWordWrap(True)
+        self.order_note.setTextFormat(QtCore.Qt.RichText)
+        self.order_note.linkActivated.connect(self._open_customer_order)
+        self.order_note.setVisible(False)
 
         g = QtWidgets.QGridLayout(box)
         g.setHorizontalSpacing(10)
@@ -589,6 +716,7 @@ class SalesScreen(QtWidgets.QWidget):
         g.addLayout(opts, 1, 6, 1, 4)
         g.addWidget(self.internal_note, 2, 0, 1, 10)
         g.addWidget(self.wage_note, 3, 0, 1, 10)
+        g.addWidget(self.order_note, 4, 0, 1, 10)
         g.setColumnStretch(3, 3)
         g.setColumnStretch(6, 3)
         # ══ Enter يمضي إلى الأمام في الشاشة كلها ══
@@ -742,12 +870,23 @@ class SalesScreen(QtWidgets.QWidget):
         self.items_table = make_table()
         self.items_table.cellClicked.connect(self._model_clicked)
         self.items_table.setToolTip(
-            "انقر خانة الموديل لعرض صورته المحفوظة في دليل الموديلات")
+            "انقر خانة الموديل لعرض صورته المحفوظة في دليل الموديلات\n"
+            "وانقر خانة الأجر لتعديله في مكانه — Enter يحفظ وينزل للسطر"
+            " التالي")
+        # 4.59: الأجر يُكتب في خانته — نقرةً أو بالكتابة مباشرةً والخانة
+        # محدّدة. وما سواها من الخانات لا يُكتب (`_mark_wage_cells`).
+        self._wage_delegate = _WageDelegate(self)
+        for c in self.WAGE_COLS:
+            self.items_table.setItemDelegateForColumn(c, self._wage_delegate)
+        self.items_table.setEditTriggers(
+            QtWidgets.QAbstractItemView.AnyKeyPressed)
+        # الزر الأيمن على سطر: أجرُه على كل الأسطر، أو المتفق عليه
+        self.items_table._tt_extra = self._wage_menu
         # التعديل والحذف في **عمود السطر الأول** لا تحت الجدول:
         # زرٌّ في صفّه لا يُخطئ صاحبه، ولا يحتاج تحديداً سابقاً.
         hint = QtWidgets.QLabel(
             "✎ يفتح السطر كاملاً للتصحيح   ·   ✕ يحذفه من الفاتورة "
-            "  ·   كلاهما في أول عمودٍ من الجدول")
+            "  ·   خانة الأجر تُعدَّل بالنقر عليها، وEnter ينزل للتي تحتها")
         hint.setObjectName("cardSub")
 
         self.p_weight = _Panel("إجمالي الوزن المقيد")
@@ -875,6 +1014,7 @@ class SalesScreen(QtWidgets.QWidget):
 
     def hold_invoice(self):
         """يعلّق الفاتورة الجارية: تُحفظ بلا ترحيل وتُمسح الشاشة."""
+        self._wage_delegate.flush()
         try:
             if self.editing_id is not None:
                 raise ValueError("فاتورةٌ مُرحَّلة مفتوحة للتعديل لا تُعلَّق —"
@@ -1207,6 +1347,7 @@ class SalesScreen(QtWidgets.QWidget):
 
     def on_close(self):
         """يُستدعى من `LazyScreen.release` عند مغادرة الشاشة."""
+        self._wage_delegate.flush()
         self._save_draft()
 
     # ══════════════════════════════════════════════════════════════
@@ -1273,6 +1414,8 @@ class SalesScreen(QtWidgets.QWidget):
         لا يمسح فاتورةً قيد الإدخال: مفتاحٌ واحد يمحو عمل خمس دقائق
         خطأٌ في التصميم لا تسهيل.
         """
+        if self._wage_delegate.cancel():   # خانة أجرٍ مفتوحة: تراجعٌ عنها
+            return
         if self.editing_id is not None:
             self.cancel_edit()
         else:
@@ -1293,7 +1436,46 @@ class SalesScreen(QtWidgets.QWidget):
         if internal:
             self.vat_check.setChecked(False)
         self._load_agreed_wage(cid)
-        self.recalc()
+        self._load_open_orders(cid)
+        # الأجور تُخفى في التحويل الداخلي وتعود لغيره — وخاناتها تتبعها
+        self.render_items()
+
+    def _load_open_orders(self, cid):
+        """طلبات العميل المفتوحة من دليل الموديلات — تنبيهٌ برابط."""
+        orders = []
+        if cid is not None and not self._is_internal(cid):
+            try:
+                from models import model_orders as mo
+                with db(readonly=True) as conn:
+                    orders = mo.open_for_customer(
+                        conn, cid, self.customer.currentText())
+            except Exception:
+                orders = []
+        if not orders:
+            self.order_note.setText("")
+            self.order_note.setVisible(False)
+            return
+        links = " · ".join(
+            f"<a href='{o['id']}'>{o['order_no']}</a> ({o['n_models']} موديل"
+            f" · {o['n_pieces']} قطعة)" for o in orders[:4])
+        more = f" و{len(orders) - 4} غيرها" if len(orders) > 4 else ""
+        self.order_note.setText(
+            f"📝 لهذا العميل {'طلبٌ مفتوح' if len(orders) == 1 else 'طلبات مفتوحة'}"
+            f" من دليل الموديلات: {links}{more} — انقر الرقم لعرضه بالصور.")
+        self.order_note.setVisible(True)
+
+    def _open_customer_order(self, link):
+        try:
+            from ui.model_orders_dialog import ModelOrdersDialog
+            dlg = ModelOrdersDialog(self, self.user)
+            dlg.show_order(int(link))
+            self._order_dlg = dlg
+            dlg.exec_()
+        except Exception as e:
+            err(self, e)
+        finally:
+            self._order_dlg = None
+            self._load_open_orders(self.customer.currentData())
 
     def _load_agreed_wage(self, cid):
         """أجرة العميل المتفق عليها — تُقرأ مرةً عند اختياره.
@@ -1629,7 +1811,7 @@ class SalesScreen(QtWidgets.QWidget):
                     k = int(it["karat"] or 0) or kv.active()
                     cart.append(self._item_from_wo(
                         wo, kv.g(it["registered_weight"], k),
-                        kv.rate(it["wage_per_gram"], k), k,
+                        self._wage_view(it["wage_per_gram"], k), k,
                         # هويّة السطر: بها يعرف التعديل أيَّ سطرٍ
                         # يُحدِّث. الرقم التجميعي يتكرّر في الفاتورة
                         # بأسطرٍ مستقلة، ولا يميّزها إلا هذا الرقم.
@@ -1894,6 +2076,24 @@ class SalesScreen(QtWidgets.QWidget):
                 "standing": 0.0}
 
     @staticmethod
+    def _wage_store(it):
+        """أجر جرام السطر بمكافئ 18 للقيد — بستّ منازل في كل عيار.
+
+        `kv.rate_store` يقرّب عيار 18 إلى منزلتين، وهو ما يكتبه المستخدم
+        فلا يضيع منه شيء. لكن الأجرة المقطوعة للقطعة (تُكتب في خانة
+        «الأجرة (ريال)» — 4.59) تُقسَم على الوزن فتخرج بمنازل أكثر،
+        وتقريبها إلى منزلتين يزيد الأجرة هللاتٍ أو ينقصها: 333 تصير 333.09.
+        """
+        k = int(it.get("karat") or kv.active())
+        return round(float(it.get("wage") or 0) * kv.BASE / k, 6)
+
+    @staticmethod
+    def _wage_view(rate18, karat):
+        """عكس `_wage_store`: الأجر المرحَّل بعيار السطر بلا تقريبٍ —
+        فأجرةٌ مقطوعة تُفتح للتعديل وتُعاد كما رُحّلت لا تزيد هللة."""
+        return round(float(rate18 or 0) * int(karat) / kv.BASE, 6)
+
+    @staticmethod
     def _wages_of(it, internal=False):
         if internal:
             return 0.0
@@ -2025,8 +2225,14 @@ class SalesScreen(QtWidgets.QWidget):
                        f"الأصحّ تعديل البطاقة من شاشة تسوية وزن "
                        f"الطقم.\n\nهل تريد المتابعة على أي حال؟"):
                 return
+        # الأجر الدقيق (أجرةٌ مقطوعة قُسمت على الوزن) يبقى كما هو ما لم
+        # يُغيَّر رقمه الظاهر أو عياره — فحفظ النافذة بلا تغييرٍ لا يقرّبه
+        wage = round(w_wage.value(), 2)
+        if k == k0 and reg == round(float(it.get("weight") or 0), 3) and \
+                abs(wage - round(float(it.get("wage") or 0), 2)) < 0.005:
+            wage = float(it.get("wage") or 0)
         it.update({"karat": k, "weight": reg,
-                   "wage": round(w_wage.value(), 2),
+                   "wage": wage,
                    "gold": round(w_gold.value(), 3),
                    "small": round(w_small.value(), 3),
                    "big": round(w_big.value(), 3),
@@ -2101,12 +2307,179 @@ class SalesScreen(QtWidgets.QWidget):
         ترك الشاشة والبحث في دليل الموديلات. الصورة وصفية بحتة بلا أي
         أثر محاسبي، فعرضها هنا لا يمسّ شيئاً.
         """
+        if col in self.WAGE_COLS:
+            # بعد لحظة: خانةٌ أخرى كانت مفتوحة تُعتمد ويُعاد رسم الجدول
+            # أولاً، ثم تُفتح هذه على البيانات الجديدة
+            QtCore.QTimer.singleShot(
+                0, lambda: self.start_wage_edit(row, col))
+            return
         if col != 1:          # العمود الأول للأزرار، والموديل يليه
             return
         try:
             show_model_image(self, cell(self.items_table, row, 1))
         except Exception as e:
             info(self, str(e), "صورة الموديل")
+
+    # ══ الأجر في خانته (4.59) ══
+    def _wage_editable(self, row, col):
+        """تُكتب الخانة في مكانها؟ أسطر البنود وحدها — لا صفّ الإجمالي،
+        ولا شيء في التحويل الداخلي (بلا أجور). وسطر «أجر فقط» خانته
+        المبلغ، والأجرة الكلية لسطرٍ بلا وزنٍ لا تُقسَم على شيء."""
+        if col not in self.WAGE_COLS or not (0 <= row < len(self.items)):
+            return False
+        cid = self.customer.currentData()
+        if cid is not None and self._is_internal(cid):
+            return False
+        it = self.items[row]
+        if it.get("wage_only"):
+            return col == self.C_AMOUNT
+        return col == self.C_WAGE or float(it.get("weight") or 0) > 0
+
+    def _inline_value(self, row, col):
+        if not (0 <= row < len(self.items)):
+            return 0.0
+        it = self.items[row]
+        if it.get("wage_only"):
+            return float(it.get("amount") or 0)
+        if col == self.C_WAGE:
+            return round(float(it.get("wage") or 0), 2)
+        return gold_math.total_wages(float(it.get("wage") or 0),
+                                     float(it.get("weight") or 0))
+
+    def _set_inline_wage(self, row, col, val):
+        """يكتب ما أُدخل في بيانات السطر — ويعيد هل تغيّر شيء.
+
+        الأجر/جم يُحفظ كما كُتب. والأجرة الكلية (ريال) تُقسَم على الوزن
+        المقيد بستّ منازل — فأجرةٌ مقطوعة للقطعة تبقى هي هي في الفاتورة
+        ولا تزيد هللةً ولا تنقصها بالتقريب.
+        """
+        if not self._wage_editable(row, col):
+            return False
+        it = self.items[row]
+        val = round(max(0.0, float(val or 0)), 2)
+        if abs(val - self._inline_value(row, col)) < 0.005:
+            return False
+        if it.get("wage_only"):
+            if val <= 0:
+                return False     # سطر أجرٍ بلا مبلغ يُحذف بزرّه لا يُصفَّر
+            it["amount"] = val
+        elif col == self.C_WAGE:
+            it["wage"] = val
+        else:
+            it["wage"] = round(val / float(it["weight"]), 6)
+        return True
+
+    def _after_inline_wage(self, row, col, move=0, changed=True):
+        if changed:
+            it = self.items[row] if 0 <= row < len(self.items) else None
+            if it is not None and not it.get("wage_only"):
+                k = int(it.get("karat") or kv.active())
+                self._wage_hint(kv.rate(kv.rate_store(it["wage"], k)))
+            self.render_items()
+        if move:
+            nxt = self._next_wage_row(row, col, move)
+            if nxt is not None:
+                self.start_wage_edit(nxt, col)
+                return
+            if move > 0:
+                # بعد آخر سطر: إلى رقم التشغيل لطقمٍ تالٍ — Enter يمضي
+                # إلى الأمام في الشاشة كلها
+                self._focus(self.barcode)
+                return
+        if 0 <= row < len(self.items):
+            self.items_table.setCurrentCell(row, col)
+        self.items_table.setFocus()
+
+    def _next_wage_row(self, row, col, step):
+        r = row + step
+        while 0 <= r < len(self.items):
+            if self._wage_editable(r, col):
+                return r
+            r += step
+        return None
+
+    def start_wage_edit(self, row, col=None):
+        """يفتح خانة أجر السطر للكتابة في مكانها."""
+        col = self.C_WAGE if col is None else col
+        if 0 <= row < len(self.items) and self.items[row].get("wage_only"):
+            col = self.C_AMOUNT          # سطر «أجر فقط»: مبلغه هو أجره
+        if not self._wage_editable(row, col):
+            return False
+        item = self.items_table.item(row, col)
+        if item is None:
+            return False
+        self.items_table.setCurrentCell(row, col)
+        self.items_table.scrollToItem(item)
+        self.items_table.setFocus()
+        self.items_table.editItem(item)
+        return True
+
+    def _wage_menu(self, pos):
+        """أفعال الأجر في قائمة الزر الأيمن على سطرٍ من البنود."""
+        idx = self.items_table.indexAt(pos)
+        r = idx.row() if idx.isValid() else -1
+        if not (0 <= r < len(self.items)):
+            return []
+        cid = self.customer.currentData()
+        if cid is not None and self._is_internal(cid):
+            return []
+        it = self.items[r]
+        sets = [i for i in self.items if not i.get("wage_only")]
+        out = [("✎ تعديل الأجر في خانته",
+                lambda: self.start_wage_edit(r, idx.column()
+                                             if idx.column() in
+                                             self.WAGE_COLS else None))]
+        if not it.get("wage_only") and len(sets) > 1:
+            k = int(it.get("karat") or kv.active())
+            w = float(it.get("wage") or 0)
+            out.append((f"⇊ أجر هذا السطر ({w:,.2f}/جم {k}) لكل الأطقم",
+                        lambda: self.apply_wage_all(w, k)))
+        if self._agreed_wage > 0 and sets:
+            a = self._agreed_wage
+            out.append((f"💠 الأجرة المتفق عليها ({a:,.2f}) لكل الأطقم",
+                        lambda: self.apply_wage_all(a, kv.active())))
+        return out
+
+    def apply_wage_all(self, wage, karat):
+        """أجرٌ واحد لكل أطقم الفاتورة — بمكافئه في عيار كل سطر.
+
+        الأجر/جم بعيارٍ يقابله في غيره أجرٌ يُبقي الأجرة نفسها لذهبٍ واحد
+        (`kv.rate`): 18 ريالاً لجرام 18 هي 21 لجرام 21. وأسطر «أجر فقط»
+        لا تُمسّ.
+        """
+        self._wage_delegate.flush()
+        karat = int(karat or kv.active())
+        n = 0
+        for it in self.items:
+            if it.get("wage_only"):
+                continue
+            k = int(it.get("karat") or kv.active())
+            it["wage"] = (round(float(wage), 6) if k == karat
+                          else round(float(wage) * k / karat, 6))
+            n += 1
+        if n:
+            self._wage_hint(kv.rate(kv.rate_store(wage, karat)))
+            self.render_items()
+        return n
+
+    def _mark_wage_cells(self):
+        """خانات الأجر القابلة للكتابة بلونٍ ذهبي خفيف — وما سواها لا
+        يُكتب (فالكتابة والخانة محدّدة لا تفتح إلا الأجر)."""
+        tint = QtGui.QColor(201, 162, 39, 46)
+        tip = ("انقر لتعديل الأجر هنا — Enter يحفظ وينزل للسطر التالي،"
+               " وEsc يتراجع")
+        t = self.items_table
+        for r in range(t.rowCount()):
+            for c in range(t.columnCount()):
+                x = t.item(r, c)
+                if x is None:
+                    continue
+                if self._wage_editable(r, c):
+                    x.setFlags(x.flags() | QtCore.Qt.ItemIsEditable)
+                    x.setBackground(tint)
+                    x.setToolTip(tip)
+                else:
+                    x.setFlags(x.flags() & ~QtCore.Qt.ItemIsEditable)
 
     # ══════════════════════════════════════════════════════════════
     #  العرض والحساب
@@ -2173,6 +2546,7 @@ class SalesScreen(QtWidgets.QWidget):
                                on_delete=self.remove_item,
                                edit_tip="تعديل هذا السطر كاملاً",
                                del_tip="حذف هذا السطر من الفاتورة")
+        self._mark_wage_cells()
         self.recalc()
 
     def _bold_row(self, r):
@@ -2259,6 +2633,8 @@ class SalesScreen(QtWidgets.QWidget):
     # ══════════════════════════════════════════════════════════════
 
     def save(self):
+        # أجرٌ كُتب في خانته ولم تُغادَر بعد (F2 والخانة مفتوحة) يُعتمد أولاً
+        self._wage_delegate.flush()
         try:
             cid = self.customer.currentData()
             if cid is None:
@@ -2281,8 +2657,8 @@ class SalesScreen(QtWidgets.QWidget):
                       "item_id": i.get("item_id"),
                       "weight": self._store_w(i),
                       "karat": int(i.get("karat") or kv.active()),
-                      "wage_override": (None if internal else kv.rate_store(
-                          i["wage"], int(i.get("karat") or kv.active())))})
+                      "wage_override": (None if internal
+                                        else self._wage_store(i))})
                     for i in self.items]
             desc = self.description.text().strip()
             # تأكيد الترحيل: أثر محاسبي لا يُلغى إلا بقيد عكسي

@@ -1456,6 +1456,10 @@ def migrate_schema() -> None:
         from models.purchases import ensure_schema as _pu_schema
         _pu_schema(conn)
 
+        # 4.59: طلبات العملاء من دليل الموديلات (بلا أثر محاسبي)
+        from models.model_orders import ensure_schema as _mo_schema
+        _mo_schema(conn)
+
         # 4.44: قاعدةٌ قائمة بلا هويةٍ محفوظة تحفظ هويتها كما تظهر —
         # فالمصنع الجديد وحده يبدأ بهويةٍ فارغة
         from services import branding as _br

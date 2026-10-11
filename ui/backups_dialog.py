@@ -67,7 +67,9 @@ class BackupsDialog(QtWidgets.QDialog):
               for i, r in enumerate(self.rows)])
         fit_columns(self.table, [5, 22, 16, 12, 45])
         if self.rows:
-            self.table.selectRow(0)
+            # setCurrentCell لا selectRow: في الواجهة العربية (RTL) لا يحدّد
+            # selectRow في Qt 5 شيئاً (يقيس عموده من خارج الجدول)
+            self.table.setCurrentCell(0, 0)
         st = storage.status()
         last = (f"آخر نسخة تلقائية: {st['when']}" if st.get("when")
                 else "النسخة التلقائية الأولى بعد دقيقة من التشغيل")

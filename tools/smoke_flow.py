@@ -7472,6 +7472,75 @@ def main():
     finally:
         _mw91.RUNNER = _r91
 
+    step("92) 4.59: طلبات العملاء من دليل الموديلات · الأجر في خانته")
+    from models import model_orders as _mo92
+    from services import print_manager as _pm92
+    with db() as conn:
+        _m92 = conn.execute(
+            "SELECT TRIM(model_no) m FROM work_orders WHERE is_deleted=0"
+            " AND status='in_stock' AND TRIM(COALESCE(model_no,''))<>''"
+            " LIMIT 1").fetchone()
+        _m92 = _m92["m"] if _m92 else "SMK-92"
+        _in92 = _mo92._stock(conn).get(_m92, (0, 0))[0]
+        _n_before = _mo92.count_open(conn)
+        _r92 = _mo92.save_order(
+            conn, "عميل الطلبات", [{"model": _m92, "qty": _in92 + 3},
+                                   {"model": "تصميم-92", "qty": 2},
+                                   {"model": _m92, "qty": 1, "note": "x"}],
+            "admin", due_date="2026-12-01", notes="ملاحظة")
+        _o92 = _mo92.get_order(conn, _r92["id"])
+    check("الطلب يُحفظ برقمٍ من تسلسله (OR-…) ويدمج الموديل المكرّر",
+          _r92["order_no"].startswith("OR-") and _o92["models"] == 2
+          and _o92["lines"][0]["qty"] == _in92 + 4
+          and _o92["lines"][0]["note"] == "x", str(_o92["lines"]))
+    check("وما يلزم تصنيعه = المطلوب ناقص ما بالخزنة الآن",
+          _o92["lines"][0]["short"] == 4 and _o92["lines"][1]["short"] == 2
+          and _o92["short"] == 6, str(_o92["short"]))
+    with db(readonly=True) as conn:
+        _je92 = conn.execute(
+            "SELECT COUNT(*) FROM journal_entries WHERE description LIKE ?",
+            (f"%{_r92['order_no']}%",)).fetchone()[0]
+        _l92 = _mo92.list_orders(conn, "open", "تصميم-92")
+        _p92 = {p["model"]: p for p in _mo92.production(conn)}
+    check("بلا أثر محاسبي: لا قيد للطلب", _je92 == 0)
+    check("والبحث برقم موديلٍ يجد الطلب، وخلاصة التصنيع تجمعه",
+          [x["id"] for x in _l92] == [_r92["id"]]
+          and _p92["تصميم-92"]["short"] == 2
+          and "عميل الطلبات" in _p92[_m92]["customers"])
+    with db() as conn:
+        _mo92.save_order(conn, "عميل الطلبات", [{"model": _m92, "qty": 1}],
+                         "admin", order_id=_r92["id"])
+        _o92b = _mo92.get_order(conn, _r92["id"])
+        _mo92.set_status(conn, _r92["id"], "done", "admin")
+        _n_after = _mo92.count_open(conn)
+    check("التعديل يبقي رقم الطلب ويستبدل أسطره، و«تم التسليم» يُخرجه من"
+          " المفتوحة",
+          _o92b["order_no"] == _r92["order_no"] and _o92b["pieces"] == 1
+          and _n_after == _n_before)
+    _h92 = _pm92.build_body("model_order", _r92["id"], per_page=4)
+    check("قالب طباعة الطلب: اسم العميل ورقم الطلب في رأس الصفحة",
+          "عميل الطلبات" in _h92 and _r92["order_no"] in _h92
+          and 'class="ordhead"' in _h92)
+    _h92b = _pm92.build_body("model_order", _r92["id"], per_page=2,
+                             show_stock=True)
+    check("وورقة الورشة بخلاصتها", "خلاصة الطلب للورشة" in _h92b)
+    with db() as conn:
+        _mo92.delete_order(conn, _r92["id"], "admin")
+        _gone92 = _mo92.get_order(conn, _r92["id"])
+        _a92 = conn.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE table_name='model_orders'"
+            " AND record_id=?", (_r92["id"],)).fetchone()[0]
+    check("الحذف منطقي ويبقى أثره في سجل التتبع", _gone92 is None
+          and _a92 >= 3, str(_a92))
+    # الأجر في خانته: الأجرة المقطوعة تُقسَم بستّ منازل فلا تزيد هللة
+    from services import gold_math as _gm92
+    from ui.sales_screen import SalesScreen as _SS92
+    _it92 = {"wage": round(333.0 / 38.33, 6), "karat": 18}
+    check("الأجر يُرحَّل بستّ منازل: أجرة 333 مقطوعة على 38.33 جم تبقى 333",
+          _gm92.total_wages(_SS92._wage_store(_it92), 38.33) == 333.0
+          and abs(_SS92._wage_view(_SS92._wage_store(_it92), 18)
+                  - _it92["wage"]) < 1e-9)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

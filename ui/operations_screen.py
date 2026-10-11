@@ -303,7 +303,8 @@ class OperationsScreen(QtWidgets.QWidget):
             fill(self.table, DOC_COLS,
                  [(d["no"], lbl.get(d["kind"], d["kind"]), d["date"],
                    d["party"], "—", "—")])
-            self.table.selectRow(0)
+            # setCurrentCell لا selectRow: الأخير لا يحدّد شيئاً في RTL
+            self.table.setCurrentCell(0, 0)
             self.picked.setText(
                 f"المحدَّد: {d['no']} — الجهة الحالية: {d['party']}")
         except Exception as e:
