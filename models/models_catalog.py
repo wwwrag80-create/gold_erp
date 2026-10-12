@@ -324,9 +324,31 @@ def rename_model(conn, old_no, new_no, username):
         "UPDATE work_orders SET model_no=? WHERE TRIM(model_no)=?"
         " AND is_deleted=0", (new_no, str(old_no).strip()))
     n = cur.rowcount or 0
+    moved = _move_images(old_no, new_no)
     log_action(conn, username, "rename", "work_orders", None,
-               f"موديل: {old_no} ← {new_no} ({n} طقم)")
+               f"موديل: {old_no} ← {new_no} ({n} طقم)"
+               + (" · ونُقلت صورته" if moved else ""))
     return {"old": old_no, "new": new_no, "count": n}
+
+
+def _move_images(old_no, new_no):
+    """صورة الموديل (وأصلها) تتبع اسمه الجديد — ما لم يكن للجديد صورة.
+
+    كانت الصورة تبقى باسمه القديم بعد إعادة التسمية فتختفي من الدليل.
+    """
+    try:
+        cur = image_path(old_no)
+        if cur is None or image_path(new_no) is not None \
+                or _safe_name(old_no) == _safe_name(new_no):
+            return False
+        new_safe = _safe_name(new_no)
+        cur.replace(images_dir() / (new_safe + cur.suffix))
+        o = original_path(old_no)
+        if o is not None:
+            o.replace(o.parent / (new_safe + o.suffix))
+        return True
+    except OSError:
+        return False
 
 
 def assign_model(conn, wo_id, model_no, username):
@@ -377,6 +399,90 @@ def image_path(model_no):
     return None
 
 
+# ══ الصورة الأصلية بخلفيتها (4.61) ══
+# إزالة الخلفية تُعدّل الصورة المعروضة، والأصل يُحفظ هنا كما أضافه
+# المستخدم — فيُستعاد بنقرة، وتُعاد المعالجة منه لا من نسخةٍ معالجة.
+ORIG_DIR = "_original"
+
+
+def _orig_dir():
+    d = images_dir() / ORIG_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def original_path(model_no):
+    """الأصل المحفوظ قبل إزالة الخلفية — أو None."""
+    base = images_dir() / ORIG_DIR / _safe_name(model_no)
+    for ext in IMAGE_EXTS:
+        p = base.with_suffix(ext)
+        if p.exists():
+            return p
+    return None
+
+
+def _drop_files(base):
+    for ext in IMAGE_EXTS:
+        p = base.with_suffix(ext)
+        try:
+            if p.exists():
+                p.unlink()
+        except OSError:
+            pass
+
+
+def cutout_image(model_no):
+    """يزيل خلفية صورة الموديل — ويعيد وصف ما جرى.
+
+    يُحفظ الأصل أولاً (إن لم يُحفظ من قبل)، وتُعالَج النسخة منه دائماً،
+    وتُكتب PNG شفافة باسم الموديل. ويرفع `CutoutError` بسببٍ مقروء إن
+    لم تكن الخلفية لوناً واحداً — والصورة حينها تبقى كما هي.
+    """
+    import shutil
+
+    from services import cutout as _co
+    cur = image_path(model_no)
+    if cur is None:
+        raise ValueError("لا توجد صورة لهذا الموديل")
+    orig = original_path(model_no)
+    fresh = orig is None
+    if fresh:
+        orig = _orig_dir() / cur.name
+        shutil.copy2(cur, orig)
+    safe = _safe_name(model_no)
+    tmp = images_dir() / (safe + ".cut.tmp")
+    try:
+        note = _co.cutout_file(orig, tmp)
+    except Exception:
+        for f in ((tmp, orig) if fresh else (tmp,)):
+            # صورةٌ لم تُعالَج قط: لا داعي لنسخةٍ أصلية مكرّرة منها
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        raise
+    _drop_files(images_dir() / safe)
+    tmp.replace(images_dir() / (safe + ".png"))
+    return note
+
+
+def restore_original(model_no):
+    """يعيد الصورة الأصلية بخلفيتها مكان المعالَجة."""
+    orig = original_path(model_no)
+    if orig is None:
+        return False
+    safe = _safe_name(model_no)
+    _drop_files(images_dir() / safe)
+    orig.replace(images_dir() / (safe + orig.suffix))
+    return True
+
+
+def needs_cutout(conn=None):
+    """الموديلات التي لصورها خلفيةٌ لم تُزل بعد (لا أصل محفوظ لها)."""
+    return [stem for stem in sorted(models_with_images(conn))
+            if original_path(stem) is None]
+
+
 def set_image(model_no, src_path, username="admin"):
     """ينسخ صورة من جهاز المستخدم ويربطها بالموديل.
 
@@ -395,14 +501,20 @@ def set_image(model_no, src_path, username="admin"):
             "صيغة غير مدعومة — المسموح: " + " · ".join(IMAGE_EXTS))
     if src.stat().st_size > 8 * 1024 * 1024:
         raise ValueError("حجم الصورة يتجاوز 8 ميجابايت")
-    remove_image(model_no)
+    remove_image(model_no)            # ومعها أصل الصورة السابقة
     dst = images_dir() / (_safe_name(model_no) + ext)
     shutil.copy2(src, dst)
     return str(dst)
 
 
 def remove_image(model_no):
-    """يحذف صورة الموديل إن وُجدت."""
+    """يحذف صورة الموديل إن وُجدت — وأصلها المحفوظ معها."""
+    o = original_path(model_no)
+    if o is not None:
+        try:
+            o.unlink()
+        except OSError:
+            pass
     p = image_path(model_no)
     if p is None:
         return False

@@ -451,6 +451,9 @@ def compress(path):
             return raw, ctype
         if img.width() > MAX_WIDTH:
             img = img.scaledToWidth(MAX_WIDTH, 1)   # 1 = Smooth
+        # صورةٌ شفافة (بلا خلفية) تُوضع على أبيض قبل JPEG — وإلا سوداء
+        from services.cutout import flatten
+        img = flatten(img)
         ba = QByteArray()
         buf = QBuffer(ba)
         buf.open(QBuffer.WriteOnly)

@@ -7541,6 +7541,49 @@ def main():
           and abs(_SS92._wage_view(_SS92._wage_store(_it92), 18)
                   - _it92["wage"]) < 1e-9)
 
+    step("93) 4.61: صور الموديلات بلا خلفية · الأصل محفوظ")
+    try:
+        from PyQt5 import QtCore as _QC93, QtGui as _QG93, \
+            QtWidgets as _QW93
+        _QW93.QApplication.instance() or _QW93.QApplication([])
+        from models import models_catalog as _mc93
+        from services import cutout as _co93
+        _img93 = _QG93.QImage(900, 700, _QG93.QImage.Format_RGB32)
+        _img93.fill(_QG93.QColor("#000000"))
+        _p93 = _QG93.QPainter(_img93)
+        _p93.setRenderHint(_QG93.QPainter.Antialiasing)
+        _p93.setBrush(_QG93.QColor("#c9a14a"))
+        _p93.setPen(_QC93.Qt.NoPen)
+        _pp93 = _QG93.QPainterPath()
+        _pp93.addEllipse(_QC93.QPointF(450, 350), 250, 180)
+        _pp93.addEllipse(_QC93.QPointF(450, 350), 120, 80)
+        _p93.drawPath(_pp93)
+        _p93.end()
+        _src93 = Path(_TMP) / "smk93.jpg"
+        _img93.save(str(_src93), "JPG", 92)
+        _mc93.set_image("SMK-93", str(_src93))
+        _note93 = _mc93.cutout_image("SMK-93")
+        _cur93 = _mc93.image_path("SMK-93")
+        _q93 = _QG93.QImage(str(_cur93))
+        check("الخلفية السوداء تُزال: PNG شفافة مقصوصة، ووسط الحلقة شفاف",
+              _cur93.suffix == ".png" and _q93.hasAlphaChannel()
+              and _QG93.qAlpha(_q93.pixel(0, 0)) == 0
+              and _QG93.qAlpha(_q93.pixel(_q93.width() // 2,
+                                          _q93.height() // 2)) == 0
+              and _q93.width() < 900, f"{_note93} {_q93.size()}")
+        check("والأصل محفوظ ويُستعاد بخلفيته",
+              _mc93.original_path("SMK-93") is not None
+              and _mc93.restore_original("SMK-93")
+              and _mc93.image_path("SMK-93").suffix == ".jpg"
+              and _mc93.original_path("SMK-93") is None)
+        _flat93 = _co93.flatten(_q93)
+        check("وقبل JPEG يُوضع الشفاف على أبيض لا أسود",
+              not _flat93.hasAlphaChannel()
+              and _QG93.QColor(_flat93.pixel(0, 0)).name() == "#ffffff")
+        _mc93.remove_image("SMK-93")
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

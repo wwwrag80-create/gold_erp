@@ -2989,9 +2989,10 @@ RECV_PHOTO_CSS = """
   .card { border: 1px solid #D8CDB4; border-radius: 5px;
           padding: 2mm; background: #FFFFFF; height: 122mm;
           display: flex; flex-direction: column; }
+  /* 4.61: الصورة بلا إطارٍ ولا خلفية — القطعة وحدها على الورق */
   .imgbox { flex: 1 1 auto; min-height: 42mm; width: 100%;
             display: flex; align-items: center; justify-content: center;
-            background: #FCFAF5; border-radius: 3px; overflow: hidden; }
+            background: transparent; overflow: hidden; }
   .imgbox img { max-width: 97%; max-height: 100%; object-fit: contain; }
   .noimg { color: #9A8C6E; font-size: 9pt; }
   .cap { margin: 1.5mm 0 1mm; font-size: 10.5pt; font-weight: bold;
@@ -3515,9 +3516,9 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
         padding: 1.5mm; text-align: center;
       }}
       .phbox {{
-        height: {img_h:.1f}mm; border: 1px solid #D8CDB4; border-radius: 4px;
+        height: {img_h:.1f}mm; border: none;
         display: flex; align-items: center; justify-content: center;
-        background: #FFFFFF; overflow: hidden;
+        background: transparent; overflow: hidden;
       }}
       .phbox img {{ max-width: 96%; max-height: {img_h - 2:.1f}mm;
                    object-fit: contain; }}
@@ -3640,9 +3641,9 @@ def _tpl_model_order(conn, order_id=0, per_page=4, show_stock=False):
         padding: 1.5mm; text-align: center;
       }}
       .phbox {{
-        height: {img_h:.1f}mm; border: 1px solid #D8CDB4; border-radius: 4px;
+        height: {img_h:.1f}mm; border: none;
         display: flex; align-items: center; justify-content: center;
-        background: #FFFFFF; overflow: hidden;
+        background: transparent; overflow: hidden;
       }}
       .phbox img {{ max-width: 96%; max-height: {img_h - 2:.1f}mm;
                    object-fit: contain; }}

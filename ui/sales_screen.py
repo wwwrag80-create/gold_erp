@@ -29,6 +29,42 @@ from ui.widgets.table_fit import fit_columns
 DRAFT_KEY = "sales"
 
 
+class _HeldEnterGuard(QtCore.QObject):
+    """إصبعٌ باقٍ على Enter لا يضيف السطر (4.61).
+
+    المفتاح المضغوط باستمرار يكرّر نفسه (auto-repeat) عشرات المرات في
+    الثانية: فكان يمشي على الخانات حتى الأجر — وهذا مقصود — ثم تُحسب
+    تكراراته «الضغطةَ الثانية» فيُضاف السطر قبل أن تُرفع اليد. الآن عند
+    الوقفة على الأجر لا يضيف السطر إلا **ضغطةٌ جديدة بعد رفع الإصبع**:
+    تكرارات المفتاح تُبتلع، ويُشترط تحريرٌ حقيقي له منذ الوقفة.
+
+    يُركَّب على خانة الأجر **بعد** سلسلة Enter فيسبقها (آخر مرشّحٍ
+    يُركَّب هو أول من يرى الحدث).
+    """
+
+    KEYS = (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter)
+
+    def __init__(self, screen):
+        super().__init__(screen)
+        self.screen = screen
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t not in (QtCore.QEvent.KeyPress, QtCore.QEvent.KeyRelease):
+            return False
+        if ev.key() not in self.KEYS:
+            return False
+        if t == QtCore.QEvent.KeyRelease:
+            # تحريرٌ حقيقي — لا ما يولّده التكرار التلقائي في بعض الأنظمة
+            if not ev.isAutoRepeat():
+                self.screen._enter_up = True
+            return False
+        if self.screen._wage_armed and (ev.isAutoRepeat()
+                                        or not self.screen._enter_up):
+            return True           # الإصبع ما زال على Enter: لا إضافة
+        return False
+
+
 class _WageDelegate(QtWidgets.QStyledItemDelegate):
     """خانتا الأجر في جدول البنود تُكتبان في مكانهما (4.59).
 
@@ -854,6 +890,14 @@ class SalesScreen(QtWidgets.QWidget):
                              lambda: bool(self.barcode.text().strip())})
         # 4.60: «وقفةٌ» عند الأجر — تُلغى بأي كتابةٍ فيه أو بمغادرته
         self._wage_armed = False
+        self._enter_up = True
+        # 4.61: والإضافة بضغطةٍ جديدة بعد رفع الإصبع عن Enter لا بتكراره
+        self._held_guard = _HeldEnterGuard(self)
+        self.line_wage.installEventFilter(self._held_guard)
+        try:
+            self.line_wage.lineEdit().installEventFilter(self._held_guard)
+        except Exception:
+            pass
         self._add_text = self.btn_add_line.text()
         try:
             self.line_wage.lineEdit().textEdited.connect(
@@ -893,13 +937,16 @@ class SalesScreen(QtWidgets.QWidget):
         if on == self._wage_armed and not on:
             return
         self._wage_armed = on
+        if on:
+            # الوقفة تبدأ والإصبع على Enter — لا إضافة قبل رفعه
+            self._enter_up = False
         self.btn_add_line.setText("↵ " + self._add_text.lstrip("+ ").strip()
                                   if on else self._add_text)
         if on:
             w = self.line_wage
             QtWidgets.QToolTip.showText(
                 w.mapToGlobal(QtCore.QPoint(0, w.height())),
-                "↵ Enter مرةً ثانية يضيف السطر", w)
+                "↵ ارفع إصبعك ثم Enter مرةً ثانية يضيف السطر", w)
         else:
             QtWidgets.QToolTip.hideText()
 

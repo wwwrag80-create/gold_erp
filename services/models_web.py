@@ -733,6 +733,10 @@ def thumb(path, width):
         if img.loadFromData(raw):
             if img.width() > width:
                 img = img.scaledToWidth(int(width), 1)    # 1 = Smooth
+            # JPEG بلا شفافية: الصورة المزالة خلفيتها تُوضع على أبيض
+            # البطاقة نفسه — وإلا خرجت الأجزاء الشفافة سوداء
+            from services.cutout import flatten
+            img = flatten(img)
             ba = QByteArray()
             buf = QBuffer(ba)
             buf.open(QBuffer.WriteOnly)
@@ -810,8 +814,7 @@ padding:9px 12px}
 grid-template-columns:repeat(var(--cols),minmax(0,1fr))}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
 overflow:hidden;display:flex;flex-direction:column}
-.ph{display:block;background:#fff;aspect-ratio:1/1;
-border-bottom:1px solid var(--line)}
+.ph{display:block;background:transparent;aspect-ratio:1/1;padding:6px}
 .ph img{width:100%;height:100%;object-fit:contain;display:block}
 .noimg{display:flex;align-items:center;justify-content:center;
 color:var(--muted);font-size:13px;aspect-ratio:1/1;background:#f1ece2}

@@ -75,6 +75,13 @@ class ModelsScreen(QtWidgets.QWidget):
             "صور الموديلات بالعدد الذي تختاره في كل صفحة A4 — تحت كل\n"
             "صورة اسم الموديل وكم بالخزنة وكم عند المناديب")
         btn_photos.clicked.connect(self.print_photos)
+        # 4.61: الصور بلا خلفية — لكل صورةٍ أُضيفت قبل هذه الميزة
+        btn_cut = self.btn_cutout = QtWidgets.QPushButton("🪄 خلفيات الصور")
+        btn_cut.setToolTip(
+            "يزيل الخلفية (السوداء أو البيضاء أو غيرها) من كل صورةٍ لم\n"
+            "تُعالَج بعد، فتصير شفافةً ومقصوصةً على القطعة.\n"
+            "والصور الجديدة تُعالَج تلقائياً عند إضافتها.")
+        btn_cut.clicked.connect(self.cutout_all)
         # 4.52: رابطٌ ثابت يفتح هذه الشاشة كاملةً على جوال المدير — من
         # هذا الجهاز مباشرةً بلا سحابة (services.models_web)
         btn_link = self.btn_link = QtWidgets.QPushButton("🔗 رابط المدير")
@@ -138,6 +145,7 @@ class ModelsScreen(QtWidgets.QWidget):
         head.addWidget(btn_collapse)
         head.addWidget(btn_print)
         head.addWidget(btn_photos)
+        head.addWidget(btn_cut)
         head.addWidget(btn_orders)
         head.addWidget(btn_link)
         head.addStretch(1)
@@ -676,6 +684,11 @@ class ModelsScreen(QtWidgets.QWidget):
             act = m.addAction("🗑 حذف الصورة",
                               lambda: self.del_image(val))
             act.setEnabled(has)
+            m.addAction("🪄 إزالة خلفية الصورة",
+                        lambda: self.cutout_one(val)).setEnabled(has)
+            if mc.original_path(val) is not None:
+                m.addAction("↺ الصورة الأصلية بخلفيتها",
+                            lambda: self.restore_image(val))
             m.addSeparator()
             m.addAction("📝 طلب عميل بهذا الموديل",
                         lambda: self.open_orders(preset=[val]))
@@ -694,8 +707,76 @@ class ModelsScreen(QtWidgets.QWidget):
             if not path:
                 return
             mc.set_image(model_no, path, self.user["username"])
-            info(self, f"أُضيفت صورة الموديل {model_no}.\n\n"
-                       f"الصورة وصفية بحتة — لا أثر محاسبي لها.")
+            # 4.61: كل صورةٍ تُضاف تُزال خلفيتها فتظهر القطعة وحدها
+            note = self._cutout(model_no)
+            info(self, f"أُضيفت صورة الموديل {model_no}.\n\n{note}")
+            self.refresh(force=True)
+        except Exception as e:
+            err(self, e)
+
+    def _cutout(self, model_no):
+        """يزيل خلفية صورة الموديل — ويعيد جملةً تقول ما جرى."""
+        from services.cutout import CutoutError
+        from ui.widgets.common import busy
+        try:
+            with busy(self, "جارٍ إزالة خلفية الصورة…",
+                      stage="إزالة خلفية صورة"):
+                note = mc.cutout_image(model_no)
+            return (f"✔ {note}: الصورة شفافة الآن ومقصوصةٌ على القطعة.\n"
+                    "والأصل محفوظ — يُستعاد من الزر الأيمن على الموديل.")
+        except CutoutError as e:
+            return f"الصورة كما أُضيفت: {e}."
+
+    def cutout_one(self, model_no):
+        info(self, self._cutout(model_no), f"الموديل {model_no}")
+        self.refresh(force=True)
+
+    def restore_image(self, model_no):
+        try:
+            if mc.restore_original(model_no):
+                info(self, f"أُعيدت صورة الموديل {model_no} الأصلية"
+                           " بخلفيتها.")
+                self.refresh(force=True)
+        except Exception as e:
+            err(self, e)
+
+    def cutout_all(self):
+        """يزيل الخلفية من كل صورةٍ لم تُعالَج بعد — مرةً واحدة."""
+        try:
+            todo = mc.needs_cutout()
+            if not todo:
+                info(self, "كل صور الموديلات بلا خلفية — لا شيء يُعالج.")
+                return
+            if not ask(self, f"إزالة الخلفية من {len(todo)} صورة؟\n\n"
+                             "تصير الصور شفافةً ومقصوصةً على القطعة. وأصل كل"
+                             " صورةٍ يُحفظ ويُستعاد من الزر الأيمن على"
+                             " موديلها."):
+                return
+            from services.cutout import CutoutError
+            dlg = QtWidgets.QProgressDialog(
+                "إزالة خلفيات الصور…", "إيقاف", 0, len(todo), self)
+            dlg.setWindowTitle("خلفيات الصور")
+            dlg.setWindowModality(QtCore.Qt.WindowModal)
+            dlg.setMinimumDuration(0)
+            done, kept = 0, []
+            for i, stem in enumerate(todo):
+                if dlg.wasCanceled():
+                    break
+                dlg.setLabelText(f"الموديل {stem} ({i + 1} من {len(todo)})")
+                dlg.setValue(i)
+                QtWidgets.QApplication.processEvents()
+                try:
+                    mc.cutout_image(stem)
+                    done += 1
+                except (CutoutError, ValueError) as e:
+                    kept.append(f"{stem}: {e}")
+            dlg.setValue(len(todo))
+            msg = f"أُزيلت الخلفية من {done} صورة."
+            if kept:
+                msg += (f"\n\nبقيت {len(kept)} كما هي:\n"
+                        + "\n".join(kept[:8])
+                        + ("\n…" if len(kept) > 8 else ""))
+            info(self, msg, "خلفيات الصور")
             self.refresh(force=True)
         except Exception as e:
             err(self, e)
