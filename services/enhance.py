@@ -21,8 +21,13 @@
      في الدليل والطباعة بدل أن يسبح صغيراً في بياض.
   6. **الشفافية من الإضاءة** لا من حدودٍ مقصوصة: كل درجة رمادٍ تصير
      شفافيةً بقدرها — فيبقى الظلّ ظلاً والخطّ خطاً على أي خلفية.
-  7. **تظليل القطعة** (4.64): رسومٌ كثيرة ظُلّل نصف طقمها ونصفه أبيض،
-     أو رُسمت حدودها بخطٍّ منقّط. فيُعرف مكان القطع من خطوطها (تُسدّ
+  7. **ورقٌ أبيض ناصع وخطٌّ وحده** (4.65): ظلّ اليد والغطاء وبقع الورق
+     تُزال بإضاءةٍ مستوية (`_flatten`)، والظلّ الرمادي داخل القطع يُمحى
+     (`unshade`) فلا يبقى إلا الخطّ والفصوص والأجزاء المصمتة — واضحةً
+     بارزة على بياضٍ كامل. هذا هو الافتراضي.
+  8. **تظليل القطعة** (4.64، اختياري ومطفأ افتراضياً): لمن أراد رمادياً
+     موحّداً داخل القطع — رسمٌ ظُلّل نصف طقمه ونصفه أبيض، أو رُسمت
+     حدوده بخطٍّ منقّط. فيُعرف مكان القطع من خطوطها (تُسدّ
      فجوات الخطّ الصغيرة، وكل ما أحاطت به الخطوط داخلٌ في القطعة) ويُملأ
      ما فتح لونه داخلها **برماديٍّ موحّد** — داخل القطع وحدها، لا إطار
      ولا خلفية — والخطّ والفصوص الأغمق باقيةٌ فوقه فتبرز.
@@ -38,10 +43,12 @@ from PyQt5 import QtCore, QtGui
 
 from services import cutout as _co
 
-VERSION = 3            # يُسجَّل مع كل صورةٍ معالَجة (تُعاد معالجة الأقدم)
+VERSION = 4            # يُسجَّل مع كل صورةٍ معالَجة (تُعاد معالجة الأقدم)
 MAX_SIDE = 2000        # الصورة المحفوظة — تكفي A4 بدقّة الطباعة
 WORK_SIDE = 900        # التحليل (اللون الغالب، الحوافّ، القصّ) على نسخةٍ أصغر
 SHADE_SIDE = 640       # تحليل شكل القطع للتظليل — يكفيه نسخةٌ أصغر
+BG_SIDE = 400          # تقدير إضاءة الورق — تتغيّر ببطء فتكفيها نسخةٌ صغيرة
+BG_REACH = 0.04        # أعرض قطعةٍ داكنة لا تُعدّ ظلاً: 8% من ضلع الصورة
 INK = QtGui.QColor(24, 22, 20)   # لون الحبر في الصورة الشفافة
 
 DEFAULTS = {
@@ -51,7 +58,9 @@ DEFAULTS = {
     "remove_color": True,    # محو الكتابة بالقلم الملوّن
     "remove_edges": True,    # محو حافّة الماسح السوداء
     "despeckle": True,       # محو نقاط الغبار الشاردة
-    "shade": 55,             # تظليل القطعة (0 = بلا تظليل .. 100 أغمق)
+    "flatten": True,         # إضاءةٌ مستوية: ظلال الورق وبقعه تصير بياضاً
+    "unshade": True,         # محو الظلّ الرمادي داخل القطع — الخطّ وحده
+    "shade": 0,              # تظليلٌ موحّد للقطع (0 = بلا تظليل .. 100 أغمق)
     "reach": 30,             # سدّ الفراغات في حدود القطعة (0..100)
     "crop": True,            # قصٌّ على الرسم (التناسب)
     "transparent": True,     # خلفية شفافة
@@ -387,6 +396,109 @@ def _speck_mask(gray, w, h, thr=170):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  ورقٌ أبيض كله: إضاءةٌ مستوية، وبلا ظلٍّ رمادي (4.65)
+# ══════════════════════════════════════════════════════════════════
+
+def _flatten(img):
+    """يجعل إضاءة الورق مستوية — فظلّ اليد والغطاء وبقع الورق بياض.
+
+    لون الورق في كل موضع يُقدَّر من نسخةٍ صغيرة: أفتح ما حول الموضع
+    (فتختفي الخطوط والقطع في لون الورق حولها) ثم أغمق ما حوله بالقدر
+    نفسه (فيرجع الظلّ الواسع بحدوده). ثم تُقسَم الصورة عليه بالرسم
+    (ColorDodge: الأصل ÷ الورق) — فالورق المظلّل والمضيء كلاهما أبيض،
+    والخطّ داخل الظلّ يبقى خطاً بنسبته إلى ورقه.
+    """
+    W, H = img.width(), img.height()
+    small = _work(img, BG_SIDE).convertToFormat(
+        QtGui.QImage.Format_Grayscale8).convertToFormat(
+        QtGui.QImage.Format_RGB32)
+    w, h = small.width(), small.height()
+    r = max(3, int(round(max(w, h) * BG_REACH)))
+    bg = _morph(_morph(small, r, True), r, False)
+    bg = bg.scaled(max(1, w // 4), max(1, h // 4),
+                   QtCore.Qt.IgnoreAspectRatio,
+                   QtCore.Qt.SmoothTransformation).scaled(
+        w, h, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.SmoothTransformation)
+    data, w, h = _gray_bytes(bg)
+    peak = sorted(data)[int(len(data) * 0.95)]
+    # قطعةٌ داكنة أعرض من المدى لا تُعدّ ورقاً مظلّلاً فتبيضّ كلها
+    floor = max(1, int(peak * 0.38))
+    data = data.translate(bytes(255 - max(v, floor) for v in range(256)))
+    inv = _gray_image(data, w, h).scaled(
+        W, H, QtCore.Qt.IgnoreAspectRatio,
+        QtCore.Qt.SmoothTransformation).convertToFormat(
+        QtGui.QImage.Format_RGB32)
+    out = img.convertToFormat(QtGui.QImage.Format_RGB32)
+    p = QtGui.QPainter(out)
+    p.setCompositionMode(QtGui.QPainter.CompositionMode_ColorDodge)
+    p.drawImage(0, 0, inv)
+    p.end()
+    return out
+
+
+def _ink_cut(hist):
+    """الحدّ بين الخطّ والظلّ الرمادي (Otsu) بعد المستويات.
+
+    يُحسب على ما ليس ورقاً، فينقسم إلى صنفين: الخطوط الداكنة، والظلّ
+    الفاتح داخل القطع. ولا يقلّ عن 100 (خطٌّ أغمق منه خطٌّ دائماً) ولا
+    يزيد على 200.
+    """
+    vals = [(v, c) for v, c in hist.items() if v < 236]
+    n = sum(c for _, c in vals)
+    if not n:
+        return 200
+    total = sum(v * c for v, c in vals)
+    by = dict(vals)
+    best, cut, w0, s0 = -1.0, 200, 0, 0
+    for t in range(236):
+        c = by.get(t, 0)
+        w0 += c
+        s0 += t * c
+        w1 = n - w0
+        if not w0 or not w1:
+            continue
+        m0, m1 = s0 / w0, (total - s0) / w1
+        var = w0 * w1 * (m0 - m1) ** 2
+        if var > best:
+            best, cut = var, t
+    return max(100, min(200, cut))
+
+
+def _unshade(gray, w, h, cut):
+    """يمحو الظلّ الرمادي الواسع — ويُبقي حوافّ الخطوط الناعمة.
+
+    البكسل الأفتح من الحدّ يصير أبيض **إلا إن جاور خطاً داكناً**: حافّة
+    الخطّ الرفيع المنعّمة (ونصفا خطٍّ وقع بين بكسلين) تبقى فلا يتقطّع
+    الخطّ ولا يتنقّط — والظلّ المسطّح داخل القطعة بعيدٌ عن الخطوط فيُمحى.
+    """
+    near, _w, _h = _gray_bytes(_morph(_mask_image(gray, w, h), 1, False))
+    keep = _gray_image(near.translate(
+        bytes(255 if v < cut else 0 for v in range(256))), w, h)
+    top = _mask_image(gray, w, h).convertToFormat(
+        QtGui.QImage.Format_ARGB32)
+    top.setAlphaChannel(keep)
+    out = _mask_image(gray.translate(_unshade_lut(cut)), w, h)
+    p = QtGui.QPainter(out)
+    p.drawImage(0, 0, top)
+    p.end()
+    return _gray_bytes(out)[0]
+
+
+def _unshade_lut(cut, knee=14):
+    """الأفتح من الحدّ أبيض، والأغمق باقٍ — بانتقالٍ ناعم لا حافّة مسنّنة."""
+    out = bytearray(256)
+    a, b = cut - knee, cut + knee
+    for v in range(256):
+        if v <= a:
+            out[v] = v
+        elif v >= b:
+            out[v] = 255
+        else:
+            out[v] = int(round(v + (255 - v) * (v - a) / float(b - a)))
+    return bytes(out)
+
+
+# ══════════════════════════════════════════════════════════════════
 #  تظليل القطعة: رماديٌّ موحّد داخل قطع الطقم وحدها
 # ══════════════════════════════════════════════════════════════════
 
@@ -541,24 +653,43 @@ def enhance_drawing(img, o):
             img = _paint_white(img, m, w, h)
             notes.append("مُحيت حافّة الماسح السوداء")
 
+    if o.get("flatten", True):
+        img = _flatten(img)
+
+    def _tone(hist_small, full_hist=None):
+        white, black, gamma = _levels(
+            hist_small, 0, float(o.get("strength", 55)),
+            float(o.get("paper", 50)), full_hist)
+        lut = _lut(white, black, gamma)
+        cut = None
+        if o.get("unshade", True):
+            after = Counter()
+            for v, c in (full_hist or hist_small).items():
+                after[lut[v]] += c
+            cut = _ink_cut(after)
+        return lut, cut
+
     gw, sw, sh = _gray_bytes(_work(img))
     hist = Counter(gw)
-    white, black, gamma = _levels(hist, len(gw), float(o.get("strength", 55)),
-                                  float(o.get("paper", 50)))
-    lut = _lut(white, black, gamma)
+    lut, cut = _tone(hist)
     if o.get("despeckle", True):
-        m = _speck_mask(gw.translate(lut), sw, sh)
+        g1 = gw.translate(lut)
+        m = _speck_mask(_unshade(g1, sw, sh, cut) if cut else g1, sw, sh)
         if any(m):
             img = _paint_white(img, m, sw, sh)
             gw, sw, sh = _gray_bytes(_work(img))
             notes.append("نُظّفت نقاط الغبار")
     gfull, W, H = _gray_bytes(img)
-    # نقطة الحبر من الدقّة الكاملة: الخطّ الرفيع لا يُقاس بعد تصغيره
-    white, black, gamma = _levels(hist, len(gw), float(o.get("strength", 55)),
-                                  float(o.get("paper", 50)), Counter(gfull))
-    lut = _lut(white, black, gamma)
+    # نقطة الحبر وحدّ الظلّ من الدقّة الكاملة: الخطّ الرفيع لا يُقاس بعد
+    # تصغيره
+    lut, cut = _tone(hist, Counter(gfull))
     gfull = gfull.translate(lut)
     gsmall = gw.translate(lut)
+    if cut is not None:
+        gfull = _unshade(gfull, W, H, cut)
+        gsmall = _unshade(gsmall, sw, sh, cut)
+    if o.get("unshade", True):
+        notes.append("بلا ظلٍّ رمادي — الخطّ وحده")
     shade = float(o.get("shade", 0) or 0)
     if shade > 0:
         gs, xw, xh = _gray_bytes(_work(img, SHADE_SIDE))
@@ -585,6 +716,7 @@ def enhance_drawing(img, o):
                                   " خفّف «تبييض الورق»")
         out = out.copy(_crop_rect(box, sw, sh, W, H))
     notes.insert(0, "رسمٌ أوضح وورقٌ أبيض"
+                 + (" ناصع" if o.get("flatten", True) else "")
                  + (" شفاف" if o.get("transparent", True) else ""))
     return out, " · ".join(notes)
 

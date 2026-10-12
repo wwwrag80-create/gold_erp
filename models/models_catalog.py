@@ -545,11 +545,16 @@ def refresh_image(model_no):
     """يعيد معالجة الصورة بالمعالِج الحالي من أصلها (4.64).
 
     ما ضُبط في الاستوديو يُعاد **بضبطه نفسه** (الممحاة والتدوير والقوة…)
-    ويُضاف إليه ما جدّ في المعالِج — كتظليل القطعة — بقيمته الافتراضية.
+    ويُضاف إليه ما جدّ في المعالِج بقيمته الافتراضية.
     """
     m = image_meta(model_no) or {}
     if m.get("by") == "studio" and m.get("opts"):
-        return enhance_image(model_no, dict(m["opts"]), by="studio")
+        opts = dict(m["opts"])
+        if int(m.get("v") or 0) < 4:
+            # تظليل 4.64 كان افتراضياً لا اختياراً — فلا يُبقى (4.65)
+            opts.pop("shade", None)
+            opts.pop("reach", None)
+        return enhance_image(model_no, opts, by="studio")
     return enhance_image(model_no)
 
 

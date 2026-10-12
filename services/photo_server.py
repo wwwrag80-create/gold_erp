@@ -52,7 +52,7 @@ _docs = {}                       # token → {"no":…, "items":[…], "at":…}
 # (رابط دليل الموديلات للمدير — `services.models_web`). المفتاح أول جزء
 # من المسار، والدالة تعيد {code, body, ctype, headers}.
 _routes = {}
-MAX_POST = 4096                  # أكبر جسم طلبٍ يُقبل (نموذج رمز الدخول)
+MAX_POST = 128 * 1024           # أكبر جسم طلبٍ يُقبل (نموذج طلب العميل 4.65)
 
 
 def add_route(prefix, fn):

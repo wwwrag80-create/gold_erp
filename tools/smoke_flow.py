@@ -7652,7 +7652,9 @@ def main():
 
         def _al95(img, x, y):
             return _QG95.QColor.fromRgba(img.pixel(x, y)).alpha()
-        _o95, _md95, _n95 = _en95.process(_im95, {"crop": False})
+        # التظليل اختياريٌّ مطفأ منذ 4.65 — يُختبر بتشغيله صراحةً
+        _o95, _md95, _n95 = _en95.process(_im95, {"crop": False,
+                                                  "shade": 55})
         check("داخل الحدّ المنقّط والفصّ رماديٌّ موحّد (لا أبيض)",
               all(45 <= _al95(_o95, x, y) <= 100
                   for x, y in ((860, 280), (830, 300), (860, 650)))
@@ -7667,6 +7669,9 @@ def main():
         check("و«تظليل القطعة» صفر = بلا تظليل",
               _al95(_z95, 860, 280) < 10 and "ظُلّلت" not in _nz)
         _d95, _md, _nd = _en95.process(_im95, {"crop": False, "shade": 90})
+        _f95, _mf, _nf = _en95.process(_im95, {"crop": False})
+        check("والافتراضي (4.65) بلا تظليل",
+              _al95(_f95, 860, 280) < 10 and "ظُلّلت" not in _nf)
         check("والمنزلق يغمّق الظلّ",
               _al95(_d95, 860, 280) > _al95(_o95, 860, 280) + 20)
 
@@ -7693,6 +7698,113 @@ def main():
               and _mm95.get("v") == _en95.VERSION
               and "SMK-95" not in _mc95.needs_enhance(), str(_mm95))
         _mc95.remove_image("SMK-95")
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
+    step("96) 4.65: ورقٌ أبيض ناصع بلا ظلالٍ ولا بقع · القطع بخطّها وحده")
+    try:
+        from PyQt5 import QtCore as _QC96, QtGui as _QG96, \
+            QtWidgets as _QW96
+        _QW96.QApplication.instance() or _QW96.QApplication([])
+        from services import enhance as _en96
+        _im96 = _QG96.QImage(1400, 1000, _QG96.QImage.Format_RGB32)
+        _im96.fill(_QG96.QColor("#efebe2"))
+        _p96 = _QG96.QPainter(_im96)
+        _p96.setRenderHint(_QG96.QPainter.Antialiasing)
+        _p96.setBrush(_QG96.QColor("#c2c2c2"))               # قطعةٌ مظلّلة
+        _p96.setPen(_QG96.QPen(_QG96.QColor("#3c3c3c"), 3))
+        _p96.drawEllipse(_QC96.QPointF(700, 500), 120, 170)
+        _p96.setPen(_QC96.Qt.NoPen)
+        _p96.setBrush(_QG96.QColor("#151515"))               # جزءٌ مصمت
+        _p96.drawEllipse(_QC96.QPointF(1050, 500), 30, 45)
+        # ظلّ اليد والغطاء: الورق يغمق نحو اليسار وبقعةٌ داكنة في الركن
+        _p96.setCompositionMode(_QG96.QPainter.CompositionMode_Multiply)
+        _g96 = _QG96.QLinearGradient(0, 0, 1400, 0)
+        _g96.setColorAt(0, _QG96.QColor(165, 165, 165))
+        _g96.setColorAt(0.5, _QG96.QColor(245, 245, 245))
+        _g96.setColorAt(1, _QG96.QColor(255, 255, 255))
+        _p96.fillRect(0, 0, 1400, 1000, _QG96.QBrush(_g96))
+        _r96 = _QG96.QRadialGradient(250, 820, 260)
+        _r96.setColorAt(0, _QG96.QColor(185, 185, 185))
+        _r96.setColorAt(1, _QG96.QColor(255, 255, 255))
+        _p96.fillRect(0, 0, 1400, 1000, _QG96.QBrush(_r96))
+        _p96.end()
+
+        def _al96(img, x, y):
+            return _QG96.QColor.fromRgba(img.pixel(x, y)).alpha()
+        _o96, _m96, _n96 = _en96.process(_im96, {"crop": False})
+        check("الورق المظلّل (الطرف الأيسر وبقعة الركن) أبيضُ شفاف",
+              all(_al96(_o96, x, y) <= 6 for x, y in
+                  ((20, 20), (60, 500), (250, 820), (150, 950),
+                   (1300, 100))) and "ناصع" in _n96,
+              str([_al96(_o96, x, y) for x, y in
+                   ((20, 20), (60, 500), (250, 820))]))
+        check("الظلّ الرمادي داخل القطعة يُمحى — يبقى خطّها وحده",
+              _al96(_o96, 700, 500) <= 6
+              and max(_al96(_o96, 700 + 120 + d, 500)
+                      for d in range(-3, 4)) >= 170
+              and "الخطّ وحده" in _n96,
+              str((_al96(_o96, 700, 500),
+                   [_al96(_o96, 820 + d, 500) for d in range(-3, 4)])))
+        check("والجزء المصمت يبقى أسود",
+              _al96(_o96, 1050, 500) >= 220, str(_al96(_o96, 1050, 500)))
+        _k96, _mk, _nk = _en96.process(
+            _im96, {"crop": False, "flatten": False, "unshade": False})
+        check("وبإطفاء الخيارين يبقى سلوك 4.63 (الظلّ والورق المظلّل باقيان)",
+              _al96(_k96, 60, 500) > 20 and _al96(_k96, 700, 500) > 20,
+              str((_al96(_k96, 60, 500), _al96(_k96, 700, 500))))
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
+    step("97) 4.65: طلبات العملاء من رابط المدير — تسجيلٌ وتعديلٌ وطباعة")
+    try:
+        import re as _re97
+        from urllib.parse import urlencode as _ue97
+        from models import model_orders as _mo97
+        from services import models_web as _mw97
+        with db() as conn:
+            _tok97 = _mw97.ensure_token(conn)
+            _mw97.set_enabled(conn, True, "admin")
+            _wo97 = conn.execute(
+                "SELECT TRIM(model_no) m FROM work_orders WHERE is_deleted=0"
+                " AND model_no IS NOT NULL AND TRIM(model_no)<>''"
+                " LIMIT 1").fetchone()
+        _mdl97 = _wo97["m"] if _wo97 else None
+        _r97 = _mw97.handle("GET", [_tok97, "order", "new"], {}, {}, None)
+        _cs97 = _re97.search(r'name="csrf" value="([0-9a-f]+)"',
+                             str(_r97["body"]))
+        check("الرابط: نموذج «طلب جديد» بالموديلات ورمز التحقّق",
+              _r97["code"] == 200 and _cs97 is not None and _mdl97
+              and f'data-n="{_mdl97}"' in _r97["body"])
+        _form97 = [("customer", "عميل الرابط"), ("date", "2026-10-12"),
+                   ("m", _mdl97 or ""), ("q", "2"), ("n", "")]
+        _bad97 = _mw97.handle("POST", [_tok97, "order", "save"], {}, {},
+                              _ue97(_form97).encode())
+        with db(readonly=True) as conn:
+            _n97 = len(_mo97.list_orders(conn, "all", "عميل الرابط"))
+        check("الحفظ بلا رمز التحقّق يُرفض ولا يكتب", _bad97["code"] == 403
+              and _n97 == 0)
+        _ok97 = _mw97.handle(
+            "POST", [_tok97, "order", "save"], {}, {},
+            _ue97(_form97 + [("csrf", _cs97.group(1) if _cs97 else "")])
+            .encode())
+        with db(readonly=True) as conn:
+            _rows97 = _mo97.list_orders(conn, "all", "عميل الرابط")
+            _o97 = _mo97.get_order(conn, _rows97[0]["id"]) if _rows97 \
+                else None
+        check("والحفظ برمزه يسجّل الطلب في قاعدة جهاز المصنع",
+              _ok97["code"] == 303 and _o97 is not None
+              and _o97["lines"][0]["qty"] == 2
+              and _o97["created_by"] == _mw97.WEB_USER, str(_ok97))
+        _pg97 = _mw97.handle("GET", [_tok97, "order", str(_o97["id"])],
+                             {"print": "1"}, {}, None) if _o97 else {}
+        check("وصفحة الطلب جاهزة للطباعة A4",
+              _pg97.get("code") == 200 and "@page{size:A4" in _pg97["body"]
+              and "window.print" in _pg97["body"])
+        with db() as conn:
+            _mw97.set_enabled(conn, False, "admin")
+            if _o97:
+                _mo97.delete_order(conn, _o97["id"], "admin")
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 

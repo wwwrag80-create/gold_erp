@@ -27,7 +27,11 @@
 
 **الحماية**: رمزٌ عشوائي طويل في الرابط لا يُخمَّن (تغييره يُبطل القديم
 فوراً)، ورمز دخول (PIN) اختياري يُحفظ في جوال المدير 30 يوماً، وقفلٌ بعد
-محاولاتٍ خاطئة متكررة. والخادم **قراءةٌ فقط**: لا مسار يكتب في القاعدة.
+محاولاتٍ خاطئة متكررة. والخادم **قراءةٌ فقط** إلا في أمرٍ واحد (4.65):
+**طلبات العملاء** — تُسجَّل وتُعدَّل وتُطبع من الرابط كما في البرنامج،
+فتُحفظ في قاعدة جهاز المصنع وتظهر في البرنامج وفي الرابط معاً. والكتابة
+بنموذجٍ (POST) يحمل رمز تحقّقٍ من الصفحة نفسها (CSRF)، وكل حفظٍ يُسجَّل في
+سجل التتبع باسم «رابط المدير». ولا مسار غيره يكتب في القاعدة.
 """
 import hashlib
 import hmac
@@ -687,6 +691,9 @@ def handle(method, parts, query, headers, body):
         if rest[:1] == ["img"]:
             return _resp(401, b"", "text/plain")
         return _resp(200, login_page(base))
+    if rest[:1] == ["order"]:
+        return _order_route(method, rest[1:], query, body, base,
+                            _csrf(token, secret), not pin_hash)
     if method != "GET":
         return _resp(405, _GONE)
     if rest[:1] == ["img"] and len(rest) == 2:
@@ -1072,7 +1079,7 @@ def page_html(conn, query, base):
 <meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">
 <title>{title}</title>
-<style>{_CSS}</style></head><body>
+<style>{_CSS}{_ORDER_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
 <div class="bar"><input id="q" type="search"
@@ -1243,9 +1250,10 @@ def _received(conn, query, base, view, sort, imgs, unit, sort_sel):
 
 
 def _orders(conn, base, status, imgs):
-    """طلبات العملاء (4.59) — للعرض فقط: كل طلبٍ بعميله وتاريخه، وتحته
-    صور موديلاته بالعدد المطلوب وما بالخزنة منه وما يلزم تصنيعه. وفي
-    أعلاها «خلاصة التصنيع» للطلبات المفتوحة مجتمعةً."""
+    """طلبات العملاء (4.59): كل طلبٍ بعميله وتاريخه، وتحته صور موديلاته
+    بالعدد المطلوب وما بالخزنة منه وما يلزم تصنيعه. وفي أعلاها «خلاصة
+    التصنيع» للطلبات المفتوحة مجتمعةً. ومنذ 4.65: «➕ طلب جديد»، ولكل
+    طلبٍ «🖨 عرض وطباعة» و«✏ تعديل» — كما في البرنامج."""
     from models import model_orders as mo
     from models import models_catalog as mc
     rows = mo.list_orders(conn, status)
@@ -1279,12 +1287,16 @@ def _orders(conn, base, status, imgs):
                if o.get("due_date") else "")
         arts.append(
             f'<article class="order" data-s="{_e(keys)}">'
-            f'<div class="oh"><span class="no">{_e(o["order_no"])}</span>'
+            f'<div class="oh"><a class="no" href="{_e(base)}/order/{o["id"]}">'
+            f'{_e(o["order_no"])}</a>'
             f'<span class="cu">{_e(o["customer_name"])}</span>'
             f'<span class="m">{_e(o["order_date"])}</span>{due}'
             f'<span class="m">{o["models"]} موديل · {o["pieces"]} قطعة</span>'
             f'<span class="st {_e(o["status"])}">{_e(o["status_label"])}'
-            f'</span></div><div class="og">{"".join(cards)}</div>'
+            f'</span><span class="acts"><a class="btn sm gold"'
+            f' href="{_e(base)}/order/{o["id"]}">🖨 عرض وطباعة</a>'
+            f'<a class="btn sm gh" href="{_e(base)}/order/{o["id"]}/edit">'
+            f'✏ تعديل</a></span></div><div class="og">{"".join(cards)}</div>'
             + (f'<div class="onote">ملاحظات: {_e(o["notes"])}</div>'
                if o.get("notes") else "")
             + '</article>')
@@ -1309,7 +1321,443 @@ def _orders(conn, base, status, imgs):
                + (f'<div class="out">يلزم تصنيعه<b>{tot_short} قطعة</b></div>'
                   if status != "done" else ""))
     body = "".join(arts) or '<div class="empty">لا طلبات</div>'
-    return body, summary, ""
+    tools = (f'<a class="btn" href="{_e(base)}/order/new">➕ طلب جديد</a>')
+    return body, summary, tools
+
+
+# ══════════════════════════════════════════════════════════════════
+#  طلبات العملاء من الرابط (4.65): تسجيلٌ وتعديلٌ وطباعة
+# ══════════════════════════════════════════════════════════════════
+
+WEB_USER = "رابط المدير"             # اسم المستخدم في سجل التتبع
+ORDER_PP = (2, 4, 6, 9, 12)          # الصور في صفحة الطباعة
+_GRID = {2: (1, 2), 4: (2, 2), 6: (2, 3), 9: (3, 3), 12: (3, 4)}
+
+
+def _csrf(token, secret):
+    """رمز التحقّق في كل نموذج — صفحةٌ من موقعٍ آخر لا تعرفه فلا تكتب."""
+    return hmac.new(secret.encode("utf-8"), f"csrf|{token}".encode("utf-8"),
+                    hashlib.sha256).hexdigest()[:32]
+
+
+def _form_val(form, key, limit=200):
+    return str((form.get(key) or [""])[-1]).strip()[:limit]
+
+
+def _order_route(method, rest, query, body, base, csrf, no_pin):
+    from database.database import db
+    from models import model_orders as mo
+    if method == "POST":
+        form = parse_qs((body or b"").decode("utf-8", "replace"),
+                        keep_blank_values=True)
+        if not hmac.compare_digest(_form_val(form, "csrf", 64), csrf):
+            return _resp(403, _note_page(
+                base, "انتهت صلاحية الصفحة — افتحها من جديد ثم أعد"
+                      " المحاولة."))
+        if rest == ["save"]:
+            return _order_save(form, base, csrf, no_pin)
+        if len(rest) == 2 and rest[0].isdigit() and rest[1] == "status":
+            st = _form_val(form, "st", 20)
+            try:
+                with db() as conn:
+                    mo.set_status(conn, int(rest[0]), st, WEB_USER)
+            except ValueError as e:
+                return _resp(400, _note_page(base, str(e)))
+            return _resp(303, "", headers={
+                "Location": f"{base}/order/{rest[0]}"})
+        return _resp(404, _GONE)
+    if method != "GET":
+        return _resp(405, _GONE)
+    with db(readonly=True) as conn:
+        if rest == ["new"]:
+            return _resp(200, order_form(conn, base, None, csrf, no_pin))
+        if len(rest) == 2 and rest[0].isdigit() and rest[1] == "edit":
+            o = mo.get_order(conn, int(rest[0]))
+            if not o:
+                return _resp(404, _note_page(base, "الطلب غير موجود"))
+            return _resp(200, order_form(conn, base, o, csrf, no_pin))
+        if len(rest) == 1 and rest[0].isdigit():
+            o = mo.get_order(conn, int(rest[0]))
+            if not o:
+                return _resp(404, _note_page(base, "الطلب غير موجود"))
+            return _resp(200, order_page(base, o, query, csrf))
+    return _resp(404, _GONE)
+
+
+def _customers(conn):
+    """{الاسم: المعرّف} — كل جهات التعامل كما في البرنامج عدا الداخلية."""
+    try:
+        from models import entities
+        return {r["name"]: r["id"] for r in entities.list_customers(conn)
+                if r["entity_type"] != "internal"}
+    except Exception:
+        return {}
+
+
+def _order_save(form, base, csrf, no_pin):
+    from datetime import date
+
+    from database.database import db
+    from models import model_orders as mo
+    oid = _form_val(form, "id", 12)
+    oid = int(oid) if oid.isdigit() else None
+    name = _form_val(form, "customer", 120)
+    d1 = _form_val(form, "date", 10)
+    d1 = d1 if _DATE.match(d1) else date.today().isoformat()
+    due = _form_val(form, "due", 10)
+    due = due if _DATE.match(due) else None
+    notes = _form_val(form, "notes", 500)
+    ms, qs, ns = form.get("m", []), form.get("q", []), form.get("n", [])
+    lines = []
+    for i, m in enumerate(ms[:3000]):
+        try:
+            q = int((qs[i] if i < len(qs) else "0") or 0)
+        except ValueError:
+            q = 0
+        q = max(0, min(q, 9999))
+        if q:
+            lines.append({"model": str(m).strip()[:80], "qty": q,
+                          "note": str(ns[i] if i < len(ns) else "")
+                          .strip()[:200]})
+    try:
+        with db() as conn:
+            known = {c["model"] for c in mo.catalog(conn)}
+            if oid:
+                old = mo.get_order(conn, oid)
+                known |= {ln["model"] for ln in (old or {}).get("lines", [])}
+            lines = [ln for ln in lines if ln["model"] in known]
+            res = mo.save_order(conn, name, lines, WEB_USER, order_id=oid,
+                                entity_id=_customers(conn).get(name),
+                                order_date=d1, due_date=due, notes=notes)
+    except ValueError as e:
+        draft = {"id": oid, "customer_name": name, "order_date": d1,
+                 "due_date": due, "notes": notes, "lines": lines,
+                 "order_no": ""}
+        with db(readonly=True) as conn:
+            return _resp(400, order_form(conn, base, draft, csrf, no_pin,
+                                         error=str(e)))
+    loc = f"{base}/order/{res['id']}?saved=1"
+    if _form_val(form, "go", 10) == "print":
+        loc += "&print=1"
+    return _resp(303, "", headers={"Location": loc})
+
+
+_ORDER_CSS = """
+.btn{display:inline-block;padding:8px 16px;border-radius:9px;border:0;
+background:var(--brown);color:#fff;text-decoration:none;font-weight:600;
+font-size:14px;cursor:pointer;white-space:nowrap}
+.btn.gold{background:var(--gold)}
+.btn.gh{background:#fff;color:var(--brown);border:1px solid var(--line)}
+.btn.sm{padding:5px 11px;font-size:12.5px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-inline-start:auto}
+.ofh{display:grid;grid-template-columns:2fr 1fr 1fr 3fr;gap:10px 14px;
+background:#fff;border:1px solid var(--line);border-radius:14px;
+padding:12px 14px;margin:0 0 12px}
+.ofh label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;
+color:var(--muted)}
+.ofh input{padding:9px 10px;border:1px solid var(--line);border-radius:9px;
+font-size:15px;color:var(--ink)}
+.selbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;
+gap:10px;flex-wrap:wrap;background:#fffaf0;border:1px solid #e9d9b5;
+border-radius:12px;padding:9px 12px;margin:0 0 12px}
+.selbar b{color:var(--brown);font-size:15px}
+.selbar .chips2{flex:1 1 300px;color:var(--muted);font-size:12.5px}
+.selbar input[type=search]{padding:7px 10px;border:1px solid var(--line);
+border-radius:8px;width:260px}
+.pk .ph{cursor:pointer}
+.pk.sel{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}
+.qty{display:flex;align-items:center;gap:6px;margin:7px 0 5px}
+.qty button{width:34px;height:34px;border-radius:9px;border:1px solid
+var(--line);background:#fff;font-size:18px;font-weight:700;cursor:pointer;
+color:var(--brown)}
+.qty input{width:64px;height:34px;text-align:center;font-size:17px;
+font-weight:700;border:1px solid var(--line);border-radius:9px}
+.pk input.nt{width:100%;padding:5px 7px;border:1px solid var(--line);
+border-radius:7px;font-size:12px}
+.err{background:#fbeaea;color:#a4262c;border-radius:10px;padding:10px 14px;
+margin:0 0 12px;font-weight:600}
+.ok{background:#e8f3ea;color:var(--in);border-radius:10px;padding:10px 14px;
+margin:0 0 12px;font-weight:600}
+.warn{color:var(--out);font-size:12.5px;margin:0 0 10px}
+.oh a.no{text-decoration:none}
+"""
+
+_FORM_JS = """
+(function(){
+ var f=document.getElementById('of'),q=document.getElementById('pq'),
+  only=document.getElementById('only'),tot=document.getElementById('tot'),
+  chips=document.getElementById('chips');
+ var cards=[].slice.call(document.querySelectorAll('.pk'));
+ function inp(c){return c.querySelector('input[name=q]');}
+ function val(c){var v=parseInt(inp(c).value,10);return isNaN(v)||v<0?0:v;}
+ function filt(){var s=(q.value||'').trim().toLowerCase(),o=only.checked;
+  cards.forEach(function(c){var hit=(!s||c.getAttribute('data-m')
+   .indexOf(s)>=0)&&(!o||val(c)>0);c.style.display=hit?'':'none';});}
+ function upd(){var n=0,p=0,h=[];cards.forEach(function(c){var v=val(c);
+  c.classList.toggle('sel',v>0);if(v>0){n++;p+=v;
+  h.push(c.getAttribute('data-n')+' × '+v);}});
+  tot.textContent=n+' موديل · '+p+' قطعة';
+  chips.textContent=h.join('   ·   ')||'لم يُختر موديلٌ بعد — اضغط صورته أو +';
+  filt();}
+ cards.forEach(function(c){var i=inp(c);
+  c.querySelector('.plus').addEventListener('click',function(){
+   i.value=val(c)+1;upd();});
+  c.querySelector('.minus').addEventListener('click',function(){
+   i.value=Math.max(0,val(c)-1);upd();});
+  c.querySelector('.ph').addEventListener('click',function(){
+   if(!val(c)){i.value=1;upd();}});
+  i.addEventListener('input',upd);});
+ q.addEventListener('input',filt);only.addEventListener('change',filt);
+ f.addEventListener('submit',function(e){var any=false;
+  cards.forEach(function(c){var z=!val(c);if(!z)any=true;
+   c.querySelectorAll('input').forEach(function(x){x.disabled=z;});});
+  if(!any){e.preventDefault();cards.forEach(function(c){
+   c.querySelectorAll('input').forEach(function(x){x.disabled=false;});});
+   alert('اختر موديلاً واحداً على الأقل بعددٍ أكبر من صفر');}});
+ upd();
+})();
+"""
+
+
+def _shell(base, title, inner, css="", js="", back=True):
+    """صفحةٌ بتصميم الرابط نفسه — للطلب وطباعته."""
+    co = _company().strip()
+    head = (f'<a class="btn gh sm" href="{_e(_link(base, tab="orders"))}">'
+            '← الطلبات</a>' if back else "")
+    return f"""<!DOCTYPE html>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8">
+<meta name="viewport" content="width={DESKTOP_W}">
+<meta name="robots" content="noindex,nofollow">
+<title>{_e(title)}</title>
+<style>{_CSS}{_ORDER_CSS}{css}</style></head><body>
+<header><div class="hi"><div class="t"><h1>{_e(title)}</h1>
+<div class="sub">{_e(co) + " · " if co else ""}دليل الموديلات — من جهاز
+ المصنع مباشرةً</div></div><div class="bar">{head}</div></div></header>
+<main>{inner}</main>
+<footer>إصدار {_e(_version())}</footer>
+{f"<script>{js}</script>" if js else ""}</body></html>"""
+
+
+def _note_page(base, text):
+    return _shell(base, "طلبات العملاء",
+                  f'<div class="err">{_e(text)}</div>')
+
+
+def order_form(conn, base, order, csrf, no_pin, error=""):
+    """نموذج الطلب: العميل والتاريخ، وكل الموديلات بصورها وخانة عددٍ
+    تحت كل صورة (+ و−)، والبحث برقم الموديل، و«المختار فقط»."""
+    from datetime import date
+
+    from models import model_orders as mo
+    from models import models_catalog as mc
+    order = order or {}
+    picked = {ln["model"]: ln for ln in order.get("lines", [])}
+    cat = mo.catalog(conn)
+    names = [c["model"] for c in cat]
+    extra = [m for m in picked if m not in set(names)]
+    stock = {c["model"]: c for c in cat}
+    imgs = mc.models_with_images(conn)
+    cards = []
+    for m in extra + names:
+        ln = picked.get(m, {})
+        q = int(ln.get("qty") or 0)
+        c = stock.get(m, {})
+        have = mc._safe_name(m) in imgs
+        u = f"{base}/img/{quote(str(m), safe='')}"
+        ph = (f'<div class="ph"><img loading="lazy" src="{_e(u)}"'
+              f' alt="{_e(m)}"></div>' if have
+              else '<div class="ph noimg">لا توجد صورة</div>')
+        cards.append(
+            f'<article class="card pk{" sel" if q else ""}"'
+            f' data-m="{_e(str(m).lower())}" data-n="{_e(m)}">{ph}'
+            f'<div class="b"><h2>{_e(m)}</h2><div class="chips">'
+            f'<span class="chip in">بالخزنة {int(c.get("in_count") or 0)}'
+            f'</span></div>'
+            f'<input type="hidden" name="m" value="{_e(m)}">'
+            f'<div class="qty"><button type="button" class="minus"'
+            f' aria-label="أقل">−</button><input name="q" type="number"'
+            f' min="0" max="9999" inputmode="numeric" value="{q}">'
+            f'<button type="button" class="plus" aria-label="أكثر">+'
+            f'</button></div><input class="nt" name="n" maxlength="200"'
+            f' placeholder="ملاحظة على الموديل (اختياري)"'
+            f' value="{_e(ln.get("note") or "")}"></div></article>')
+    custs = "".join(f'<option value="{_e(n)}">'
+                    for n in sorted(_customers(conn)))
+    oid = order.get("id")
+    title = (f"تعديل الطلب {order.get('order_no')}" if oid
+             and order.get("order_no") else "طلب عميل جديد")
+    d1 = order.get("order_date") or date.today().isoformat()
+    warn = ('<div class="warn">🔒 الرابط صار يسجّل طلبات — يُنصح بتفعيل'
+            ' «رمز الدخول» من شاشة «رابط المدير» في البرنامج.</div>'
+            if no_pin else "")
+    inner = (
+        (f'<div class="err">⚠ {_e(error)}</div>' if error else "")
+        + f'<form id="of" method="post" action="{_e(base)}/order/save">'
+        f'<input type="hidden" name="csrf" value="{_e(csrf)}">'
+        f'<input type="hidden" name="id" value="{_e(oid or "")}">'
+        f'<div class="ofh">'
+        f'<label>اسم العميل<input name="customer" list="custs" required'
+        f' maxlength="120" autocomplete="off"'
+        f' value="{_e(order.get("customer_name") or "")}"></label>'
+        f'<label>تاريخ الطلب<input type="date" name="date"'
+        f' value="{_e(d1)}"></label>'
+        f'<label>موعد التسليم (اختياري)<input type="date" name="due"'
+        f' value="{_e(order.get("due_date") or "")}"></label>'
+        f'<label>ملاحظات الطلب<input name="notes" maxlength="500"'
+        f' value="{_e(order.get("notes") or "")}"></label></div>'
+        f'<datalist id="custs">{custs}</datalist>{warn}'
+        f'<div class="selbar"><b id="tot"></b><span id="chips"'
+        f' class="chips2"></span><input id="pq" type="search"'
+        f' placeholder="ابحث برقم الموديل…"><label><input id="only"'
+        f' type="checkbox"> المختار فقط</label>'
+        f'<button class="btn" name="go" value="save">💾 حفظ الطلب</button>'
+        f'<button class="btn gold" name="go" value="print">💾 حفظ وطباعة'
+        f'</button></div>'
+        f'<section class="grid">{"".join(cards)}</section></form>')
+    return _shell(base, title, inner, js=_FORM_JS)
+
+
+_PRINT_CSS = """
+@page{size:A4;margin:8mm}
+.sheet{display:flex;flex-direction:column;align-items:center;gap:14px}
+.pg{width:194mm;height:279mm;background:#fff;display:flex;
+flex-direction:column;box-sizing:content-box;padding:8mm;
+box-shadow:0 2px 10px rgba(0,0,0,.12);overflow:hidden}
+.pgh{display:flex;align-items:baseline;gap:5mm;flex-wrap:wrap;
+border-bottom:.5mm solid #B99B33;padding:0 0 2mm;margin:0 0 3mm;
+font-size:11pt;color:#4A3A1E}
+.pgh .cu{font-size:13pt;font-weight:700}
+.pgh .no{font-weight:700}
+.pgh .pn{margin-inline-start:auto;color:#776b5e;font-size:9pt}
+.info{font-size:10.5pt;color:#4A3A1E;margin:0 0 3mm}
+.cells{flex:1;min-height:0;display:grid;gap:3mm}
+.cell{display:flex;flex-direction:column;min-height:0;border:.3mm solid
+#e7dfd1;border-radius:2.5mm;padding:2mm;overflow:hidden}
+.cell .im{flex:1;min-height:0;display:flex;align-items:center;
+justify-content:center}
+.cell img{max-width:100%;max-height:100%;object-fit:contain}
+.cell .ni{color:#9a8f7c;font-size:10pt}
+.cap{text-align:center;color:#4A3A1E;padding-top:1.5mm;line-height:1.35}
+.cap .mn{font-size:13pt;font-weight:700}
+.cap .q{font-size:15pt;font-weight:800;color:#8a6d1d}
+.cap .s,.cap .t{display:block;font-size:9.5pt;color:#5a5040}
+.ws table{width:100%;font-size:11pt}
+.ws th,.ws td{border:.3mm solid #e7dfd1;padding:1.5mm;text-align:center}
+.tb{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+background:#fff;border:1px solid var(--line);border-radius:14px;
+padding:10px 12px;margin:0 0 14px}
+.tb form{display:inline;margin:0}
+.tb select{padding:6px 8px;border:1px solid var(--line);border-radius:8px}
+.st2{padding:3px 10px;border-radius:11px;font-weight:700;font-size:13px}
+@media print{
+ header,footer,.tb,.ok{display:none!important}
+ body{background:#fff;min-width:0}
+ main{padding:0;max-width:none}
+ .sheet{gap:0;display:block}
+ .pg{box-shadow:none;padding:0;page-break-after:always;break-after:page}
+ .pg:last-child{page-break-after:auto;break-after:auto}
+}
+"""
+
+
+def order_page(base, o, query, csrf):
+    """الطلب كما يُطبع: صفحات A4 في رأس كلٍّ منها العميل ورقم الطلب، وتحت
+    كل صورةٍ الموديل والعدد بخطٍّ بارز — وفوقها شريطٌ للطباعة والتعديل
+    والحالة لا يظهر في الورقة."""
+    try:
+        pp = int(query.get("pp") or 4)
+    except ValueError:
+        pp = 4
+    pp = pp if pp in _GRID else 4
+    ws = query.get("stock") == "1"
+    cols, rows = _GRID[pp]
+    oid = o["id"]
+    cells = []
+    for ln in o["lines"]:
+        u = f"{base}/img/{quote(str(ln['model']), safe='')}?full=1"
+        im = (f'<img src="{_e(u)}" alt="{_e(ln["model"])}">'
+              if ln.get("has_image")
+              else '<span class="ni">لا صورة لهذا الموديل</span>')
+        extra = ""
+        if ws:
+            extra = (f'<span class="s">بالخزنة {ln["in_count"]}'
+                     + (f' · للتصنيع <b>{ln["short"]}</b>' if ln["short"]
+                        else " · متوفّر ✔") + "</span>")
+        if ln.get("note"):
+            extra += f'<span class="t">{_e(ln["note"])}</span>'
+        cells.append(
+            f'<div class="cell"><div class="im">{im}</div><div class="cap">'
+            f'<span class="mn">{_e(ln["model"])}</span> &nbsp;—&nbsp;'
+            f' العدد: <span class="q">{ln["qty"]}</span>{extra}</div></div>')
+    pages_n = max(1, (len(cells) + pp - 1) // pp)
+    head = (f'<span class="no">طلب {_e(o["order_no"])}</span>'
+            f'<span>العميل: <span class="cu">{_e(o["customer_name"])}'
+            f'</span></span><span>{_e(o["order_date"])}</span>')
+    info = (f'<div class="info">{o["models"]} موديل · <b>{o["pieces"]}</b>'
+            ' قطعة'
+            + (f' &nbsp;·&nbsp; موعد التسليم: <b>{_e(o["due_date"])}</b>'
+               if o.get("due_date") else "")
+            + (f'<br>ملاحظات: {_e(o["notes"])}' if o.get("notes") else "")
+            + "</div>")
+    grid = (f'grid-template-columns:repeat({cols},minmax(0,1fr));'
+            f'grid-template-rows:repeat({rows},minmax(0,1fr))')
+    pages = []
+    for i in range(pages_n):
+        chunk = cells[i * pp:(i + 1) * pp]
+        pages.append(
+            f'<section class="pg"><div class="pgh">{head}<span class="pn">'
+            f'صفحة {i + 1} من {pages_n}</span></div>'
+            + (info if i == 0 else "")
+            + f'<div class="cells" style="{grid}">{"".join(chunk)}</div>'
+            '</section>')
+    if ws:
+        trs = "".join(
+            f'<tr><td>{_e(ln["model"])}</td><td>{ln["qty"]}</td>'
+            f'<td>{ln["in_count"]}</td>'
+            f'<td>{ln["short"] if ln["short"] else "✔"}</td>'
+            f'<td>{_e(ln.get("note") or "")}</td></tr>' for ln in o["lines"])
+        pages.append(
+            f'<section class="pg ws"><div class="pgh">{head}<span class="pn">'
+            'خلاصة الطلب للورشة</span></div><table><tr><th>الموديل</th>'
+            '<th>العدد</th><th>بالخزنة</th><th>للتصنيع</th><th>ملاحظة</th>'
+            f'</tr>{trs}<tr><th>الإجمالي</th><th>{o["pieces"]}</th><th></th>'
+            f'<th>{o["short"]}</th><th></th></tr></table></section>')
+
+    def _st(st, label, cls="gh"):
+        return (f'<form method="post" action="{_e(base)}/order/{oid}/status">'
+                f'<input type="hidden" name="csrf" value="{_e(csrf)}">'
+                f'<input type="hidden" name="st" value="{st}">'
+                f'<button class="btn sm {cls}">{label}</button></form>')
+    states = []
+    if o["status"] != "done":
+        states.append(_st("done", "✔ تم التسليم"))
+    if o["status"] != "open":
+        states.append(_st("open", "↺ إعادة فتح"))
+    if o["status"] != "cancelled":
+        states.append(_st("cancelled", "✖ إلغاء الطلب"))
+    pp_opts = "".join(f'<option value="{n}"{" selected" if n == pp else ""}>'
+                      f'{n} صور في الصفحة</option>' for n in ORDER_PP)
+    tb = (
+        f'<div class="tb"><button class="btn gold" type="button"'
+        f' onclick="window.print()">🖨 طباعة</button>'
+        f'<a class="btn" href="{_e(base)}/order/{oid}/edit">✏ تعديل</a>'
+        f'<form method="get" action="{_e(base)}/order/{oid}">'
+        f'<select name="pp" onchange="this.form.submit()">{pp_opts}</select>'
+        f' <label><input type="checkbox" name="stock" value="1"'
+        f'{" checked" if ws else ""} onchange="this.form.submit()">'
+        f' ورقة الورشة (بالخزنة وللتصنيع)</label></form>'
+        f'<span class="st2 st {_e(o["status"])}">{_e(o["status_label"])}'
+        f'</span><span class="acts">{"".join(states)}'
+        f'<a class="btn gh sm" href="{_e(base)}/order/new">➕ طلب جديد</a>'
+        '</span></div>')
+    ok = ('<div class="ok">✔ حُفظ الطلب — وهو الآن في البرنامج على جهاز'
+          ' المصنع وفي هذا الرابط معاً.</div>'
+          if query.get("saved") == "1" else "")
+    js = ("window.addEventListener('load',function(){setTimeout(function()"
+          "{window.print();},300);});" if query.get("print") == "1" else "")
+    return _shell(base, f"طلب {o['order_no']} — {o['customer_name']}",
+                  ok + tb + f'<div class="sheet">{"".join(pages)}</div>',
+                  css=_PRINT_CSS, js=js)
 
 
 def login_page(base, error=""):
