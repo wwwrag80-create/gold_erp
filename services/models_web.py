@@ -66,13 +66,18 @@ COOKIE_DAYS = 30
 # المصغّرة أكبر قليلاً (4.57): الجوال يكبّر الشبكة بالأصابع فتُرى الصورة
 # بأضعاف حجمها في الصف، وكاملُها يُفتح بالنقر عليها
 THUMB_W, FULL_W = 640, 1600
-CACHE_CAP = 40 * 1024 * 1024         # ذاكرة الصور المصغّرة (في الذاكرة)
+CACHE_CAP = 96 * 1024 * 1024         # ذاكرة الصور المصغّرة (في الذاكرة)
+IMG_CHECK_S = 20                     # الصفحة المفتوحة تتحقّق من تغيّر الصور
 LOCK_AFTER, LOCK_WINDOW = 10, 15 * 60
 
 _lock = threading.Lock()
 _fails = []                          # أوقات محاولات رمز الدخول الخاطئة
 _thumbs = OrderedDict()              # (المسار, التعديل, العرض) → بايتات
 _thumb_bytes = [0]
+# 4.66: تصغير الصور ثقيل — ثلاثٌ معاً على الأكثر، والبقية تنتظر دورها بدل
+# أن تتزاحم كلها فتبطؤ جميعاً حتى ينقطع بعضها في الطريق إلى الجوال
+_gen = threading.BoundedSemaphore(3)
+_warming = [False]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -300,6 +305,7 @@ def activate(username=None):
                 "message": "تعذّر تشغيل الخادم على هذا الجهاز (منفذ مشغول"
                            " أو جدار حماية)"}
     register()
+    warm_async()                     # المصغّرات جاهزةٌ قبل أول فتح
     lan = f"http://{addr[0]}:{addr[1]}/{PREFIX}/{tok}"
     out = {"ok": True, "url": lan, "lan": lan, "mode": st["mode"],
            "reason": "", "message": "", "enable_url": "", "login_url": ""}
@@ -632,7 +638,8 @@ _SEC = {
     "X-Frame-Options": "DENY",
     "Content-Security-Policy": (
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline';"
-        " script-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"),
+        " script-src 'unsafe-inline'; connect-src 'self';"
+        " form-action 'self'; base-uri 'none'"),
 }
 
 
@@ -697,14 +704,53 @@ def handle(method, parts, query, headers, body):
     if method != "GET":
         return _resp(405, _GONE)
     if rest[:1] == ["img"] and len(rest) == 2:
-        return _image(rest[1], query.get("full") == "1")
+        return _image(rest[1], query.get("full") == "1", query.get("v"),
+                      headers)
+    if rest == ["imgver"]:
+        return _resp(200, json.dumps(_img_versions()), "application/json",
+                     {"Cache-Control": "no-store"})
     if rest:
         return _resp(404, _GONE)
     with db(readonly=True) as conn:
         return _resp(200, page_html(conn, query, base))
 
 
-def _image(model_no, full):
+def _ver_of(path):
+    """إصدار الصورة من تاريخ ملفها وحجمه — يتغيّر متى استُبدلت أو عولجت."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return ""
+    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
+def _img_versions():
+    """{اسم ملف الصورة: إصدارها} لكل صور الدليل — بقراءة المجلد مرةً واحدة.
+
+    **لماذا**: كان رابط الصورة ثابتاً والجوال يحتفظ بها عشر دقائق، فإن
+    استُبدلت صورة موديلٍ بقي الجوال يعرض القديمة. الآن الإصدار جزءٌ من
+    الرابط (`?v=`) — صورةٌ جديدة = رابطٌ جديد، فتظهر فوراً.
+    """
+    from models import models_catalog as mc
+    out = {}
+    try:
+        for f in mc.images_dir().iterdir():
+            if f.suffix.lower() in mc.IMAGE_EXTS:
+                v = _ver_of(f)
+                if v:
+                    out[f.stem] = v
+    except Exception:
+        pass
+    return out
+
+
+def _img_url(base, model, ver, full=False):
+    q = (["full=1"] if full else []) + ([f"v={ver}"] if ver else [])
+    return (f"{base}/img/{quote(str(model), safe='')}"
+            + ("?" + "&".join(q) if q else ""))
+
+
+def _image(model_no, full, v=None, headers=None):
     from models import models_catalog as mc
     try:
         p = mc.image_path(model_no)
@@ -712,26 +758,82 @@ def _image(model_no, full):
         p = None
     if p is None:
         return _resp(404, b"", "text/plain")
+    ver = _ver_of(p)
+    etag = f'"{ver}-{"f" if full else "t"}"'
+    # برابطٍ يحمل الإصدار الحالي: تُحفظ في الجوال طويلاً (لن تتغيّر تحت
+    # هذا الرابط أبداً). وبلا إصدار أو بإصدارٍ قديم: يُسأل الجهاز كل مرة
+    cache = ("private, max-age=31536000, immutable" if v and v == ver
+             else "private, no-cache")
+    inm = (headers.get("If-None-Match") if headers is not None else "") or ""
+    if etag in inm:
+        return _resp(304, b"", "image/jpeg",
+                     {"Cache-Control": cache, "ETag": etag})
     data, ctype = thumb(p, FULL_W if full else THUMB_W)
     if not data:
         return _resp(404, b"", "text/plain")
-    return _resp(200, data, ctype, {"Cache-Control": "private, max-age=600"})
+    return _resp(200, data, ctype, {"Cache-Control": cache, "ETag": etag})
+
+
+def warm_async():
+    """يجهّز مصغّرات الدليل في الخلفية بترتيب الصفحة (4.66).
+
+    أول فتحٍ للرابط بعد تشغيل البرنامج كان يصغّر كل الصور لحظتها فيبطؤ
+    بعضها حتى يتعثّر. والتجهيز يقف قبل امتلاء ذاكرة المصغّرات فلا يطرد
+    بعضُه بعضاً.
+    """
+    with _lock:
+        if _warming[0]:
+            return
+        _warming[0] = True
+
+    def run():
+        try:
+            from models import models_catalog as mc
+            files = sorted((f for f in mc.images_dir().iterdir()
+                            if f.suffix.lower() in mc.IMAGE_EXTS),
+                           key=lambda f: mc.model_key(f.stem))
+            for f in files:
+                with _lock:
+                    full = _thumb_bytes[0] > CACHE_CAP * 0.85
+                if full:
+                    break
+                thumb(f, THUMB_W)
+        except Exception:
+            pass
+        finally:
+            with _lock:
+                _warming[0] = False
+    threading.Thread(target=run, daemon=True,
+                     name="models-web-warm").start()
 
 
 def thumb(path, width):
     """الصورة مصغّرةً ومضغوطة (JPEG) — من الذاكرة إن سبق تصغيرها."""
-    import mimetypes
     try:
         st = os.stat(path)
     except OSError:
         return b"", ""
-    key = (str(path), st.st_mtime_ns, int(width))
+    key = (str(path), st.st_mtime_ns, st.st_size, int(width))
     with _lock:
         hit = _thumbs.get(key)
         if hit is not None:
             _thumbs.move_to_end(key)
             return hit
-    raw = open(path, "rb").read()
+    with _gen:
+        with _lock:                  # صغّرها خيطٌ آخر وهذا ينتظر دوره؟
+            hit = _thumbs.get(key)
+        if hit is not None:
+            return hit
+        return _make_thumb(path, width, key)
+
+
+def _make_thumb(path, width, key):
+    import mimetypes
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError:                   # تُستبدل الآن — والصفحة تعيد المحاولة
+        return b"", ""
     out = (raw, mimetypes.guess_type(str(path))[0] or "image/jpeg")
     try:
         from PyQt5.QtCore import QBuffer, QByteArray
@@ -936,6 +1038,48 @@ _JS = """
 """
 
 
+_IMG_JS = """
+(function(){
+ // 4.66: صورةٌ تعثّر تحميلها (انقطاعٌ في الطريق أو استبدالٌ لحظتها)
+ // تُعاد تلقائياً بمهلةٍ تتضاعف — بدل أن تبقى مكسورة
+ document.addEventListener('error',function(e){var t=e.target;
+  if(!t||t.tagName!=='IMG')return;var n=+(t.getAttribute('data-r')||0);
+  if(n>=5)return;t.setAttribute('data-r',n+1);
+  setTimeout(function(){var u=t.src.replace(/([?&])r=\\d+&?/,'$1')
+   .replace(/[?&]$/,'');t.src=u+(u.indexOf('?')<0?'?':'&')+'r='+(n+1);},
+   800*Math.pow(2,n));},true);
+ // والصورة المستبدَلة أو المضافة تظهر في الصفحة المفتوحة وحدها
+ var base=document.documentElement.getAttribute('data-base');
+ if(!base||!window.fetch)return;
+ function setv(u,v){return /[?&]v=/.test(u)?u.replace(/([?&]v=)[^&]*/,'$1'+v)
+  :u+(u.indexOf('?')<0?'?':'&')+'v='+v;}
+ function apply(m){
+  document.querySelectorAll('img[data-s]').forEach(function(t){
+   var v=m[t.getAttribute('data-s')];
+   if(!v||v===t.getAttribute('data-v'))return;
+   t.setAttribute('data-v',v);t.removeAttribute('data-r');
+   t.src=setv(t.src.replace(/([?&])r=\\d+&?/,'$1').replace(/[?&]$/,''),v);
+   var a=t.closest('a');if(a)a.href=setv(a.href,v);});
+  document.querySelectorAll('.noimg[data-s]').forEach(function(d){
+   var s=d.getAttribute('data-s'),v=m[s];if(!v)return;
+   var n=d.getAttribute('data-n'),u=base+'/img/'+encodeURIComponent(n);
+   var a=document.createElement('a');a.className='ph';a.target='_blank';
+   a.rel='noopener';a.href=u+'?full=1&v='+v;
+   var i=document.createElement('img');i.src=u+'?v='+v;i.alt=n;
+   i.setAttribute('data-s',s);i.setAttribute('data-v',v);
+   a.appendChild(i);d.parentNode.replaceChild(a,d);});}
+ function check(){
+  if(document.visibilityState&&document.visibilityState!=='visible')return;
+  fetch(base+'/imgver',{cache:'no-store',credentials:'same-origin'})
+   .then(function(r){return r.ok?r.json():null;})
+   .then(function(m){if(m)apply(m);}).catch(function(){});}
+ setInterval(check,%d);
+ document.addEventListener('visibilitychange',check);
+ window.addEventListener('pageshow',function(e){if(e.persisted)check();});
+})();
+""" % (IMG_CHECK_S * 1000)
+
+
 def _e(v):
     return html.escape(str(v if v is not None else ""), quote=True)
 
@@ -1004,13 +1148,18 @@ def _link(base, **kw):
     return base + ("?" + q if q else "")
 
 
-def _photo(base, model, have):
-    if not have:
-        return '<div class="noimg">لا توجد صورة</div>'
-    u = f"{base}/img/{quote(str(model), safe='')}"
-    return (f'<a class="ph" href="{_e(u)}?full=1" target="_blank"'
-            f' rel="noopener"><img loading="lazy" src="{_e(u)}"'
-            f' alt="{_e(model)}"></a>')
+def _photo(base, model, ver):
+    """صورة الموديل برابطٍ يحمل إصدارها — أو «لا توجد صورة» تتحوّل إلى
+    الصورة وحدها إن أُضيفت والصفحة مفتوحة (`_IMG_JS`)."""
+    from models.models_catalog import _safe_name
+    s = _e(_safe_name(model))
+    if not ver:
+        return (f'<div class="noimg" data-s="{s}" data-n="{_e(model)}">'
+                'لا توجد صورة</div>')
+    return (f'<a class="ph" href="{_e(_img_url(base, model, ver, True))}"'
+            f' target="_blank" rel="noopener"><img loading="lazy"'
+            f' src="{_e(_img_url(base, model, ver))}" alt="{_e(model)}"'
+            f' data-s="{s}" data-v="{_e(ver)}"></a>')
 
 
 def page_html(conn, query, base):
@@ -1018,7 +1167,6 @@ def page_html(conn, query, base):
     بالأصابع) — الدليل، أو البضاعة الواردة بتاريخ."""
     from datetime import datetime
 
-    from models import models_catalog as mc
     from services import karat_view as kv
     tab = query.get("tab") if query.get("tab") in (
         "guide", "received", "orders") else "guide"
@@ -1026,7 +1174,8 @@ def page_html(conn, query, base):
         "all", "in_stock", "sold") else "all"
     sort = query.get("sort") if query.get("sort") in (
         "az", "za", "most", "least") else "az"
-    imgs = mc.models_with_images(conn)
+    imgs = _img_versions()               # {اسم الملف: إصدار الصورة}
+    warm_async()
     unit = _e(kv.unit())
 
     try:
@@ -1074,7 +1223,7 @@ def page_html(conn, query, base):
     cols = "".join(f'<button type="button" data-c="{c}">{c}</button>'
                    for c in COLS)
     return f"""<!DOCTYPE html>
-<html dir="rtl" lang="ar" data-cols="{DEFAULT_COLS}"><head>
+<html dir="rtl" lang="ar" data-cols="{DEFAULT_COLS}" data-base="{_e(base)}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">
@@ -1098,7 +1247,7 @@ def page_html(conn, query, base):
                                 day=query.get('day'), st=query.get('st')))}">↻ تحديث</a>
  · إصدار {_e(_version())}
  · <a href="{_e(base)}/logout">خروج</a></footer>
-<script>{_JS}</script></body></html>"""
+<script>{_JS}{_IMG_JS}</script></body></html>"""
 
 
 def _guide(conn, base, view, sort, imgs, unit, sort_sel):
@@ -1146,7 +1295,7 @@ def _guide(conn, base, view, sort, imgs, unit, sort_sel):
         cards.append(
             f'<article class="card" data-s="{_e(keys)}"'
             f' data-m="{_e(str(name).lower())}">'
-            f'{_photo(base, name, mc._safe_name(name) in imgs)}'
+            f'{_photo(base, name, imgs.get(mc._safe_name(name)))}'
             f'<div class="b"><h2>الموديل {_e(name)}</h2>'
             f'<div class="chips">{"".join(chips)}'
             f'<span class="chip pick" style="display:none"></span></div>'
@@ -1224,7 +1373,7 @@ def _received(conn, query, base, view, sort, imgs, unit, sort_sel):
         cards.append(
             f'<article class="card" data-s="{_e(keys)}"'
             f' data-m="{_e(str(name).lower())}">'
-            f'{_photo(base, name, mc._safe_name(name) in imgs)}'
+            f'{_photo(base, name, imgs.get(mc._safe_name(name)))}'
             f'<div class="b"><h2>الموديل {_e(name)}</h2>'
             f'<div class="chips"><span class="chip pick" style="display:none">'
             f'</span><span class="chip">{m["count"]} طقم ·'
@@ -1280,7 +1429,7 @@ def _orders(conn, base, status, imgs):
                     if ln.get("note") else "")
             cards.append(
                 f'<div class="oc">'
-                f'{_photo(base, ln["model"], mc._safe_name(ln["model"]) in imgs)}'
+                f'{_photo(base, ln["model"], imgs.get(mc._safe_name(ln["model"])))}'
                 f'<div class="b"><h2>{_e(ln["model"])}</h2>'
                 f'<div class="chips">{"".join(chips)}</div>{note}</div></div>')
         due = (f'<span class="m">التسليم {_e(o["due_date"])}</span>'
@@ -1525,7 +1674,7 @@ def _shell(base, title, inner, css="", js="", back=True):
     head = (f'<a class="btn gh sm" href="{_e(_link(base, tab="orders"))}">'
             '← الطلبات</a>' if back else "")
     return f"""<!DOCTYPE html>
-<html dir="rtl" lang="ar"><head><meta charset="utf-8">
+<html dir="rtl" lang="ar" data-base="{_e(base)}"><head><meta charset="utf-8">
 <meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">
 <title>{_e(title)}</title>
@@ -1535,7 +1684,7 @@ def _shell(base, title, inner, css="", js="", back=True):
  المصنع مباشرةً</div></div><div class="bar">{head}</div></div></header>
 <main>{inner}</main>
 <footer>إصدار {_e(_version())}</footer>
-{f"<script>{js}</script>" if js else ""}</body></html>"""
+<script>{js}{_IMG_JS}</script></body></html>"""
 
 
 def _note_page(base, text):
@@ -1556,16 +1705,17 @@ def order_form(conn, base, order, csrf, no_pin, error=""):
     names = [c["model"] for c in cat]
     extra = [m for m in picked if m not in set(names)]
     stock = {c["model"]: c for c in cat}
-    imgs = mc.models_with_images(conn)
+    imgs = _img_versions()
     cards = []
     for m in extra + names:
         ln = picked.get(m, {})
         q = int(ln.get("qty") or 0)
         c = stock.get(m, {})
-        have = mc._safe_name(m) in imgs
-        u = f"{base}/img/{quote(str(m), safe='')}"
-        ph = (f'<div class="ph"><img loading="lazy" src="{_e(u)}"'
-              f' alt="{_e(m)}"></div>' if have
+        sn = mc._safe_name(m)
+        ver = imgs.get(sn)
+        ph = (f'<div class="ph"><img loading="lazy"'
+              f' src="{_e(_img_url(base, m, ver))}" alt="{_e(m)}"'
+              f' data-s="{_e(sn)}" data-v="{_e(ver)}"></div>' if ver
               else '<div class="ph noimg">لا توجد صورة</div>')
         cards.append(
             f'<article class="card pk{" sel" if q else ""}"'
@@ -1672,11 +1822,15 @@ def order_page(base, o, query, csrf):
     ws = query.get("stock") == "1"
     cols, rows = _GRID[pp]
     oid = o["id"]
+    from models.models_catalog import _safe_name
+    vers = _img_versions()
     cells = []
     for ln in o["lines"]:
-        u = f"{base}/img/{quote(str(ln['model']), safe='')}?full=1"
-        im = (f'<img src="{_e(u)}" alt="{_e(ln["model"])}">'
-              if ln.get("has_image")
+        sn = _safe_name(ln["model"])
+        ver = vers.get(sn)
+        im = (f'<img src="{_e(_img_url(base, ln["model"], ver, True))}"'
+              f' alt="{_e(ln["model"])}" data-s="{_e(sn)}"'
+              f' data-v="{_e(ver)}">' if ver
               else '<span class="ni">لا صورة لهذا الموديل</span>')
         extra = ""
         if ws:

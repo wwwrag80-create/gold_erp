@@ -7808,6 +7808,73 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    step("98) 4.66: صور رابط المدير تتحدّث فور استبدالها ولا تنكسر")
+    try:
+        import json as _js98
+        import re as _re98
+        from PyQt5 import QtGui as _QG98, QtWidgets as _QW98
+        _QW98.QApplication.instance() or _QW98.QApplication([])
+        from models import models_catalog as _mc98
+        from services import models_web as _mw98
+        from services import photo_server as _ps98
+        with db() as conn:
+            _tok98 = _mw98.ensure_token(conn)
+            _mw98.set_enabled(conn, True, "admin")
+            _w98 = conn.execute(
+                "SELECT TRIM(model_no) m FROM work_orders WHERE is_deleted=0"
+                " AND model_no IS NOT NULL AND TRIM(model_no)<>''"
+                " LIMIT 1").fetchone()
+        _m98 = _w98["m"]
+        _old98 = _mc98.image_path(_m98)
+        _bak98 = _old98.read_bytes() if _old98 else None
+        _bakext98 = _old98.suffix if _old98 else None
+
+        def _put98(color):
+            im = _QG98.QImage(300, 200, _QG98.QImage.Format_RGB32)
+            im.fill(_QG98.QColor(color))
+            f = Path(_TMP) / f"smk98_{color[1:]}.png"
+            im.save(str(f), "PNG")
+            _mc98.set_image(_m98, str(f))
+        _put98("#ffffff")
+        _v1 = _js98.loads(_mw98.handle("GET", [_tok98, "imgver"], {}, {},
+                                       None)["body"])
+        _sn98 = _mc98._safe_name(_m98)
+        _pg98 = _mw98.handle("GET", [_tok98], {}, {}, None)["body"]
+        _r98 = _mw98.handle("GET", [_tok98, "img", _m98],
+                            {"v": _v1.get(_sn98, "")}, {}, None)
+        check("رابط الصورة يحمل إصدارها، وبه تُحفظ في الجوال طويلاً",
+              f'data-v="{_v1.get(_sn98)}"' in _pg98
+              and "immutable" in _r98["headers"].get("Cache-Control", ""))
+        _et98 = _r98["headers"].get("ETag", "")
+        _n98 = _mw98.handle("GET", [_tok98, "img", _m98], {},
+                            {"If-None-Match": _et98}, None)
+        check("وبلا تغيّر ⇒ 304 (لا يُعاد إرسالها)", _n98["code"] == 304)
+        time.sleep(0.02)
+        _put98("#ff0000")
+        _v2 = _js98.loads(_mw98.handle("GET", [_tok98, "imgver"], {}, {},
+                                       None)["body"])
+        _o98 = _mw98.handle("GET", [_tok98, "img", _m98],
+                            {"v": _v1.get(_sn98, "")},
+                            {"If-None-Match": _et98}, None)
+        check("استبدال الصورة يغيّر إصدارها، والرابط القديم يعيد الجديدة",
+              _v2.get(_sn98) != _v1.get(_sn98) and _o98["code"] == 200
+              and "no-cache" in _o98["headers"].get("Cache-Control", ""))
+        check("وصفحة الرابط تعيد الصورة المتعثّرة وتتحقّق من الصور وحدها",
+              "data-r" in _pg98 and "/imgver" in _pg98
+              and _re98.search(r"setInterval\(check,\d+\)", _pg98)
+              is not None and "connect-src 'self'" in str(_r98["headers"]))
+        check("وطابور اتصالات الخادم يتّسع لصفحةٍ كاملة من الصور",
+              _ps98._Server.request_queue_size >= 64)
+        _mc98.remove_image(_m98)
+        if _bak98 is not None:
+            _b98 = Path(_TMP) / f"smk98_back{_bakext98}"
+            _b98.write_bytes(_bak98)
+            _mc98.set_image(_m98, str(_b98))
+        with db() as conn:
+            _mw98.set_enabled(conn, False, "admin")
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
