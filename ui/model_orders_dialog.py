@@ -742,9 +742,11 @@ class ModelOrdersDialog(QtWidgets.QDialog):
     # ══════════════════════════════════════════════════════════════
     def _ask_print_options(self):
         from services.print_manager import photo_grid
-        from ui.widgets.common import load_pref, save_pref
+        from ui.widgets.common import load_pref, photo_bg_choice, save_pref
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("طباعة الطلب بالصور")
+        bgc = photo_bg_choice(dlg)
+        dlg._bg_choice = bgc
         dlg.setMinimumWidth(420)
         per = QtWidgets.QSpinBox()
         per.setRange(1, 60)
@@ -776,6 +778,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         f = QtWidgets.QFormLayout(dlg)
         f.addRow("عدد الصور في الصفحة:", per)
         f.addRow(grid)
+        f.addRow("الصور:", bgc)
         f.addRow(stock)
         f.addRow(box)
         self._print_dlg = dlg
@@ -784,7 +787,8 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         u = self.user.get("username")
         save_pref("orders.per_page", str(per.value()), u)
         save_pref("orders.show_stock", "1" if stock.isChecked() else "0", u)
-        return per.value(), stock.isChecked()
+        bgc.remember(u)
+        return per.value(), stock.isChecked(), bgc.with_bg()
 
     def print_order(self, order_id):
         try:
@@ -794,7 +798,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
             from services import print_manager
             print_manager.preview_document(
                 self, "model_order", int(order_id), per_page=opts[0],
-                show_stock=opts[1])
+                show_stock=opts[1], with_bg=opts[2])
         except Exception as e:
             err(self, e)
 

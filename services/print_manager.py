@@ -1806,13 +1806,14 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_models_received_photos(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("mode", "all"), kw.get("sort", "az"),
-                kw.get("per_page", 4)))
+                kw.get("per_page", 4), kw.get("with_bg", False)))
         if doc_type == "model_photos":
             return en(_tpl_model_photos(conn, doc_id,
                                         kw.get("min_count", 3),
                                         kw.get("mode", "all"),
                                         kw.get("sort", "az"),
-                                        kw.get("per_page", 4)))
+                                        kw.get("per_page", 4),
+                                        kw.get("with_bg", False)))
         if doc_type == "dash_panel":
             return en(_tpl_dash_panel(
                 conn, doc_id, kw.get("title", ""),
@@ -3013,7 +3014,8 @@ RECV_PHOTO_CSS = """
 
 
 def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
-                                mode="all", sort="az", per_page=4):
+                                mode="all", sort="az", per_page=4,
+                                with_bg=False):
     """صور الوارد من التصنيع — أربع في كل صفحة A4، وتحتها بياناتها.
 
     تحت كل صورة: اسم الموديل وعددُ قطعه ووزنُها، ثم جدولٌ بأرقام
@@ -3056,7 +3058,7 @@ def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
 
     cards = []
     for m in picked:
-        uri = _img_uri(mc.image_path(m["model"]) or "")
+        uri = _img_uri(mc.image_for(m["model"], with_bg) or "")
         img = (f'<img src="{uri}" />' if uri
                else '<span class="noimg">لا صورة لهذا الموديل</span>')
         shown = m["items"][:PHOTO_ROWS]
@@ -3415,7 +3417,7 @@ def photo_grid(n, width_mm=190.0, height_mm=258.0, caption_mm=14.0):
 
 
 def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
-                      per_page=4):
+                      per_page=4, with_bg=False):
     """ورقة صور الموديلات — بالعدد الذي يختاره المستخدم في كل صفحة.
 
     تُطبع صور الموديلات التي بلغ عددها الحدّ المطلوب، و**عدد الصور في
@@ -3443,7 +3445,8 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
     for m in models:
         if _n(m) < int(min_count or 0):
             continue
-        p_img = mc.image_path(m["model"])
+        # 4.62: بلا خلفية (الافتراض) أو بخلفيتها الأصلية — يختارها المستخدم
+        p_img = mc.image_for(m["model"], with_bg)
         if p_img is None:
             continue
         picked.append((m, p_img, _n(m)))
@@ -3539,7 +3542,8 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
             + css + meta + pages)
 
 
-def _tpl_model_order(conn, order_id=0, per_page=4, show_stock=False):
+def _tpl_model_order(conn, order_id=0, per_page=4, show_stock=False,
+                     with_bg=False):
     """طلب العميل بصور موديلاته (4.59).
 
     في رأس **كل صفحة** اسم العميل ورقم الطلب — فالورقة الثالثة إن
@@ -3565,7 +3569,7 @@ def _tpl_model_order(conn, order_id=0, per_page=4, show_stock=False):
 
     boxes = []
     for ln in o["lines"]:
-        p_img = mc.image_path(ln["model"])
+        p_img = mc.image_for(ln["model"], with_bg)
         uri = _img_uri(p_img) if p_img else ""
         img = (f'<img src="{uri}" />' if uri
                else '<span class="noimg">لا صورة لهذا الموديل</span>')

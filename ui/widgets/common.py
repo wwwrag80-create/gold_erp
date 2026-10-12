@@ -1158,22 +1158,69 @@ def show_model_image(parent, model_no):
     dlg = QtWidgets.QDialog(parent)
     dlg.setWindowTitle(f"صورة الموديل {no}")
     lbl = QtWidgets.QLabel()
-    pix = QtGui.QPixmap(str(p))
-    try:
-        if pix.width() > 900 or pix.height() > 700:
-            pix = pix.scaled(900, 700, QtCore.Qt.KeepAspectRatio,
-                             QtCore.Qt.SmoothTransformation)
-    except Exception:
-        pass
-    lbl.setPixmap(pix)
     lbl.setAlignment(QtCore.Qt.AlignCenter)
+    lbl.setMinimumSize(320, 240)
+
+    def _show(path):
+        pix = QtGui.QPixmap(str(path))
+        try:
+            if pix.width() > 900 or pix.height() > 700:
+                pix = pix.scaled(900, 700, QtCore.Qt.KeepAspectRatio,
+                                 QtCore.Qt.SmoothTransformation)
+        except Exception:
+            pass
+        lbl.setPixmap(pix)
+
+    lay = QtWidgets.QVBoxLayout(dlg)
+    # 4.62: صورةٌ أُزيلت خلفيتها تُعرض بخيارين — بدونها أو بخلفيتها
+    orig = mc.original_path(no)
+    if orig is not None:
+        choice = photo_bg_choice(dlg)
+        dlg._bg_choice = choice
+
+        def _flip(*_, save=True):
+            _show(orig if choice.with_bg() else p)
+            if save:
+                choice.remember()
+        choice.cut_btn.toggled.connect(_flip)
+        lay.addWidget(choice)
+        _flip(save=False)
+    else:
+        _show(p)
     btn = QtWidgets.QPushButton("إغلاق")
     btn.clicked.connect(dlg.accept)
-    lay = QtWidgets.QVBoxLayout(dlg)
     lay.addWidget(lbl, 1)
     lay.addWidget(btn)
+    dlg._img_label = lbl
     dlg.exec_()
     return True
+
+
+def photo_bg_choice(parent=None):
+    """خياران لصور الموديلات عند المعاينة (4.62): بدون خلفية · بخلفيتها.
+
+    «بدون خلفية» الصورة الشفافة المقصوصة على القطعة، و«بخلفيتها» الأصل
+    كما التُقط (لما أُزيلت خلفيته). والاختيار الأخير يُحفظ فيعود.
+    يعيد عنصراً فيه `with_bg()` و`remember(user)`.
+    """
+    w = QtWidgets.QWidget(parent)
+    lay = QtWidgets.QHBoxLayout(w)
+    lay.setContentsMargins(0, 0, 0, 0)
+    cut = QtWidgets.QRadioButton("بدون خلفية (شفافة)")
+    org = QtWidgets.QRadioButton("بخلفيتها الأصلية")
+    grp = QtWidgets.QButtonGroup(w)
+    grp.addButton(cut)
+    grp.addButton(org)
+    lay.addWidget(cut)
+    lay.addWidget(org)
+    lay.addStretch(1)
+    (org if str(load_pref("models.photos_bg", "cut")) == "orig"
+     else cut).setChecked(True)
+    w.cut_btn, w.org_btn, w._grp = cut, org, grp
+    w.with_bg = org.isChecked
+    w.remember = lambda user=None: save_pref(
+        "models.photos_bg", "orig" if org.isChecked() else "cut", user)
+    return w
 
 
 def has_model_image(model_no):

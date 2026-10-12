@@ -889,25 +889,29 @@ class ModelsScreen(QtWidgets.QWidget):
                 # في وضع التاريخ: صور وارد الفترة وحدها، وتحت كل
                 # صورة عددُ قطعها وأرقام تشغيلها ومع من هي — بلا
                 # سؤالٍ عن حدٍّ أدنى، فالفترة هي المرشّح.
+                opts = self._ask_photo_options(received=True)
+                if not opts:
+                    return
                 print_manager.preview_document(
                     self, "models_received_photos", 0,
                     date_from=dstr(self.d_from), date_to=dstr(self.d_to),
                     mode=self.view_mode.currentData() or "all",
-                    sort=self.sort_mode.currentData() or "az")
+                    sort=self.sort_mode.currentData() or "az",
+                    with_bg=opts[2])
                 return
             opts = self._ask_photo_options()
             if not opts:
                 return
-            n, per_page = opts
+            n, per_page, with_bg = opts
             print_manager.preview_document(
                 self, "model_photos", 0, min_count=int(n),
                 mode=self.view_mode.currentData() or "all",
                 sort=self.sort_mode.currentData() or "az",
-                per_page=int(per_page))
+                per_page=int(per_page), with_bg=with_bg)
         except Exception as e:
             err(self, e)
 
-    def _ask_photo_options(self):
+    def _ask_photo_options(self, received=False):
         """الحدّ الأدنى للعدد + **عدد الصور في الصفحة** — يختاره المستخدم.
 
         العدد يُحفظ فيعود كما تركه: من يطبع ثمانياً في الصفحة لا يعيد
@@ -915,9 +919,12 @@ class ModelsScreen(QtWidgets.QWidget):
         ستخرج الصفحة.
         """
         from services.print_manager import photo_grid
-        from ui.widgets.common import load_pref, save_pref
+        from ui.widgets.common import load_pref, photo_bg_choice, save_pref
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("طباعة صور الموديلات")
+        dlg.setWindowTitle("طباعة صور الوارد" if received
+                           else "طباعة صور الموديلات")
+        # 4.62: الصور بدون خلفية (شفافة) أو بخلفيتها الأصلية
+        bgc = photo_bg_choice(dlg)
         dlg.setMinimumWidth(380)
         mn = QtWidgets.QSpinBox()
         mn.setRange(1, 999)
@@ -947,18 +954,25 @@ class ModelsScreen(QtWidgets.QWidget):
         box.accepted.connect(dlg.accept)
         box.rejected.connect(dlg.reject)
         f = QtWidgets.QFormLayout(dlg)
-        f.addRow("الموديلات التي عددها (قطعة فأكثر):", mn)
-        f.addRow("عدد الصور في الصفحة:", per)
-        f.addRow(grid)
+        if not received:
+            # صور الوارد: الفترة هي المرشّح، وأربعٌ بجداولها في الصفحة
+            f.addRow("الموديلات التي عددها (قطعة فأكثر):", mn)
+            f.addRow("عدد الصور في الصفحة:", per)
+            f.addRow(grid)
+        f.addRow("الصور:", bgc)
         f.addRow(box)
         self._photo_dlg = dlg
+        dlg._bg_choice = bgc
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
             return None
         user = getattr(self, "user", {}) or {}
-        save_pref("models.photos_min", str(mn.value()), user.get("username"))
-        save_pref("models.photos_per_page", str(per.value()),
-                  user.get("username"))
-        return mn.value(), per.value()
+        bgc.remember(user.get("username"))
+        if not received:
+            save_pref("models.photos_min", str(mn.value()),
+                      user.get("username"))
+            save_pref("models.photos_per_page", str(per.value()),
+                      user.get("username"))
+        return mn.value(), per.value(), bgc.with_bg()
 
     def _orders_badge(self):
         """عدد الطلبات المفتوحة على الزر — يُرى دون فتح النافذة."""

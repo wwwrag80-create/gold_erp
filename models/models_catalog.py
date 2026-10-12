@@ -421,6 +421,19 @@ def original_path(model_no):
     return None
 
 
+def image_for(model_no, with_bg=False):
+    """الصورة للعرض والطباعة: بلا خلفية (الافتراض) أو بخلفيتها الأصلية.
+
+    «بخلفيتها» تعيد الأصل المحفوظ إن كانت الصورة قد عولجت، وإلا الصورة
+    نفسها — فهي بخلفيتها أصلاً.
+    """
+    if with_bg:
+        o = original_path(model_no)
+        if o is not None:
+            return o
+    return image_path(model_no)
+
+
 def _drop_files(base):
     for ext in IMAGE_EXTS:
         p = base.with_suffix(ext)
