@@ -5,6 +5,9 @@
 الدليل والطباعة والرابط — يتبدّل مع كل حركة منزلق. وفيها:
   · نوع الصورة: رسمٌ ممسوح أو صورةٌ فوتوغرافية (يُعرف تلقائياً).
   · قوة الخط والظل، وتبييض الورق.
+  · **تظليل القطعة** (4.64): رماديٌّ موحّد داخل قطع الطقم وحدها — لا
+    إطار ولا خلفية — فيبرز الخطّ والفصوص؛ و«سدّ الفراغات» لرسمٍ حدوده
+    منقّطة أو متقطّعة.
   · محو الكتابة الملوّنة، وحافّة الماسح السوداء، ونقاط الغبار.
   · القصّ على الرسم (التناسب)، والخلفية الشفافة.
   · التدوير: ربع دورة، أو بالدرجة لرسمٍ مُسح مائلاً.
@@ -139,6 +142,12 @@ class ImageStudio(QtWidgets.QDialog):
             self.mode.addItem(t, k)
         self.strength = self._slider()
         self.paper = self._slider()
+        self.shade = self._slider()
+        self.shade.setToolTip("رماديٌّ داخل قطع الطقم وحدها — 0 بلا تظليل")
+        self.reach = self._slider()
+        self.reach.setToolTip("ارفعه إن بقي جزءٌ من قطعةٍ أبيض (حدودٌ"
+                              " منقّطة)، واخفضه إن امتدّ الظلّ بين قطعٍ"
+                              " منفصلة")
         self.c_color = QtWidgets.QCheckBox("محو الكتابة بالقلم الملوّن")
         self.c_edges = QtWidgets.QCheckBox("محو حافّة الماسح السوداء")
         self.c_speck = QtWidgets.QCheckBox("تنظيف نقاط الغبار")
@@ -177,6 +186,8 @@ class ImageStudio(QtWidgets.QDialog):
         form.addRow("نوع الصورة:", self.mode)
         form.addRow("قوة الخط والظل:", self.strength)
         form.addRow("تبييض الورق:", self.paper)
+        form.addRow("تظليل القطعة:", self.shade)
+        form.addRow("سدّ الفراغات:", self.reach)
         for c in (self.c_color, self.c_edges, self.c_speck, self.c_crop,
                   self.c_trans):
             form.addRow(c)
@@ -235,7 +246,7 @@ class ImageStudio(QtWidgets.QDialog):
         self._load_opts(self.opts)
         for w in (self.mode,):
             w.currentIndexChanged.connect(self._changed)
-        for w in (self.strength, self.paper):
+        for w in (self.strength, self.paper, self.shade, self.reach):
             w.valueChanged.connect(self._changed)
         for c in (self.c_color, self.c_edges, self.c_speck, self.c_crop,
                   self.c_trans):
@@ -252,29 +263,31 @@ class ImageStudio(QtWidgets.QDialog):
 
     # ── الضبط ↔ الخيارات ──
     def _load_opts(self, o):
-        for w in (self.mode, self.strength, self.paper, self.c_color,
-                  self.c_edges, self.c_speck, self.c_crop, self.c_trans,
-                  self.rot):
+        widgets = (self.mode, self.strength, self.paper, self.shade,
+                   self.reach, self.c_color, self.c_edges, self.c_speck,
+                   self.c_crop, self.c_trans, self.rot)
+        for w in widgets:
             w.blockSignals(True)
         self.mode.setCurrentIndex(max(0, self.mode.findData(o["mode"])))
         self.strength.setValue(int(o["strength"]))
         self.paper.setValue(int(o["paper"]))
+        self.shade.setValue(int(o.get("shade", 0)))
+        self.reach.setValue(int(o.get("reach", 30)))
         self.c_color.setChecked(bool(o["remove_color"]))
         self.c_edges.setChecked(bool(o["remove_edges"]))
         self.c_speck.setChecked(bool(o.get("despeckle", True)))
         self.c_crop.setChecked(bool(o["crop"]))
         self.c_trans.setChecked(bool(o["transparent"]))
         self.rot.setValue(float(o["rotate"]))
-        for w in (self.mode, self.strength, self.paper, self.c_color,
-                  self.c_edges, self.c_speck, self.c_crop, self.c_trans,
-                  self.rot):
+        for w in widgets:
             w.blockSignals(False)
         self.erase = [tuple(x) for x in (o.get("erase") or [])]
 
     def current_opts(self):
         return en.options(
             mode=self.mode.currentData(), strength=self.strength.value(),
-            paper=self.paper.value(), remove_color=self.c_color.isChecked(),
+            paper=self.paper.value(), shade=self.shade.value(),
+            reach=self.reach.value(), remove_color=self.c_color.isChecked(),
             remove_edges=self.c_edges.isChecked(),
             despeckle=self.c_speck.isChecked(), crop=self.c_crop.isChecked(),
             transparent=self.c_trans.isChecked(), rotate=self.rot.value(),

@@ -79,7 +79,8 @@ class ModelsScreen(QtWidgets.QWidget):
         btn_cut = self.btn_cutout = QtWidgets.QPushButton("🪄 تحسين الصور")
         btn_cut.setToolTip(
             "يحسّن كل صورةٍ لم تُحسَّن بعد: الرسم الممسوح أوضح وأبرز على\n"
-            "ورقٍ شفاف، والصورة الفوتوغرافية بلا خلفية — مقصوصةً على القطعة.\n"
+            "ورقٍ شفاف وقطع الطقم مظلّلة، والصورة الفوتوغرافية بلا خلفية —\n"
+            "مقصوصةً على القطعة.\n"
             "والصور الجديدة تُحسَّن تلقائياً عند إضافتها، ولكل صورةٍ\n"
             "«🎨 استوديو الصورة» من الزر الأيمن لضبطها بالعين.")
         btn_cut.clicked.connect(self.cutout_all)
@@ -745,7 +746,7 @@ class ModelsScreen(QtWidgets.QWidget):
             if dlg.exec_() == QtWidgets.QDialog.Accepted:
                 info(self, f"حُفظت صورة الموديل {model_no} المحسّنة — "
                            f"{getattr(dlg, 'saved_note', '')}.\n"
-                           "ولا يغيّرها «تحسين الصور» الجماعي بعد الآن.")
+                           "و«تحسين الصور» الجماعي يحفظ ضبطك هذا.")
                 self.refresh(force=True)
         except Exception as e:
             err(self, e)
@@ -770,12 +771,13 @@ class ModelsScreen(QtWidgets.QWidget):
                 return
             if not ask(self, f"تحسين {len(todo)} صورة؟\n\n"
                              "الرسوم الممسوحة تصير أوضح وأبرز على ورقٍ شفاف"
-                             " (وتُمحى الكتابة الملوّنة وحافّة الماسح ونقاط"
-                             " الغبار)، والصور الفوتوغرافية تُزال خلفيتها —"
-                             " وكلها مقصوصة على القطعة.\n\n"
-                             "ما عولج سابقاً يُعاد من أصله، وما عدّلته يدوياً"
-                             " في الاستوديو لا يُمسّ. وأصل كل صورةٍ محفوظ"
-                             " ويُستعاد من الزر الأيمن على موديلها."):
+                             " وقطع الطقم مظلّلةٌ بالرمادي فيبرز الخطّ"
+                             " والفصوص (وتُمحى الكتابة الملوّنة وحافّة الماسح"
+                             " ونقاط الغبار)، والصور الفوتوغرافية تُزال"
+                             " خلفيتها — وكلها مقصوصة على القطعة.\n\n"
+                             "ما عولج سابقاً يُعاد من أصله، وما ضبطته في"
+                             " الاستوديو يُعاد بضبطك نفسه. وأصل كل صورةٍ"
+                             " محفوظ ويُستعاد من الزر الأيمن على موديلها."):
                 return
             from services.cutout import CutoutError
             dlg = QtWidgets.QProgressDialog(
@@ -791,7 +793,7 @@ class ModelsScreen(QtWidgets.QWidget):
                 dlg.setValue(i)
                 QtWidgets.QApplication.processEvents()
                 try:
-                    mc.enhance_image(stem)
+                    mc.refresh_image(stem)
                     done += 1
                 except (CutoutError, ValueError) as e:
                     kept.append(f"{stem}: {e}")

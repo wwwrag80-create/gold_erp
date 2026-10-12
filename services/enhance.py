@@ -21,20 +21,27 @@
      في الدليل والطباعة بدل أن يسبح صغيراً في بياض.
   6. **الشفافية من الإضاءة** لا من حدودٍ مقصوصة: كل درجة رمادٍ تصير
      شفافيةً بقدرها — فيبقى الظلّ ظلاً والخطّ خطاً على أي خلفية.
+  7. **تظليل القطعة** (4.64): رسومٌ كثيرة ظُلّل نصف طقمها ونصفه أبيض،
+     أو رُسمت حدودها بخطٍّ منقّط. فيُعرف مكان القطع من خطوطها (تُسدّ
+     فجوات الخطّ الصغيرة، وكل ما أحاطت به الخطوط داخلٌ في القطعة) ويُملأ
+     ما فتح لونه داخلها **برماديٍّ موحّد** — داخل القطع وحدها، لا إطار
+     ولا خلفية — والخطّ والفصوص الأغمق باقيةٌ فوقه فتبرز.
 
 والصورة الفوتوغرافية الملوّنة (ذهبٌ على خلفية) تمضي إلى `cutout` كما
 كانت. والأصل محفوظ دائماً (`models_catalog`)، وكل معالجةٍ تبدأ منه.
 """
 import math
-from collections import Counter, deque
+import re
+from collections import Counter
 
 from PyQt5 import QtCore, QtGui
 
 from services import cutout as _co
 
-VERSION = 2            # يُسجَّل مع كل صورةٍ معالَجة (تُعاد معالجة الأقدم)
+VERSION = 3            # يُسجَّل مع كل صورةٍ معالَجة (تُعاد معالجة الأقدم)
 MAX_SIDE = 2000        # الصورة المحفوظة — تكفي A4 بدقّة الطباعة
 WORK_SIDE = 900        # التحليل (اللون الغالب، الحوافّ، القصّ) على نسخةٍ أصغر
+SHADE_SIDE = 640       # تحليل شكل القطع للتظليل — يكفيه نسخةٌ أصغر
 INK = QtGui.QColor(24, 22, 20)   # لون الحبر في الصورة الشفافة
 
 DEFAULTS = {
@@ -44,6 +51,8 @@ DEFAULTS = {
     "remove_color": True,    # محو الكتابة بالقلم الملوّن
     "remove_edges": True,    # محو حافّة الماسح السوداء
     "despeckle": True,       # محو نقاط الغبار الشاردة
+    "shade": 55,             # تظليل القطعة (0 = بلا تظليل .. 100 أغمق)
+    "reach": 30,             # سدّ الفراغات في حدود القطعة (0..100)
     "crop": True,            # قصٌّ على الرسم (التناسب)
     "transparent": True,     # خلفية شفافة
     "rotate": 0.0,           # تدويرٌ بالدرجات
@@ -176,17 +185,9 @@ def _rotate(img, angle):
 # ══════════════════════════════════════════════════════════════════
 
 def _dilate(mask, w, h, times=1):
-    n = w * h
-    for _ in range(times):
-        src = bytes(mask)
-        for i in range(n):
-            if src[i]:
-                continue
-            x = i % w
-            if (x and src[i - 1]) or (x < w - 1 and src[i + 1]) \
-                    or (i >= w and src[i - w]) or (i < n - w and src[i + w]):
-                mask[i] = 255
-    return mask
+    """يمدّ القناع بكسلاً في الجهات الأربع `times` مرة — بسرعة الرسم."""
+    img = _morph(_mask_image(mask, w, h), times, True, cross_only=True)
+    return bytearray(_gray_bytes(img)[0])
 
 
 def _color_mask(R, G, B, w, h):
@@ -385,6 +386,134 @@ def _speck_mask(gray, w, h, thr=170):
     return _dilate(out, w, h, 1) if any(out) else out
 
 
+# ══════════════════════════════════════════════════════════════════
+#  تظليل القطعة: رماديٌّ موحّد داخل قطع الطقم وحدها
+# ══════════════════════════════════════════════════════════════════
+
+def _mask_image(mask, w, h):
+    """قناعٌ (0/255) صورةً RGB32 — يُرسم عليها بـQPainter."""
+    return _gray_image(mask, w, h).convertToFormat(QtGui.QImage.Format_RGB32)
+
+
+def _morph(img, steps, grow, cross_only=False):
+    """تمديدٌ (grow) أو تآكلٌ لقناعٍ أبيض بقرصٍ نصف قطره `steps`.
+
+    كل خطوةٍ إزاحاتٌ بكسلٍ واحد تُدمج بـLighten (الأكبر) أو Darken
+    (الأصغر) — بسرعة الرسم لا بحلقة بايثون. وتتناوب الخطوات بين مربّعٍ
+    وصليب فيقترب الشكل من القرص (ثماني) فلا تخرج الزوايا مربّعة؛
+    و`cross_only` للجهات الأربع وحدها (المعيّن).
+    """
+    mode = (QtGui.QPainter.CompositionMode_Lighten if grow
+            else QtGui.QPainter.CompositionMode_Darken)
+    square = (((-1, 0), (1, 0)), ((0, -1), (0, 1)))
+    cross = (((-1, 0), (1, 0), (0, -1), (0, 1)),)
+    for k in range(steps):
+        for offs in (square if k % 2 == 0 and not cross_only else cross):
+            src = img.copy()
+            p = QtGui.QPainter(img)
+            p.setCompositionMode(mode)
+            for dx, dy in offs:
+                p.drawImage(dx, dy, src)
+            p.end()
+    return img
+
+
+_RUNS = re.compile(rb"\x01+")
+
+
+def _outside(free, w, h, big):
+    """الفراغ خارج القطع: المتصل بطرف الصورة، أو الواسع جداً.
+
+    `free` بايتٌ لكل بكسل (1 = فراغ). يُقسَّم كل سطرٍ إلى مقاطع متصلة
+    (بسرعة C) وتُجمع المقاطع المتلامسة بين سطرين — فالعمل بعدد المقاطع
+    لا بعدد البكسلات. والفراغ المحاط بالقطعة (داخل حجرٍ أو بين خطوطها)
+    ليس من الخارج — إلا إن اتّسع (`big`): داخل عقدٍ أو إسوارةٍ مغلقة.
+    """
+    runs = []
+    first = [0] * (h + 1)
+    for y in range(h):
+        first[y] = len(runs)
+        base = y * w
+        for m in _RUNS.finditer(free, base, base + w):
+            runs.append((y, m.start() - base, m.end() - base))
+    first[h] = len(runs)
+    parent = list(range(len(runs)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    for y in range(1, h):
+        i, ie = first[y - 1], first[y]
+        j, je = first[y], first[y + 1]
+        while i < ie and j < je:
+            a1, b1 = runs[i][1], runs[i][2]
+            a2, b2 = runs[j][1], runs[j][2]
+            if a1 < b2 and a2 < b1:
+                ri, rj = find(i), find(j)
+                if ri != rj:
+                    parent[ri] = rj
+            if b1 < b2:
+                i += 1
+            else:
+                j += 1
+    area = {}
+    edge = set()
+    for k, (y, a, b) in enumerate(runs):
+        r = find(k)
+        area[r] = area.get(r, 0) + b - a
+        if y == 0 or y == h - 1 or a == 0 or b == w:
+            edge.add(r)
+    out = bytearray(w * h)
+    for k, (y, a, b) in enumerate(runs):
+        r = find(k)
+        if r in edge or area[r] > big:
+            out[y * w + a:y * w + b] = b"\xff" * (b - a)
+    return out
+
+
+def _shade_mask(gray, w, h, reach):
+    """مكان القطع (0/255): الحبر وما أحاط به — بلا الورق حولها.
+
+    الحبر يُمدَّد بقدر «سدّ الفراغات» فتنغلق الخطوط المنقّطة والفجوات
+    الصغيرة في حدود القطعة، ثم يُعدّ كل ما لا يصل إليه الورق الخارجي
+    داخلاً في القطعة، ثم يُعاد التمديد كما كان فترجع الحدود إلى خطّها.
+    """
+    r = max(1, int(round(1 + reach * 0.08 * max(w, h) / 640.0)))
+    ink = gray.translate(bytes(255 if v < 232 else 0 for v in range(256)))
+    if not any(ink):
+        return None
+    closed, _w, _h = _gray_bytes(_morph(_mask_image(ink, w, h), r, True))
+    free = closed.translate(bytes(1 if v < 128 else 0 for v in range(256)))
+    out = _outside(free, w, h, w * h * 0.025)
+    inside = out.translate(bytes(255 - v for v in range(256)))
+    sil, _w, _h = _gray_bytes(_morph(_mask_image(inside, w, h), r, False))
+    return sil
+
+
+def _apply_shade(gfull, W, H, sil, sw, sh, tone):
+    """يُنزل ما فتح لونه داخل القطع إلى درجة الظلّ — والخطّ الأغمق باقٍ."""
+    m = _gray_image(sil, sw, sh).scaled(
+        W, H, QtCore.Qt.IgnoreAspectRatio,
+        QtCore.Qt.SmoothTransformation).convertToFormat(
+        QtGui.QImage.Format_Grayscale8)
+    grey = QtGui.QImage(W, H, QtGui.QImage.Format_ARGB32)
+    grey.fill(QtGui.QColor(tone, tone, tone))
+    grey.setAlphaChannel(m)
+    base = _gray_image(gfull, W, H).convertToFormat(QtGui.QImage.Format_RGB32)
+    p = QtGui.QPainter(base)
+    p.setCompositionMode(QtGui.QPainter.CompositionMode_Darken)
+    p.drawImage(0, 0, grey)
+    p.end()
+    return _gray_bytes(base)[0]
+
+
+def shade_tone(shade):
+    """درجة الرمادي داخل القطع من «تظليل القطعة» (55 ← 184 كرسم C37)."""
+    return max(110, min(250, int(round(250 - float(shade) * 1.2))))
+
+
 def _crop_rect(box, sw, sh, W, H, margin=0.04):
     x0, y0, x1, y1 = box
     sx, sy = W / float(sw), H / float(sh)
@@ -430,6 +559,15 @@ def enhance_drawing(img, o):
     lut = _lut(white, black, gamma)
     gfull = gfull.translate(lut)
     gsmall = gw.translate(lut)
+    shade = float(o.get("shade", 0) or 0)
+    if shade > 0:
+        gs, xw, xh = _gray_bytes(_work(img, SHADE_SIDE))
+        sil = _shade_mask(gs.translate(lut), xw, xh,
+                          float(o.get("reach", 30)))
+        if sil is not None and any(sil):
+            tone = shade_tone(shade)
+            gfull = _apply_shade(gfull, W, H, sil, xw, xh, tone)
+            notes.append("ظُلّلت القطع")
 
     if o.get("transparent", True):
         inv = bytes(255 - v for v in range(256))

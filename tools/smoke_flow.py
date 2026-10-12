@@ -7626,6 +7626,76 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    step("95) 4.64: تظليل القطعة — رماديٌّ داخل قطع الطقم وحدها")
+    try:
+        from PyQt5 import QtCore as _QC95, QtGui as _QG95, \
+            QtWidgets as _QW95
+        _QW95.QApplication.instance() or _QW95.QApplication([])
+        from models import models_catalog as _mc95
+        from services import enhance as _en95
+        _im95 = _QG95.QImage(1200, 900, _QG95.QImage.Format_RGB32)
+        _im95.fill(_QG95.QColor("#f3f1ea"))
+        _p95 = _QG95.QPainter(_im95)
+        _p95.setRenderHint(_QG95.QPainter.Antialiasing)
+        _p95.setBrush(_QC95.Qt.NoBrush)
+        _p95.setPen(_QG95.QPen(_QG95.QColor("#3a3a3a"), 5))
+        _p95.drawEllipse(_QC95.QPointF(320, 450), 230, 230)     # إسوارةٌ مغلقة
+        _p95.drawEllipse(_QC95.QPointF(860, 650), 34, 34)       # فصّ
+        _p95.setPen(_QC95.Qt.NoPen)
+        _p95.setBrush(_QG95.QColor("#3a3a3a"))
+        import math as _m95
+        for _k in range(56):                                    # حدٌّ منقّط
+            _a = _k * 2 * _m95.pi / 56
+            _p95.drawEllipse(_QC95.QPointF(860 + 80 * _m95.cos(_a),
+                                           280 + 80 * _m95.sin(_a)), 3, 3)
+        _p95.end()
+
+        def _al95(img, x, y):
+            return _QG95.QColor.fromRgba(img.pixel(x, y)).alpha()
+        _o95, _md95, _n95 = _en95.process(_im95, {"crop": False})
+        check("داخل الحدّ المنقّط والفصّ رماديٌّ موحّد (لا أبيض)",
+              all(45 <= _al95(_o95, x, y) <= 100
+                  for x, y in ((860, 280), (830, 300), (860, 650)))
+              and "ظُلّلت القطع" in _n95,
+              f"{[_al95(_o95, x, y) for x, y in ((860, 280), (860, 650))]}")
+        check("وما حول القطع ورقٌ شفاف — لا إطار ولا خلفية",
+              _al95(_o95, 5, 5) == 0 and _al95(_o95, 1000, 120) == 0
+              and _al95(_o95, 860, 400) == 0)
+        check("وداخل الإسوارة المغلقة الواسع يبقى فارغاً (ليس من القطعة)",
+              _al95(_o95, 320, 450) == 0 and _al95(_o95, 200, 450) == 0)
+        _z95, _mz, _nz = _en95.process(_im95, {"crop": False, "shade": 0})
+        check("و«تظليل القطعة» صفر = بلا تظليل",
+              _al95(_z95, 860, 280) < 10 and "ظُلّلت" not in _nz)
+        _d95, _md, _nd = _en95.process(_im95, {"crop": False, "shade": 90})
+        check("والمنزلق يغمّق الظلّ",
+              _al95(_d95, 860, 280) > _al95(_o95, 860, 280) + 20)
+
+        # صورةٌ ضُبطت في الاستوديو بمعالِجٍ أقدم: تُعاد بضبطها ويُضاف الظلّ
+        _src95 = Path(_TMP) / "smk95.png"
+        _im95.save(str(_src95), "PNG")
+        _mc95.set_image("SMK-95", str(_src95))
+        _old95 = {k: v for k, v in _en95.options(strength=80,
+                                                 rotate=0.0).items()
+                  if k not in ("shade", "reach")}
+        _mc95.save_studio("SMK-95", _im95, _old95)
+        _meta95 = _mc95._meta_load()
+        _meta95["SMK-95"]["v"] = 2
+        _meta95["SMK-95"]["opts"] = _old95
+        _mc95._meta_save(_meta95)
+        check("صورة الاستوديو القديمة تدخل «تحسين الصور»",
+              "SMK-95" in _mc95.needs_enhance())
+        _mc95.refresh_image("SMK-95")
+        _mm95 = _mc95.image_meta("SMK-95")
+        check("وتُعاد بضبطها نفسه (من الاستوديو) ومعه التظليل",
+              _mm95.get("by") == "studio"
+              and _mm95["opts"].get("strength") == 80
+              and _mm95["opts"].get("shade") == _en95.DEFAULTS["shade"]
+              and _mm95.get("v") == _en95.VERSION
+              and "SMK-95" not in _mc95.needs_enhance(), str(_mm95))
+        _mc95.remove_image("SMK-95")
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -530,13 +530,27 @@ def enhance_image(model_no, opts=None, by="auto"):
                 pass
         if not fresh:
             # أصلٌ محفوظ ومعالجةٌ تعذّرت: يُسجَّل فلا تُعاد كل مرة
+            # (وضبط الاستوديو باقٍ فيه)
             _meta_set(model_no, {"v": _en.VERSION, "by": by,
-                                 "mode": "none"})
+                                 "mode": "none",
+                                 "opts": _en.options(**(opts or {}))})
         raise
     _install(model_no, tmp)
     _meta_set(model_no, {"v": _en.VERSION, "by": by, "mode": mode,
                          "opts": _en.options(**(opts or {}))})
     return note
+
+
+def refresh_image(model_no):
+    """يعيد معالجة الصورة بالمعالِج الحالي من أصلها (4.64).
+
+    ما ضُبط في الاستوديو يُعاد **بضبطه نفسه** (الممحاة والتدوير والقوة…)
+    ويُضاف إليه ما جدّ في المعالِج — كتظليل القطعة — بقيمته الافتراضية.
+    """
+    m = image_meta(model_no) or {}
+    if m.get("by") == "studio" and m.get("opts"):
+        return enhance_image(model_no, dict(m["opts"]), by="studio")
+    return enhance_image(model_no)
 
 
 def cutout_image(model_no):
@@ -571,17 +585,16 @@ def restore_original(model_no):
 
 
 def needs_enhance(conn=None):
-    """الصور التي لم تُحسَّن بالمعالِج الحالي — وما عُدّل يدوياً مستثنى.
+    """الصور التي لم تُحسَّن بالمعالِج الحالي.
 
-    تشمل ما عولج في 4.61 (إزالة الخلفية الأولى) فيُعاد من أصله.
+    تشمل ما عولج في 4.61 (إزالة الخلفية الأولى) فيُعاد من أصله، وما
+    ضُبط في الاستوديو بمعالِجٍ أقدم — فيُعاد بضبطه (`refresh_image`).
     """
     from services import enhance as _en
     meta = _meta_load()
     out = []
     for stem in sorted(models_with_images(conn)):
         m = meta.get(stem) or {}
-        if m.get("by") == "studio":
-            continue
         if int(m.get("v") or 0) < _en.VERSION:
             out.append(stem)
     return out
