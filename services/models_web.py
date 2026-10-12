@@ -740,7 +740,8 @@ def thumb(path, width):
             ba = QByteArray()
             buf = QBuffer(ba)
             buf.open(QBuffer.WriteOnly)
-            if img.save(buf, "JPEG", 70):
+            # 84 لا 70: خطوط الرسومات الدقيقة تتلطّخ بضغط JPEG الشديد
+            if img.save(buf, "JPEG", 84):
                 small = bytes(ba)
                 if 0 < len(small) < len(raw):
                     out = (small, "image/jpeg")

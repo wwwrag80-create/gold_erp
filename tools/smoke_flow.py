@@ -7584,6 +7584,48 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    step("94) 4.63: الرسوم الممسوحة أوضح بدقّتها الكاملة · سجلّ المعالجة")
+    try:
+        from PyQt5 import QtCore as _QC94, QtGui as _QG94, \
+            QtWidgets as _QW94
+        _QW94.QApplication.instance() or _QW94.QApplication([])
+        from models import models_catalog as _mc94
+        from services import enhance as _en94
+        _im94 = _QG94.QImage(1200, 900, _QG94.QImage.Format_RGB32)
+        _im94.fill(_QG94.QColor("#f3f1ea"))
+        _p94 = _QG94.QPainter(_im94)
+        _p94.setRenderHint(_QG94.QPainter.Antialiasing)
+        _p94.setPen(_QG94.QPen(_QG94.QColor("#b4b4b4"), 1.0))   # خطٌّ باهت
+        _p94.setBrush(_QG94.QColor("#dedede"))                  # وظلٌّ فاتح
+        for _k in range(90):
+            _p94.drawEllipse(_QC94.QPointF(150 + _k * 10, 450), 4, 3)
+        _p94.setPen(_QG94.QColor("#2b4fa8"))
+        _p94.setFont(_QG94.QFont("DejaVu Sans", 30))
+        _p94.drawText(900, 820, "21.83")                         # قلمٌ أزرق
+        _p94.end()
+        _src94 = Path(_TMP) / "smk94.png"
+        _im94.save(str(_src94), "PNG")
+        _mc94.set_image("SMK-94", str(_src94))
+        _note94 = _mc94.enhance_image("SMK-94")
+        _q94 = _QG94.QImage(str(_mc94.image_path("SMK-94")))
+        _al94 = sorted(_q94.convertToFormat(
+            _QG94.QImage.Format_ARGB32).bits().asstring(
+            _q94.width() * _q94.height() * 4)[3::4])
+        check("رسمٌ باهت: يُعرف رسماً، وخطّه يصير داكناً، والقلم الأزرق يُمحى",
+              _mc94.image_meta("SMK-94").get("mode") == "drawing"
+              and _al94[int(len(_al94) * 0.995)] >= 200
+              and "الملوّنة" in _note94, _note94)
+        check("ويُقصّ على الرسم (التناسب)",
+              _q94.width() < 1200 and _q94.height() < 300,
+              f"{_q94.width()}x{_q94.height()}")
+        check("وسجلّ المعالجة يعفيه من التحسين الجماعي حتى يتغيّر المعالِج",
+              "SMK-94" not in _mc94.needs_enhance()
+              and _mc94.image_meta("SMK-94").get("v") == _en94.VERSION)
+        _mc94.remove_image("SMK-94")
+        check("وحذف الصورة يحذف سجلّها", not _mc94.image_meta("SMK-94"))
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

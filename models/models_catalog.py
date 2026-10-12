@@ -346,6 +346,10 @@ def _move_images(old_no, new_no):
         o = original_path(old_no)
         if o is not None:
             o.replace(o.parent / (new_safe + o.suffix))
+        m = image_meta(old_no)
+        if m:
+            _meta_set(old_no, None)
+            _meta_set(new_no, m)
         return True
     except OSError:
         return False
@@ -444,28 +448,79 @@ def _drop_files(base):
             pass
 
 
-def cutout_image(model_no):
-    """يزيل خلفية صورة الموديل — ويعيد وصف ما جرى.
+# ══ سجلّ المعالجة (4.63) ══
+# لكل صورةٍ معالَجة: إصدار المعالِج، ونوعها (رسمٌ/صورة)، ومن عالجها
+# (تلقائياً أو يدوياً في الاستوديو) وخياراته. به:
+#   · يُعاد تحسين ما عالجه إصدارٌ أقدم (إزالة الخلفية في 4.61 كانت تُتلف
+#     الرسومات الدقيقة) — من الأصل دائماً.
+#   · ولا يُمسّ أبداً ما عُدّل يدوياً في الاستوديو.
+#   · ويفتح الاستوديو على آخر ضبطٍ له (الممحاة والتدوير معه).
+META = "_meta.json"
 
-    يُحفظ الأصل أولاً (إن لم يُحفظ من قبل)، وتُعالَج النسخة منه دائماً،
-    وتُكتب PNG شفافة باسم الموديل. ويرفع `CutoutError` بسببٍ مقروء إن
-    لم تكن الخلفية لوناً واحداً — والصورة حينها تبقى كما هي.
-    """
+
+def _meta_load():
+    import json
+    try:
+        return json.loads((images_dir() / ORIG_DIR / META).read_text(
+            encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _meta_save(data):
+    import json
+    try:
+        (_orig_dir() / META).write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def image_meta(model_no):
+    return _meta_load().get(_safe_name(model_no)) or {}
+
+
+def _meta_set(model_no, info):
+    d = _meta_load()
+    if info is None:
+        d.pop(_safe_name(model_no), None)
+    else:
+        d[_safe_name(model_no)] = info
+    _meta_save(d)
+
+
+def _backup_original(model_no):
+    """الأصل محفوظاً (يُنسخ مرةً واحدة) — ويعيد (مساره، هل نُسخ الآن)."""
     import shutil
-
-    from services import cutout as _co
     cur = image_path(model_no)
     if cur is None:
         raise ValueError("لا توجد صورة لهذا الموديل")
     orig = original_path(model_no)
-    fresh = orig is None
-    if fresh:
-        orig = _orig_dir() / cur.name
-        shutil.copy2(cur, orig)
+    if orig is not None:
+        return orig, False
+    orig = _orig_dir() / cur.name
+    shutil.copy2(cur, orig)
+    return orig, True
+
+
+def _install(model_no, tmp):
     safe = _safe_name(model_no)
-    tmp = images_dir() / (safe + ".cut.tmp")
+    _drop_files(images_dir() / safe)
+    tmp.replace(images_dir() / (safe + ".png"))
+
+
+def enhance_image(model_no, opts=None, by="auto"):
+    """يحسّن صورة الموديل من أصلها — ويعيد وصف ما جرى.
+
+    الرسم الممسوح يصير واضحاً بارزاً على ورقٍ شفاف ومقصوصاً على القطعة،
+    والصورة الفوتوغرافية تُزال خلفيتها (`services.enhance`). ويرفع
+    `CutoutError` بسببٍ مقروء إن تعذّر — والصورة حينها تبقى كما هي.
+    """
+    from services import enhance as _en
+    orig, fresh = _backup_original(model_no)
+    tmp = images_dir() / (_safe_name(model_no) + ".cut.tmp")
     try:
-        note = _co.cutout_file(orig, tmp)
+        mode, note = _en.process_file(orig, tmp, opts)
     except Exception:
         for f in ((tmp, orig) if fresh else (tmp,)):
             # صورةٌ لم تُعالَج قط: لا داعي لنسخةٍ أصلية مكرّرة منها
@@ -473,10 +528,34 @@ def cutout_image(model_no):
                 f.unlink()
             except OSError:
                 pass
+        if not fresh:
+            # أصلٌ محفوظ ومعالجةٌ تعذّرت: يُسجَّل فلا تُعاد كل مرة
+            _meta_set(model_no, {"v": _en.VERSION, "by": by,
+                                 "mode": "none"})
         raise
-    _drop_files(images_dir() / safe)
-    tmp.replace(images_dir() / (safe + ".png"))
+    _install(model_no, tmp)
+    _meta_set(model_no, {"v": _en.VERSION, "by": by, "mode": mode,
+                         "opts": _en.options(**(opts or {}))})
     return note
+
+
+def cutout_image(model_no):
+    """(توافق) تحسينٌ تلقائي — كان إزالةَ خلفيةٍ وحدها حتى 4.62."""
+    return enhance_image(model_no)
+
+
+def save_studio(model_no, image, opts):
+    """يحفظ ما عُدّل في الاستوديو يدوياً — ولا يمسّه التحسين الجماعي."""
+    from services import enhance as _en
+    _backup_original(model_no)
+    tmp = images_dir() / (_safe_name(model_no) + ".cut.tmp")
+    if not image.save(str(tmp), "PNG"):
+        raise ValueError("تعذّر حفظ الصورة")
+    _install(model_no, tmp)
+    _meta_set(model_no, {"v": _en.VERSION, "by": "studio",
+                         "mode": opts.get("mode", "auto"),
+                         "opts": _en.options(**opts)})
+    return True
 
 
 def restore_original(model_no):
@@ -487,13 +566,30 @@ def restore_original(model_no):
     safe = _safe_name(model_no)
     _drop_files(images_dir() / safe)
     orig.replace(images_dir() / (safe + orig.suffix))
+    _meta_set(model_no, None)
     return True
 
 
+def needs_enhance(conn=None):
+    """الصور التي لم تُحسَّن بالمعالِج الحالي — وما عُدّل يدوياً مستثنى.
+
+    تشمل ما عولج في 4.61 (إزالة الخلفية الأولى) فيُعاد من أصله.
+    """
+    from services import enhance as _en
+    meta = _meta_load()
+    out = []
+    for stem in sorted(models_with_images(conn)):
+        m = meta.get(stem) or {}
+        if m.get("by") == "studio":
+            continue
+        if int(m.get("v") or 0) < _en.VERSION:
+            out.append(stem)
+    return out
+
+
 def needs_cutout(conn=None):
-    """الموديلات التي لصورها خلفيةٌ لم تُزل بعد (لا أصل محفوظ لها)."""
-    return [stem for stem in sorted(models_with_images(conn))
-            if original_path(stem) is None]
+    """(توافق) = `needs_enhance`."""
+    return needs_enhance(conn)
 
 
 def set_image(model_no, src_path, username="admin"):
@@ -521,7 +617,8 @@ def set_image(model_no, src_path, username="admin"):
 
 
 def remove_image(model_no):
-    """يحذف صورة الموديل إن وُجدت — وأصلها المحفوظ معها."""
+    """يحذف صورة الموديل إن وُجدت — وأصلها المحفوظ وسجلّها معها."""
+    _meta_set(model_no, None)
     o = original_path(model_no)
     if o is not None:
         try:

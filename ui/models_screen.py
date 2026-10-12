@@ -76,11 +76,12 @@ class ModelsScreen(QtWidgets.QWidget):
             "صورة اسم الموديل وكم بالخزنة وكم عند المناديب")
         btn_photos.clicked.connect(self.print_photos)
         # 4.61: الصور بلا خلفية — لكل صورةٍ أُضيفت قبل هذه الميزة
-        btn_cut = self.btn_cutout = QtWidgets.QPushButton("🪄 خلفيات الصور")
+        btn_cut = self.btn_cutout = QtWidgets.QPushButton("🪄 تحسين الصور")
         btn_cut.setToolTip(
-            "يزيل الخلفية (السوداء أو البيضاء أو غيرها) من كل صورةٍ لم\n"
-            "تُعالَج بعد، فتصير شفافةً ومقصوصةً على القطعة.\n"
-            "والصور الجديدة تُعالَج تلقائياً عند إضافتها.")
+            "يحسّن كل صورةٍ لم تُحسَّن بعد: الرسم الممسوح أوضح وأبرز على\n"
+            "ورقٍ شفاف، والصورة الفوتوغرافية بلا خلفية — مقصوصةً على القطعة.\n"
+            "والصور الجديدة تُحسَّن تلقائياً عند إضافتها، ولكل صورةٍ\n"
+            "«🎨 استوديو الصورة» من الزر الأيمن لضبطها بالعين.")
         btn_cut.clicked.connect(self.cutout_all)
         # 4.52: رابطٌ ثابت يفتح هذه الشاشة كاملةً على جوال المدير — من
         # هذا الجهاز مباشرةً بلا سحابة (services.models_web)
@@ -684,7 +685,9 @@ class ModelsScreen(QtWidgets.QWidget):
             act = m.addAction("🗑 حذف الصورة",
                               lambda: self.del_image(val))
             act.setEnabled(has)
-            m.addAction("🪄 إزالة خلفية الصورة",
+            m.addAction("🎨 استوديو الصورة (ضبطٌ بالعين)…",
+                        lambda: self.open_studio(val)).setEnabled(has)
+            m.addAction("🪄 تحسينٌ تلقائي للصورة",
                         lambda: self.cutout_one(val)).setEnabled(has)
             if mc.original_path(val) is not None:
                 m.addAction("↺ الصورة الأصلية بخلفيتها",
@@ -707,29 +710,47 @@ class ModelsScreen(QtWidgets.QWidget):
             if not path:
                 return
             mc.set_image(model_no, path, self.user["username"])
-            # 4.61: كل صورةٍ تُضاف تُزال خلفيتها فتظهر القطعة وحدها
-            note = self._cutout(model_no)
+            # 4.63: كل صورةٍ تُضاف تُحسَّن: الرسم أوضح على ورقٍ شفاف،
+            # والصورة الفوتوغرافية بلا خلفية — والأصل محفوظ
+            note = self._enhance(model_no)
             info(self, f"أُضيفت صورة الموديل {model_no}.\n\n{note}")
             self.refresh(force=True)
         except Exception as e:
             err(self, e)
 
-    def _cutout(self, model_no):
-        """يزيل خلفية صورة الموديل — ويعيد جملةً تقول ما جرى."""
+    def _enhance(self, model_no):
+        """يحسّن صورة الموديل تلقائياً — ويعيد جملةً تقول ما جرى."""
         from services.cutout import CutoutError
         from ui.widgets.common import busy
         try:
-            with busy(self, "جارٍ إزالة خلفية الصورة…",
-                      stage="إزالة خلفية صورة"):
-                note = mc.cutout_image(model_no)
-            return (f"✔ {note}: الصورة شفافة الآن ومقصوصةٌ على القطعة.\n"
-                    "والأصل محفوظ — يُستعاد من الزر الأيمن على الموديل.")
+            with busy(self, "جارٍ تحسين الصورة…", stage="تحسين صورة"):
+                note = mc.enhance_image(model_no)
+            return (f"✔ {note}، ومقصوصةٌ على القطعة.\n"
+                    "ولضبطها بالعين: الزر الأيمن ← «🎨 استوديو الصورة».\n"
+                    "والأصل محفوظ — يُستعاد من القائمة نفسها.")
         except CutoutError as e:
-            return f"الصورة كما أُضيفت: {e}."
+            return (f"الصورة كما أُضيفت: {e}.\n"
+                    "ويمكن ضبطها يدوياً من «🎨 استوديو الصورة».")
 
     def cutout_one(self, model_no):
-        info(self, self._cutout(model_no), f"الموديل {model_no}")
+        info(self, self._enhance(model_no), f"الموديل {model_no}")
         self.refresh(force=True)
+
+    def open_studio(self, model_no):
+        """استوديو الصورة: الأصل والمحسَّنة جنباً إلى جنب وأدوات الضبط."""
+        try:
+            from ui.image_studio import ImageStudio
+            dlg = ImageStudio(self, model_no, self.user)
+            self._studio = dlg
+            if dlg.exec_() == QtWidgets.QDialog.Accepted:
+                info(self, f"حُفظت صورة الموديل {model_no} المحسّنة — "
+                           f"{getattr(dlg, 'saved_note', '')}.\n"
+                           "ولا يغيّرها «تحسين الصور» الجماعي بعد الآن.")
+                self.refresh(force=True)
+        except Exception as e:
+            err(self, e)
+        finally:
+            self._studio = None
 
     def restore_image(self, model_no):
         try:
@@ -743,19 +764,23 @@ class ModelsScreen(QtWidgets.QWidget):
     def cutout_all(self):
         """يزيل الخلفية من كل صورةٍ لم تُعالَج بعد — مرةً واحدة."""
         try:
-            todo = mc.needs_cutout()
+            todo = mc.needs_enhance()
             if not todo:
-                info(self, "كل صور الموديلات بلا خلفية — لا شيء يُعالج.")
+                info(self, "كل صور الموديلات محسّنة — لا شيء يُعالج.")
                 return
-            if not ask(self, f"إزالة الخلفية من {len(todo)} صورة؟\n\n"
-                             "تصير الصور شفافةً ومقصوصةً على القطعة. وأصل كل"
-                             " صورةٍ يُحفظ ويُستعاد من الزر الأيمن على"
-                             " موديلها."):
+            if not ask(self, f"تحسين {len(todo)} صورة؟\n\n"
+                             "الرسوم الممسوحة تصير أوضح وأبرز على ورقٍ شفاف"
+                             " (وتُمحى الكتابة الملوّنة وحافّة الماسح ونقاط"
+                             " الغبار)، والصور الفوتوغرافية تُزال خلفيتها —"
+                             " وكلها مقصوصة على القطعة.\n\n"
+                             "ما عولج سابقاً يُعاد من أصله، وما عدّلته يدوياً"
+                             " في الاستوديو لا يُمسّ. وأصل كل صورةٍ محفوظ"
+                             " ويُستعاد من الزر الأيمن على موديلها."):
                 return
             from services.cutout import CutoutError
             dlg = QtWidgets.QProgressDialog(
-                "إزالة خلفيات الصور…", "إيقاف", 0, len(todo), self)
-            dlg.setWindowTitle("خلفيات الصور")
+                "تحسين الصور…", "إيقاف", 0, len(todo), self)
+            dlg.setWindowTitle("تحسين الصور")
             dlg.setWindowModality(QtCore.Qt.WindowModal)
             dlg.setMinimumDuration(0)
             done, kept = 0, []
@@ -766,17 +791,17 @@ class ModelsScreen(QtWidgets.QWidget):
                 dlg.setValue(i)
                 QtWidgets.QApplication.processEvents()
                 try:
-                    mc.cutout_image(stem)
+                    mc.enhance_image(stem)
                     done += 1
                 except (CutoutError, ValueError) as e:
                     kept.append(f"{stem}: {e}")
             dlg.setValue(len(todo))
-            msg = f"أُزيلت الخلفية من {done} صورة."
+            msg = f"حُسّنت {done} صورة."
             if kept:
                 msg += (f"\n\nبقيت {len(kept)} كما هي:\n"
                         + "\n".join(kept[:8])
                         + ("\n…" if len(kept) > 8 else ""))
-            info(self, msg, "خلفيات الصور")
+            info(self, msg, "تحسين الصور")
             self.refresh(force=True)
         except Exception as e:
             err(self, e)
