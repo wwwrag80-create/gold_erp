@@ -2,6 +2,8 @@
 """أرصدة المخازن — جرد لحظي: دفتري بمكافئ 18 + فعلي لكل عيار."""
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models.inventory import stock_snapshot
@@ -16,7 +18,7 @@ class StockReportScreen(QtWidgets.QWidget):
         self.cash_summary = big_label()
         self.boxes = make_table()
         _enhance(self.boxes, key="stock_boxes")
-        btn = QtWidgets.QPushButton("تحديث الجرد")
+        btn = kit.PushButton("تحديث الجرد")
         btn.clicked.connect(self.refresh)
 
         lay = QtWidgets.QVBoxLayout(self)

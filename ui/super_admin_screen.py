@@ -13,6 +13,8 @@
 """
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import licensing, tenant
 from ui.widgets.common import (ask, big_label, err, fill, info, make_table,
@@ -74,36 +76,36 @@ class SuperAdminScreen(QtWidgets.QWidget):
     def _users_tab(self):
         """إنشاء حسابات المصانع وإدارتها — للمدير العام حصراً."""
         w = QtWidgets.QWidget()
-        self.nu_factory = QtWidgets.QLineEdit()
+        self.nu_factory = kit.LineEdit()
         self.nu_factory.setPlaceholderText("اسم المصنع")
-        self.nu_user = QtWidgets.QLineEdit()
+        self.nu_user = kit.LineEdit()
         self.nu_user.setPlaceholderText("اسم المستخدم")
-        self.nu_pass = QtWidgets.QLineEdit()
+        self.nu_pass = kit.LineEdit()
         self.nu_pass.setPlaceholderText("كلمة المرور")
         self.nu_pass.setEchoMode(QtWidgets.QLineEdit.Password)
-        self.nu_is_admin = QtWidgets.QCheckBox("حساب مدير عام")
+        self.nu_is_admin = kit.CheckBox("حساب مدير عام")
         self.nu_is_admin.setToolTip(
             "المدير العام يرى شاشات الإدارة من أي نسخة")
-        btn_new = QtWidgets.QPushButton("➕ إنشاء الحساب")
+        btn_new = kit.PushButton("➕ إنشاء الحساب")
         btn_new.setObjectName("homeBtn")
         btn_new.clicked.connect(self.create_factory_user)
-        btn_load = QtWidgets.QPushButton("↻ تحديث القائمة")
+        btn_load = kit.PushButton("↻ تحديث القائمة")
         btn_load.clicked.connect(self.load_users)
-        btn_toggle = QtWidgets.QPushButton("⛔ إيقاف / تفعيل الحساب")
+        btn_toggle = kit.PushButton("⛔ إيقاف / تفعيل الحساب")
         btn_toggle.clicked.connect(self.toggle_user)
-        btn_fac_stop = QtWidgets.QPushButton("⛔ إيقاف المصنع كاملاً")
+        btn_fac_stop = kit.PushButton("⛔ إيقاف المصنع كاملاً")
         btn_fac_stop.setToolTip("يوقف كل حسابات المصنع المحدَّد — فيتوقّف "
                                 "البرنامج عنده خلال دقائق")
         btn_fac_stop.clicked.connect(lambda: self.set_factory(False))
-        btn_fac_go = QtWidgets.QPushButton("✔ تفعيل المصنع")
+        btn_fac_go = kit.PushButton("✔ تفعيل المصنع")
         btn_fac_go.clicked.connect(lambda: self.set_factory(True))
-        btn_add = QtWidgets.QPushButton("➕ مستخدم إضافي لهذا المصنع")
+        btn_add = kit.PushButton("➕ مستخدم إضافي لهذا المصنع")
         btn_add.setToolTip("حساب دخول ثانٍ لنفس المصنع المحدَّد")
         btn_add.clicked.connect(self.add_user_to_factory)
-        btn_del = QtWidgets.QPushButton("🗑 حذف الحساب نهائياً")
+        btn_del = kit.PushButton("🗑 حذف الحساب نهائياً")
         btn_del.setObjectName("ghost")
         btn_del.clicked.connect(self.delete_user)
-        btn_purge = QtWidgets.QPushButton("🧹 حذف البيانات القديمة المرفوعة")
+        btn_purge = kit.PushButton("🧹 حذف البيانات القديمة المرفوعة")
         btn_purge.setToolTip("يمسح من السحابة ما رفعته الإصدارات السابقة "
                              "من فواتير وقيود وسندات لكل المصانع")
         btn_purge.clicked.connect(self.purge_old_cloud_data)
@@ -118,7 +120,7 @@ class SuperAdminScreen(QtWidgets.QWidget):
         row.addWidget(self.nu_is_admin)
         row.addWidget(btn_new)
 
-        btn_diag2 = QtWidgets.QPushButton("🔍 فحص الإعدادات")
+        btn_diag2 = kit.PushButton("🔍 فحص الإعدادات")
         btn_diag2.setToolTip("يوضّح ما إذا كانت المفاتيح مقروءة فعلاً")
         btn_diag2.clicked.connect(self.check_keys)
 
@@ -385,30 +387,30 @@ class SuperAdminScreen(QtWidgets.QWidget):
 
     def _maint_tab(self):
         w = QtWidgets.QWidget()
-        btn_now = QtWidgets.QPushButton("💾 أخذ نسخة احتياطية الآن")
+        btn_now = kit.PushButton("💾 أخذ نسخة احتياطية الآن")
         btn_now.setObjectName("homeBtn")
         btn_now.clicked.connect(self.backup_now)
-        btn_list = QtWidgets.QPushButton("↻ تحديث القائمة")
+        btn_list = kit.PushButton("↻ تحديث القائمة")
         btn_list.clicked.connect(self.load_backups)
-        btn_health = QtWidgets.QPushButton("🩺 فحص سلامة النظام")
+        btn_health = kit.PushButton("🩺 فحص سلامة النظام")
         btn_health.setToolTip(
             "يتحقق من توازن كل القيود وسلامة قاعدة البيانات")
         btn_health.clicked.connect(self.check_health)
-        btn_restore = QtWidgets.QPushButton("♻ استرجاع نسخة…")
+        btn_restore = kit.PushButton("♻ استرجاع نسخة…")
         btn_restore.setObjectName("homeBtn")
         btn_restore.clicked.connect(self.open_restore)
-        btn_tune = QtWidgets.QPushButton("⚡ صيانة سريعة")
+        btn_tune = kit.PushButton("⚡ صيانة سريعة")
         btn_tune.setToolTip(
             "تنظيف طابور المزامنة المرفوع، دمج ملف WAL، وتحديث "
             "إحصاءات مخطِّط الاستعلام. آمن أثناء العمل ويستغرق ثوانيَ.")
         btn_tune.clicked.connect(self.run_maintenance)
-        btn_compact = QtWidgets.QPushButton("🗜 ضغط قاعدة البيانات")
+        btn_compact = kit.PushButton("🗜 ضغط قاعدة البيانات")
         btn_compact.setToolTip(
             "يعيد بناء الملف بلا صفحات محرَّرة فيصغر حجمه ومعه كل "
             "نسخة احتياطية. يقفل النظام أثناء التنفيذ — نفّذه وقت "
             "الفراغ.")
         btn_compact.clicked.connect(self.compact_db)
-        btn_dbstats = QtWidgets.QPushButton("📊 حجم الجداول")
+        btn_dbstats = kit.PushButton("📊 حجم الجداول")
         btn_dbstats.clicked.connect(self.show_db_stats)
 
         row = QtWidgets.QHBoxLayout()
@@ -469,7 +471,7 @@ class SuperAdminScreen(QtWidgets.QWidget):
             "لا يمكن التراجع عن هذا الإجراء.")
         dnote.setObjectName("cardSub")
         dnote.setWordWrap(True)
-        btn_wipe = QtWidgets.QPushButton("🔥 مسح كافة بيانات النظام")
+        btn_wipe = kit.PushButton("🔥 مسح كافة بيانات النظام")
         btn_wipe.setObjectName("dangerBtn")
         btn_wipe.clicked.connect(self.wipe_system)
         dl.addWidget(dnote)

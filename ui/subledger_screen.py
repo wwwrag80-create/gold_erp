@@ -7,6 +7,8 @@
 وزر لطباعة القائمة كاملة PDF لتقديمها للإدارة."""
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import coa, entities
@@ -29,11 +31,11 @@ class SubLedgerScreen(QtWidgets.QWidget):
         self.on_drill_account = on_drill_account
         self._rows = []
 
-        self.category = QtWidgets.QComboBox()
+        self.category = kit.ComboBox()
         for label, val in CATEGORIES:
             self.category.addItem(label, val)
         self.category.currentIndexChanged.connect(self.refresh)
-        self.search = QtWidgets.QLineEdit()
+        self.search = kit.LineEdit()
         self.search.setPlaceholderText("بحث بالاسم داخل الفئة…")
         self.search.textChanged.connect(self.render)
 
@@ -51,17 +53,17 @@ class SubLedgerScreen(QtWidgets.QWidget):
 
         self.table = make_table()
         self.table.doubleClicked.connect(self.open_ledger)
-        btn = QtWidgets.QPushButton("فتح دفتر الأستاذ للجهة المحددة")
+        btn = kit.PushButton("فتح دفتر الأستاذ للجهة المحددة")
         btn.setObjectName("ghost")
         btn.clicked.connect(self.open_ledger)
-        btn_rename = QtWidgets.QPushButton("✎ تعديل الاسم")
+        btn_rename = kit.PushButton("✎ تعديل الاسم")
 
         btn_rename.setToolTip("يعدّل اسم الجهة وحسابها معاً")
 
         btn_rename.clicked.connect(self.rename_selected)
-        btn_print = QtWidgets.QPushButton("🖨 معاينة/طباعة قائمة الأرصدة (PDF)")
+        btn_print = kit.PushButton("🖨 معاينة/طباعة قائمة الأرصدة (PDF)")
         btn_print.clicked.connect(self.print_report)
-        btn_pdf = QtWidgets.QPushButton("💾 حفظ القائمة PDF")
+        btn_pdf = kit.PushButton("💾 حفظ القائمة PDF")
         btn_pdf.setObjectName("ghost")
         btn_pdf.clicked.connect(self.save_pdf)
 
@@ -137,8 +139,7 @@ class SubLedgerScreen(QtWidgets.QWidget):
 
     def _ledger_btn(self, d):
         """زر «كشف حساب» داخل كل صف — تعمّق فوري لحركات الجهة."""
-        b = QtWidgets.QPushButton("📄 كشف حساب")
-        b.setObjectName("ghost")
+        b = kit.CellButton("📄 كشف حساب")
         b.clicked.connect(
             lambda _, acc=d["account_id"]: self.on_drill_account(acc)
             if self.on_drill_account else None)

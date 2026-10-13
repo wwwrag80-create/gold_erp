@@ -15,6 +15,8 @@ Esc يغلق الشريط ويعيد الجدول كما كان — فلا يت�
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 _BAR_PROP = "_search_bar"
 
 
@@ -40,7 +42,7 @@ class SearchBar(QtWidgets.QFrame):
         super().__init__(view)
         self.view = view
         self.setObjectName("tableSearch")
-        self.edit = QtWidgets.QLineEdit()
+        self.edit = kit.LineEdit()
         self.edit.setObjectName("tableSearchInput")
         self.edit.setPlaceholderText("🔍 ابحث في الجدول…")
         self.edit.setClearButtonEnabled(True)
@@ -117,6 +119,10 @@ class SearchBar(QtWidgets.QFrame):
                     for c in range(cols) if v.item(r, c) is not None)
                 v.setRowHidden(r, not hit)
                 shown += int(hit)
+        elif hasattr(v, "set_filter"):
+            # جدول النموذج (`ledger_view`): التصفية في النموذج نفسه
+            v.set_filter(q)
+            shown, total = v.shown_count(), len(v.source.rows)
         elif isinstance(v, QtWidgets.QTreeWidget):
             root = v.invisibleRootItem()
             for i in range(root.childCount()):
@@ -150,6 +156,8 @@ def target_view(start=None):
             return w.view
         if isinstance(w, (QtWidgets.QTableWidget, QtWidgets.QTreeWidget)):
             return w
+        if hasattr(w, "set_filter") and isinstance(w, QtWidgets.QTableView):
+            return w
         w = w.parentWidget()
     return None
 
@@ -159,8 +167,13 @@ def largest_visible(root):
     if root is None:
         return None
     for v in root.findChildren((QtWidgets.QTableWidget,
-                                QtWidgets.QTreeWidget)):
+                                QtWidgets.QTreeWidget,
+                                QtWidgets.QTableView)):
         if not v.isVisible() or v.objectName() == "sidebar":
+            continue
+        if (isinstance(v, QtWidgets.QTableView)
+                and not isinstance(v, QtWidgets.QTableWidget)
+                and not hasattr(v, "set_filter")):
             continue
         a = v.width() * v.height()
         if a > area:

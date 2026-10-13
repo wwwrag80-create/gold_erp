@@ -179,11 +179,49 @@ def _handlers_of(path, clsname):
     return out
 
 
+def _runtime_has(path, clsname, attr, lines=None, conditional=False):
+    """هل للصنف الحقيقي هذه الدالة؟ — لما لا تراه شجرة الشيفرة.
+
+    أصناف `ui.kit` (4.69) ترث مكتبة QFluentWidgets بأسماءٍ مثل
+    `qf.PrimaryPushButton`، فدوالّ المكتبة لا تظهر في الشجرة. فيُستورد
+    الصنف نفسه ويُسأل عن دالته:
+    · الصنف المساعد (mixin) يصحّ إن وُجدت الدالة في **كل** أبنائه.
+    · صنفٌ معرَّفٌ في فرعٍ غير فعّال هنا (`if ACTIVE:` والمكتبة غائبة)
+      يُترك — شيفرته لا تعمل في هذه البيئة، والفحص في البيئة الأخرى.
+    """
+    import importlib
+    try:
+        mod = importlib.import_module(
+            path[:-3].replace("\\", "/").replace("/", "."))
+    except Exception:
+        return False
+    cls = getattr(mod, clsname, None)
+    if cls is None:
+        return conditional
+    if getattr(cls, "__qualname__", clsname) != clsname:
+        return True
+    # التعريف الفعّال غير هذا؟ (صنفان بالاسم نفسه في فرعَي `if/else`):
+    # دوالّ الصنف الحقيقي تُعرف مواضعها من شيفرتها
+    if lines is not None:
+        at = [v.__code__.co_firstlineno for v in vars(cls).values()
+              if hasattr(v, "__code__")]
+        if at and not any(lines[0] <= ln <= lines[1] for ln in at):
+            return True
+    if hasattr(cls, attr):
+        return True
+    subs = cls.__subclasses__()
+    return bool(subs) and all(hasattr(sc, attr) for sc in subs)
+
+
 def check_methods():
     step("2) الدوال المربوطة والمستدعاة")
     problems = []
     for path in sorted(glob.glob("ui/**/*.py", recursive=True)):
         tree = ast.parse(open(path, encoding="utf-8").read(), path)
+        # أصنافٌ معرَّفة تحت `if` في أعلى الملف: فرعٌ واحد منها فعّال
+        conditional = {c.lineno for top in tree.body
+                       if isinstance(top, ast.If) for c in ast.walk(top)
+                       if isinstance(c, ast.ClassDef)}
         for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
             defined = {m.name for m in cls.body
                        if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
@@ -211,7 +249,9 @@ def check_methods():
                                 and a.value.id == "self"):
                             used.setdefault(a.attr, a.lineno)
             for name, line in sorted(used.items(), key=lambda kv: kv[1]):
-                if name not in known:
+                if name not in known and not _runtime_has(
+                        path, cls.name, name, (cls.lineno, cls.end_lineno),
+                        cls.lineno in conditional):
                     problems.append(f"{path}:{line} {cls.name}.{name}")
     if problems:
         failures.append(("methods", problems))

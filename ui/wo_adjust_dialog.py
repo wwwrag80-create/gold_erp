@@ -5,6 +5,8 @@
 """
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import inventory
@@ -37,11 +39,11 @@ class WorkOrderAdjustDialog(QtWidgets.QDialog):
         self.big.setValue(kv.g(wo["big_stones"]))
         for w in (self.gold, self.small, self.big):
             w.valueChanged.connect(self.recalc)
-        self.contra = QtWidgets.QComboBox()
+        self.contra = kit.ComboBox()
         for code, name in inventory.ADJUST_CONTRA_ACCOUNTS:
             self.contra.addItem(f"{code} — {name}", code)
         self.contra.currentIndexChanged.connect(self.recalc)
-        self.notes = QtWidgets.QLineEdit()
+        self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("بيان التسوية (اختياري)")
 
         self.preview = QtWidgets.QLabel()
@@ -60,7 +62,7 @@ class WorkOrderAdjustDialog(QtWidgets.QDialog):
         form.addRow("البيان:", self.notes)
         form.addRow(self.preview)
 
-        btn_delete = QtWidgets.QPushButton("🗑 حذف الطقم نهائياً")
+        btn_delete = kit.PushButton("🗑 حذف الطقم نهائياً")
         btn_delete.setObjectName("ghost")
         btn_delete.setToolTip(
             "يخرج الطقم من الذهب المشغول مقابل حساب التسويات")

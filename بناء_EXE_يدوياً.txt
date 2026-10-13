@@ -15,7 +15,7 @@
   ────────────────────────────────────
   انسخ هذا السطر والصقه ثم Enter:
 
-python -m pip install --upgrade pip PyQt5 qrcode pillow python-barcode pyinstaller
+python -m pip install --upgrade pip PyQt5 qrcode pillow python-barcode pyinstaller "PyQt-Fluent-Widgets==1.11.3"
 
 
   الخطوة ٣ — نظّف البناء السابق

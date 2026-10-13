@@ -17,6 +17,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import dossier, entities
 from models.aging import BUCKET_LABELS
@@ -46,11 +48,11 @@ class DossierScreen(QtWidgets.QWidget):
         self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-1))
         self.d_to = date_edit()
 
-        btn = QtWidgets.QPushButton("📇 افتح الملف")
+        btn = kit.PushButton("📇 افتح الملف")
         btn.clicked.connect(self.load)
-        btn_print = QtWidgets.QPushButton("👁 معاينة وطباعة")
+        btn_print = kit.PushButton("👁 معاينة وطباعة")
         btn_print.clicked.connect(self.print_report)
-        btn_copy = QtWidgets.QPushButton("📋 نسخ الخلاصة")
+        btn_copy = kit.PushButton("📋 نسخ الخلاصة")
         btn_copy.setObjectName("ghost")
         btn_copy.clicked.connect(self.copy_summary)
 
@@ -99,7 +101,7 @@ class DossierScreen(QtWidgets.QWidget):
         mrow = QtWidgets.QHBoxLayout()
         self.models_span = QtWidgets.QLabel("")
         self.models_span.setObjectName("cardSub")
-        self.btn_photos = QtWidgets.QPushButton("🖼 عرض صور الموديلات")
+        self.btn_photos = kit.PushButton("🖼 عرض صور الموديلات")
         self.btn_photos.setToolTip(
             "صورةٌ لكل رقم موديل أخذته الجهة في الفترة، وتحتها أرقام "
             "التشغيل بوزنها — للمعاينة والطباعة")

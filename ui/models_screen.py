@@ -15,6 +15,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import models_catalog as mc
@@ -37,7 +39,7 @@ class ModelsScreen(QtWidgets.QWidget):
         self._days_loaded = False
         self._sync = False          # يمنع ارتداد الإشارات بين التاريخ والقائمة
 
-        self.search = QtWidgets.QLineEdit()
+        self.search = kit.LineEdit()
         self.search.setPlaceholderText("ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…")
         self.search.setToolTip("بحث برقم الموديل أو رقم التشغيل أو اسم الجهة")
         # 4.67: يتّسع ويضيق مع الشاشة — لا يفرض عرضاً يمدّها
@@ -48,7 +50,7 @@ class ModelsScreen(QtWidgets.QWidget):
         self.search.textChanged.connect(self.apply_filter)
 
         # مرشّح العرض: يحدّد أي الفروع تُعرض
-        self.view_mode = QtWidgets.QComboBox()
+        self.view_mode = kit.ComboBox()
         self.view_mode.setMaximumWidth(210)
         for lbl, val in (("الكل", "all"),
                          ("المتاح للبيع", "in_stock"),
@@ -58,7 +60,7 @@ class ModelsScreen(QtWidgets.QWidget):
             lambda: self.refresh(force=True))
 
         # الفرز
-        self.sort_mode = QtWidgets.QComboBox()
+        self.sort_mode = kit.ComboBox()
         self.sort_mode.setMaximumWidth(180)
         for lbl, val in (("أ ← ي", "az"), ("ي ← أ", "za"),
                          ("الأكثر عدداً", "most"),
@@ -68,13 +70,13 @@ class ModelsScreen(QtWidgets.QWidget):
             lambda: self.refresh(force=True))
 
         # ── 4.67: شريطٌ مرتّب لا يمدّ الشاشة — أزرارٌ مدموجة ورموز ──
-        btn_refresh = self.btn_refresh = QtWidgets.QPushButton("↻")
+        btn_refresh = self.btn_refresh = kit.PushButton("↻")
         btn_refresh.setToolTip("تحديث")
         btn_refresh.setObjectName("ghost")
         btn_refresh.setFixedWidth(46)
         btn_refresh.clicked.connect(lambda: self.refresh(force=True))
         # طيّ الكل وتوسيع الكل زرٌّ واحد يتبدّل
-        btn_fold = self.btn_fold = QtWidgets.QPushButton("⊞ توسيع الكل")
+        btn_fold = self.btn_fold = kit.PushButton("⊞ توسيع الكل")
         btn_fold.setObjectName("ghost")
         btn_fold.setToolTip("توسيع كل الموديلات أو طيّها")
         btn_fold.clicked.connect(self._toggle_fold)
@@ -90,10 +92,10 @@ class ModelsScreen(QtWidgets.QWidget):
         pmenu.setToolTipsVisible(True)
         pmenu.addAction(self.btn_print)
         pmenu.addAction(self.btn_photos)
-        btn_pr = self.btn_print_menu = QtWidgets.QPushButton("🖨 طباعة")
+        btn_pr = self.btn_print_menu = kit.PushButton("🖨 طباعة")
         btn_pr.setMenu(pmenu)
         # 4.61: الصور بلا خلفية — رمزٌ صغير (4.67): يُستعمل نادراً
-        btn_cut = self.btn_cutout = QtWidgets.QPushButton("🪄")
+        btn_cut = self.btn_cutout = kit.PushButton("🪄")
         btn_cut.setObjectName("ghost")
         btn_cut.setFixedWidth(46)
         btn_cut.setToolTip(
@@ -106,28 +108,28 @@ class ModelsScreen(QtWidgets.QWidget):
         btn_cut.clicked.connect(self.cutout_all)
         # 4.52: رابطٌ ثابت يفتح هذه الشاشة كاملةً على جوال المدير — من
         # هذا الجهاز مباشرةً بلا سحابة (services.models_web)
-        btn_link = self.btn_link = QtWidgets.QPushButton("🔗 رابط المدير")
+        btn_link = self.btn_link = kit.PushButton("🔗 رابط المدير")
         btn_link.setToolTip(
             "رابطٌ ثابت مجاني يفتح الدليل كاملاً بصوره وتفاصيله على جوال\n"
             "المدير — يعمل والبرنامج مفتوح ومتصل، بلا رفعٍ ولا مساحة سحابية")
         btn_link.clicked.connect(self.open_link)
         # 4.59: طلبات العملاء — يختار العميل من الصور ويُحفظ طلبه بعدده
         # ويُطبع بصور موديلاته (models.model_orders · بلا أثر محاسبي)
-        btn_orders = self.btn_orders = QtWidgets.QPushButton("📝 الطلبات")
+        btn_orders = self.btn_orders = kit.PushButton("📝 الطلبات")
         btn_orders.setToolTip(
             "تسجيل طلب عميل: اسمه والموديلات التي يختارها من الصور وعدد\n"
             "كلٍّ منها — ثم معاينته وطباعته بالصور، والطلبات المحفوظة")
         btn_orders.clicked.connect(lambda: self.open_orders())
 
         # ── الوارد بتاريخ: ماذا دخل ذلك اليوم وأين هو الآن ──
-        self.by_date = QtWidgets.QCheckBox("البضاعة الواردة بتاريخ")
+        self.by_date = kit.CheckBox("البضاعة الواردة بتاريخ")
         self.by_date.setToolTip(
             "يعرض الموديلات التي وردت من التصنيع في اليوم المحدَّد —\n"
             "كل موديل وأرقام تشغيله، ومع من كل قطعة اليوم:\n"
             "«الخزنة» إن كانت متاحة، أو اسم الجهة إن خرجت إليها.")
         self.by_date.toggled.connect(self._on_date_mode)
 
-        self.day = QtWidgets.QComboBox()
+        self.day = kit.ComboBox()
         # يضيق مع الشاشة (والقائمة المنسدلة تُظهر النص كاملاً)
         self.day.setSizeAdjustPolicy(
             QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -1005,9 +1007,9 @@ class ModelsScreen(QtWidgets.QWidget):
         # 4.62: الصور بدون خلفية (شفافة) أو بخلفيتها الأصلية
         bgc = photo_bg_choice(dlg)
         dlg.setMinimumWidth(380)
-        mn = QtWidgets.QSpinBox()
+        mn = kit.SpinBox()
         mn.setRange(1, 999)
-        per = QtWidgets.QSpinBox()
+        per = kit.SpinBox()
         per.setRange(1, 60)
         try:
             mn.setValue(int(load_pref("models.photos_min", "3") or 3))

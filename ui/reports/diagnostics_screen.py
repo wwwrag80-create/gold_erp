@@ -18,6 +18,8 @@
 """
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import health
 from ui.widgets.common import big_label, err, fill, info, make_table, \
@@ -33,12 +35,12 @@ class DiagnosticsScreen(QtWidgets.QWidget):
         self.user = user
 
         self.state = big_label("اضغط «فحص الآن».")
-        btn = QtWidgets.QPushButton("🩺 فحص الآن")
+        btn = kit.PushButton("🩺 فحص الآن")
         btn.clicked.connect(self.run_check)
-        btn_log = QtWidgets.QPushButton("📄 آخر الأخطاء والبطء")
+        btn_log = kit.PushButton("📄 آخر الأخطاء والبطء")
         btn_log.setObjectName("ghost")
         btn_log.clicked.connect(self.show_log)
-        btn_clear = QtWidgets.QPushButton("🧹 مسح السجل")
+        btn_clear = kit.PushButton("🧹 مسح السجل")
         btn_clear.setObjectName("ghost")
         btn_clear.setToolTip("يمسح ملف الأخطاء والبطء — لا يمسّ أي بيانات")
         btn_clear.clicked.connect(self.clear_log)

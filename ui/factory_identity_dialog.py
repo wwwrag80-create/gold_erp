@@ -12,6 +12,8 @@ import base64
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import branding
 from ui.widgets.common import ask, err, info
@@ -111,19 +113,19 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
             " border-radius: 8px; background: #FFFFFF; color: #8A7A55; }")
         v.addWidget(self.logo_view, 0, QtCore.Qt.AlignHCenter)
         row = QtWidgets.QHBoxLayout()
-        self.btn_logo = QtWidgets.QPushButton("🖼 اختيار الشعار…")
+        self.btn_logo = kit.PushButton("🖼 اختيار الشعار…")
         self.btn_logo.clicked.connect(self.pick_logo)
-        self.btn_logo_clear = QtWidgets.QPushButton("الشعار الأصلي")
+        self.btn_logo_clear = kit.PushButton("الشعار الأصلي")
         self.btn_logo_clear.setToolTip("يعيد الشعار المرفق مع النظام")
         self.btn_logo_clear.clicked.connect(self.clear_logo)
         row.addWidget(self.btn_logo)
         row.addWidget(self.btn_logo_clear)
         v.addLayout(row)
-        self.hide_logo = QtWidgets.QCheckBox("بلا شعار في الطباعة")
+        self.hide_logo = kit.CheckBox("بلا شعار في الطباعة")
         self.hide_logo.toggled.connect(self._changed)
         v.addWidget(self.hide_logo)
         f = QtWidgets.QFormLayout()
-        self.logo_size = QtWidgets.QComboBox()
+        self.logo_size = kit.ComboBox()
         for px, label in branding.LOGO_SIZES:
             self.logo_size.addItem(label, px)
         self.logo_size.currentIndexChanged.connect(self._changed)
@@ -142,11 +144,11 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
             " border-radius: 8px; background: #FFFFFF; color: #8A7A55; }")
         v.addWidget(self.stamp_view, 0, QtCore.Qt.AlignHCenter)
         row2 = QtWidgets.QHBoxLayout()
-        self.btn_stamp = QtWidgets.QPushButton("🔏 ختم / توقيع…")
+        self.btn_stamp = kit.PushButton("🔏 ختم / توقيع…")
         self.btn_stamp.setToolTip("صورة الختم تظهر بجوار «التوقيع» "
                                   "أسفل كل ورقة (اختياري)")
         self.btn_stamp.clicked.connect(self.pick_stamp)
-        self.btn_stamp_clear = QtWidgets.QPushButton("إزالة الختم")
+        self.btn_stamp_clear = kit.PushButton("إزالة الختم")
         self.btn_stamp_clear.clicked.connect(self.clear_stamp)
         row2.addWidget(self.btn_stamp)
         row2.addWidget(self.btn_stamp_clear)
@@ -162,7 +164,7 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
         g.setVerticalSpacing(8)
 
         def edit(ph="", ltr=False):
-            e = QtWidgets.QLineEdit()
+            e = kit.LineEdit()
             e.setPlaceholderText(ph)
             e.setMinimumHeight(34)
             if ltr:
@@ -217,15 +219,15 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
         self.layout_group = QtWidgets.QButtonGroup(self)
         self.layout_btns = {}
         for key, label in branding.LAYOUTS:
-            rb = QtWidgets.QRadioButton(label)
+            rb = kit.RadioButton(label)
             rb.toggled.connect(self._changed)
             self.layout_group.addButton(rb)
             self.layout_btns[key] = rb
             lv.addWidget(rb)
         opts = QtWidgets.QHBoxLayout()
-        self.show_en = QtWidgets.QCheckBox("إظهار الاسم الإنجليزي")
+        self.show_en = kit.CheckBox("إظهار الاسم الإنجليزي")
         self.show_en.toggled.connect(self._changed)
-        self.show_vat = QtWidgets.QCheckBox("إظهار الرقم الضريبي تحت السجل")
+        self.show_vat = kit.CheckBox("إظهار الرقم الضريبي تحت السجل")
         self.show_vat.toggled.connect(self._changed)
         opts.addWidget(self.show_en)
         opts.addWidget(self.show_vat)
@@ -256,20 +258,20 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
 
     def _buttons(self):
         h = QtWidgets.QHBoxLayout()
-        self.btn_apply = QtWidgets.QPushButton("✔ اعتماد الهوية")
+        self.btn_apply = kit.PushButton("✔ اعتماد الهوية")
         self.btn_apply.setObjectName("primary")
         self.btn_apply.setMinimumHeight(40)
         self.btn_apply.setDefault(True)
         self.btn_apply.clicked.connect(self.apply)
-        self.btn_import = QtWidgets.QPushButton("⬇ استيراد ملف هوية…")
+        self.btn_import = kit.PushButton("⬇ استيراد ملف هوية…")
         self.btn_import.clicked.connect(self.import_identity)
-        self.btn_export = QtWidgets.QPushButton("⬆ تصدير ملف الهوية…")
+        self.btn_export = kit.PushButton("⬆ تصدير ملف الهوية…")
         self.btn_export.setToolTip("ملفٌ واحد يحمل الشعار والبيانات — "
                                    "يُستورد في جهازٍ آخر للمصنع نفسه")
         self.btn_export.clicked.connect(self.export_identity)
-        self.btn_reset = QtWidgets.QPushButton("↺ الهوية الأصلية")
+        self.btn_reset = kit.PushButton("↺ الهوية الأصلية")
         self.btn_reset.clicked.connect(self.reset_identity)
-        self.btn_close = QtWidgets.QPushButton("إغلاق")
+        self.btn_close = kit.PushButton("إغلاق")
         self.btn_close.clicked.connect(self.reject)
         h.addWidget(self.btn_apply)
         h.addWidget(self.btn_import)

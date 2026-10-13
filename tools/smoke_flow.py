@@ -7035,7 +7035,8 @@ def main():
         _src83 = open(os.path.join(ROOT, "ui", "dashboard_screen.py"),
                       encoding="utf-8").read()
         check("لوحة التحكم: قائمة «المدة» بدل «تحديد فترة» اليدوي",
-              "self.period = QtWidgets.QComboBox()" in _src83
+              ("self.period = QtWidgets.QComboBox()" in _src83
+               or "self.period = kit.ComboBox()" in _src83)
               and "use_period" not in _src83 and hasattr(_D83, "refresh"))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
@@ -7955,6 +7956,99 @@ def main():
         _em100 = _gw100._emblem(96)
         check("وشعار المصنع الجديد خاتمٌ مصوَّر لا رسمٌ",
               _cs100.asset("emblem.png") is not None and not _em100.isNull())
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
+    step("101) 4.69: مكتبة الواجهات الحديثة (QFluentWidgets) ببديلٍ كلاسيكي")
+    try:
+        from PyQt5 import QtCore as _QC101, QtWidgets as _QW101
+        _app101 = _QW101.QApplication.instance() or _QW101.QApplication([])
+        from ui import kit as _k101, theme as _th101
+        from ui.widgets import common as _cm101
+        _st101 = _k101.status()
+        check("الطبقة تعرف حالها: المكتبة وإصدارها وترخيصها أو سبب غيابها",
+              set(_st101) >= {"active", "library", "version", "reason",
+                              "license"}
+              and (_st101["active"] or _st101["reason"]), str(_st101))
+        _pairs101 = (("PushButton", _QW101.QPushButton),
+                     ("LineEdit", _QW101.QLineEdit),
+                     ("ComboBox", _QW101.QComboBox),
+                     ("CheckBox", _QW101.QCheckBox),
+                     ("SpinBox", _QW101.QSpinBox),
+                     ("DoubleSpinBox", _QW101.QDoubleSpinBox),
+                     ("DateEdit", _QW101.QDateEdit),
+                     ("TableWidget", _QW101.QTableWidget),
+                     ("TableView", _QW101.QTableView))
+        check("كل مكوّنٍ ابنٌ لصنف Qt الذي حلّ محلّه (الشاشات تعمل كما هي)",
+              all(issubclass(getattr(_k101, n), q) for n, q in _pairs101))
+        _th101.apply(_app101, theme="light")
+        check("والاتجاه العربي يبقى بعد تركيب مترجم المكتبة",
+              _app101.layoutDirection() == _QC101.Qt.RightToLeft)
+        _t101 = _cm101.make_table()
+        _cm101.fill(_t101, ["أ", "ب"], [["1", "2"], ["3", "4"]])
+        _t101.setCurrentCell(1, 0)
+        check("جدول النظام: QTableWidget بصفوف حديثة، والتحديد من الشيفرة "
+              "يصل",
+              isinstance(_t101, _QW101.QTableWidget)
+              and _t101.currentRow() == 1
+              and (not _k101.ACTIVE or 1 in _t101.itemDelegate().selectedRows))
+        _seen101 = []
+        _old_q101 = _QW101.QMessageBox.question
+        _QW101.QMessageBox.question = staticmethod(
+            lambda *a, **k: (_seen101.append(a[2]), _QW101.QMessageBox.Yes)[1])
+        _ans101 = _cm101.ask(None, "سؤال ١٠١؟")
+        _QW101.QMessageBox.question = _old_q101
+        check("والرسائل تحترم أدوات الإسكات (QMessageBox المستبدَلة)",
+              _ans101 is True and _seen101 == ["سؤال ١٠١؟"], str(_seen101))
+        _cb101 = _k101.ComboBox()
+        for _i in (18, 21, 22):
+            _cb101.addItem(f"عيار {_i}", _i)
+        _act101 = []
+        _cb101.activated[int].connect(_act101.append)
+        if _k101.ACTIVE:
+            _cb101._kit_pick(2)
+        else:
+            _cb101.setCurrentIndex(2)
+            _act101.append(2)
+        check("القائمة المنسدلة QComboBox كاملة: الاختيار والبيانات والإشارة",
+              _cb101.currentData() == 22 and _act101 == [2])
+        _le101 = _k101.SearchLineEdit()
+        _m101 = _le101.textMargins()
+        check("خانة البحث: هامش الأزرار يسار النصّ بالعربية",
+              not _k101.ACTIVE or (_m101.left() > 0 and _m101.right() == 0),
+              f"{_m101.left()}/{_m101.right()}")
+        from ui.widgets.ledger_view import LedgerView as _LV101
+        _lv101 = _LV101()
+        _lv101.set_data(["الرقم", "البيان", "المبلغ", "الوزن"],
+                        [["S-1", "الأفق", 1500.0, 10.0, 77],
+                         ["S-2", "النور", -200.0, 5.5, 78],
+                         ["S-3", "الأفق للمجوهرات", 9500.0, 2.0, 79]])
+        _src101 = _lv101.source
+        check("الجدول المحاسبي (QTableView): أنواع الأعمدة وصفّ إجماليٍّ صحيح",
+              _src101.kinds[2] == "money" and _src101.kinds[3] == "weight"
+              and _src101.kinds[0] == "text"
+              and abs(_src101.totals[2] - 10800.0) < 1e-6
+              and abs(_src101.totals[3] - 17.5) < 1e-6, str(_src101.totals))
+        _lv101.sortByColumn(2, _QC101.Qt.DescendingOrder)
+        _px101 = _lv101.proxy
+        check("وفرزٌ بالقيمة (9,500 قبل 1,500) والإجمالي آخراً",
+              _px101.index(0, 0).data() == "S-3"
+              and _src101.is_total(_px101.mapToSource(
+                  _px101.index(_px101.rowCount() - 1, 0)).row()))
+        _lv101.set_filter("الافق")
+        check("وتصفيةٌ عربية فورية يتبعها الإجمالي",
+              _lv101.shown_count() == 2
+              and abs(_src101.totals[2] - 11000.0) < 1e-6,
+              str((_lv101.shown_count(), _src101.totals)))
+        _lv101.set_filter("")
+        _lv101.setCurrentIndex(_px101.index(0, 0))
+        check("والسطر المحدد يعيد قيمه الخام كاملة (رقم القيد خلف آخر عمود)",
+              _lv101.current_values() == ["S-3", "الأفق للمجوهرات", 9500.0,
+                                          2.0, 79])
+        check("والسالب بالأحمر بفواصل الآلاف",
+              _src101.data(_src101.index(1, 2)) == "-200.00"
+              and _src101.data(_src101.index(1, 2),
+                               _QC101.Qt.ForegroundRole) is not None)
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 

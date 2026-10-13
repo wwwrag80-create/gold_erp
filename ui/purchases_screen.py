@@ -11,6 +11,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 import config
 from database.database import db
 from models import editing, entities, purchases
@@ -57,15 +59,15 @@ class NewSupplierDialog(QtWidgets.QDialog):
         self.supplier_id = None
         self.setWindowTitle("مورد جديد")
         self.setMinimumWidth(460)
-        self.name = QtWidgets.QLineEdit()
-        self.phone = QtWidgets.QLineEdit()
-        self.vat = QtWidgets.QLineEdit()
+        self.name = kit.LineEdit()
+        self.phone = kit.LineEdit()
+        self.vat = kit.LineEdit()
         self.vat.setPlaceholderText("15 رقماً يبدأ بـ3 وينتهي بـ3")
         form = QtWidgets.QFormLayout(self)
         form.addRow("اسم المورد:", self.name)
         form.addRow("الجوال:", self.phone)
         form.addRow("الرقم الضريبي:", self.vat)
-        btn = QtWidgets.QPushButton("حفظ المورد")
+        btn = kit.PushButton("حفظ المورد")
         btn.clicked.connect(self.save)
         form.addRow(btn)
 
@@ -120,7 +122,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         # ① فاتورة المورد: من · رقمها · متى · ومعالجتها الضريبية
         self.supplier = search_combo("اكتب اسم المورد…")
         self.supplier.currentIndexChanged.connect(self._on_supplier)
-        btn_new_sup = QtWidgets.QPushButton("+ مورد جديد")
+        btn_new_sup = kit.PushButton("+ مورد جديد")
         btn_new_sup.setObjectName("ghost")
         btn_new_sup.clicked.connect(self.new_supplier)
         self.sup_vat = QtWidgets.QLabel("—")
@@ -130,29 +132,29 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.sup_vat.setMinimumWidth(0)
         self.sup_vat.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
                                    QtWidgets.QSizePolicy.Preferred)
-        self.inv_no = QtWidgets.QLineEdit()
+        self.inv_no = kit.LineEdit()
         self.inv_no.setPlaceholderText("كما في ورقة المورد")
         self.p_date = date_edit()
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.addItem("مصروف تشغيلي", "expense")
         self.kind.addItem("أصل ثابت (مكينة/معدة)", "asset")
         self.kind.currentIndexChanged.connect(self._on_kind)
-        self.treat = QtWidgets.QComboBox()
+        self.treat = kit.ComboBox()
         for k, lbl in purchases.TAX_TREATMENTS:
             self.treat.addItem(lbl, k)
         self.treat.currentIndexChanged.connect(self._on_treat)
-        self.desc = QtWidgets.QLineEdit()
+        self.desc = kit.LineEdit()
         self.desc.setPlaceholderText("البيان (اسم الأصل إن كان أصلاً)")
-        self.life = QtWidgets.QSpinBox()
+        self.life = kit.SpinBox()
         self.life.setRange(0, 600)
         self.life.setSuffix(" شهراً")
         self.life.setSpecialValueText("يُحدَّد لاحقاً")
         self.life_lbl = QtWidgets.QLabel("العمر الإنتاجي:")
-        self.pay = QtWidgets.QComboBox()
+        self.pay = kit.ComboBox()
         for k, lbl in purchases.PAY_MODES:
             self.pay.addItem(lbl, k)
         self.pay.currentIndexChanged.connect(self._recalc)
-        self.inv_type = QtWidgets.QComboBox()
+        self.inv_type = kit.ComboBox()
         for k, lbl in purchases.INVOICE_TYPES:
             self.inv_type.addItem(lbl, k)
         self.inv_type.setToolTip(
@@ -195,16 +197,16 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         # العدد ثم السعر ثم المبلغ قبل الضريبة ثم الخصم ثم الضريبة ثم
         # بعد الضريبة. وEnter أو «+ إضافة سطر» يُنزله في الجدول تحته —
         # فاتورةٌ واحدة على أكثر من حساب.
-        self.account = QtWidgets.QComboBox()
+        self.account = kit.ComboBox()
         _shrink(self.account, 14)
         self.l_qty = mspin()
         self.l_qty.setValue(1)
         self.l_price = mspin()
-        self.l_gross = QtWidgets.QLineEdit()
+        self.l_gross = kit.LineEdit()
         self.l_gross.setReadOnly(True)
         self.discount = mspin()
         self.vat = mspin()
-        self.l_total = QtWidgets.QLineEdit()
+        self.l_total = kit.LineEdit()
         self.l_total.setReadOnly(True)
         for sp in (self.l_qty, self.l_price, self.discount):
             sp.valueChanged.connect(self._line_auto_vat)
@@ -215,7 +217,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             wd.setMinimumWidth(64)
         self.vat.valueChanged.connect(self._line_vat_typed)
         self._vat_manual = False
-        self.btn_line = QtWidgets.QPushButton("+ إضافة سطر")
+        self.btn_line = kit.PushButton("+ إضافة سطر")
         self.btn_line.clicked.connect(self.add_line)
         box_amt = QtWidgets.QGroupBox("② المبالغ والضريبة")
         a = QtWidgets.QGridLayout(box_amt)
@@ -249,7 +251,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                   self.c_total):
             cards.addWidget(c, 1)
 
-        btn_save = QtWidgets.QPushButton("✔ ترحيل فاتورة المورد")
+        btn_save = kit.PushButton("✔ ترحيل فاتورة المورد")
         btn_save.clicked.connect(self.save_purchase)
         self.init_edit_mode(btn_save, "فاتورة المشتريات")
 
@@ -563,9 +565,9 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.r_from = date_edit()
         self.r_from.setDate(QtCore.QDate(today.year(), today.month(), 1))
         self.r_to = date_edit()
-        btn = QtWidgets.QPushButton("عرض")
+        btn = kit.PushButton("عرض")
         btn.clicked.connect(self.refresh_register)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة السجل")
+        btn_print = kit.PushButton("🖨 طباعة السجل")
         btn_print.setObjectName("ghost")
         btn_print.clicked.connect(self.print_register)
         top = QtWidgets.QHBoxLayout()

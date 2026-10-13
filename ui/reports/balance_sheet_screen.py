@@ -19,6 +19,8 @@ from datetime import date
 
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import balance_tree, statements
 from services import karat_view as kv
@@ -62,22 +64,22 @@ class FinancialPositionTab(QtWidgets.QWidget):
 
         today = date.today()
         self.as_of = date_edit()
-        self.cmp_on = QtWidgets.QCheckBox("مقارنة بـ:")
+        self.cmp_on = kit.CheckBox("مقارنة بـ:")
         self.cmp_on.setChecked(True)
         self.cmp_to = date_edit()
         self.cmp_to.setDate(QtCore.QDate(today.year - 1, 12, 31))
         self.cmp_on.stateChanged.connect(
             lambda _s: self.cmp_to.setEnabled(self.cmp_on.isChecked()))
 
-        btn = QtWidgets.QPushButton("إعداد القائمة")
+        btn = kit.PushButton("إعداد القائمة")
         btn.setObjectName("homeBtn")
         btn.clicked.connect(self.load)
-        btn_print = QtWidgets.QPushButton("🖨 معاينة وطباعة")
+        btn_print = kit.PushButton("🖨 معاينة وطباعة")
         btn_print.clicked.connect(self.print_sheet)
-        btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
+        btn_exp = kit.PushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
-        btn_mov = QtWidgets.QPushButton("🔎 تفصيل البند وحركته")
+        btn_mov = kit.PushButton("🔎 تفصيل البند وحركته")
         btn_mov.setToolTip("حسابات البند المحدد، ومن كلٍّ منها كشف حركته"
                            " بأرقام السندات")
         btn_mov.clicked.connect(lambda: self.show_detail())
@@ -297,7 +299,7 @@ class AccountTreeTab(QtWidgets.QWidget):
         self.data = None
         self.d_to = date_edit()
 
-        self.level = QtWidgets.QComboBox()
+        self.level = kit.ComboBox()
         self.level.setMaximumWidth(160)
         for i, lbl in ((1, "1 — الأقسام الرئيسية"),
                        (2, "2 — المجموعات"),
@@ -309,15 +311,15 @@ class AccountTreeTab(QtWidgets.QWidget):
         self.level.setCurrentIndex(2)
         self.level.currentIndexChanged.connect(self.load)
 
-        self.zero = QtWidgets.QCheckBox("إخفاء الصفرية")
+        self.zero = kit.CheckBox("إخفاء الصفرية")
         self.zero.setChecked(True)
         self.zero.stateChanged.connect(self.load)
 
-        btn = QtWidgets.QPushButton("عرض الأرصدة")
+        btn = kit.PushButton("عرض الأرصدة")
         btn.clicked.connect(self.load)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة")
+        btn_print = kit.PushButton("🖨 طباعة")
         btn_print.clicked.connect(self.print_sheet)
-        btn_mov = QtWidgets.QPushButton("🔎 تفصيل الحركة")
+        btn_mov = kit.PushButton("🔎 تفصيل الحركة")
         btn_mov.setToolTip("كشف حركة الحساب المحدد بأرقام السندات")
         btn_mov.clicked.connect(self.show_movement)
 

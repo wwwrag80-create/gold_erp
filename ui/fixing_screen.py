@@ -4,6 +4,8 @@
 الوزن دون أي أثر نقدي عند ترك المبلغ فارغاً أو صفراً)."""
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import editing, entities, fixing
@@ -25,7 +27,7 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
         self.balances = big_label()
         self.weight = wspin()
         self.price = mspin()
-        self.gold_only = QtWidgets.QCheckBox(
+        self.gold_only = kit.CheckBox(
             "تسكير ذهب فقط (بدون مبلغ نقدي)")
         self.gold_only.stateChanged.connect(self.toggle_gold_only)
         self.amount = big_label("المبلغ = 0.00 ريال")
@@ -33,7 +35,7 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
         self.price.valueChanged.connect(self.recalc)
         self.date = date_edit()
 
-        btn_save = QtWidgets.QPushButton("تنفيذ التسكير وترحيل القيد")
+        btn_save = kit.PushButton("تنفيذ التسكير وترحيل القيد")
         btn_save.clicked.connect(self.save)
         self.init_edit_mode(btn_save, "التسكير")
 

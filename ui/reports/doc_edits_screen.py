@@ -15,6 +15,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import doc_edits as de
 from services import karat_view as kv
@@ -47,19 +49,19 @@ class DocEditsScreen(QtWidgets.QWidget):
         # المدة تُختار باسمها فتُحسب تواريخها وتُعرض التعديلات فوراً
         from models import dash_panels as _dp
         self._dp = _dp
-        self.period = QtWidgets.QComboBox()
+        self.period = kit.ComboBox()
         for k, lbl in _dp.PERIODS:
             self.period.addItem(lbl, k)
         self.period.setCurrentIndex(self.period.findData("month"))
         self.d_from = date_edit()
         self.d_to = date_edit()
         self._apply_period()
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.setMaximumWidth(190)
         self.kind.addItem("كل المستندات", "")
         for k, lbl in sorted(de.LABELS.items(), key=lambda x: x[1]):
             self.kind.addItem(lbl, k)
-        self.late_only = QtWidgets.QCheckBox(
+        self.late_only = kit.CheckBox(
             f"المتأخّر فقط (بعد {de.LATE_DAYS} يوماً)")
         self.period.currentIndexChanged.connect(self._period_picked)
         for w in (self.kind,):
@@ -68,14 +70,14 @@ class DocEditsScreen(QtWidgets.QWidget):
         for d in (self.d_from, self.d_to):
             d.dateChanged.connect(self._date_typed)
 
-        btn_cmp = QtWidgets.QPushButton("🧾 القالب قبل / بعد")
+        btn_cmp = kit.PushButton("🧾 القالب قبل / بعد")
         btn_cmp.setObjectName("homeBtn")
         btn_cmp.setToolTip("المستند المحدَّد كما كان قبل التعديل وكما "
                            "صار بعده — أو نقرٌ مزدوج على السطر")
         btn_cmp.clicked.connect(lambda: self.open_compare())
-        btn_print = QtWidgets.QPushButton("🖨 طباعة السجل")
+        btn_print = kit.PushButton("🖨 طباعة السجل")
         btn_print.clicked.connect(self.print_report)
-        btn_copy = QtWidgets.QPushButton("📋 نسخ الخلاصة")
+        btn_copy = kit.PushButton("📋 نسخ الخلاصة")
         btn_copy.setObjectName("ghost")
         btn_copy.clicked.connect(self.copy_summary)
 

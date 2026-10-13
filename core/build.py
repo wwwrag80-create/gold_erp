@@ -237,6 +237,33 @@ def _splash_png():
         return None
 
 
+# ══ مكتبة الواجهات الحديثة (4.69) ══
+# QFluentWidgets تحمل أنماطها وأيقوناتها داخل وحدة موارد، وتستورد على
+# ويندوز وحدات pywin32 للنوافذ — فتُضمّ كلها صراحةً. وإن لم تكن مثبّتة
+# على جهاز البناء يُبنى الـexe بالواجهة الكلاسيكية مع تنبيهٍ واضح.
+FLUENT_PKGS = ("qfluentwidgets", "qframelesswindow", "darkdetect")
+FLUENT_WIN = ("win32api", "win32con", "win32gui", "pywintypes")
+
+
+def _fluent_args():
+    import importlib.util as _iu
+    if _iu.find_spec("qfluentwidgets") is None:
+        print("  [!] مكتبة QFluentWidgets غير مثبّتة — يُبنى بالواجهة "
+              "الكلاسيكية.\n      للواجهة الحديثة: "
+              "python -m pip install \"PyQt-Fluent-Widgets==1.11.3\"")
+        return []
+    out = []
+    for pkg in FLUENT_PKGS:
+        if _iu.find_spec(pkg) is not None:
+            out += ["--collect-all", pkg]
+    if sys.platform.startswith("win"):
+        for mod in FLUENT_WIN:
+            if _iu.find_spec(mod) is not None:
+                out += ["--hidden-import", mod]
+    print("  ✔ الواجهة الحديثة (QFluentWidgets) تُضمّ في الـexe")
+    return out
+
+
 def build_app(onefile=False, console=False):
     print("── بناء التطبيق الرئيسي ──")
     name = APP_NAME + ("_debug" if console else "")
@@ -263,6 +290,7 @@ def build_app(onefile=False, console=False):
     # ضمّ ملفات بيانات المكتبات (خطوط الباركود مثلاً) تحسّباً
     for pkg in ("barcode", "qrcode"):
         args += ["--collect-all", pkg]
+    args += _fluent_args()
     args.append(str(ROOT / "main.py"))
 
     # شاشة البدء تُجرَّب، وإن رفضتها أداة البناء (بيئةٌ بلا Tk مثلاً)

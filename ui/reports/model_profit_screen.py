@@ -13,6 +13,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import model_profit as mp
 from services import karat_view as kv
@@ -50,9 +52,9 @@ class ModelProfitScreen(QtWidgets.QWidget):
         self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(),
                                          1, 1))
         self.d_to = date_edit()
-        btn = QtWidgets.QPushButton("📊 إعداد التقرير")
+        btn = kit.PushButton("📊 إعداد التقرير")
         btn.clicked.connect(self.load)
-        btn_copy = QtWidgets.QPushButton("📋 نسخ الجدول")
+        btn_copy = kit.PushButton("📋 نسخ الجدول")
         btn_copy.setObjectName("ghost")
         btn_copy.clicked.connect(self.copy_table)
 

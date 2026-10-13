@@ -18,6 +18,8 @@ from datetime import date
 
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import statements
 from ui.reports.income_statement import PERIODS, money, period_range
@@ -34,7 +36,7 @@ class CashFlowScreen(QtWidgets.QWidget):
         self.cf = None
         self.rows = []
 
-        self.period = QtWidgets.QComboBox()
+        self.period = kit.ComboBox()
         for label, key in PERIODS:
             self.period.addItem(label, key)
         self.period.setCurrentIndex(3)
@@ -44,23 +46,23 @@ class CashFlowScreen(QtWidgets.QWidget):
         self.d_from.setDate(QtCore.QDate(today.year, 1, 1))
         self.d_to = date_edit()
         self.d_to.setDate(QtCore.QDate(today.year, 12, 31))
-        self.method = QtWidgets.QComboBox()
+        self.method = kit.ComboBox()
         self.method.addItem("الطريقة غير المباشرة", "indirect")
         self.method.addItem("الطريقة المباشرة", "direct")
         self.method.currentIndexChanged.connect(self._rerender)
-        self.cmp_on = QtWidgets.QCheckBox(
+        self.cmp_on = kit.CheckBox(
             "مقارنة بالفترة المماثلة من السنة السابقة")
         self.cmp_on.setChecked(True)
 
-        btn = QtWidgets.QPushButton("إعداد القائمة")
+        btn = kit.PushButton("إعداد القائمة")
         btn.setObjectName("homeBtn")
         btn.clicked.connect(self.load)
-        btn_print = QtWidgets.QPushButton("🖨 معاينة وطباعة")
+        btn_print = kit.PushButton("🖨 معاينة وطباعة")
         btn_print.clicked.connect(self.print_statement)
-        btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
+        btn_exp = kit.PushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
-        btn_mov = QtWidgets.QPushButton("🔎 حركة الصندوق والبنوك")
+        btn_mov = kit.PushButton("🔎 حركة الصندوق والبنوك")
         btn_mov.setToolTip("حسابات النقد وما في حكمه، ومن كلٍّ منها كشف"
                            " حركته في الفترة بأرقام السندات")
         btn_mov.clicked.connect(self.show_movement)

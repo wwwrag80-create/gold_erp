@@ -1,15 +1,22 @@
 # -*- coding: utf-8 -*-
 """سجل العمليات المركزي: بديل موحّد عن جداول (آخر العمليات/الفواتير)
 المتناثرة في كل شاشة — قائمة منسدلة لنوع المستند + بحث برقم المستند
-أو التاريخ، مع إمكانية الحذف المنطقي (للمحاسب) من مكان واحد."""
+أو التاريخ، مع إمكانية الحذف المنطقي (للمحاسب) من مكان واحد.
+
+**الجدول على نموذج بيانات (4.69)** — `ui.widgets.ledger_view`: سنةٌ من
+الفواتير تُعرض فوراً، والفرز بالقيمة، والتصفية الفورية داخل النتائج
+بلا رجوعٍ للقاعدة، وصفّ إجماليٍّ لما يظهر يتغيّر مع التصفية."""
 from PyQt5 import QtCore, QtWidgets
+
+from ui import kit
 
 from database.database import db
 from services import karat_view as kv
 from models import fixing, inventory, invoices, journal, melting, payroll
 from models import purchases, shrinkage, stocktake, tax_sales, vouchers
 from services.audit import soft_delete_entry
-from ui.widgets.common import (ask, date_edit, dstr, err, fill, info, make_table, title_label)
+from ui.widgets.common import ask, date_edit, dstr, err, info, title_label
+from ui.widgets.ledger_view import LedgerView
 
 
 def _inv_kind(r):
@@ -135,18 +142,26 @@ class TransactionLogScreen(QtWidgets.QWidget):
         super().__init__()
         self.user = user
 
-        self.doc_type = QtWidgets.QComboBox()
+        self.doc_type = kit.ComboBox()
         for key, label, *_ in DOC_TYPES:
             self.doc_type.addItem(label, key)
         self.doc_type.currentIndexChanged.connect(self.search)
-        self.q = QtWidgets.QLineEdit()
+        self.q = kit.LineEdit()
         self.q.setPlaceholderText("بحث برقم المستند أو اسم العميل...")
         self.q.returnPressed.connect(self.search)
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
         self.d_to = date_edit()
-        btn = QtWidgets.QPushButton("بحث")
+        btn = kit.PushButton("بحث")
         btn.clicked.connect(self.search)
+        # تصفيةٌ فورية داخل النتائج المعروضة — تطبيعٌ عربي ومجموعٌ حيّ
+        self.flt = kit.SearchLineEdit()
+        self.flt.setPlaceholderText("تصفية فورية داخل النتائج…")
+        self.flt.setClearButtonEnabled(True)
+        self.flt.setMaximumWidth(320)
+        self.flt.textChanged.connect(self._filter)
+        self.count = QtWidgets.QLabel("")
+        self.count.setObjectName("tableSearchCount")
 
         head = QtWidgets.QHBoxLayout()
         head.addWidget(QtWidgets.QLabel("نوع المستند:"))
@@ -158,8 +173,8 @@ class TransactionLogScreen(QtWidgets.QWidget):
         head.addWidget(self.d_to)
         head.addWidget(btn)
 
-        self.table = make_table()
-        self.btn_del = QtWidgets.QPushButton("حذف منطقي للعملية المحددة وعكس أثرها")
+        self.table = LedgerView()
+        self.btn_del = kit.PushButton("حذف منطقي للعملية المحددة وعكس أثرها")
         self.btn_del.setObjectName("danger")
         self.btn_del.clicked.connect(self.delete_selected)
         if user["role"] != "accountant":
@@ -168,6 +183,11 @@ class TransactionLogScreen(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("سجل العمليات — كل مستندات النظام من مكان واحد"))
         lay.addLayout(head)
+        sub = QtWidgets.QHBoxLayout()
+        sub.addWidget(self.flt)
+        sub.addWidget(self.count)
+        sub.addStretch(1)
+        lay.addLayout(sub)
         lay.addWidget(self.table, 1)
         lay.addWidget(self.btn_del)
 
@@ -187,18 +207,29 @@ class TransactionLogScreen(QtWidgets.QWidget):
                              dstr(self.d_to))
             data = [mapper(r) for r in rows]
             # عناوين الأعمدة بعيار المصنع («مكافئ 18» ← «مكافئ 21»)
-            fill(self.table, [kv.rename(c) for c in columns], data)
+            self.table.set_data([kv.rename(c) for c in columns], data)
+            self.table.set_filter(self.flt.text())
+            self._show_count()
         except Exception as e:
             err(self, e)
 
+    def _filter(self, text):
+        self.table.set_filter(text)
+        self._show_count()
+
+    def _show_count(self):
+        n, total = self.table.shown_count(), len(self.table.source.rows)
+        self.count.setText(f"{n:,} من {total:,}" if n != total
+                           else f"{total:,} مستند")
+
     def delete_selected(self):
-        r = self.table.currentRow()
-        if r < 0:
+        # رقم القيد **آخر قيمةٍ في الصفّ** لا آخر عمودٍ ظاهر: قيود اليومية
+        # تحمل رقمها خلف عمود «المستخدم»، فكان الحذف يقرأ اسم المستخدم
+        vals = self.table.current_values()
+        if not vals:
             return
-        entry_col = self.table.columnCount() - 1
-        item = self.table.item(r, entry_col)
-        entry_id = item.text() if item else ""
-        if not entry_id:
+        entry_id = str(vals[-1] if vals[-1] is not None else "").strip()
+        if not entry_id or not entry_id.isdigit():
             return
         if not ask(self, f"حذف منطقي للقيد رقم {entry_id} وعكس آثاره بالكامل؟"):
             return

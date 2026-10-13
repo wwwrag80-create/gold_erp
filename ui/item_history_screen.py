@@ -7,6 +7,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import inventory
@@ -49,7 +51,7 @@ class TurnoverPanel(QtWidgets.QFrame):
         bl.addWidget(self.sub)
         lay.addWidget(box)
 
-        self.toggle = QtWidgets.QPushButton("إخفاء الجدول")
+        self.toggle = kit.PushButton("إخفاء الجدول")
         self.toggle.setObjectName("ghost")
         self.toggle.clicked.connect(self._toggle)
         lay.addWidget(self.toggle)
@@ -83,10 +85,10 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         super().__init__()
         self.user = user
 
-        self.search = QtWidgets.QLineEdit()
+        self.search = kit.LineEdit()
         self.search.setPlaceholderText("أدخل رقم التشغيل (مثال: 1)…")
         self.search.returnPressed.connect(self.load)
-        btn = QtWidgets.QPushButton("بحث")
+        btn = kit.PushButton("بحث")
         btn.clicked.connect(self.load)
 
         top = QtWidgets.QHBoxLayout()
@@ -107,9 +109,9 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate.currentDate().addYears(-1))
         self.d_to = date_edit()
-        btn_run = QtWidgets.QPushButton("تحديث اللوحات")
+        btn_run = kit.PushButton("تحديث اللوحات")
         btn_run.clicked.connect(self.load_turnover)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة تقرير الدوران")
+        btn_print = kit.PushButton("🖨 طباعة تقرير الدوران")
         btn_print.clicked.connect(self.print_turnover)
         filt = QtWidgets.QHBoxLayout()
         filt.addWidget(QtWidgets.QLabel("من:"))

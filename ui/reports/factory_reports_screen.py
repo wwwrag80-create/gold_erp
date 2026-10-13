@@ -6,6 +6,8 @@
 """
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from ui.reports.income_statement import IncomeStatementScreen
 from ui.reports.khazina_report_screen import KhazinaReportScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
@@ -34,7 +36,7 @@ class FactoryReportsScreen(QtWidgets.QWidget):
         self.buttons = []
         btn_row = QtWidgets.QHBoxLayout()
         for label, idx in options:
-            b = QtWidgets.QPushButton(label)
+            b = kit.PushButton(label)
             b.setObjectName("reportTab")
             b.setCheckable(True)
             b.clicked.connect(lambda _, i=idx: self.select(i))

@@ -7,6 +7,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import aging, entities
 from services import karat_view as kv
@@ -25,13 +27,13 @@ class AgingScreen(QtWidgets.QWidget):
         self.user = user
         self.rows = []
 
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.setMaximumWidth(140)
         for label, val in TYPES:
             self.kind.addItem(label, val)
         self.kind.currentIndexChanged.connect(self.refresh)
         self.as_of = date_edit()
-        self.dim = QtWidgets.QComboBox()
+        self.dim = kit.ComboBox()
         self.dim.setMaximumWidth(150)
         # النقد أولاً: أربعة عشر عموداً في شاشة واحدة لا تُقرأ، وسؤال
         # «كم تأخّر علينا؟» نقديٌّ في الغالب. والبعدان متاحان لمن أراد.
@@ -45,18 +47,18 @@ class AgingScreen(QtWidgets.QWidget):
         # مع جهةٍ بعينها أو مجموعة. النافذة أنسب من قائمة منسدلة لأن
         # الجهات قد تبلغ المئات، وفيها بحثٌ بالاسم.
         self.selected = []                  # فارغة = كل الجهات
-        self.btn_names = QtWidgets.QPushButton("الجهات: كل الجهات ▾")
+        self.btn_names = kit.PushButton("الجهات: كل الجهات ▾")
         self.btn_names.setMinimumWidth(220)
         self.btn_names.setToolTip(
             "اختر جهةً أو أكثر ليقتصر الجدول عليها — والفراغ يعني الكل")
         self.btn_names.clicked.connect(self.pick_names)
-        btn_clear = QtWidgets.QPushButton("مسح التحديد")
+        btn_clear = kit.PushButton("مسح التحديد")
         btn_clear.setObjectName("ghost")
         btn_clear.setToolTip("يعيد عرض كل الجهات")
         btn_clear.clicked.connect(self.clear_names)
-        btn = QtWidgets.QPushButton("عرض")
+        btn = kit.PushButton("عرض")
         btn.clicked.connect(self.refresh)
-        btn_print = QtWidgets.QPushButton("👁 معاينة وطباعة")
+        btn_print = kit.PushButton("👁 معاينة وطباعة")
         btn_print.clicked.connect(self.print_report)
 
         head = QtWidgets.QHBoxLayout()
@@ -129,7 +131,7 @@ class AgingScreen(QtWidgets.QWidget):
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle("اختيار الجهات")
             dlg.setMinimumSize(420, 480)
-            search = QtWidgets.QLineEdit()
+            search = kit.LineEdit()
             search.setPlaceholderText("اكتب أول حروف الاسم للتصفية…")
             lst = QtWidgets.QListWidget()
             chosen = set(self.selected)
@@ -155,10 +157,10 @@ class AgingScreen(QtWidgets.QWidget):
                     if not lst.item(i).isHidden():
                         lst.item(i).setCheckState(state)
 
-            btn_all = QtWidgets.QPushButton("تحديد الظاهر")
+            btn_all = kit.PushButton("تحديد الظاهر")
             btn_all.setObjectName("ghost")
             btn_all.clicked.connect(lambda: _set_all(QtCore.Qt.Checked))
-            btn_none = QtWidgets.QPushButton("إلغاء التحديد")
+            btn_none = kit.PushButton("إلغاء التحديد")
             btn_none.setObjectName("ghost")
             btn_none.clicked.connect(lambda: _set_all(QtCore.Qt.Unchecked))
             box = QtWidgets.QDialogButtonBox(

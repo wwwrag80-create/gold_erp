@@ -10,6 +10,8 @@ from pathlib import Path
 
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
@@ -38,22 +40,22 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
         # المدة تُختار باسمها فتُحسب تواريخها وتتحدّث الأرصدة فوراً (4.49)
         from models import dash_panels as _dp
         self._dp = _dp
-        self.period = QtWidgets.QComboBox()
+        self.period = kit.ComboBox()
         for k, lbl in _dp.PERIODS:
             self.period.addItem(lbl, k)
         self.period.setCurrentIndex(self.period.findData("year"))
         self.period.currentIndexChanged.connect(self._period_picked)
 
-        btn_add = QtWidgets.QPushButton("➕ إضافة الحساب للمقارنة")
+        btn_add = kit.PushButton("➕ إضافة الحساب للمقارنة")
         btn_add.setObjectName("homeBtn")
         btn_add.clicked.connect(self.add_account)
-        btn_del = QtWidgets.QPushButton("🗑 حذف السطر")
+        btn_del = kit.PushButton("🗑 حذف السطر")
         btn_del.clicked.connect(self.remove_row)
-        btn_clear = QtWidgets.QPushButton("↺ تفريغ الجدول")
+        btn_clear = kit.PushButton("↺ تفريغ الجدول")
         btn_clear.clicked.connect(self.clear_all)
-        btn_reload = QtWidgets.QPushButton("↻ تحديث الأرصدة")
+        btn_reload = kit.PushButton("↻ تحديث الأرصدة")
         btn_reload.clicked.connect(self.reload_all)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة المقارنة")
+        btn_print = kit.PushButton("🖨 طباعة المقارنة")
         btn_print.clicked.connect(self.print_cmp)
 
         head = QtWidgets.QHBoxLayout()

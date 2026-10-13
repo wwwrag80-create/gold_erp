@@ -6,6 +6,8 @@ import json
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from pathlib import Path
 
 import config
@@ -281,7 +283,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # مهما اختير — وهذا ما يجعل الأرصدة قابلة للجمع والمقارنة.
         lbl_karat = QtWidgets.QLabel("العيار:")
         lbl_karat.setObjectName("headerUser")
-        self.karat_box = QtWidgets.QComboBox()
+        self.karat_box = kit.ComboBox()
         self.karat_box.setObjectName("karatBox")
         self.karat_box.setFixedWidth(96)
         self.karat_box.setToolTip(
@@ -304,7 +306,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # الموحّد وإعادة ترتيب القائمة. الشريط أداةٌ لا لوحة أزرار،
         # وكل زرٍّ يُضاف إليه يُضيّق ما قبله.
         btn_view = self._view_menu_button()
-        btn_update = QtWidgets.QPushButton("⬆ تحديث")
+        btn_update = kit.PushButton("⬆ تحديث")
         btn_update.setToolTip(
             "تحقّق من التحديثات عبر الإنترنت، أو ثبّت حزمة محفوظة")
         btn_update.clicked.connect(self.do_update)
@@ -369,7 +371,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # الرئيسية ثم دخولٍ من جديد. ومن شاشةٍ فُتحت من القائمة يعود
         # إلى الرئيسية.
         self._history = []
-        self.btn_close = QtWidgets.QPushButton("→  رجوع")
+        self.btn_close = kit.PushButton("→  رجوع")
         self.btn_close.setObjectName("closeBtn")
         self.btn_close.clicked.connect(self._close_screen)
         for _seq in ("Alt+Left", "Alt+Right"):
@@ -1492,6 +1494,18 @@ class MainWindow(QtWidgets.QMainWindow):
         a_fx.setCheckable(True)
         a_fx.setChecked(_fx.enabled())
         a_fx.toggled.connect(self._set_effects)
+        # ══ مكتبة الواجهات الحديثة (4.69) ══
+        # تُختار المكوّنات مرةً عند الإقلاع، فالتبديل يُطبّق في التشغيل
+        # التالي. ونسخة EXE بُنيت قبل المكتبة تعرض الخيار وتقول ما ينقصها.
+        from ui import kit as _kit
+        a_kit = menu.addAction(
+            "🧩 الواجهة الحديثة (QFluentWidgets)" if _kit.ACTIVE
+            or not _kit.preferred()
+            else "🧩 الواجهة الحديثة — تحتاج بناء EXE جديداً")
+        a_kit.setCheckable(True)
+        a_kit.setChecked(_kit.preferred())
+        a_kit.setToolTip(_kit.REASON or "مفعّلة")
+        a_kit.toggled.connect(self._set_fluent)
         from ui.widgets import declutter as _dc
         a_notes = menu.addAction("📝 إظهار العناوين والملاحظات التوضيحية")
         a_notes.setCheckable(True)
@@ -1743,6 +1757,20 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             err(self, e)
 
+    def _set_fluent(self, on):
+        from ui import kit as _kit
+        if not _kit.set_preferred(bool(on)):
+            err(self, "تعذّر حفظ الاختيار في مجلد البيانات")
+            return
+        if bool(on) and not _kit.ACTIVE and "غير مثبّتة" in _kit.REASON:
+            info(self, "حُفظ الاختيار، لكن مكتبة QFluentWidgets غير موجودة "
+                       "في هذه النسخة.\n\nتُضاف ببناء EXE جديد (MAKE_EXE.bat) "
+                       "أو بتثبيتها: pip install -r requirements.txt",
+                 "الواجهة الحديثة")
+            return
+        info(self, ("تُفتح الواجهة الحديثة" if on else "تُفتح الواجهة الكلاسيكية")
+             + " عند تشغيل البرنامج في المرة القادمة.", "الواجهة الحديثة")
+
     def _set_effects(self, on):
         try:
             from ui.widgets import effects as _fx
@@ -1796,12 +1824,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def export_table(self):
         """Ctrl+Shift+E: يصدّر الجدول المعروض إلى Excel."""
         v = self._table_target()
+        name = self.crumb.text() if hasattr(self, "crumb") else "جدول"
+        if hasattr(v, "rows_matrix") and hasattr(v, "export_csv"):
+            v.export_csv(self, name)          # جدول النموذج (4.69)
+            return
         if not isinstance(v, QtWidgets.QTableWidget):
             self.toast("لا جدول في هذه الشاشة يُصدَّر")
             return
         try:
             from ui.widgets.table_tools import export_csv
-            name = self.crumb.text() if hasattr(self, "crumb") else "جدول"
             export_csv(self, v, name)
         except Exception as e:
             err(self, e)
@@ -1822,7 +1853,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("الاختصارات والخصائص")
         dlg.setMinimumWidth(560)
-        t = QtWidgets.QTableWidget(len(self.SHORTCUTS), 2)
+        t = kit.TableWidget(len(self.SHORTCUTS), 2)
         t.setHorizontalHeaderLabels(["الاختصار", "ما يفعله"])
         t.verticalHeader().setVisible(False)
         t.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -1879,7 +1910,7 @@ class MainWindow(QtWidgets.QMainWindow):
             sb.addWidget(self._sb_fac)
             sb.addWidget(self._sb_ver)
             # حالة الربط مع الهيئة — ظاهرةٌ في الرئيسية، والنقر يفتحها
-            self._sb_zatca = QtWidgets.QPushButton("🧾 …")
+            self._sb_zatca = kit.PushButton("🧾 …")
             self._sb_zatca.setObjectName("statusLink")
             self._sb_zatca.setFlat(True)
             self._sb_zatca.setCursor(QtCore.Qt.PointingHandCursor)

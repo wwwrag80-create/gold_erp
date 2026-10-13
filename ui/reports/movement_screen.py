@@ -16,6 +16,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import entities, movement
 from models.accounts import list_postable
@@ -38,14 +40,14 @@ class MovementScreen(QtWidgets.QWidget):
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-1))
         self.d_to = date_edit()
-        self.dim = QtWidgets.QComboBox()
+        self.dim = kit.ComboBox()
         self.dim.setMaximumWidth(120)
         self.dim.addItem("الذهب", "gold")
         self.dim.addItem("النقد", "cash")
         self.dim.currentIndexChanged.connect(self._render)
-        btn = QtWidgets.QPushButton("📊 تحليل الفترة")
+        btn = kit.PushButton("📊 تحليل الفترة")
         btn.clicked.connect(self.load)
-        btn_copy = QtWidgets.QPushButton("📋 نسخ الخلاصة")
+        btn_copy = kit.PushButton("📋 نسخ الخلاصة")
         btn_copy.setObjectName("ghost")
         btn_copy.clicked.connect(self.copy_summary)
 

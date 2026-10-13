@@ -4,6 +4,8 @@ from datetime import datetime
 
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import editing, shrinkage
@@ -22,10 +24,10 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
         self.tazeena = big_label()
         self.weight = wspin()
         self.date = date_edit()
-        self.period = QtWidgets.QLineEdit(datetime.now().strftime("%Y-%m"))
+        self.period = kit.LineEdit(datetime.now().strftime("%Y-%m"))
         self.period.setMaximumWidth(140)
-        self.notes = QtWidgets.QLineEdit()
-        btn_save = QtWidgets.QPushButton("ترحيل قيد تسوية الفاقد")
+        self.notes = kit.LineEdit()
+        btn_save = kit.PushButton("ترحيل قيد تسوية الفاقد")
         btn_save.clicked.connect(self.save)
         self.init_edit_mode(btn_save, "تسوية الفاقد")
 

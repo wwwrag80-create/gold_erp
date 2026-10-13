@@ -4,6 +4,8 @@
 على الاسم يمنع تكرار الحسابات (توحيد الهمزات والتاء المربوطة)."""
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import entities
@@ -39,12 +41,12 @@ class EntitiesScreen(QtWidgets.QWidget):
         super().__init__()
         self.user = user
 
-        self.etype = QtWidgets.QComboBox()
+        self.etype = kit.ComboBox()
         for label, val in TYPE_ITEMS:
             self.etype.addItem(label, val)
         self.etype.currentIndexChanged.connect(self._type_changed)
 
-        self.name = QtWidgets.QLineEdit()
+        self.name = kit.LineEdit()
         self.name.setPlaceholderText("اكتب الاسم — ستظهر الأسماء المشابهة تلقائياً")
         self.name.textChanged.connect(self._check_similar)
         self.completer_model = QtCore.QStringListModel()
@@ -56,15 +58,15 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.similar.setObjectName("warn")
         self.similar.setWordWrap(True)
 
-        self.phone = QtWidgets.QLineEdit()
-        self.address = QtWidgets.QLineEdit()
-        self.vat = QtWidgets.QLineEdit()
+        self.phone = kit.LineEdit()
+        self.address = kit.LineEdit()
+        self.vat = kit.LineEdit()
         self.share = mspin(maximum=100.0)
-        self.job_title = QtWidgets.QLineEdit()
+        self.job_title = kit.LineEdit()
         self.salary = mspin()
         self.open_cash = mspin(minimum=-1_000_000_000.0)
         self.open_gold = wspin()
-        self.gold_sign = QtWidgets.QComboBox()
+        self.gold_sign = kit.ComboBox()
         self.gold_sign.addItem("مدين (عليه ذهب لنا)", 1)
         self.gold_sign.addItem("دائن (له ذهب علينا)", -1)
         self.open_date = date_edit()
@@ -106,7 +108,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         n.setWordWrap(True)
         of.addRow(n)
 
-        btn_save = QtWidgets.QPushButton("حفظ واعتماد (إنشاء الحساب + القيد الافتتاحي)")
+        btn_save = kit.PushButton("حفظ واعتماد (إنشاء الحساب + القيد الافتتاحي)")
         btn_save.clicked.connect(self.save)
 
         add_box = QtWidgets.QGroupBox("إضافة جهة تعامل جديدة")
@@ -130,25 +132,25 @@ class EntitiesScreen(QtWidgets.QWidget):
         # الرقابية في الشجرة ورصيدَيها بطبيعتهما (مدين/دائن)، مجمّعةً
         # بنوعها ولكل نوعٍ مجموعه — فيُطابَق مجموعُ كل نوعٍ رصيدَ
         # مجموعته في ميزان المراجعة.
-        self.f_type = QtWidgets.QComboBox()
+        self.f_type = kit.ComboBox()
         self.f_type.addItem("كل الأنواع", None)
         for label, val in TYPE_ITEMS:
             self.f_type.addItem(label, val)
         self.f_type.addItem("حساب داخلي", "internal")
         self.f_type.currentIndexChanged.connect(self.refresh)
-        self.f_search = QtWidgets.QLineEdit()
+        self.f_search = kit.LineEdit()
         self.f_search.setPlaceholderText("بحث بالاسم أو الهاتف أو الرقم"
                                          " الضريبي…")
         self.f_search.textChanged.connect(self.refresh)
-        btn_edit = QtWidgets.QPushButton("✎ تعديل الجهة / نقل نوعها")
+        btn_edit = kit.PushButton("✎ تعديل الجهة / نقل نوعها")
         btn_edit.setObjectName("homeBtn")
         btn_edit.clicked.connect(self.edit_selected)
-        btn_stmt = QtWidgets.QPushButton("📄 كشف حساب الجهة")
+        btn_stmt = kit.PushButton("📄 كشف حساب الجهة")
         btn_stmt.clicked.connect(self.statement_selected)
-        btn_refresh = QtWidgets.QPushButton("تحديث الأرصدة")
+        btn_refresh = kit.PushButton("تحديث الأرصدة")
         btn_refresh.setObjectName("ghost")
         btn_refresh.clicked.connect(self.refresh)
-        btn_del = QtWidgets.QPushButton("حذف الجهة المحددة (بلا حركات فقط)")
+        btn_del = kit.PushButton("حذف الجهة المحددة (بلا حركات فقط)")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_selected)
         frow = QtWidgets.QHBoxLayout()
@@ -208,7 +210,7 @@ class EntitiesScreen(QtWidgets.QWidget):
             f"سقف وزني ({kv.unit()}):")
         self.lbl_credit_who = QtWidgets.QLabel("— لم تُحدَّد جهة —")
         self.lbl_credit_who.setObjectName("big")
-        btn = QtWidgets.QPushButton("حفظ سقف الجهة المحددة")
+        btn = kit.PushButton("حفظ سقف الجهة المحددة")
         btn.clicked.connect(self.save_limit)
 
         self.agreed_wage = mspin()
@@ -220,10 +222,10 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.lbl_agreed_hist.setObjectName("cardSub")
         self.lbl_agreed_hist.setProperty("live", True)
         self.lbl_agreed_hist.setWordWrap(True)
-        btn_wage = QtWidgets.QPushButton("حفظ الأجرة المتفق عليها")
+        btn_wage = kit.PushButton("حفظ الأجرة المتفق عليها")
         btn_wage.clicked.connect(self.save_agreed_wage)
 
-        self.guard_mode = QtWidgets.QComboBox()
+        self.guard_mode = kit.ComboBox()
         for label, val in (("تنبيه فقط (الافتراضي)", "warn"),
                            ("منع الترحيل عند التجاوز", "block"),
                            ("بلا فحص", "off")):
@@ -609,15 +611,15 @@ class EntityEditDialog(QtWidgets.QDialog):
         self.setLayoutDirection(QtCore.Qt.RightToLeft)
         self.setMinimumWidth(520)
         t = e["entity_type"]
-        self.type = QtWidgets.QComboBox()
+        self.type = kit.ComboBox()
         for tt in entities.allowed_types(t):
             self.type.addItem(entities.TYPE_LABELS[tt], tt)
         self.type.setCurrentIndex(max(0, self.type.findData(t)))
-        self.name = QtWidgets.QLineEdit(e["name"])
-        self.phone = QtWidgets.QLineEdit(e["phone"] or "")
-        self.address = QtWidgets.QLineEdit(e["address"] or "")
-        self.vat = QtWidgets.QLineEdit(e["vat_number"] or "")
-        self.job = QtWidgets.QLineEdit(e["job_title"] or "")
+        self.name = kit.LineEdit(e["name"])
+        self.phone = kit.LineEdit(e["phone"] or "")
+        self.address = kit.LineEdit(e["address"] or "")
+        self.vat = kit.LineEdit(e["vat_number"] or "")
+        self.job = kit.LineEdit(e["job_title"] or "")
         self.salary = mspin()
         self.salary.setValue(float(e["basic_salary"] or 0))
         self.share = mspin(maximum=100.0)
@@ -629,7 +631,7 @@ class EntityEditDialog(QtWidgets.QDialog):
         if t in entities.TRADE_TYPES:
             f.addRow("العنوان:", self.address)
             f.addRow("الرقم الضريبي:", self.vat)
-        self.direct = QtWidgets.QCheckBox(
+        self.direct = kit.CheckBox(
             "يُصرف له مباشرةً بلا مسير رواتب — كل سند صرفٍ له يُحمَّل"
             " أجراً (مصروفات العمال / رواتب الإدارة)")
         try:

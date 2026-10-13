@@ -13,6 +13,8 @@ from pathlib import Path
 
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 CONFIG_FILE = "dashboard_cards.json"
 
 # القيم الافتراضية للبطاقة (بوحدات الشبكة والبكسل)
@@ -75,14 +77,14 @@ class ComboCardDialog(QtWidgets.QDialog):
         self.setMinimumWidth(520)
         self.accounts = accounts
 
-        self.title = QtWidgets.QLineEdit()
+        self.title = kit.LineEdit()
         self.title.setPlaceholderText("اسم اللوحة — مثل: نسبة التوزيع")
         self.combos = []
         form = QtWidgets.QFormLayout()
         form.addRow("اسم اللوحة:", self.title)
         for i, lbl in enumerate(("الحساب الأول:", "الحساب الثاني:",
                                  "الحساب الثالث:")):
-            cb = QtWidgets.QComboBox()
+            cb = kit.ComboBox()
             cb.setEditable(True)
             cb.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
             for a in accounts:
@@ -90,7 +92,7 @@ class ComboCardDialog(QtWidgets.QDialog):
             self.combos.append(cb)
             form.addRow(lbl, cb)
 
-        self.mode = QtWidgets.QComboBox()
+        self.mode = kit.ComboBox()
         self.mode.addItem("الذهب (جم)", "gold")
         self.mode.addItem("النقد (ريال)", "cash")
         form.addRow("البعد المعروض:", self.mode)
@@ -174,7 +176,7 @@ class CardSettingsDialog(QtWidgets.QDialog):
         # العرض بأنصاف الأعمدة: نصف · 1 · 1.5 · 2 … حتى 4
         # يُخزَّن مضاعفاً بـ2 (نصف = 1، عمود = 2) فالشبكة تعمل
         # بأعمدة صحيحة مضاعفة.
-        self.span = QtWidgets.QDoubleSpinBox()
+        self.span = kit.DoubleSpinBox()
         self.span.setRange(0.5, 4.0)
         self.span.setSingleStep(0.5)
         self.span.setDecimals(1)
@@ -182,17 +184,17 @@ class CardSettingsDialog(QtWidgets.QDialog):
         self.span.setToolTip(
             "عرض البطاقة: 0.5 = نصف عمود · 1 = عمود · 2 = عمودان")
         self.span.valueChanged.connect(self._apply_size)
-        self.height = QtWidgets.QSpinBox()
+        self.height = kit.SpinBox()
         self.height.setRange(0, 400)
         self.height.setSingleStep(10)
         self.height.setSuffix("  بكسل")
         self.height.setSpecialValueText("تلقائي")
         self.height.setToolTip("ارتفاع البطاقة — صفر يعني التلقائي")
         self.height.valueChanged.connect(self._apply_size)
-        self.visible = QtWidgets.QCheckBox("إظهار البطاقة")
+        self.visible = kit.CheckBox("إظهار البطاقة")
         self.visible.stateChanged.connect(self._apply_visible)
 
-        self.columns = QtWidgets.QSpinBox()
+        self.columns = kit.SpinBox()
         self.columns.setRange(2, 6)
         self.columns.setValue(self.cfg["columns"])
         self.columns.setSuffix("  بكل صف")
@@ -204,16 +206,16 @@ class CardSettingsDialog(QtWidgets.QDialog):
         form.addRow("أعمدة الشبكة:", self.columns)
 
         # ── إضافة حساب ──
-        self.acc = QtWidgets.QComboBox()
+        self.acc = kit.ComboBox()
         self.acc.setEditable(True)
         self.acc.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         for a in accounts:
             self.acc.addItem(f"{a['code']} — {a['name']}", a["code"])
-        btn_add = QtWidgets.QPushButton("➕ إضافة بطاقة لهذا الحساب")
+        btn_add = kit.PushButton("➕ إضافة بطاقة لهذا الحساب")
         btn_add.clicked.connect(self._add_custom)
-        btn_del = QtWidgets.QPushButton("🗑 حذف البطاقة")
+        btn_del = kit.PushButton("🗑 حذف البطاقة")
         btn_del.clicked.connect(self._del_custom)
-        btn_combo = QtWidgets.QPushButton("➕ لوحة مركّبة (3 حسابات)")
+        btn_combo = kit.PushButton("➕ لوحة مركّبة (3 حسابات)")
         btn_combo.setToolTip("اسم + ثلاثة حسابات + نسبتان محسوبتان")
         btn_combo.clicked.connect(self._add_combo)
 
@@ -229,7 +231,7 @@ class CardSettingsDialog(QtWidgets.QDialog):
         note.setObjectName("cardSub")
         note.setWordWrap(True)
 
-        btn_reset = QtWidgets.QPushButton("↺ الترتيب الافتراضي")
+        btn_reset = kit.PushButton("↺ الترتيب الافتراضي")
         btn_reset.clicked.connect(self._reset)
         box = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Save

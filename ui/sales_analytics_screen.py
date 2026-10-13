@@ -8,6 +8,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import entities, sales_analytics as sa
 from services import gold_math
@@ -46,7 +48,7 @@ class PanelColumn(QtWidgets.QFrame):
         bl.addWidget(self.value)
         lay.addWidget(box)
 
-        self.toggle = QtWidgets.QPushButton("إخفاء الجدول")
+        self.toggle = kit.PushButton("إخفاء الجدول")
         self.toggle.setObjectName("ghost")
         self.toggle.clicked.connect(self._toggle)
         lay.addWidget(self.toggle)
@@ -101,7 +103,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         # التشغيل وأوزانها كما كان · تقرير — اللوحات وحدها بالمعادلة:
         # المصروف − المرتجع = المباع الفعلي، بلا أرقام تشغيل
         self.mode = "detail"
-        btn_run = QtWidgets.QPushButton("تحديث اللوحات ▾")
+        btn_run = kit.PushButton("تحديث اللوحات ▾")
         menu = QtWidgets.QMenu(btn_run)
         menu.addAction("تفصيلي — اللوحات وأرقام التشغيل والأوزان",
                        lambda: self.run_mode("detail"))
@@ -109,7 +111,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                        lambda: self.run_mode("report"))
         btn_run.setMenu(menu)
         self.btn_run = btn_run
-        btn_print = QtWidgets.QPushButton("🖨 طباعة تقرير العميل")
+        btn_print = kit.PushButton("🖨 طباعة تقرير العميل")
         btn_print.clicked.connect(self.print_report)
 
         filt = QtWidgets.QHBoxLayout()

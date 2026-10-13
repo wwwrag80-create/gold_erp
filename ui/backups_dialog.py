@@ -11,6 +11,8 @@ import sys
 
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from services import storage
 from ui.widgets.common import ask, err, fill, info, make_table
 from ui.widgets.table_fit import fit_columns
@@ -40,16 +42,16 @@ class BackupsDialog(QtWidgets.QDialog):
         lay.addWidget(self.table, 1)
 
         row = QtWidgets.QHBoxLayout()
-        self.btn_now = QtWidgets.QPushButton("💾 نسخة الآن")
+        self.btn_now = kit.PushButton("💾 نسخة الآن")
         self.btn_now.setObjectName("primary")
         self.btn_now.setMinimumHeight(40)
         self.btn_now.clicked.connect(self.backup_now)
-        self.btn_restore = QtWidgets.QPushButton("♻ استرجاع النسخة المحددة")
+        self.btn_restore = kit.PushButton("♻ استرجاع النسخة المحددة")
         self.btn_restore.setMinimumHeight(40)
         self.btn_restore.clicked.connect(self.restore)
-        self.btn_folder = QtWidgets.QPushButton("📂 فتح مجلد النسخ")
+        self.btn_folder = kit.PushButton("📂 فتح مجلد النسخ")
         self.btn_folder.clicked.connect(self.open_folder)
-        self.btn_close = QtWidgets.QPushButton("إغلاق")
+        self.btn_close = kit.PushButton("إغلاق")
         self.btn_close.clicked.connect(self.reject)
         row.addWidget(self.btn_now)
         row.addWidget(self.btn_restore)

@@ -7,6 +7,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import reconciliation
 from ui.widgets.common import (big_label, bulk_rows, err, make_table,
@@ -23,7 +25,7 @@ class ReconciliationScreen(QtWidgets.QWidget):
         self.on_open_entry = on_open_entry
         self.issues = []
 
-        btn = QtWidgets.QPushButton("🔍 تشغيل التدقيق الآلي الشامل")
+        btn = kit.PushButton("🔍 تشغيل التدقيق الآلي الشامل")
         btn.setObjectName("homeBtn")
         btn.clicked.connect(self.run)
 
@@ -84,8 +86,7 @@ class ReconciliationScreen(QtWidgets.QWidget):
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     self.table.setItem(i, c, it)
                 if issue.get("entry_id") and self.on_open_entry:
-                    b = QtWidgets.QPushButton("فتح القيد")
-                    b.setObjectName("ghost")
+                    b = kit.CellButton("فتح القيد")
                     b.clicked.connect(
                         lambda _, e=issue["entry_id"]: self.on_open_entry(e))
                     self.table.setCellWidget(i, len(COLS) - 1, b)

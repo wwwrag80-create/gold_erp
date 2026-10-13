@@ -16,6 +16,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import bank_recon as br
 from ui.widgets.common import (Card, big_label, bulk_rows, busy, date_edit,
@@ -32,7 +34,7 @@ class BankReconScreen(QtWidgets.QWidget):
         self.user = user
         self.rows = []
 
-        self.acc = QtWidgets.QComboBox()
+        self.acc = kit.ComboBox()
         self.acc.setMinimumWidth(240)
         self.acc.currentIndexChanged.connect(self.load)
         self.d_from = date_edit()
@@ -44,20 +46,20 @@ class BankReconScreen(QtWidgets.QWidget):
             "اتركه صفراً إن أردت المطابقة بلا مقارنة رصيد.")
         self.stmt.valueChanged.connect(self._recompute)
 
-        btn = QtWidgets.QPushButton("📄 عرض الحركات")
+        btn = kit.PushButton("📄 عرض الحركات")
         btn.clicked.connect(self.load)
-        btn_all = QtWidgets.QPushButton("✓ تعليم المعروض")
+        btn_all = kit.PushButton("✓ تعليم المعروض")
         btn_all.setObjectName("ghost")
         btn_all.setToolTip("يضع علامة المطابقة على كل الحركات المعروضة")
         btn_all.clicked.connect(lambda: self._mark_all(True))
-        btn_none = QtWidgets.QPushButton("✗ رفع التعليم")
+        btn_none = kit.PushButton("✗ رفع التعليم")
         btn_none.setObjectName("ghost")
         btn_none.clicked.connect(lambda: self._mark_all(False))
-        btn_save = QtWidgets.QPushButton("💾 حفظ المطابقة")
+        btn_save = kit.PushButton("💾 حفظ المطابقة")
         btn_save.setToolTip(
             "يحفظ علامات المطابقة — لا يُنشئ قيداً ولا يمسّ رقماً")
         btn_save.clicked.connect(self.save)
-        btn_print = QtWidgets.QPushButton("🖨 كشف المطابقة")
+        btn_print = kit.PushButton("🖨 كشف المطابقة")
         btn_print.setObjectName("ghost")
         btn_print.clicked.connect(self.print_statement)
 

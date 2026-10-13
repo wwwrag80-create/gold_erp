@@ -15,6 +15,8 @@ import calendar
 
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import payroll
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
@@ -33,20 +35,20 @@ class PayrollRunScreen(QtWidgets.QWidget):
         self.rows = []
 
         today = QtCore.QDate.currentDate()
-        self.month = QtWidgets.QComboBox()
+        self.month = kit.ComboBox()
         for i, m in enumerate(MONTHS, 1):
             self.month.addItem(m, i)
         self.month.setCurrentIndex(today.month() - 1)
-        self.year = QtWidgets.QSpinBox()
+        self.year = kit.SpinBox()
         self.year.setRange(2000, 2100)
         self.year.setValue(today.year())
         self.month.currentIndexChanged.connect(self.load)
         self.year.valueChanged.connect(self.load)
 
         self.date = date_edit()
-        btn_load = QtWidgets.QPushButton("↻ جلب الموظفين والرواتب")
+        btn_load = kit.PushButton("↻ جلب الموظفين والرواتب")
         btn_load.clicked.connect(self.load)
-        self.btn_post = QtWidgets.QPushButton("💾 حفظ وترحيل الرواتب")
+        self.btn_post = kit.PushButton("💾 حفظ وترحيل الرواتب")
         self.btn_post.setObjectName("homeBtn")
         self.btn_post.clicked.connect(self.post)
 

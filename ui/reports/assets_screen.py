@@ -18,6 +18,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import assets as fa
 from ui.widgets.common import (Card, ask, big_label, busy, date_edit, dstr,
@@ -37,22 +39,22 @@ class AssetsScreen(QtWidgets.QWidget):
         self.rows = []
 
         # ── تسجيل أصل ──
-        self.name = QtWidgets.QLineEdit()
+        self.name = kit.LineEdit()
         self.name.setPlaceholderText("اسم الأصل — مكينة ليزر، سيارة توصيل…")
-        self.acc = QtWidgets.QComboBox()
+        self.acc = kit.ComboBox()
         self.acc.setMinimumWidth(210)
         self.cost = mspin()
         self.salvage = mspin()
         self.salvage.setToolTip(
             "القيمة المتوقَّعة عند نهاية عمره — تُطرح من التكلفة قبل "
             "القسمة. اتركها صفراً إن كان يُخرَّد بلا قيمة.")
-        self.life = QtWidgets.QSpinBox()
+        self.life = kit.SpinBox()
         self.life.setRange(1, 600)
         self.life.setValue(60)
         self.life.setSuffix(" شهراً")
         self.life.setToolTip("العمر الإنتاجي بالأشهر — ٦٠ تعني خمس سنوات")
         self.start = date_edit()
-        btn_add = QtWidgets.QPushButton("➕ تسجيل الأصل")
+        btn_add = kit.PushButton("➕ تسجيل الأصل")
         btn_add.clicked.connect(self.add_asset)
 
         form = QtWidgets.QGridLayout()
@@ -74,16 +76,16 @@ class AssetsScreen(QtWidgets.QWidget):
         box_add.setLayout(form)
 
         # ── إهلاك الشهر ──
-        self.period = QtWidgets.QLineEdit()
+        self.period = kit.LineEdit()
         self.period.setMaximumWidth(120)
         self.period.setPlaceholderText("2026-01")
         self.period.setText(QtCore.QDate.currentDate().toString("yyyy-MM"))
-        btn_prev = QtWidgets.QPushButton("👁 ما سيُهلَك")
+        btn_prev = kit.PushButton("👁 ما سيُهلَك")
         btn_prev.setObjectName("ghost")
         btn_prev.clicked.connect(self.show_preview)
-        btn_run = QtWidgets.QPushButton("📅 ترحيل إهلاك الشهر")
+        btn_run = kit.PushButton("📅 ترحيل إهلاك الشهر")
         btn_run.clicked.connect(self.run_month)
-        btn_disp = QtWidgets.QPushButton("⏏ إخراج من الخدمة")
+        btn_disp = kit.PushButton("⏏ إخراج من الخدمة")
         btn_disp.setObjectName("ghost")
         btn_disp.setToolTip(
             "يوقف قسط الأصل المحدَّد — البيع أو الشطب قيدٌ تكتبه بنفسك")

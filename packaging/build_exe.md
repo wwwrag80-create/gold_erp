@@ -1,7 +1,7 @@
 # تحويل النظام إلى ملف تشغيل واحد (Windows exe)
 
 ```bash
-pip install pyinstaller PyQt5 python-barcode qrcode Pillow
+pip install pyinstaller PyQt5 python-barcode qrcode Pillow "PyQt-Fluent-Widgets==1.11.3"
 pyinstaller --onefile --windowed --name GoldERP main.py
 ```
 

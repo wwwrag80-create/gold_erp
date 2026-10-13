@@ -4,6 +4,8 @@
 أرقام التشغيل ومطابقتها بالمتاح فعلياً في النظام."""
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import inventory, stocktake
@@ -38,7 +40,7 @@ class StocktakeScreen(QtWidgets.QWidget):
         self.b_actual.valueChanged.connect(self.show_diff)
         self.b_diff = big_label()
         self.b_date = date_edit()
-        self.b_notes = QtWidgets.QLineEdit()
+        self.b_notes = kit.LineEdit()
 
         form = QtWidgets.QFormLayout()
         form.addRow("الحساب:", self.b_account)
@@ -49,7 +51,7 @@ class StocktakeScreen(QtWidgets.QWidget):
         form.addRow("تاريخ الجرد:", self.b_date)
         form.addRow("ملاحظات:", self.b_notes)
 
-        btn = QtWidgets.QPushButton("ترحيل تسوية الجرد (عجز/زيادة آلياً حسب الفرق)")
+        btn = kit.PushButton("ترحيل تسوية الجرد (عجز/زيادة آلياً حسب الفرق)")
         btn.clicked.connect(self.save_bulk)
 
         box = QtWidgets.QGroupBox(
@@ -123,21 +125,21 @@ class StocktakeScreen(QtWidgets.QWidget):
     # ---------- التبويب الثاني: جرد بالباركود ----------
     def _build_itemized_tab(self):
         w = QtWidgets.QWidget()
-        self.scan_input = QtWidgets.QLineEdit()
+        self.scan_input = kit.LineEdit()
         self.scan_input.setPlaceholderText(
             "امسح الباركود أو اكتب رقم التشغيل ثم Enter لإضافته لقائمة الجرد")
         self.scan_input.returnPressed.connect(self.add_scan)
         self.scan_table = make_table()
         self.scan_count = big_label("عدد الأطقم الممسوحة: 0")
-        btn_remove = QtWidgets.QPushButton("حذف السطر المحدد من القائمة")
+        btn_remove = kit.PushButton("حذف السطر المحدد من القائمة")
         btn_remove.setObjectName("ghost")
         btn_remove.clicked.connect(self.remove_scan)
-        btn_clear = QtWidgets.QPushButton("تفريغ القائمة")
+        btn_clear = kit.PushButton("تفريغ القائمة")
         btn_clear.setObjectName("ghost")
         btn_clear.clicked.connect(self.clear_scans)
         self.i_date = date_edit()
-        self.i_notes = QtWidgets.QLineEdit()
-        btn_reconcile = QtWidgets.QPushButton(
+        self.i_notes = kit.LineEdit()
+        btn_reconcile = kit.PushButton(
             "مطابقة (Reconcile) — وترحيل قيد عجز المفقود تلقائياً")
         btn_reconcile.clicked.connect(self.reconcile)
 

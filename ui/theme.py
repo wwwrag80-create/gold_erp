@@ -234,6 +234,12 @@ def apply(app, theme=None, scale=None):
     f.setStyleStrategy(QtGui.QFont.PreferAntialias)
     app.setFont(f)
     app.setStyleSheet(build(styles.TEMPLATE, tk, s))
+    # مكوّنات Fluent (4.69): الوضع الليلي ولون الذهب والخط نفسه
+    try:
+        from ui import kit
+        kit.apply(app, name, s)
+    except Exception:
+        pass
     # الظلال الناعمة تحت البطاقات (`ui.widgets.effects`) — تُركَّب على
     # ما يظهر من الآن، ويُعاد تلوين ما ظهر بلون المظهر الجديد
     try:

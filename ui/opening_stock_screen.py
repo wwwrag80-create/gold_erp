@@ -5,6 +5,8 @@
 للتسوية (3900) بإجمالي الوزن المقيد، بقيد واحد مجمّع."""
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 import config
 from database.database import db
 from models import inventory
@@ -24,13 +26,13 @@ class OpeningStockScreen(QtWidgets.QWidget):
         self.batch = []
         self.rate = config.STONE_DISCOUNT_RATE
 
-        self.wo_no = QtWidgets.QLineEdit()
+        self.wo_no = kit.LineEdit()
         self.gold = wspin()
         self.small = wspin()
         self.big = wspin()
         self.after = QtWidgets.QLabel("0.000")
         self.after.setObjectName("big")
-        self.btn_rate = QtWidgets.QPushButton(f"خصم {self.rate*100:.0f}%")
+        self.btn_rate = kit.PushButton(f"خصم {self.rate*100:.0f}%")
         self.btn_rate.setObjectName("ghost")
         self.btn_rate.setMaximumWidth(110)
         self.btn_rate.clicked.connect(self.edit_rate)
@@ -40,7 +42,7 @@ class OpeningStockScreen(QtWidgets.QWidget):
             w.valueChanged.connect(self.recalc)
         self.reg_label = big_label("الوزن المقيد: 0.000 جم")
 
-        btn_add = QtWidgets.QPushButton("+ إضافة")
+        btn_add = kit.PushButton("+ إضافة")
         btn_add.clicked.connect(self.add_row)
 
         def _lbl(t):
@@ -80,12 +82,12 @@ class OpeningStockScreen(QtWidgets.QWidget):
         ebl.addWidget(self.reg_label)
 
         self.grid = make_table()
-        btn_remove = QtWidgets.QPushButton("حذف السطر المحدد")
+        btn_remove = kit.PushButton("حذف السطر المحدد")
         btn_remove.setObjectName("ghost")
         btn_remove.clicked.connect(self.remove_row)
         self.date = date_edit()
         self.totals = big_label()
-        btn_post = QtWidgets.QPushButton(
+        btn_post = kit.PushButton(
             "ترحيل الرصيد الافتتاحي المخزني (قيد مجمّع واحد)")
         btn_post.clicked.connect(self.post_batch)
 

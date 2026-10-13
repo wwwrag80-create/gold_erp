@@ -17,6 +17,8 @@ import threading
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services.fatoora import api, ledger, onboard, readiness
 from services.fatoora import profile as pf
@@ -113,10 +115,10 @@ class FatooraDialog(QtWidgets.QDialog):
         self.score = QtWidgets.QLabel()
         self.score.setObjectName("big")
         row.addWidget(self.score, 1)
-        b_ping = QtWidgets.QPushButton("📡 اختبار الاتصال بالبوابة")
+        b_ping = kit.PushButton("📡 اختبار الاتصال بالبوابة")
         b_ping.setObjectName("ghost")
         b_ping.clicked.connect(lambda: self.test_connection(b_ping))
-        b_re = QtWidgets.QPushButton("🔄 إعادة الفحص")
+        b_re = kit.PushButton("🔄 إعادة الفحص")
         b_re.clicked.connect(self.refresh_status)
         row.addWidget(b_ping)
         row.addWidget(b_re)
@@ -206,19 +208,19 @@ class FatooraDialog(QtWidgets.QDialog):
                 ("postal", "الرمز البريدي", "5 أرقام"),
                 ("branch", "اسم الفرع", ""),
                 ("industry", "النشاط", "مثال: Gold Jewelry Manufacturing")):
-            e = QtWidgets.QLineEdit()
+            e = kit.LineEdit()
             e.setPlaceholderText(ph)
             self.f[key] = e
             form.addRow(label + ":", e)
-        self.scheme = QtWidgets.QComboBox()
+        self.scheme = kit.ComboBox()
         for k, lbl in pf.ID_SCHEMES:
             self.scheme.addItem(lbl, k)
         form.addRow("نوع المعرّف:", self.scheme)
-        self.env = QtWidgets.QComboBox()
+        self.env = kit.ComboBox()
         for k, lbl in pf.ENVS:
             self.env.addItem(lbl, k)
         form.addRow("بيئة الربط:", self.env)
-        self.pm = QtWidgets.QComboBox()
+        self.pm = kit.ComboBox()
         for k, lbl in pf.PAYMENT_MEANS:
             self.pm.addItem(lbl, k)
         form.addRow("طريقة الدفع الافتراضية:", self.pm)
@@ -227,7 +229,7 @@ class FatooraDialog(QtWidgets.QDialog):
         self.prof_msg.setObjectName("warn")
         self.prof_msg.setWordWrap(True)
         outer.addWidget(self.prof_msg)
-        b = QtWidgets.QPushButton("💾 حفظ بيانات المنشأة")
+        b = kit.PushButton("💾 حفظ بيانات المنشأة")
         b.clicked.connect(self.save_profile)
         outer.addWidget(b, alignment=QtCore.Qt.AlignLeft)
         outer.addStretch(1)
@@ -288,32 +290,32 @@ class FatooraDialog(QtWidgets.QDialog):
 
         h1, self.s1 = step("① مفتاح الجهاز وطلب الشهادة (CSR) — على هذا "
                            "الجهاز بلا إنترنت")
-        self.b1 = QtWidgets.QPushButton("توليد المفتاح وطلب الشهادة")
+        self.b1 = kit.PushButton("توليد المفتاح وطلب الشهادة")
         self.b1.clicked.connect(self.do_generate)
         h1.addWidget(self.b1)
 
         h2, self.s2 = step("② شهادة الامتثال — برمز OTP من بوابة فاتورة")
-        self.otp = QtWidgets.QLineEdit()
+        self.otp = kit.LineEdit()
         self.otp.setPlaceholderText("رمز OTP (6 أرقام)")
         self.otp.setMaximumWidth(170)
         h2.addWidget(self.otp)
-        self.b2 = QtWidgets.QPushButton("طلب شهادة الامتثال")
+        self.b2 = kit.PushButton("طلب شهادة الامتثال")
         self.b2.clicked.connect(self.do_compliance)
         h2.addWidget(self.b2)
 
         h3, self.s3 = step("③ فحوص الامتثال — ستة مستندات تجريبية يتحقّق منها "
                            "خادم الهيئة")
-        self.b3 = QtWidgets.QPushButton("تشغيل الفحوص")
+        self.b3 = kit.PushButton("تشغيل الفحوص")
         self.b3.clicked.connect(self.do_checks)
         h3.addWidget(self.b3)
 
         h4, self.s4 = step("④ الشهادة الإنتاجية — بها تُرسل الفواتير الحقيقية")
-        self.b4 = QtWidgets.QPushButton("طلب الشهادة الإنتاجية")
+        self.b4 = kit.PushButton("طلب الشهادة الإنتاجية")
         self.b4.clicked.connect(self.do_production)
         h4.addWidget(self.b4)
 
         h5, self.s5 = step("⑤ الإصدار والإرسال التلقائي مع كل فاتورة")
-        self.b5 = QtWidgets.QPushButton("تفعيل")
+        self.b5 = kit.PushButton("تفعيل")
         self.b5.clicked.connect(self.do_toggle)
         h5.addWidget(self.b5)
 
@@ -456,7 +458,7 @@ class FatooraDialog(QtWidgets.QDialog):
     def _tab_buyers(self):
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
-        self.btable = QtWidgets.QTableWidget(0, len(self.BUYER_COLS))
+        self.btable = kit.TableWidget(0, len(self.BUYER_COLS))
         self.btable.setHorizontalHeaderLabels([c[1] for c in
                                                self.BUYER_COLS])
         hh = self.btable.horizontalHeader()
@@ -465,7 +467,7 @@ class FatooraDialog(QtWidgets.QDialog):
             hh.setSectionResizeMode(c, QtWidgets.QHeaderView.ResizeToContents)
         self.btable.verticalHeader().setVisible(False)
         v.addWidget(self.btable, 1)
-        b = QtWidgets.QPushButton("💾 حفظ عناوين المشترين")
+        b = kit.PushButton("💾 حفظ عناوين المشترين")
         b.clicked.connect(self.save_buyers)
         v.addWidget(b, alignment=QtCore.Qt.AlignLeft)
         return w
@@ -519,7 +521,7 @@ class FatooraDialog(QtWidgets.QDialog):
     def _tab_log(self):
         w = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(w)
-        self.ltable = QtWidgets.QTableWidget(0, len(self.LOG_COLS))
+        self.ltable = kit.TableWidget(0, len(self.LOG_COLS))
         self.ltable.setHorizontalHeaderLabels(list(self.LOG_COLS))
         self.ltable.verticalHeader().setVisible(False)
         self.ltable.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -530,12 +532,12 @@ class FatooraDialog(QtWidgets.QDialog):
         self.ltable.horizontalHeader().setStretchLastSection(True)
         v.addWidget(self.ltable, 1)
         row = QtWidgets.QHBoxLayout()
-        b_send = QtWidgets.QPushButton("📤 إرسال المعلّق الآن")
+        b_send = kit.PushButton("📤 إرسال المعلّق الآن")
         b_send.clicked.connect(lambda: self.send_now(b_send))
-        b_xml = QtWidgets.QPushButton("💾 حفظ ملف XML")
+        b_xml = kit.PushButton("💾 حفظ ملف XML")
         b_xml.setObjectName("ghost")
         b_xml.clicked.connect(self.save_xml)
-        b_resp = QtWidgets.QPushButton("🧾 ردّ الهيئة")
+        b_resp = kit.PushButton("🧾 ردّ الهيئة")
         b_resp.setObjectName("ghost")
         b_resp.clicked.connect(self.show_response)
         for b in (b_send, b_xml, b_resp):

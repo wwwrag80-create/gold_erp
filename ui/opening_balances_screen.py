@@ -7,6 +7,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 import config
@@ -36,11 +38,11 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
         self.cash.setRange(-9_999_999, 9_999_999)
         self.gold = wspin()
         self.gold.setRange(-999_999, 999_999)
-        self.desc = QtWidgets.QLineEdit()
+        self.desc = kit.LineEdit()
         self.desc.setPlaceholderText("بيان اختياري")
-        btn_add = QtWidgets.QPushButton("إضافة السطر")
+        btn_add = kit.PushButton("إضافة السطر")
         btn_add.clicked.connect(self.add_row)
-        btn_del = QtWidgets.QPushButton("حذف المحدد")
+        btn_del = kit.PushButton("حذف المحدد")
         btn_del.setObjectName("ghost")
         btn_del.clicked.connect(self.del_row)
 
@@ -57,9 +59,9 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
         entry.addWidget(btn_del, 1, 5)
 
         self.date = date_edit()
-        self.notes = QtWidgets.QLineEdit()
+        self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("ملاحظة على القيد الافتتاحي")
-        btn_save = QtWidgets.QPushButton("💾 ترحيل القيد الافتتاحي")
+        btn_save = kit.PushButton("💾 ترحيل القيد الافتتاحي")
         btn_save.setObjectName("homeBtn")
         btn_save.clicked.connect(self.save)
 
@@ -75,16 +77,16 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
 
         # ── شبكة أطقم الذهب المشغول (تظهر عند اختيار حساب 1200) ──
         self.wo_rows = []
-        self.wo_no = QtWidgets.QLineEdit()
+        self.wo_no = kit.LineEdit()
         self.wo_no.setPlaceholderText("رقم التشغيل")
         self.wo_reg = wspin()
         self.wo_no.returnPressed.connect(lambda: self.wo_reg.setFocus())
-        btn_wo_add = QtWidgets.QPushButton("➕ إضافة طقم")
+        btn_wo_add = kit.PushButton("➕ إضافة طقم")
         btn_wo_add.clicked.connect(self.add_wo_row)
-        btn_wo_del = QtWidgets.QPushButton("حذف المحدد")
+        btn_wo_del = kit.PushButton("حذف المحدد")
         btn_wo_del.setObjectName("ghost")
         btn_wo_del.clicked.connect(self.del_wo_row)
-        btn_wo_save = QtWidgets.QPushButton("💾 ترحيل أطقم الذهب المشغول")
+        btn_wo_save = kit.PushButton("💾 ترحيل أطقم الذهب المشغول")
         btn_wo_save.setObjectName("homeBtn")
         btn_wo_save.clicked.connect(self.save_wo)
 

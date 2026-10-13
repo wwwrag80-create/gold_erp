@@ -8,6 +8,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import operations
@@ -70,7 +72,7 @@ class SupplyEditDialog(QtWidgets.QDialog):
         self.wage.setValue(kv.rate(self.wo["wage_per_gram"]))
         for w in (self.gold, self.small, self.big):
             w.valueChanged.connect(self.recalc)
-        self.notes = QtWidgets.QLineEdit()
+        self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("سبب التعديل (يُسجَّل في التدقيق)")
 
         edit_box = QtWidgets.QGroupBox("التعديل")
@@ -84,7 +86,7 @@ class SupplyEditDialog(QtWidgets.QDialog):
         self.preview = big_label("")
         self.preview.setWordWrap(True)
 
-        btn_del = QtWidgets.QPushButton("🗑 حذف العملية نهائياً")
+        btn_del = kit.PushButton("🗑 حذف العملية نهائياً")
         btn_del.setObjectName("ghost")
         btn_del.clicked.connect(self.delete_supply)
         box = QtWidgets.QDialogButtonBox(

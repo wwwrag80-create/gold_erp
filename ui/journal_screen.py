@@ -2,6 +2,8 @@
 """القيود اليومية المزدوجة رباعية الأعمدة + قائمة القيود والحذف المنطقي."""
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import editing, journal
@@ -53,8 +55,8 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         self.accounts = []
 
         self.date = date_edit()
-        self.desc = QtWidgets.QLineEdit()
-        self.lines = QtWidgets.QTableWidget()
+        self.desc = kit.LineEdit()
+        self.lines = kit.TableWidget()
         self.lines.setColumnCount(len(COLS))
         self.lines.setHorizontalHeaderLabels(_cols())
         self.lines.verticalHeader().setVisible(False)
@@ -62,13 +64,13 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
             0, QtWidgets.QHeaderView.Stretch)
         self.totals = big_label()
 
-        btn_add = QtWidgets.QPushButton("+ إضافة سطر")
+        btn_add = kit.PushButton("+ إضافة سطر")
         btn_add.setObjectName("ghost")
         btn_add.clicked.connect(self.add_row)
-        btn_rem = QtWidgets.QPushButton("حذف السطر المحدد")
+        btn_rem = kit.PushButton("حذف السطر المحدد")
         btn_rem.setObjectName("ghost")
         btn_rem.clicked.connect(self.remove_row)
-        btn_post = QtWidgets.QPushButton("ترحيل القيد")
+        btn_post = kit.PushButton("ترحيل القيد")
         btn_post.clicked.connect(self.post)
         self.init_edit_mode(btn_post, "القيد")
 
@@ -94,10 +96,10 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         bl.addLayout(prow)
 
         self.entries = make_table()
-        btn_view = QtWidgets.QPushButton("عرض أسطر القيد المحدد")
+        btn_view = kit.PushButton("عرض أسطر القيد المحدد")
         btn_view.setObjectName("ghost")
         btn_view.clicked.connect(self.view_entry)
-        btn_del = QtWidgets.QPushButton("حذف منطقي للقيد المحدد")
+        btn_del = kit.PushButton("حذف منطقي للقيد المحدد")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_entry)
         # سجل القيود مخفيّ افتراضياً: بناء مئات الصفوف عند كل فتح
@@ -105,7 +107,7 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         ebox = QtWidgets.QGroupBox("سجل القيود (يشمل المحذوف منطقياً)")
         ebox.setVisible(False)
         self._log_box = ebox
-        self.btn_log = QtWidgets.QPushButton("إظهار سجل القيود")
+        self.btn_log = kit.PushButton("إظهار سجل القيود")
         self.btn_log.setObjectName("ghost")
         self.btn_log.clicked.connect(self.toggle_log)
         el = QtWidgets.QVBoxLayout(ebox)

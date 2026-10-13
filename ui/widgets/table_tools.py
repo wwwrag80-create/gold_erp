@@ -25,6 +25,8 @@ import re
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from ui.widgets.common import _norm, err, info, load_pref, save_pref
 
 TOTAL_ROLE = QtCore.Qt.UserRole + 77       # وسم صف الإجمالي
@@ -316,7 +318,7 @@ def attach_menu(table, key=None):
 
         def _menu(pos):
             key = table.property("_tt_key")
-            m = QtWidgets.QMenu(table)
+            items = []
             # أفعال الشاشة نفسها على الصفّ (إن عرّفتها) قبل النسخ والتصدير:
             # `table._tt_extra(pos)` ← [(النص، الدالة)] — قائمةٌ واحدة لا
             # قائمتان تتعاقبان على النقرة نفسها
@@ -326,26 +328,21 @@ def attach_menu(table, key=None):
                     acts = extra(pos) or []
                 except Exception:
                     acts = []
-                for label, fn in acts:
-                    if fn is None:
-                        m.addAction(label).setEnabled(False)
-                    else:
-                        m.addAction(label, fn)
+                items += [(label, fn) for label, fn in acts]
                 if acts:
-                    m.addSeparator()
-            a_copy = m.addAction("📋 نسخ الجدول (يُلصق في Excel)")
-            a_csv = m.addAction("⬇ تصدير إلى Excel/CSV…")
-            a_reset = None
+                    items.append(None)
+            items.append(("نسخ الجدول (يُلصق في Excel)",
+                          lambda: copy_clipboard(table), "COPY"))
+            items.append(("تصدير إلى Excel/CSV…",
+                          lambda: export_csv(table.window(), table,
+                                             key or "كشف"), "DOWNLOAD"))
             if key:
-                m.addSeparator()
-                a_reset = m.addAction("↺ إعادة عرض الأعمدة للافتراضي")
-            act = m.exec_(table.viewport().mapToGlobal(pos))
-            if act is a_copy:
-                copy_clipboard(table)
-            elif act is a_csv:
-                export_csv(table.window(), table, key or "كشف")
-            elif a_reset is not None and act is a_reset:
-                reset_widths(table, key)
+                items.append(None)
+                items.append(("إعادة عرض الأعمدة للافتراضي",
+                              lambda: reset_widths(table, key), "SYNC"))
+            # قائمة Fluent المستديرة بأيقوناتها — أو `QMenu` إن غابت
+            from ui import kit
+            kit.popup_menu(table, items, table.viewport().mapToGlobal(pos))
 
         table.customContextMenuRequested.connect(_menu)
         table.setProperty("_tt_menu", True)
@@ -472,7 +469,7 @@ def apply_saved_widths(table, key):
 
 def export_button(table, key="كشف", parent=None):
     """زر تصدير جاهز — تضعه الشاشة في شريط أدواتها."""
-    b = QtWidgets.QPushButton("⬇ تصدير Excel")
+    b = kit.PushButton("⬇ تصدير Excel")
     b.setObjectName("ghost")
     b.setToolTip("يحفظ الجدول المعروض ملفاً يفتحه Excel مباشرةً")
     b.clicked.connect(

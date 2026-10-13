@@ -18,6 +18,8 @@ from datetime import date
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import period_end as pe
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
@@ -48,9 +50,9 @@ class PeriodEndScreen(QtWidgets.QWidget):
         self.d_from.setDate(QtCore.QDate(today.year, 1, 1))
         self.d_to = date_edit()
         self.d_to.setDate(QtCore.QDate(today.year, 12, 31))
-        self.cmp_on = QtWidgets.QCheckBox("مع المقارنة")
+        self.cmp_on = kit.CheckBox("مع المقارنة")
         self.cmp_on.setChecked(True)
-        btn = QtWidgets.QPushButton("تحديث")
+        btn = kit.PushButton("تحديث")
         btn.setObjectName("homeBtn")
         btn.clicked.connect(self.refresh_all)
 
@@ -102,13 +104,13 @@ class PeriodEndScreen(QtWidgets.QWidget):
     def _tab_close(self):
         w = QtWidgets.QWidget()
         self.chk = make_table()
-        b_full = QtWidgets.QPushButton(
+        b_full = kit.PushButton(
             "🖨 القوائم المالية الكاملة مع الإيضاحات")
         b_full.setObjectName("homeBtn")
         b_full.clicked.connect(lambda: self._print("fs_full"))
-        b_notes = QtWidgets.QPushButton("🖨 الإيضاحات وحدها")
+        b_notes = kit.PushButton("🖨 الإيضاحات وحدها")
         b_notes.clicked.connect(lambda: self._print("fs_notes"))
-        b_pkg = QtWidgets.QPushButton(
+        b_pkg = kit.PushButton(
             "⬇ حزمة للمحاسب القانوني / منصة «قوائم»")
         b_pkg.setObjectName("ghost")
         b_pkg.clicked.connect(self.export_package)
@@ -173,19 +175,19 @@ class PeriodEndScreen(QtWidgets.QWidget):
     # ═══════════════════════════════════════ 2) الزكاة
     def _tab_zakat(self):
         w = QtWidgets.QWidget()
-        self.z_add = QtWidgets.QDoubleSpinBox()
-        self.z_ded = QtWidgets.QDoubleSpinBox()
+        self.z_add = kit.DoubleSpinBox()
+        self.z_ded = kit.DoubleSpinBox()
         for sp in (self.z_add, self.z_ded):
             sp.setRange(0, 1e12)
             sp.setDecimals(2)
             sp.setGroupSeparatorShown(True)
             sp.setMinimumWidth(140)
-        b_calc = QtWidgets.QPushButton("احسب")
+        b_calc = kit.PushButton("احسب")
         b_calc.clicked.connect(self.load_zakat)
-        b_post = QtWidgets.QPushButton("✔ قيّد مخصص الزكاة")
+        b_post = kit.PushButton("✔ قيّد مخصص الزكاة")
         b_post.setObjectName("homeBtn")
         b_post.clicked.connect(self.post_zakat)
-        b_print = QtWidgets.QPushButton("🖨 طباعة الاحتساب")
+        b_print = kit.PushButton("🖨 طباعة الاحتساب")
         b_print.clicked.connect(self.print_zakat)
         row = FlowLayout()
         row.addWidget(QtWidgets.QLabel("إضافات أخرى:"))
@@ -264,9 +266,9 @@ class PeriodEndScreen(QtWidgets.QWidget):
 
     def _tab_eos(self):
         w = QtWidgets.QWidget()
-        b_save = QtWidgets.QPushButton("💾 حفظ بيانات الموظفين")
+        b_save = kit.PushButton("💾 حفظ بيانات الموظفين")
         b_save.clicked.connect(self.save_eos)
-        b_post = QtWidgets.QPushButton("✔ قيّد تسوية المخصص")
+        b_post = kit.PushButton("✔ قيّد تسوية المخصص")
         b_post.setObjectName("homeBtn")
         b_post.clicked.connect(self.post_eos)
         row = FlowLayout()
@@ -370,18 +372,18 @@ class PeriodEndScreen(QtWidgets.QWidget):
         row = FlowLayout()
         row.addWidget(QtWidgets.QLabel("نسبة المخصص لكل فئة:"))
         for lbl in aging.BUCKET_LABELS:
-            sp = QtWidgets.QDoubleSpinBox()
+            sp = kit.DoubleSpinBox()
             sp.setRange(0, 100)
             sp.setDecimals(2)
             sp.setSuffix(" %")
             row.addWidget(QtWidgets.QLabel(lbl + ":"))
             row.addWidget(sp)
             self.rate_boxes.append(sp)
-        b_calc = QtWidgets.QPushButton("احسب")
+        b_calc = kit.PushButton("احسب")
         b_calc.clicked.connect(lambda: self.load_ecl(keep=True))
-        b_save = QtWidgets.QPushButton("💾 حفظ النسب")
+        b_save = kit.PushButton("💾 حفظ النسب")
         b_save.clicked.connect(self.save_rates)
-        b_post = QtWidgets.QPushButton("✔ قيّد تسوية المخصص")
+        b_post = kit.PushButton("✔ قيّد تسوية المخصص")
         b_post.setObjectName("homeBtn")
         b_post.clicked.connect(self.post_ecl)
         for b in (b_calc, b_save, b_post):
@@ -458,28 +460,28 @@ class PeriodEndScreen(QtWidgets.QWidget):
                              " WHERE code='1010')")
         # ── مصروف مدفوع مقدماً
         g1 = QtWidgets.QGroupBox("مصروف مدفوع مقدماً (إيجار سنوي · تأمين …)")
-        self.p_name = QtWidgets.QLineEdit()
+        self.p_name = kit.LineEdit()
         self.p_name.setPlaceholderText("البيان — مثال: إيجار المصنع 2026")
-        self.p_exp = QtWidgets.QComboBox()
+        self.p_exp = kit.ComboBox()
         for code, lbl in exp:
             self.p_exp.addItem(lbl, code)
-        self.p_amt = QtWidgets.QDoubleSpinBox()
+        self.p_amt = kit.DoubleSpinBox()
         self.p_amt.setRange(0, 1e12)
         self.p_amt.setDecimals(2)
         self.p_amt.setGroupSeparatorShown(True)
         self.p_start = date_edit()
-        self.p_months = QtWidgets.QSpinBox()
+        self.p_months = kit.SpinBox()
         self.p_months.setRange(1, 120)
         self.p_months.setValue(12)
-        self.p_mode = QtWidgets.QComboBox()
+        self.p_mode = kit.ComboBox()
         self.p_mode.addItem("قُيِّد مصروفاً عند دفعه — انقله للمقدّم",
                             "reclass")
         self.p_mode.addItem("يُدفع الآن من الصندوق/البنك", "paid")
-        self.p_cash = QtWidgets.QComboBox()
+        self.p_cash = kit.ComboBox()
         for code, lbl in cash:
             self.p_cash.addItem(lbl, code)
         self._select(self.p_exp, "5810")
-        b_add = QtWidgets.QPushButton("➕ تسجيل")
+        b_add = kit.PushButton("➕ تسجيل")
         b_add.clicked.connect(self.add_prepaid)
         # قائمةٌ بعرض أطول بنودها تدفع المجموعة خارج إطار الشاشة
         for cb in (self.p_exp, self.p_mode, self.p_cash):
@@ -500,24 +502,24 @@ class PeriodEndScreen(QtWidgets.QWidget):
         f1.addWidget(self.p_cash, 2, 2, 1, 2)
         f1.addWidget(b_add, 2, 5)
         self.p_tbl = make_table()
-        b_amort = QtWidgets.QPushButton("✔ أطفئ المستحق حتى نهاية الفترة")
+        b_amort = kit.PushButton("✔ أطفئ المستحق حتى نهاية الفترة")
         b_amort.setObjectName("homeBtn")
         b_amort.clicked.connect(self.amortize)
         # ── مصروف مستحق
         g2 = QtWidgets.QGroupBox("مصروف مستحق (استُهلك ولم تصل فاتورته)")
-        self.a_exp = QtWidgets.QComboBox()
+        self.a_exp = kit.ComboBox()
         for code, lbl in exp:
             self.a_exp.addItem(lbl, code)
         self._select(self.a_exp, "5820")
-        self.a_amt = QtWidgets.QDoubleSpinBox()
+        self.a_amt = kit.DoubleSpinBox()
         self.a_amt.setRange(0, 1e12)
         self.a_amt.setDecimals(2)
         self.a_amt.setGroupSeparatorShown(True)
-        self.a_note = QtWidgets.QLineEdit()
+        self.a_note = kit.LineEdit()
         self.a_note.setPlaceholderText("البيان — مثال: كهرباء ديسمبر")
-        self.a_rev = QtWidgets.QCheckBox("عكسٌ تلقائي أول الفترة التالية")
+        self.a_rev = kit.CheckBox("عكسٌ تلقائي أول الفترة التالية")
         self.a_rev.setChecked(True)
-        b_acc = QtWidgets.QPushButton("✔ قيّد الاستحقاق بتاريخ نهاية الفترة")
+        b_acc = kit.PushButton("✔ قيّد الاستحقاق بتاريخ نهاية الفترة")
         b_acc.clicked.connect(self.accrue)
         self.a_exp.setSizeAdjustPolicy(
             QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)

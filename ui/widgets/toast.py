@@ -16,6 +16,15 @@ def show(parent, text, ms=2200):
         win = None
     if win is None:
         return None
+    # شريط إشعار Fluent (4.69): ينزلق من أعلى النافذة بأيقونته ثم يختفي
+    try:
+        from ui import kit
+        if kit.ACTIVE:
+            bar = kit.notify(win, text, "success", ms=ms)
+            if bar is not None:
+                return bar
+    except Exception:
+        pass
     old = win.findChild(QtWidgets.QLabel, "toast")
     if old is not None:
         old.deleteLater()

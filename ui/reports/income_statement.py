@@ -21,6 +21,8 @@ from datetime import date
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import statements
@@ -57,7 +59,7 @@ class ConsignmentTab(QtWidgets.QWidget):
 
     def __init__(self, user):
         super().__init__()
-        self.period = QtWidgets.QComboBox()
+        self.period = kit.ComboBox()
         for label, key in PERIODS:
             self.period.addItem(label, key)
         self.period.setCurrentIndex(3)
@@ -65,7 +67,7 @@ class ConsignmentTab(QtWidgets.QWidget):
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
         self.d_to = date_edit()
-        btn = QtWidgets.QPushButton("إعداد القائمة")
+        btn = kit.PushButton("إعداد القائمة")
         btn.clicked.connect(self.load)
 
         head = FlowLayout()
@@ -208,7 +210,7 @@ class StandardIncomeTab(QtWidgets.QWidget):
         super().__init__(parent)
         self.st = None
         self.rows = []
-        self.period = QtWidgets.QComboBox()
+        self.period = kit.ComboBox()
         for label, key in PERIODS:
             self.period.addItem(label, key)
         self.period.setCurrentIndex(3)
@@ -219,22 +221,22 @@ class StandardIncomeTab(QtWidgets.QWidget):
         self.d_to = date_edit()
         self.d_to.setDate(
             QtCore.QDate(QtCore.QDate.currentDate().year(), 12, 31))
-        self.cmp_on = QtWidgets.QCheckBox(
+        self.cmp_on = kit.CheckBox(
             "مقارنة بالفترة المماثلة من السنة السابقة")
         self.cmp_on.setChecked(True)
-        self.accounts = QtWidgets.QCheckBox("إظهار الحسابات تحت كل بند")
+        self.accounts = kit.CheckBox("إظهار الحسابات تحت كل بند")
         self.accounts.stateChanged.connect(self._rerender)
-        btn_mov = QtWidgets.QPushButton("🔎 تفصيل البند وحركته")
+        btn_mov = kit.PushButton("🔎 تفصيل البند وحركته")
         btn_mov.setToolTip("حسابات البند المحدد، ومن كلٍّ منها كشف حركته"
                            " في الفترة بأرقام السندات")
         btn_mov.clicked.connect(self.show_movement)
 
-        btn = QtWidgets.QPushButton("إعداد القائمة")
+        btn = kit.PushButton("إعداد القائمة")
         btn.setObjectName("homeBtn")
         btn.clicked.connect(self.load)
-        btn_print = QtWidgets.QPushButton("🖨 معاينة وطباعة")
+        btn_print = kit.PushButton("🖨 معاينة وطباعة")
         btn_print.clicked.connect(self.print_statement)
-        btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
+        btn_exp = kit.PushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
 

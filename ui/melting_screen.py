@@ -10,6 +10,8 @@
 لوحة فاقد الذهب في تقرير خزينة التصنيع."""
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 import config
 from database.database import db
 from services import karat_view as kv
@@ -44,18 +46,18 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         self.mode = "disbursement"
 
         # ── اختيار مرحلة الدورة ──
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.addItem("(أ) سند صرف للصب — إخراج كسر/خام للصهر",
                           "disbursement")
         self.kind.addItem("(ب) سند قبض مصفى — إدخال الناتج بعد التصفية",
                           "receipt")
         self.kind.currentIndexChanged.connect(self.mode_changed)
         self.date = date_edit()
-        self.notes = QtWidgets.QLineEdit()
+        self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("البيان / ملاحظات (اختياري)")
 
         # ── سطر إدخال عيار ووزن ──
-        self.karat = QtWidgets.QComboBox()
+        self.karat = kit.ComboBox()
         for k in melting.KARATS:
             self.karat.addItem(f"عيار {k}", k)
         self.weight = wspin()
@@ -63,7 +65,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         self.equiv_label = QtWidgets.QLabel("0.000")
         self.equiv_label.setObjectName("big")
         self.karat.currentIndexChanged.connect(self.recalc_line)
-        btn_add = QtWidgets.QPushButton("+ إضافة سطر")
+        btn_add = kit.PushButton("+ إضافة سطر")
         btn_add.clicked.connect(self.add_line)
 
         def _lbl(t):
@@ -89,11 +91,11 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         entry_row.addStretch(1)
 
         self.table = make_table()
-        btn_del = QtWidgets.QPushButton("حذف السطر المحدد")
+        btn_del = kit.PushButton("حذف السطر المحدد")
         btn_del.setObjectName("ghost")
         btn_del.clicked.connect(self.remove_line)
         self.totals = big_label()
-        self.btn_save = QtWidgets.QPushButton("ترحيل السند")
+        self.btn_save = kit.PushButton("ترحيل السند")
         self.btn_save.clicked.connect(self.save)
         self.init_edit_mode(self.btn_save, "سند الصهر")
 
@@ -126,7 +128,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         self.cycle_note.setProperty("live", True)    # حالةٌ لا شرح
         self.cycle_note.setWordWrap(True)
         self.close_date = date_edit()
-        btn_close = QtWidgets.QPushButton(
+        btn_close = kit.PushButton(
             "ترحيل قيد إقفال الفاقد الفني للصب (تصفير حساب الصهر)")
         btn_close.clicked.connect(self.close_cycle)
         cbox = QtWidgets.QGroupBox("(جـ) حالة الدورة وإقفال الفاقد الفني")

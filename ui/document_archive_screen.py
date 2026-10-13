@@ -10,6 +10,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from services import browser_print
@@ -97,19 +99,19 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         self.results = []
         self.shown = PAGE
 
-        self.q = QtWidgets.QLineEdit()
+        self.q = kit.LineEdit()
         self.q.setPlaceholderText("رقم المستند أو اسم الجهة…")
         self.q.returnPressed.connect(self.search)
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         for label, key in DOC_TYPES:
             self.kind.addItem(label, key)
         self.kind.currentIndexChanged.connect(self.search)
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-6))
         self.d_to = date_edit()
-        self.include_deleted = QtWidgets.QCheckBox("إظهار المحذوف منطقياً")
+        self.include_deleted = kit.CheckBox("إظهار المحذوف منطقياً")
         self.include_deleted.stateChanged.connect(self.search)
-        btn = QtWidgets.QPushButton("بحث")
+        btn = kit.PushButton("بحث")
         btn.clicked.connect(self.search)
 
         top = QtWidgets.QGridLayout()
@@ -128,7 +130,7 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         self.table.setColumnCount(len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.summary = big_label()
-        self.btn_more = QtWidgets.QPushButton()
+        self.btn_more = kit.PushButton()
         self.btn_more.setObjectName("ghost")
         self.btn_more.setToolTip(
             "يُعرض أحدث المستندات أولاً — وضيّق البحث بالتاريخ أو النوع "
@@ -225,19 +227,15 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
                               ("🖨", "طباعة مباشرة (طابعة النظام)",
                                self.do_print),
                               ("💾", "تصدير PDF", self.to_pdf)):
-            b = QtWidgets.QPushButton(text)
-            b.setObjectName("ghost")
-            b.setToolTip(tip)
-            b.setMaximumWidth(38)
+            # زرّ صفٍّ خفيف (`kit.CellButton`): أربعمئة زرٍّ في الأرشيف
+            b = kit.CellButton(text, tip)
             b.clicked.connect(lambda _, rr=r, f=fn: f(rr))
             h.addWidget(b)
         # رمز الفاتورة: تفعيله لفاتورة رُحّلت بلا رمز، أو نسخ رابطها
         # لإرساله للعميل. الفواتير وحدها — لا السندات ولا القيود.
         if r.get("src") == "invoices" and not r.get("deleted"):
-            b = QtWidgets.QPushButton("🔗")
-            b.setObjectName("ghost")
-            b.setToolTip("رمز QR: تفعيله لهذه الفاتورة أو نسخ رابط صفحتها")
-            b.setMaximumWidth(38)
+            b = kit.CellButton(
+                "🔗", "رمز QR: تفعيله لهذه الفاتورة أو نسخ رابط صفحتها")
             b.clicked.connect(lambda _, rr=r: self.share_qr(rr))
             h.addWidget(b)
         return w

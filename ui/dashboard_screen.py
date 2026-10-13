@@ -13,6 +13,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import dash_panels as dp
 from services import karat_view as kv
@@ -79,20 +81,20 @@ class DashboardScreen(QtWidgets.QWidget):
         self.panel_box = QtWidgets.QWidget()
         self.panel_box.setLayout(self.panel_row)
 
-        btn_add_panel = QtWidgets.QPushButton("➕ لوحة رئيسية")
+        btn_add_panel = kit.PushButton("➕ لوحة رئيسية")
         btn_add_panel.setToolTip("ينشئ لوحة جديدة تجمع حسابات تختارها")
         btn_add_panel.clicked.connect(self.add_panel)
-        btn_del_panel = QtWidgets.QPushButton("🗑 حذف اللوحة")
+        btn_del_panel = kit.PushButton("🗑 حذف اللوحة")
         btn_del_panel.clicked.connect(self.del_panel)
-        btn_rename = QtWidgets.QPushButton("✎ تسمية اللوحة")
+        btn_rename = kit.PushButton("✎ تسمية اللوحة")
         btn_rename.clicked.connect(self.rename_panel)
 
         # هذه الأزرار تُعرض في الشريط العلوي بجوار «إغلاق الشاشة»
-        btn_left = QtWidgets.QPushButton("◄")
+        btn_left = kit.PushButton("◄")
         btn_left.setToolTip("تحريك اللوحة يميناً")
         btn_left.setMaximumWidth(36)
         btn_left.clicked.connect(lambda: self.move_panel(-1))
-        btn_right = QtWidgets.QPushButton("►")
+        btn_right = kit.PushButton("►")
         btn_right.setToolTip("تحريك اللوحة يساراً")
         btn_right.setMaximumWidth(36)
         btn_right.clicked.connect(lambda: self.move_panel(1))
@@ -106,35 +108,35 @@ class DashboardScreen(QtWidgets.QWidget):
 
         # ── أدوات الجدول ──
         self.tbl_title = big_label()
-        btn_add_acc = QtWidgets.QPushButton("➕ إضافة حساب للجدول")
+        btn_add_acc = kit.PushButton("➕ إضافة حساب للجدول")
         btn_add_acc.setToolTip("يضيف حساباً من دليل الحسابات لهذه اللوحة")
         btn_add_acc.clicked.connect(self.add_account)
-        btn_del_acc = QtWidgets.QPushButton("🗑 حذف الحساب المحدد")
+        btn_del_acc = kit.PushButton("🗑 حذف الحساب المحدد")
         btn_del_acc.clicked.connect(self.del_account)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة الجدول")
+        btn_print = kit.PushButton("🖨 طباعة الجدول")
         btn_print.setToolTip("قالب مطابق لما يظهر على الشاشة")
         btn_print.clicked.connect(self.print_panel)
-        btn_ratio = QtWidgets.QPushButton("％ النسبة")
+        btn_ratio = kit.PushButton("％ النسبة")
         btn_ratio.setToolTip("شريط نسبة أسفل الجدول: الثاني ÷ الأول")
         btn_ratio.clicked.connect(self.add_ratio)
-        btn_up = QtWidgets.QPushButton("▲")
+        btn_up = kit.PushButton("▲")
         btn_up.setToolTip("تحريك الصف لأعلى")
         btn_up.setMaximumWidth(38)
         btn_up.clicked.connect(lambda: self.move_row(-1))
-        btn_dn = QtWidgets.QPushButton("▼")
+        btn_dn = kit.PushButton("▼")
         btn_dn.setToolTip("تحريك الصف لأسفل")
         btn_dn.setMaximumWidth(38)
         btn_dn.clicked.connect(lambda: self.move_row(1))
-        btn_refresh = QtWidgets.QPushButton("↻ تحديث")
+        btn_refresh = kit.PushButton("↻ تحديث")
         btn_refresh.clicked.connect(self.refresh)
 
         # أدوات لوحة أرقام التشغيل — تظهر معها وحدها
-        self.stock_search = QtWidgets.QLineEdit()
+        self.stock_search = kit.LineEdit()
         self.stock_search.setPlaceholderText("ابحث برقم التشغيل أو الموديل…")
         self.stock_search.setMaximumWidth(230)
         self.stock_search.textChanged.connect(
             lambda *_: self.refresh() if self._is_stock() else None)
-        self.btn_edit_wo = QtWidgets.QPushButton("✎ تعديل الطقم")
+        self.btn_edit_wo = kit.PushButton("✎ تعديل الطقم")
         self.btn_edit_wo.setToolTip(
             "يعدّل موديل الطقم أو رقم تشغيله (نقر مزدوج على الصف)")
         self.btn_edit_wo.clicked.connect(self.edit_stock_item)
@@ -168,7 +170,7 @@ class DashboardScreen(QtWidgets.QWidget):
         self.d_to = date_edit()
         # الفترة تُختار باسمها فتُحسب تواريخها وتظهر الأرقام فوراً — والكتابة
         # باليد في «فترة مخصّصة» وحدها (4.49)
-        self.period = QtWidgets.QComboBox()
+        self.period = kit.ComboBox()
         for k, lbl in dp.PERIODS:
             self.period.addItem(lbl, k)
         self.period.setToolTip("اختر المدة فتظهر أرقامها مباشرةً —"
@@ -181,7 +183,7 @@ class DashboardScreen(QtWidgets.QWidget):
             pass          # بيئة بلا إشارات Qt حقيقية
         # مقارنة بالفترة السابقة المساوية طولاً — الرقم وحده لا يقول
         # إن كان النشاط يصعد أو يهبط.
-        self.compare = QtWidgets.QCheckBox("مقارنة بالفترة السابقة")
+        self.compare = kit.CheckBox("مقارنة بالفترة السابقة")
         self.compare.setToolTip(
             "يضيف أعمدة الفترة السابقة (بنفس الطول) والفرق ونسبته.\n"
             "المقارنة على حجم الحركة لا على الرصيد التراكمي.")
@@ -282,9 +284,9 @@ class DashboardScreen(QtWidgets.QWidget):
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle("لوحة رئيسية جديدة")
             dlg.setMinimumWidth(420)
-            e_name = QtWidgets.QLineEdit()
+            e_name = kit.LineEdit()
             e_name.setPlaceholderText("اسم اللوحة")
-            cb_unit = QtWidgets.QComboBox()
+            cb_unit = kit.ComboBox()
             cb_unit.addItem(f"الوزن ({kv.unit()})", "gold")
             cb_unit.addItem("النقد (ريال)", "cash")
             note = QtWidgets.QLabel(
@@ -464,10 +466,10 @@ class DashboardScreen(QtWidgets.QWidget):
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle("شريط نسبة جديد")
             dlg.setMinimumWidth(420)
-            e_title = QtWidgets.QLineEdit()
+            e_title = kit.LineEdit()
             e_title.setPlaceholderText("اسم النسبة — مثل: نسبة التحصيل")
-            cb1 = QtWidgets.QComboBox()
-            cb2 = QtWidgets.QComboBox()
+            cb1 = kit.ComboBox()
+            cb2 = kit.ComboBox()
             for cb in (cb1, cb2):
                 for c in accs:
                     cb.addItem(f"{c} — {names[c]}", c)
@@ -483,14 +485,14 @@ class DashboardScreen(QtWidgets.QWidget):
             f.addRow("اسم النسبة:", e_title)
             f.addRow("الحساب الأول (المقام):", cb1)
             f.addRow("الحساب الثاني (البسط):", cb2)
-            cb_mode = QtWidgets.QComboBox()
+            cb_mode = kit.ComboBox()
             cb_mode.addItem("مئوية مباشرة — الثاني ÷ الأول", "direct")
             cb_mode.addItem("عكسية — الفرق ÷ الأول", "inverse")
             cb_mode.setToolTip(
                 "مثال على 10 و 8:\n"
                 "   مباشرة → 80%\n"
                 "   عكسية  → 20%")
-            cb_dim = QtWidgets.QComboBox()
+            cb_dim = kit.ComboBox()
             cb_dim.addItem("تلقائي (ذهب أو نقد)", "")
             cb_dim.addItem("الذهب", "gold")
             cb_dim.addItem("النقد", "cash")
@@ -570,7 +572,7 @@ class DashboardScreen(QtWidgets.QWidget):
                 f"{b['first_name']} {b['first_value']:,.2f} "
                 f"{b.get('unit', '')})")
             lbl.setWordWrap(True)
-            x = QtWidgets.QPushButton("✕")
+            x = kit.PushButton("✕")
             x.setMaximumWidth(30)
             x.setToolTip("حذف هذا الشريط")
             x.clicked.connect(lambda _=False, k=i: self.del_ratio(k))
@@ -859,8 +861,8 @@ class DashboardScreen(QtWidgets.QWidget):
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle(f"تعديل الطقم {r['wo']}")
             dlg.setMinimumWidth(430)
-            e_wo = QtWidgets.QLineEdit(r["wo"])
-            cb = QtWidgets.QComboBox()
+            e_wo = kit.LineEdit(r["wo"])
+            cb = kit.ComboBox()
             cb.setEditable(True)
             cb.addItem("")
             for n in names:

@@ -4,6 +4,8 @@
 المُنتَجة) — للمطابقة بين ما استلمته الخزينة وما أنتجته فعلياً."""
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models.reports import khazina_tiles, production_inputs_summary
@@ -17,7 +19,7 @@ class KhazinaReportScreen(QtWidgets.QWidget):
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
         self.d_to = date_edit()
-        btn = QtWidgets.QPushButton("إعداد التقرير")
+        btn = kit.PushButton("إعداد التقرير")
         btn.clicked.connect(self.load)
 
         head = QtWidgets.QHBoxLayout()

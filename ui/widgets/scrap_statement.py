@@ -8,6 +8,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from ui.widgets.common import err, make_table, title_label
@@ -41,10 +43,10 @@ class ScrapKaratDialog(QtWidgets.QDialog):
         self.summary.setObjectName("big")
         self.summary.setWordWrap(True)
 
-        b_open = QtWidgets.QPushButton("👁 فتح السند المحدد")
+        b_open = kit.PushButton("👁 فتح السند المحدد")
         b_open.setObjectName("homeBtn")
         b_open.clicked.connect(self.open_selected)
-        b_close = QtWidgets.QPushButton("إغلاق")
+        b_close = kit.PushButton("إغلاق")
         b_close.setObjectName("ghost")
         b_close.clicked.connect(self.reject)
         btns = QtWidgets.QHBoxLayout()

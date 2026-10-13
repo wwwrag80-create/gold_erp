@@ -12,6 +12,8 @@ import threading
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from services import models_web as mw
 from ui.widgets.common import ask, err, info
 
@@ -45,32 +47,32 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         note.setWordWrap(True)
         note.setObjectName("cardSub")
 
-        self.mode = QtWidgets.QComboBox()
+        self.mode = kit.ComboBox()
         for k, lbl in mw.MODES:
             self.mode.addItem(lbl, k)
 
-        self.pin = QtWidgets.QLineEdit()
+        self.pin = kit.LineEdit()
         self.pin.setEchoMode(QtWidgets.QLineEdit.Password)
         self.pin.setPlaceholderText("4 إلى 12 خانة — مستحسن")
         self.pin.setMaxLength(12)
         self.pin.setMaximumWidth(200)
-        btn_pin = QtWidgets.QPushButton("حفظ الرمز")
+        btn_pin = kit.PushButton("حفظ الرمز")
         btn_pin.clicked.connect(self.save_pin)
-        btn_nopin = QtWidgets.QPushButton("بلا رمز")
+        btn_nopin = kit.PushButton("بلا رمز")
         btn_nopin.setObjectName("ghost")
         btn_nopin.clicked.connect(lambda: self.save_pin(clear=True))
         self.pin_state = QtWidgets.QLabel("")
 
-        self.btn_on = QtWidgets.QPushButton("✔ تفعيل الرابط")
+        self.btn_on = kit.PushButton("✔ تفعيل الرابط")
         self.btn_on.setObjectName("homeBtn")
         self.btn_on.clicked.connect(self.enable)
-        self.btn_off = QtWidgets.QPushButton("⏹ إيقاف")
+        self.btn_off = kit.PushButton("⏹ إيقاف")
         self.btn_off.clicked.connect(self.disable)
-        self.btn_new = QtWidgets.QPushButton("↻ رابط جديد (يُبطل القديم)")
+        self.btn_new = kit.PushButton("↻ رابط جديد (يُبطل القديم)")
         self.btn_new.setObjectName("ghost")
         self.btn_new.clicked.connect(self.new_link)
         # 4.58: يجرّب الرابط فعلاً من هذا الجهاز طبقةً طبقة ويقول أين انقطع
-        self.btn_check = QtWidgets.QPushButton("🔎 فحص الرابط")
+        self.btn_check = kit.PushButton("🔎 فحص الرابط")
         self.btn_check.setToolTip("يجرّب الرابط من البرنامج إلى الإنترنت "
                                   "ويقول أين ينقطع وما إصلاحه")
         self.btn_check.clicked.connect(self.check)
@@ -80,13 +82,13 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         self.status.setTextFormat(QtCore.Qt.RichText)
         self.status.setOpenExternalLinks(True)
 
-        self.url = QtWidgets.QLineEdit()
+        self.url = kit.LineEdit()
         self.url.setReadOnly(True)
         self.url.setLayoutDirection(QtCore.Qt.LeftToRight)
         self.url.setAlignment(QtCore.Qt.AlignLeft)
-        btn_copy = QtWidgets.QPushButton("📋 نسخ")
+        btn_copy = kit.PushButton("📋 نسخ")
         btn_copy.clicked.connect(self.copy)
-        btn_open = QtWidgets.QPushButton("🌐 فتح")
+        btn_open = kit.PushButton("🌐 فتح")
         btn_open.setObjectName("ghost")
         btn_open.clicked.connect(self.open_url)
         self.qr = QtWidgets.QLabel()
@@ -344,7 +346,7 @@ class ModelsLinkDialog(QtWidgets.QDialog):
                  and it["ok"] is not True}
 
         def _btn(text, fn):
-            b = QtWidgets.QPushButton(text)
+            b = kit.PushButton(text)
             b.clicked.connect(fn)
             btns.addWidget(b)
             return b
@@ -376,7 +378,7 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             top.setText(head + "  —  📋 نُسخت النتيجة، أرسلها للدعم.")
         _btn("📋 نسخ النتيجة", _copy)
         btns.addStretch(1)
-        close = QtWidgets.QPushButton("إغلاق")
+        close = kit.PushButton("إغلاق")
         close.clicked.connect(dlg.accept)
         btns.addWidget(close)
         lay.addLayout(btns)

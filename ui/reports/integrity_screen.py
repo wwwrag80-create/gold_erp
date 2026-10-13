@@ -6,6 +6,8 @@
 """
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import integrity
 from ui.widgets.common import (ask, big_label, err, fill, info, make_table,
@@ -27,12 +29,12 @@ class IntegrityScreen(QtWidgets.QWidget):
         self.detail.setProperty("live", True)        # نتيجةٌ لا شرح
         self.detail.setWordWrap(True)
 
-        btn_check = QtWidgets.QPushButton("🔍 تحقّق الآن")
+        btn_check = kit.PushButton("🔍 تحقّق الآن")
         btn_check.clicked.connect(self.run_check)
-        self.btn_seal = QtWidgets.QPushButton("🔒 ختم القيود غير المختومة")
+        self.btn_seal = kit.PushButton("🔒 ختم القيود غير المختومة")
         self.btn_seal.setObjectName("ghost")
         self.btn_seal.clicked.connect(self.seal)
-        self.btn_rebuild = QtWidgets.QPushButton("♻ إعادة بناء السلسلة")
+        self.btn_rebuild = kit.PushButton("♻ إعادة بناء السلسلة")
         self.btn_rebuild.setObjectName("ghost")
         self.btn_rebuild.setToolTip(
             "بعد معالجة خللٍ مُثبت (استعادة نسخة احتياطية مثلاً). "

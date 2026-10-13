@@ -4,6 +4,8 @@ from datetime import datetime
 
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import payroll
 from ui.widgets.common import (big_label, date_edit, dstr, enter_chain, err,
@@ -25,9 +27,9 @@ class PayrollScreen(QtWidgets.QWidget):
     # ---------- تبويب الموظفين والسلف ----------
     def _build_employees_tab(self):
         w = QtWidgets.QWidget()
-        self.emp_name = QtWidgets.QLineEdit()
+        self.emp_name = kit.LineEdit()
         self.emp_salary = mspin()
-        btn_add = QtWidgets.QPushButton("إضافة الموظف")
+        btn_add = kit.PushButton("إضافة الموظف")
         btn_add.clicked.connect(self.add_employee)
         add_box = QtWidgets.QGroupBox("موظف جديد")
         af = QtWidgets.QFormLayout(add_box)
@@ -38,12 +40,12 @@ class PayrollScreen(QtWidgets.QWidget):
 
         self.adv_emp = search_combo("اكتب اسم الموظف…")
         self.adv_amount = mspin()
-        self.adv_pay = QtWidgets.QComboBox()
+        self.adv_pay = kit.ComboBox()
         self.adv_pay.addItem("الصندوق", "1400")
         self.adv_pay.addItem("البنك", "1500")
         self.adv_date = date_edit()
-        self.adv_notes = QtWidgets.QLineEdit()
-        btn_adv = QtWidgets.QPushButton("صرف السلفة وترحيل القيد")
+        self.adv_notes = kit.LineEdit()
+        btn_adv = kit.PushButton("صرف السلفة وترحيل القيد")
         btn_adv.clicked.connect(self.give_advance)
         adv_box = QtWidgets.QGroupBox(
             "سلفة نقدية أثناء الشهر (مدين سلف الموظفين / دائن الصندوق)")
@@ -107,15 +109,15 @@ class PayrollScreen(QtWidgets.QWidget):
     def _build_payroll_tab(self):
         w = QtWidgets.QWidget()
         self.balances = big_label()
-        self.period = QtWidgets.QLineEdit(datetime.now().strftime("%Y-%m"))
+        self.period = kit.LineEdit(datetime.now().strftime("%Y-%m"))
         self.period.setMaximumWidth(140)
-        btn_accrue = QtWidgets.QPushButton("إقفال رواتب الشهر (قيد الاستحقاق)")
+        btn_accrue = kit.PushButton("إقفال رواتب الشهر (قيد الاستحقاق)")
         btn_accrue.clicked.connect(self.run_accrual)
-        self.pay_source = QtWidgets.QComboBox()
+        self.pay_source = kit.ComboBox()
         self.pay_source.addItem("الصندوق", "1400")
         self.pay_source.addItem("البنك", "1500")
         self.pay_date = date_edit()
-        btn_pay = QtWidgets.QPushButton("صرف رواتب الفترة (خصم السلف آلياً)")
+        btn_pay = kit.PushButton("صرف رواتب الفترة (خصم السلف آلياً)")
         btn_pay.clicked.connect(self.pay_salaries)
 
         row1 = QtWidgets.QHBoxLayout()

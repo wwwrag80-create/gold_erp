@@ -3,6 +3,8 @@
 (شريط تنبيه + زر إلغاء + تبديل نص زر الحفظ) بنفس السلوك في كل النظام."""
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 
 class EditModeMixin:
     def init_edit_mode(self, save_button, label="العملية"):
@@ -18,7 +20,7 @@ class EditModeMixin:
         self.edit_banner.setObjectName("warn")
         self.edit_banner.setWordWrap(True)
         self.edit_banner.setVisible(False)
-        self.btn_cancel_edit = QtWidgets.QPushButton("إلغاء التعديل")
+        self.btn_cancel_edit = kit.PushButton("إلغاء التعديل")
         self.btn_cancel_edit.setObjectName("ghost")
         self.btn_cancel_edit.clicked.connect(self.cancel_edit)
         self.btn_cancel_edit.setVisible(False)

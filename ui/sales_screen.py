@@ -10,6 +10,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 import config
 from database.database import db
 from models import entities, inventory, invoices, pending, stock_home
@@ -186,14 +188,14 @@ class NewCustomerDialog(QtWidgets.QDialog):
         self.username = username
         self.customer_id = None
         self.setWindowTitle("عميل جديد")
-        self.name = QtWidgets.QLineEdit()
-        self.phone = QtWidgets.QLineEdit()
-        self.vat = QtWidgets.QLineEdit()
+        self.name = kit.LineEdit()
+        self.phone = kit.LineEdit()
+        self.vat = kit.LineEdit()
         form = QtWidgets.QFormLayout(self)
         form.addRow("الاسم:", self.name)
         form.addRow("الجوال:", self.phone)
         form.addRow("الرقم الضريبي:", self.vat)
-        btn = QtWidgets.QPushButton("حفظ")
+        btn = kit.PushButton("حفظ")
         btn.clicked.connect(self.save)
         form.addRow(btn)
 
@@ -310,11 +312,11 @@ class TaxDebitNoteDialog(QtWidgets.QDialog):
 
     def _tax_tab(self):
         w = QtWidgets.QWidget()
-        self.invoice = QtWidgets.QComboBox()
+        self.invoice = kit.ComboBox()
         self.date = date_edit()
         self.preview = big_label()
         self.invoice.currentIndexChanged.connect(self.update_preview)
-        btn = QtWidgets.QPushButton("إصدار الإشعار وترحيل قيد الضريبة")
+        btn = kit.PushButton("إصدار الإشعار وترحيل قيد الضريبة")
         btn.clicked.connect(self.issue)
         lay = QtWidgets.QVBoxLayout(w)
         lay.addWidget(QtWidgets.QLabel(
@@ -336,17 +338,17 @@ class TaxDebitNoteDialog(QtWidgets.QDialog):
         self.adj_entity.currentIndexChanged.connect(self.adj_preview)
         self.adj_amount = mspin()
         self.adj_amount.valueChanged.connect(self.adj_preview)
-        self.adj_dir = QtWidgets.QComboBox()
+        self.adj_dir = kit.ComboBox()
         self.adj_dir.addItem("زيادة رصيد العميل المدين (عليه)", "debit")
         self.adj_dir.addItem("تخفيض رصيد العميل (له)", "credit")
-        self.adj_contra = QtWidgets.QComboBox()
+        self.adj_contra = kit.ComboBox()
         self.adj_contra.addItem("حساب التسويات المباشرة (2900)", "adjust")
         self.adj_contra.addItem("حساب ضريبة المخرجات (2100)", "vat")
         self.adj_date = date_edit()
-        self.adj_note = QtWidgets.QLineEdit()
+        self.adj_note = kit.LineEdit()
         self.adj_note.setPlaceholderText("بيان التسوية (اختياري)")
         self.adj_prev = big_label()
-        btn = QtWidgets.QPushButton("ترحيل التسوية المباشرة")
+        btn = kit.PushButton("ترحيل التسوية المباشرة")
         btn.clicked.connect(self.issue_direct)
         lay = QtWidgets.QVBoxLayout(w)
         lay.addWidget(QtWidgets.QLabel(
@@ -535,7 +537,7 @@ class NewSourceDialog(QtWidgets.QDialog):
         self.account_id = None
         self.setWindowTitle("حساب مخزن جديد")
         self.setMinimumWidth(420)
-        self.name = QtWidgets.QLineEdit()
+        self.name = kit.LineEdit()
         self.name.setPlaceholderText("مثال: مخزن ذهب المعرض")
         note = QtWidgets.QLabel(
             "يُنشأ الحساب تحت «الأصول المتداولة — الذهب والمخازن» "
@@ -643,7 +645,7 @@ class SalesScreen(QtWidgets.QWidget):
 
     def _build_header(self):
         box = QtWidgets.QGroupBox("① العملية والطرف")
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.addItem("فاتورة بيع", "sale")
         self.kind.addItem("مرتجع بيع", "sale_return")
         self.kind.setMinimumWidth(150)
@@ -652,7 +654,7 @@ class SalesScreen(QtWidgets.QWidget):
         self.date = date_edit()
         self.customer = search_combo("اكتب اسم العميل أو الطرف المقابل…")
         self.customer.currentIndexChanged.connect(self.customer_changed)
-        btn_new_cust = QtWidgets.QPushButton("+ عميل جديد")
+        btn_new_cust = kit.PushButton("+ عميل جديد")
         btn_new_cust.setObjectName("ghost")
         btn_new_cust.clicked.connect(self.new_customer)
 
@@ -660,13 +662,13 @@ class SalesScreen(QtWidgets.QWidget):
         # آخر اختيارٍ يُحفظ ويعود: من يبيع يومه كله من صندوق الكسر لا
         # يُطالَب باختياره في كل فاتورة، ومن لا يعرف الخيار أصلاً يجد
         # الذهب المشغول كما كان دائماً.
-        self.source = QtWidgets.QComboBox()
+        self.source = kit.ComboBox()
         self.source.setMinimumWidth(240)
         self.source.setToolTip(
             "الحساب الذي يخرج منه ذهب هذه الفاتورة — ويعود إليه في "
             "المرتجع. يُحفظ مع الفاتورة ويُطبع عليها.")
         self.source.currentIndexChanged.connect(self._source_changed)
-        self.scrap_karat = QtWidgets.QComboBox()
+        self.scrap_karat = kit.ComboBox()
         self.scrap_karat.setMaximumWidth(120)
         for k in config.KARATS:
             self.scrap_karat.addItem(f"عيار {k}", k)
@@ -675,21 +677,21 @@ class SalesScreen(QtWidgets.QWidget):
             "من أي عيارٍ خُصم الوزن فعلاً.")
         self.scrap_karat.currentIndexChanged.connect(self._save_source_pref)
         self.scrap_lbl = QtWidgets.QLabel("عيار الخصم:")
-        btn_new_src = QtWidgets.QPushButton("+ حساب")
+        btn_new_src = kit.PushButton("+ حساب")
         btn_new_src.setObjectName("ghost")
         btn_new_src.setToolTip("إضافة حساب مخزنٍ جديد يخرج منه الذهب")
         btn_new_src.clicked.connect(self.new_source)
 
-        self.description = QtWidgets.QLineEdit()
+        self.description = kit.LineEdit()
         self.description.setPlaceholderText(
             "البيان (اختياري) — يُحفظ مع العملية ويظهر في كشف الحساب")
-        self.vat_check = QtWidgets.QCheckBox("ضريبة 15% (فاتورة ضريبية + QR)")
+        self.vat_check = kit.CheckBox("ضريبة 15% (فاتورة ضريبية + QR)")
         self.vat_check.setChecked(False)
         self.vat_check.stateChanged.connect(self.recalc)
         # ══ رمز QR لصفحة الفاتورة — قرارٌ لكل فاتورة ══
         # إنشاؤه يعني رفع صور موديلاتها إلى التخزين، فلا يُنشأ ما لم
         # يُطلب. وآخر اختيارٍ يبقى فلا يُسأل عنه كل مرة.
-        self.qr_check = QtWidgets.QCheckBox("رمز QR لصفحة الفاتورة")
+        self.qr_check = kit.CheckBox("رمز QR لصفحة الفاتورة")
         self.qr_check.setToolTip(
             "عند تفعيله يُطبع على الفاتورة رمزٌ يفتح صفحتها على الجوال:\n"
             "الفاتورة أولاً ثم موديلاتها بأسمائها وأعدادها.\n\n"
@@ -699,7 +701,7 @@ class SalesScreen(QtWidgets.QWidget):
         self.qr_check.setChecked(
             str(load_pref("sales_qr_enabled", "0")).strip() == "1")
         self.qr_check.stateChanged.connect(self._qr_pref_changed)
-        btn_tax_note = QtWidgets.QPushButton("إشعار مدين ضريبي")
+        btn_tax_note = kit.PushButton("إشعار مدين ضريبي")
         btn_tax_note.setObjectName("ghost")
         btn_tax_note.clicked.connect(self.open_tax_note)
 
@@ -779,11 +781,11 @@ class SalesScreen(QtWidgets.QWidget):
         # رقم الموديل أولاً: يُملأ تلقائياً من دليل الموديلات عند
         # إدخال رقم تشغيل مسجّل، ويُكتب يدوياً للأطقم الجديدة فيُسجَّل
         # في الدليل ويبقى مرتبطاً بالطقم.
-        self.model_no = QtWidgets.QComboBox()
+        self.model_no = kit.ComboBox()
         self.model_no.setEditable(True)
         self.model_no.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         self.model_no.lineEdit().setPlaceholderText("رقم الموديل")
-        self.barcode = QtWidgets.QLineEdit()
+        self.barcode = kit.LineEdit()
         self.barcode.setPlaceholderText(
             f"امسح الباركود أو اكتب الرقم ({BULK_LABEL} = رصيد تجميعي)")
         # البحث عند مغادرة الخانة لا عند Enter وحده: الماسح الضوئي
@@ -799,7 +801,7 @@ class SalesScreen(QtWidgets.QWidget):
             "الذهب القائم = الذهب + الفصوص + الأحجار قبل الخصم — "
             "للمعرفة والإحصاء، بلا أثرٍ محاسبي.")
         self.line_wage = mspin()
-        self.line_karat = QtWidgets.QComboBox()
+        self.line_karat = kit.ComboBox()
         for k in config.KARATS:
             self.line_karat.addItem(f"عيار {k}", k)
         self.line_karat.setToolTip(
@@ -832,12 +834,12 @@ class SalesScreen(QtWidgets.QWidget):
             w.valueChanged.connect(self._parts_changed)
         self.line_after.valueChanged.connect(self._after_changed)
         self.line_reg.valueChanged.connect(self._reg_changed)
-        self.btn_add_line = QtWidgets.QPushButton("+ إضافة سطر")
+        self.btn_add_line = kit.PushButton("+ إضافة سطر")
         self.btn_add_line.clicked.connect(self.add_item)
         # ══ سطر «أجر فقط» ══ أجرٌ على العميل بلا طقم ولا ذهب (تلميع،
         # تعديل مقاس، أجرةٌ فاتت): يدخل أجوره وحدها ولا يمسّ المخزون.
         # ويُضاف كذلك بكتابة المبلغ في خانة الأجر ورقمُ التشغيل فارغ.
-        self.btn_wage_only = QtWidgets.QPushButton("+ أجر فقط")
+        self.btn_wage_only = kit.PushButton("+ أجر فقط")
         self.btn_wage_only.setObjectName("ghost")
         self.btn_wage_only.setToolTip(
             "سطر أجرٍ بلا طقم ولا ذهب — يُضاف إلى أجور العميل وحدها.\n"
@@ -1017,14 +1019,14 @@ class SalesScreen(QtWidgets.QWidget):
         return box
 
     def _build_footer(self):
-        self.btn_save = QtWidgets.QPushButton("ترحيل الفاتورة")
+        self.btn_save = kit.PushButton("ترحيل الفاتورة")
         self.btn_save.clicked.connect(self.save)
-        self.btn_cancel_edit = QtWidgets.QPushButton("إلغاء التعديل")
+        self.btn_cancel_edit = kit.PushButton("إلغاء التعديل")
         self.btn_cancel_edit.setObjectName("ghost")
         self.btn_cancel_edit.clicked.connect(self.cancel_edit)
         self.btn_cancel_edit.setVisible(False)
         # تعليق: تُحفظ الفاتورة في «المعلّقات» بلا قيد ولا أثر
-        self.btn_hold = QtWidgets.QPushButton("⏸ تعليق الفاتورة")
+        self.btn_hold = kit.PushButton("⏸ تعليق الفاتورة")
         self.btn_hold.setObjectName("ghost")
         self.btn_hold.setToolTip(
             "تُحفظ الفاتورة في «المعلّقات» بلا ترحيل ولا أثر على المخزون أو"
@@ -1055,10 +1057,10 @@ class SalesScreen(QtWidgets.QWidget):
         self.held_tbl = make_table()
         self.held_tbl.doubleClicked.connect(lambda *_: self.open_held())
         self.held_rows = []
-        b_open = QtWidgets.QPushButton("↩ فتح لاستكمالها وإثباتها")
+        b_open = kit.PushButton("↩ فتح لاستكمالها وإثباتها")
         b_open.setObjectName("homeBtn")
         b_open.clicked.connect(self.open_held)
-        b_drop = QtWidgets.QPushButton("🗑 إلغاء المعلّقة")
+        b_drop = kit.PushButton("🗑 إلغاء المعلّقة")
         b_drop.setObjectName("ghost")
         b_drop.clicked.connect(self.drop_held)
         row = QtWidgets.QHBoxLayout()
@@ -2118,7 +2120,7 @@ class SalesScreen(QtWidgets.QWidget):
         amt.setDecimals(2)
         if self.line_wage.value() > 0 and not self.barcode.text().strip():
             amt.setValue(self.line_wage.value())
-        note = QtWidgets.QLineEdit()
+        note = kit.LineEdit()
         note.setPlaceholderText("مثلاً: تلميع · تعديل مقاس · أجرة سابقة")
         form = QtWidgets.QFormLayout()
         form.addRow("المبلغ (ريال):", amt)
@@ -2263,9 +2265,9 @@ class SalesScreen(QtWidgets.QWidget):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f"تعديل السطر — {wo['work_order_no']}")
         dlg.setMinimumWidth(460)
-        w_model = QtWidgets.QLineEdit(
+        w_model = kit.LineEdit(
             ((wo["model_no"] if "model_no" in wo.keys() else "") or ""))
-        w_karat = QtWidgets.QComboBox()
+        w_karat = kit.ComboBox()
         for kk in config.KARATS:
             w_karat.addItem(f"عيار {kk}", kk)
         i = w_karat.findData(k0)

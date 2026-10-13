@@ -19,6 +19,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from models import models_catalog as mc
 from services import cutout as _co
 from services import enhance as en
@@ -137,7 +139,7 @@ class ImageStudio(QtWidgets.QDialog):
         self.note.setWordWrap(True)
 
         # ── الضبط ──
-        self.mode = QtWidgets.QComboBox()
+        self.mode = kit.ComboBox()
         for t, k in (("تلقائي", "auto"), ("رسمٌ ممسوح", "drawing"),
                      ("صورةٌ فوتوغرافية", "photo")):
             self.mode.addItem(t, k)
@@ -149,14 +151,14 @@ class ImageStudio(QtWidgets.QDialog):
         self.reach.setToolTip("ارفعه إن بقي جزءٌ من قطعةٍ أبيض (حدودٌ"
                               " منقّطة)، واخفضه إن امتدّ الظلّ بين قطعٍ"
                               " منفصلة")
-        self.c_flat = QtWidgets.QCheckBox("ورقٌ أبيض ناصع (بلا ظلال ولا بقع)")
-        self.c_unshade = QtWidgets.QCheckBox("محو الظلّ الرمادي — الخطّ وحده")
-        self.c_color = QtWidgets.QCheckBox("محو الكتابة بالقلم الملوّن")
-        self.c_edges = QtWidgets.QCheckBox("محو حافّة الماسح السوداء")
-        self.c_speck = QtWidgets.QCheckBox("تنظيف نقاط الغبار")
-        self.c_crop = QtWidgets.QCheckBox("قصٌّ على الرسم (التناسب)")
-        self.c_trans = QtWidgets.QCheckBox("خلفية شفافة")
-        self.rot = QtWidgets.QDoubleSpinBox()
+        self.c_flat = kit.CheckBox("ورقٌ أبيض ناصع (بلا ظلال ولا بقع)")
+        self.c_unshade = kit.CheckBox("محو الظلّ الرمادي — الخطّ وحده")
+        self.c_color = kit.CheckBox("محو الكتابة بالقلم الملوّن")
+        self.c_edges = kit.CheckBox("محو حافّة الماسح السوداء")
+        self.c_speck = kit.CheckBox("تنظيف نقاط الغبار")
+        self.c_crop = kit.CheckBox("قصٌّ على الرسم (التناسب)")
+        self.c_trans = kit.CheckBox("خلفية شفافة")
+        self.rot = kit.DoubleSpinBox()
         self.rot.setRange(-180.0, 180.0)
         self.rot.setSingleStep(0.5)
         self.rot.setDecimals(1)
@@ -167,21 +169,21 @@ class ImageStudio(QtWidgets.QDialog):
         b_right = QtWidgets.QToolButton()
         b_right.setText("↷ 90°")
         b_right.clicked.connect(lambda: self._turn(90))
-        self.b_erase = QtWidgets.QPushButton("🧽 ممحاة")
+        self.b_erase = kit.PushButton("🧽 ممحاة")
         self.b_erase.setCheckable(True)
         self.b_erase.setToolTip("مرّر الفأرة على صورة الأصل لمحو رقمٍ أو"
                                 " ملاحظةٍ أو بقعة")
         self.b_erase.toggled.connect(self._erase_mode)
-        self.brush = QtWidgets.QSpinBox()
+        self.brush = kit.SpinBox()
         self.brush.setRange(4, 80)
         self.brush.setValue(18)
         self.brush.setSuffix(" بكسل")
         self.brush.valueChanged.connect(
             lambda v: setattr(self.before, "brush", v))
-        b_undo = QtWidgets.QPushButton("↩ تراجع عن المسح")
+        b_undo = kit.PushButton("↩ تراجع عن المسح")
         b_undo.setObjectName("ghost")
         b_undo.clicked.connect(self._undo)
-        b_clear = QtWidgets.QPushButton("مسح الممحاة كلها")
+        b_clear = kit.PushButton("مسح الممحاة كلها")
         b_clear.setObjectName("ghost")
         b_clear.clicked.connect(self._clear_erase)
 
@@ -220,13 +222,13 @@ class ImageStudio(QtWidgets.QDialog):
         pics.setColumnStretch(1, 1)
         pics.setRowStretch(1, 1)
 
-        b_reset = QtWidgets.QPushButton("↺ الضبط الافتراضي")
+        b_reset = kit.PushButton("↺ الضبط الافتراضي")
         b_reset.setObjectName("ghost")
         b_reset.clicked.connect(self._reset)
-        self.b_save = QtWidgets.QPushButton("💾 حفظ الصورة المحسّنة")
+        self.b_save = kit.PushButton("💾 حفظ الصورة المحسّنة")
         self.b_save.setObjectName("homeBtn")
         self.b_save.clicked.connect(self.save)
-        b_cancel = QtWidgets.QPushButton("إلغاء")
+        b_cancel = kit.PushButton("إلغاء")
         b_cancel.clicked.connect(self.reject)
         acts = QtWidgets.QHBoxLayout()
         acts.addWidget(self.b_save)

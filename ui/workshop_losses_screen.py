@@ -9,6 +9,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import workshop_losses as wl
@@ -25,20 +27,20 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
         self.types = []
 
         self.date = date_edit()
-        self.doc_no = QtWidgets.QLineEdit()
+        self.doc_no = kit.LineEdit()
         self.doc_no.setPlaceholderText("يُولَّد تلقائياً")
         self.doc_no.setMaximumWidth(140)
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.setMinimumWidth(200)
         self.weight = wspin()
-        self.desc = QtWidgets.QLineEdit()
+        self.desc = kit.LineEdit()
         self.desc.setPlaceholderText("البيان (اختياري)")
 
-        btn_new_type = QtWidgets.QPushButton("➕ نوع فاقد جديد")
+        btn_new_type = kit.PushButton("➕ نوع فاقد جديد")
         btn_new_type.setToolTip(
             "يُنشئ حساباً جديداً تحت «فواقد الورشة» في الدليل تلقائياً")
         btn_new_type.clicked.connect(self.new_type)
-        btn_post = QtWidgets.QPushButton("📥 ترحيل الفاقد")
+        btn_post = kit.PushButton("📥 ترحيل الفاقد")
         btn_post.setObjectName("homeBtn")
         btn_post.clicked.connect(self.save)
 
@@ -63,11 +65,11 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
         self.table = make_table()
         self.totals = big_label()
 
-        btn_refresh = QtWidgets.QPushButton("↻ تحديث")
+        btn_refresh = kit.PushButton("↻ تحديث")
         btn_refresh.clicked.connect(self.refresh)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة السجل")
+        btn_print = kit.PushButton("🖨 طباعة السجل")
         btn_print.clicked.connect(self.print_log)
-        btn_del = QtWidgets.QPushButton("🗑 حذف السند المحدد")
+        btn_del = kit.PushButton("🗑 حذف السند المحدد")
         btn_del.setObjectName("ghost")
         btn_del.setToolTip("يحذف السند ويعكس أثره المحاسبي معاً")
         btn_del.clicked.connect(self.delete_selected)

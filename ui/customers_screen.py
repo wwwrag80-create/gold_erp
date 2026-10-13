@@ -16,6 +16,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import customer_board as cb
 from services import karat_view as kv
@@ -87,18 +89,18 @@ class CustomersScreen(QtWidgets.QWidget):
         self._sorters = {}
 
         # ── الشريط ──
-        self.since_start = QtWidgets.QCheckBox("منذ البداية")
+        self.since_start = kit.CheckBox("منذ البداية")
         self.since_start.setToolTip(
             "كل حركة العميل منذ فتح حسابه — بلا «رصيد سابق»")
         self.d_from = date_edit()
         self.d_from.setDate(
             QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
         self.d_to = date_edit()
-        self.search = QtWidgets.QLineEdit()
+        self.search = kit.LineEdit()
         self.search.setPlaceholderText("🔍 ابحث باسم العميل أو رقم حسابه…")
         self.search.setClearButtonEnabled(True)
-        self.hide_idle = QtWidgets.QCheckBox("إخفاء من لا حركة له")
-        btn_load = QtWidgets.QPushButton("↻ تحديث")
+        self.hide_idle = kit.CheckBox("إخفاء من لا حركة له")
+        btn_load = kit.PushButton("↻ تحديث")
         btn_load.clicked.connect(self.refresh)
 
         self.since_start.setChecked(
@@ -152,29 +154,29 @@ class CustomersScreen(QtWidgets.QWidget):
         self.tabs.currentChanged.connect(self._tab_changed)
 
         # ── الأزرار ──
-        btn_add = QtWidgets.QPushButton("➕ إضافة حساب من الشجرة")
+        btn_add = kit.PushButton("➕ إضافة حساب من الشجرة")
         btn_add.setToolTip(
             "يضيف أي حسابٍ من دليل الحسابات إلى اللوحة — ويبقى مضافاً")
         btn_add.clicked.connect(self.add_account)
-        self.btn_remove = QtWidgets.QPushButton("✕ إخراج الحساب المضاف")
+        self.btn_remove = kit.PushButton("✕ إخراج الحساب المضاف")
         self.btn_remove.setObjectName("ghost")
         self.btn_remove.setToolTip(
             "يُخرج الحساب المحدّد من اللوحة (للحسابات المضافة وحدها)")
         self.btn_remove.clicked.connect(self.remove_account)
         self.btn_remove.setEnabled(False)
-        btn_ledger = QtWidgets.QPushButton("📄 كشف حساب العميل")
+        btn_ledger = kit.PushButton("📄 كشف حساب العميل")
         btn_ledger.setObjectName("ghost")
         btn_ledger.clicked.connect(self.open_ledger)
-        btn_detail = QtWidgets.QPushButton("🔍 تفصيل الحركة")
+        btn_detail = kit.PushButton("🔍 تفصيل الحركة")
         btn_detail.setObjectName("ghost")
         btn_detail.setToolTip(
             "كل قيدٍ للعميل المحدد، والعمود الذي حُسب فيه ولماذا —\n"
             "فالقيد اليومي يُقرأ بحسابه المقابل: مبيعات أو مرتجع أو "
             "سداد أو رصيد سابق")
         btn_detail.clicked.connect(self.show_detail)
-        btn_print = QtWidgets.QPushButton("🖨 معاينة وطباعة")
+        btn_print = kit.PushButton("🖨 معاينة وطباعة")
         btn_print.clicked.connect(self.print_report)
-        btn_export = QtWidgets.QPushButton("⬇ تصدير Excel")
+        btn_export = kit.PushButton("⬇ تصدير Excel")
         btn_export.setObjectName("ghost")
         btn_export.setToolTip("يحفظ التبويب المعروض ملفاً يفتحه Excel")
         btn_export.clicked.connect(self._export_current)
@@ -717,7 +719,7 @@ class MovementDetailDialog(QtWidgets.QDialog):
         self.setLayoutDirection(QtCore.Qt.RightToLeft)
         self.resize(1180, 640)
         self.res = res
-        self.filter = QtWidgets.QComboBox()
+        self.filter = kit.ComboBox()
         self.filter.addItem("كل الأعمدة", "")
         for k in cb.KINDS:
             self.filter.addItem(_ek_label(k), k)
@@ -732,7 +734,7 @@ class MovementDetailDialog(QtWidgets.QDialog):
         head.addWidget(self.filter)
         head.addStretch(1)
         if on_ledger:
-            b = QtWidgets.QPushButton("📄 كشف الحساب")
+            b = kit.PushButton("📄 كشف الحساب")
             b.setObjectName("ghost")
             b.clicked.connect(lambda: (self.accept(), on_ledger()))
             head.addWidget(b)

@@ -7,6 +7,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import closing, fiscal
@@ -22,18 +24,18 @@ class YearEndScreen(QtWidgets.QWidget):
         self.user = user
         self.preview = None
 
-        self.year = QtWidgets.QSpinBox()
+        self.year = kit.SpinBox()
         self.year.setRange(2000, 2100)
         self.year.setValue(QtCore.QDate.currentDate().year())
-        btn_prev = QtWidgets.QPushButton("معاينة نتيجة السنة")
+        btn_prev = kit.PushButton("معاينة نتيجة السنة")
         btn_prev.clicked.connect(self.load_preview)
 
-        self.to_partners = QtWidgets.QCheckBox(
+        self.to_partners = kit.CheckBox(
             "ترحيل الصافي إلى جاري الشركاء بدل الأرباح المحتجزة")
-        self.roll = QtWidgets.QCheckBox(
+        self.roll = kit.CheckBox(
             "إنشاء قيد تدوير صريح للسنة الجديدة (اختياري)")
 
-        btn_run = QtWidgets.QPushButton("🔒 تنفيذ الإقفال السنوي")
+        btn_run = kit.PushButton("🔒 تنفيذ الإقفال السنوي")
         btn_run.setObjectName("closeBtn")
         btn_run.clicked.connect(self.run_closing)
 
@@ -52,13 +54,13 @@ class YearEndScreen(QtWidgets.QWidget):
         self.lock_state = QtWidgets.QLabel("—")
         self.lock_state.setObjectName("cardSub")
         self.lock_state.setProperty("live", True)
-        self.lock_date = QtWidgets.QDateEdit()
+        self.lock_date = kit.DateEdit()
         self.lock_date.setCalendarPopup(True)
         self.lock_date.setDisplayFormat("yyyy-MM-dd")
         self.lock_date.setDate(QtCore.QDate.currentDate())
-        btn_lock = QtWidgets.QPushButton("🔒 اقفل حتى هذا التاريخ")
+        btn_lock = kit.PushButton("🔒 اقفل حتى هذا التاريخ")
         btn_lock.clicked.connect(self.apply_lock)
-        btn_unlock = QtWidgets.QPushButton("🔓 ارفع القفل")
+        btn_unlock = kit.PushButton("🔓 ارفع القفل")
         btn_unlock.clicked.connect(self.clear_lock)
 
         lock_row = QtWidgets.QHBoxLayout()

@@ -12,6 +12,8 @@ from datetime import date
 
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import statements
 from services import karat_view as kv
@@ -52,28 +54,28 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         self.d_from.setDate(QtCore.QDate(today.year, 1, 1))
         self.d_to = date_edit()
         self.d_to.setDate(QtCore.QDate(today.year, 12, 31))
-        self.all_time = QtWidgets.QCheckBox("كل المدة")
+        self.all_time = kit.CheckBox("كل المدة")
         self.all_time.stateChanged.connect(self._toggle_period)
-        self.dim = QtWidgets.QComboBox()
+        self.dim = kit.ComboBox()
         self.dim.addItem("النقد (ريال سعودي)", "cash")
         self.dim.addItem(f"الذهب ({kv.unit()})", "gold")
         self.dim.currentIndexChanged.connect(self.load)
-        self.level = QtWidgets.QComboBox()
+        self.level = kit.ComboBox()
         for v, lbl in LEVELS:
             self.level.addItem(lbl, v)
         self.level.setCurrentIndex(len(LEVELS) - 1)
         self.level.currentIndexChanged.connect(self.load)
-        self.show_zero = QtWidgets.QCheckBox("إظهار الحسابات الصفرية")
+        self.show_zero = kit.CheckBox("إظهار الحسابات الصفرية")
 
-        btn = QtWidgets.QPushButton("إعداد الميزان")
+        btn = kit.PushButton("إعداد الميزان")
         btn.setObjectName("homeBtn")
         btn.clicked.connect(self.load)
-        btn_print = QtWidgets.QPushButton("🖨 معاينة وطباعة")
+        btn_print = kit.PushButton("🖨 معاينة وطباعة")
         btn_print.clicked.connect(self.print_report)
-        btn_exp = QtWidgets.QPushButton("⬇ تصدير Excel")
+        btn_exp = kit.PushButton("⬇ تصدير Excel")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
-        btn_mov = QtWidgets.QPushButton("🔎 تفصيل الحركة")
+        btn_mov = kit.PushButton("🔎 تفصيل الحركة")
         btn_mov.setToolTip("كشف حركة الحساب المحدد في فترة الميزان —"
                            " بأرقام السندات وتواريخها")
         btn_mov.clicked.connect(self.show_movement)

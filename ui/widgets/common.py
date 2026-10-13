@@ -5,6 +5,9 @@ import time
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+# مكوّنات الواجهة الحديثة (QFluentWidgets) أو مكوّنات Qt إن غابت — `ui.kit`
+from ui import kit
+
 
 class Card(QtWidgets.QFrame):
     """بطاقة إحصائية قابلة للنقر (للوحة التحكم التفاعلية) — تصدر clicked
@@ -118,7 +121,7 @@ class ElidedLabel(QtWidgets.QLabel):
         painter.drawText(self.rect(), int(self.alignment()), txt)
 
 
-class _BlankZeroSpin(QtWidgets.QDoubleSpinBox):
+class _BlankZeroSpin(kit.DoubleSpinBox):
     """QDoubleSpinBox يظهر فارغاً تماماً عند القيمة صفر (بدل "0.00") —
     يمنع أخطاء التداخل أثناء الإدخال السريع، ويعمل بلا أثر جانبي على
     Range أو minimum/maximum الفعلي للحقل (خلافاً لـ setSpecialValueText
@@ -205,7 +208,7 @@ def mspin(maximum=1_000_000_000.0, minimum=0.0):
 
 
 def date_edit():
-    d = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
+    d = kit.DateEdit(QtCore.QDate.currentDate())
     d.setCalendarPopup(True)
     d.setDisplayFormat("yyyy-MM-dd")
     return d
@@ -234,7 +237,9 @@ def dstr(date_widget) -> str:
 def make_table(stretch_last=True):
     """جدول بمواصفات أنظمة ERP: أعمدة تتمدد لملء الإطار، صفوف متناوبة
     الألوان، رأس داكن غامق، إخفاء أرقام الصفوف، وارتفاع صف مريح."""
-    t = QtWidgets.QTableWidget()
+    # جدول Fluent (4.69): صفوفٌ مستديرة وتظليلٌ عند المرور وشريط تحديد
+    # ذهبي وتمريرٌ ناعم — وواجهته واجهة `QTableWidget` كاملة
+    t = kit.TableWidget()
     t.setAlternatingRowColors(True)
     t.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     t.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -724,23 +729,28 @@ def cell(table, row, col):
     return it.text() if it else ""
 
 
+# ══ الرسائل (4.69) ══
+# نافذة Fluent فوق قناعٍ معتم بأيقونةٍ ملوّنة وأزرارٍ عربية — أو
+# `QMessageBox` كما كان إن غابت المكتبة (`ui.kit.message`).
+
 def info(parent, text, title="تم بنجاح"):
-    QtWidgets.QMessageBox.information(parent, title, text)
+    kit.message(parent, text, title,
+                "success" if title == "تم بنجاح" else "info")
 
 
 def err(parent, text, title="خطأ"):
-    QtWidgets.QMessageBox.critical(parent, title, str(text))
+    kit.message(parent, str(text), title, "error")
 
 
 def warn(parent, text, title="تنبيه"):
-    QtWidgets.QMessageBox.warning(parent, title, text)
+    kit.message(parent, text, title, "warning")
 
 
 def ask(parent, text, title="تأكيد") -> bool:
-    r = QtWidgets.QMessageBox.question(
-        parent, title, text,
-        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-    return r == QtWidgets.QMessageBox.Yes
+    return kit.message(
+        parent, text, title, "question",
+        buttons=(("yes", "نعم", "primary"), ("no", "لا", "secondary")),
+        default="no") == "yes"
 
 
 def reload_combo(cb, rows, label_fn, id_key="id"):
@@ -786,7 +796,7 @@ def _norm(text):
     return "".join(m.get(c, c) for c in (text or "")).strip().lower()
 
 
-class SearchCombo(QtWidgets.QComboBox):
+class SearchCombo(kit.ComboBox):
     """حقل اختيار ذكي: يبدأ فارغاً بلا اسم افتراضي، يقبل الكتابة اليدوية،
     ويقترح الأسماء/الحسابات المتقاربة فور كتابة أول الحروف. إن لم يُطابق
     ما كُتبَ أي عنصر يُترك الاختيار فارغاً حتى لا تُلتقط قيمة خاطئة."""
@@ -1046,15 +1056,11 @@ def confirm_post(parent, summary):
     الترحيل يُحدث أثراً في الحسابات ولا يُلغى إلا بقيد عكسي، فيستحق
     تأكيداً واعياً — كما في أنظمة ERP الكبيرة.
     """
-    box = QtWidgets.QMessageBox(parent)
-    box.setWindowTitle("تأكيد الترحيل")
-    box.setIcon(QtWidgets.QMessageBox.Question)
-    box.setText("هل تريد ترحيل هذه العملية؟")
-    box.setInformativeText(summary)
-    yes = box.addButton("✔ ترحيل", QtWidgets.QMessageBox.AcceptRole)
-    box.addButton("إلغاء", QtWidgets.QMessageBox.RejectRole)
-    box.exec_()
-    return box.clickedButton() is yes
+    return kit.message(
+        parent, "هل تريد ترحيل هذه العملية؟", "تأكيد الترحيل", "question",
+        buttons=(("post", "✔ ترحيل", "primary"),
+                 ("cancel", "إلغاء", "secondary")),
+        detail=summary, default="cancel") == "post"
 
 
 def posted(parent, message, doc_type=None, doc_id=None,
@@ -1081,26 +1087,16 @@ def posted(parent, message, doc_type=None, doc_id=None,
     if warn_txt:
         message = f"{message}\n\n{warn_txt}"
 
-    box = QtWidgets.QMessageBox(parent)
-    box.setWindowTitle("تم الترحيل")
-    box.setIcon(QtWidgets.QMessageBox.Warning if warn_txt
-                else QtWidgets.QMessageBox.Information)
-    box.setText(message)
+    kind = "warning" if warn_txt else "success"
     if not (doc_type and doc_id):
-        box.setStandardButtons(QtWidgets.QMessageBox.Ok)
-        box.exec_()
+        kit.message(parent, message, "تم الترحيل", kind)
         return None
     # ══ التعديل لا يعرض خيار الطباعة ══
     # التعديل تصحيح لعملية مطبوعة سابقاً، وعرض مربع الطباعة بعده
     # يستورد وحدة الطباعة ويفتح المتصفح — فيبطئ ما يجب أن يكون
     # فورياً. رسالة نجاح مباشرة أوضح وأسرع.
     if editing:
-        box = QtWidgets.QMessageBox(parent)
-        box.setWindowTitle("تم")
-        box.setIcon(QtWidgets.QMessageBox.Information)
-        box.setText(message)
-        box.setStandardButtons(QtWidgets.QMessageBox.Ok)
-        box.exec_()
+        kit.message(parent, message, "تم", "success")
         return "ok"
 
     # نضمن جاهزية وحدة الطباعة **قبل** عرض المربع، بمهلة قصيرة
@@ -1110,24 +1106,22 @@ def posted(parent, message, doc_type=None, doc_id=None,
         preload.ensure(timeout=0.2)
     except Exception:
         pass
-    box.setInformativeText("هل تريد طباعة المستند أو معاينته؟")
-    b_prev = box.addButton("👁 معاينة وطباعة",
-                           QtWidgets.QMessageBox.AcceptRole)
-    b_print = box.addButton("🖨 طباعة مباشرة",
-                            QtWidgets.QMessageBox.ActionRole)
-    box.addButton("لاحقاً", QtWidgets.QMessageBox.RejectRole)
-    box.exec_()
-    clicked = box.clickedButton()
+    clicked = kit.message(
+        parent, message, "تم الترحيل", kind,
+        buttons=(("preview", "👁 معاينة وطباعة", "primary"),
+                 ("print", "🖨 طباعة مباشرة", "secondary"),
+                 ("later", "لاحقاً", "secondary")),
+        detail="هل تريد طباعة المستند أو معاينته؟", default="later")
     try:
         from services import print_manager
-        if clicked is b_prev:
+        if clicked == "preview":
             # المعاينة مؤجَّلة لدورة أحداث لاحقة: يُغلق مربع الحوار
             # أولاً فيرى المستخدم أن العملية تمّت، ثم يُفتح المستند.
             QtCore.QTimer.singleShot(
                 0, lambda: print_manager.preview_document(
                     parent, doc_type, doc_id, **print_kw))
             return "preview"
-        if clicked is b_print:
+        if clicked == "print":
             print_manager.print_document(parent, doc_type, doc_id,
                                          **print_kw)
             return "print"
@@ -1187,7 +1181,7 @@ def show_model_image(parent, model_no):
         _flip(save=False)
     else:
         _show(p)
-    btn = QtWidgets.QPushButton("إغلاق")
+    btn = kit.PushButton("إغلاق")
     btn.clicked.connect(dlg.accept)
     lay.addWidget(lbl, 1)
     lay.addWidget(btn)
@@ -1206,8 +1200,8 @@ def photo_bg_choice(parent=None):
     w = QtWidgets.QWidget(parent)
     lay = QtWidgets.QHBoxLayout(w)
     lay.setContentsMargins(0, 0, 0, 0)
-    cut = QtWidgets.QRadioButton("بدون خلفية (شفافة)")
-    org = QtWidgets.QRadioButton("بخلفيتها الأصلية")
+    cut = kit.RadioButton("بدون خلفية (شفافة)")
+    org = kit.RadioButton("بخلفيتها الأصلية")
     grp = QtWidgets.QButtonGroup(w)
     grp.addButton(cut)
     grp.addButton(org)
@@ -1273,7 +1267,7 @@ def karat_combo(pref_key=None, width=112):
 
     `pref_key` يجعل آخر اختيار يُحفظ فيُستعاد عند العودة للشاشة.
     """
-    cb = QtWidgets.QComboBox()
+    cb = kit.ComboBox()
     cb.setMaximumWidth(width)
     cb.setToolTip("عيار عرض الأوزان — القيد يبقى بمكافئ عيار 18")
     for k in (18, 21, 22, 24):
@@ -1402,6 +1396,8 @@ def run_bg(fn, parent=None, text="جارٍ التنفيذ…", stage="", timeout
             parent.setEnabled(False)
         except Exception:
             pass
+    # بطاقة «جارٍ التنفيذ…» بدائرةٍ دوّارة إن طال العمل (4.69)
+    tip = kit.busy_tip(parent, text)
     try:
         while not box["done"]:
             if timeout is not None and time.time() - t0 > timeout:
@@ -1409,7 +1405,9 @@ def run_bg(fn, parent=None, text="جارٍ التنفيذ…", stage="", timeout
             # بلا أحداث إدخال: الواجهة تُرسم ولا يُنفَّذ ضغطٌ عارض
             app.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents, 40)
             th.join(0.02)
+            tip.tick((time.time() - t0) * 1000)
     finally:
+        tip.done(box["done"] and box["err"] is None)
         if parent is not None:
             try:
                 parent.setEnabled(True)

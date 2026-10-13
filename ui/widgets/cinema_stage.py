@@ -107,6 +107,9 @@ class CinemaStage(QtWidgets.QWidget):
     """
 
     uses_overlay = False        # الحواف يرسمها بنفسه: تعتيمٌ ناعم بلا إطار
+    # أول إطارٍ يُرسم فعلاً: المسرح يغطّي البوابة كلها فلا تُرسم هي —
+    # فيُعلن هو أول رسمٍ نيابةً عنها (شاشة بدء الـexe تُغلق عليه)
+    first_paint = QtCore.pyqtSignal()
 
     def __init__(self, parent=None, animate=None):
         super().__init__(parent)
@@ -353,6 +356,9 @@ class CinemaStage(QtWidgets.QWidget):
             p.fillRect(self.rect(),
                        QtGui.QColor(0, 0, 0, int(255 * min(1.0, dark))))
         p.end()
+        if not getattr(self, "_announced", False):
+            self._announced = True
+            self.first_paint.emit()
 
     def set_exit(self, v):
         """يضبط الخروج: تعتيمٌ واقترابٌ خفيف (يُعاد التحجيم مع الاقتراب)."""

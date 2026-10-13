@@ -24,7 +24,7 @@ echo.
 
 echo  [2/4] Installing tools...
 python -m pip install --upgrade pip
-python -m pip install PyQt5 qrcode pillow python-barcode pyinstaller
+python -m pip install PyQt5 qrcode pillow python-barcode pyinstaller "PyQt-Fluent-Widgets==1.11.3"
 echo.
 
 echo  [3/4] Checking PyInstaller...

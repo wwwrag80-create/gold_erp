@@ -4,6 +4,8 @@
 شجرة الحسابات — أداة التسوية المالية والوزنية الوحيدة لسداد الموردين."""
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import coa, editing, entities, inventory, vouchers
 from models.accounts import list_postable
@@ -31,12 +33,12 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         super().__init__()
         self.user = user
 
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.addItem("سند قبض (نستلم)", "receipt")
         self.kind.addItem("سند صرف (ندفع)", "payment")
         self.kind.currentIndexChanged.connect(self.kind_changed)
 
-        self.target_mode = QtWidgets.QComboBox()
+        self.target_mode = kit.ComboBox()
         self.target_mode.addItem("جهة تعامل (عميل/مورد/شريك/داخلي)", "entity")
         self.target_mode.addItem("حساب مباشر من شجرة الحسابات", "account")
         self.target_mode.currentIndexChanged.connect(self.mode_changed)
@@ -59,7 +61,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self.rows = []
 
         self.g_weight = wspin()
-        self.g_karat = QtWidgets.QComboBox()
+        self.g_karat = kit.ComboBox()
         # الأعيرة من BOX_CODE فيظهر أي عيار يُضاف مستقبلاً تلقائياً
         for k in sorted(inventory.BOX_CODE):
             self.g_karat.addItem(f"عيار {k}", k)
@@ -69,9 +71,9 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         if _ki >= 0:
             self.g_karat.setCurrentIndex(_ki)
         self.g_karat.currentIndexChanged.connect(self.recalc_equiv)
-        self.g_note = QtWidgets.QLineEdit()
+        self.g_note = kit.LineEdit()
         self.g_note.setPlaceholderText("بيان السطر (اختياري)")
-        btn_add_gold = QtWidgets.QPushButton("➕ إضافة سطر ذهب")
+        btn_add_gold = kit.PushButton("➕ إضافة سطر ذهب")
         btn_add_gold.clicked.connect(self.add_gold_row)
         # ══ الترتيب: صفٌّ للسند · لوحتا الذهب والنقد متجاورتين · صفُّ
         # الخصومات بخاناتٍ صغيرة · ثم الجدول والترحيل — كلّه أمام العين
@@ -92,12 +94,12 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
 
         # تسديد النقد
         self.c_amount = mspin()
-        self.c_target = QtWidgets.QComboBox()
+        self.c_target = kit.ComboBox()
         self.c_target.addItem("الصندوق", "1400")
         self.c_target.addItem("البنك", "1500")
-        self.c_note = QtWidgets.QLineEdit()
+        self.c_note = kit.LineEdit()
         self.c_note.setPlaceholderText("بيان السطر (اختياري)")
-        btn_add_cash = QtWidgets.QPushButton("➕ إضافة سطر نقد")
+        btn_add_cash = kit.PushButton("➕ إضافة سطر نقد")
         btn_add_cash.clicked.connect(self.add_cash_row)
         cash_box = QtWidgets.QGroupBox("💵 النقد")
         cg = QtWidgets.QGridLayout(cash_box)
@@ -114,20 +116,20 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
 
         # جدول أسطر السند
         self.rows_table = make_table()
-        btn_del_row = QtWidgets.QPushButton("حذف السطر المحدد")
+        btn_del_row = kit.PushButton("حذف السطر المحدد")
         btn_del_row.setObjectName("ghost")
         btn_del_row.clicked.connect(self.del_row)
         self.rows_total = big_label()
 
         # فرق الصافي والخصومات — ضابط صارم: لا يُحتسب شيءٌ منها إلا
         # بتفعيل صريح، وإلا فُرضت القيمة صفراً مهما كان في الخانة.
-        self.adj_enable = QtWidgets.QCheckBox("تفعيل الخصم والفرق")
+        self.adj_enable = kit.CheckBox("تفعيل الخصم والفرق")
         self.adj_enable.stateChanged.connect(self.toggle_adjustments)
         self.net_diff = mspin(minimum=-1_000_000_000.0)
         self.net_diff.setToolTip("+ يزيد مديونية الطرف النقدية / − يخفضها")
         self.disc_cash = mspin()
         self.disc_gold = wspin()
-        self.notes = QtWidgets.QLineEdit()
+        self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("البيان / ملاحظات السند")
         adj = QtWidgets.QHBoxLayout()
         adj.addWidget(self.adj_enable)
@@ -143,7 +145,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         # الصرف لجهةٍ سدادٌ أو سلفة — إلا ما هو مصروفٌ بذاته: أجرُ عاملٍ
         # بلا مسير، خدمةٌ من موردٍ بلا فاتورة مشتريات، تعويضٌ لعميل.
         # فيُختار الحساب، ويظهر المبلغ في قائمة الدخل في بنده.
-        self.staff_exp = QtWidgets.QCheckBox("تحميل المبلغ مصروفاً على:")
+        self.staff_exp = kit.CheckBox("تحميل المبلغ مصروفاً على:")
         self.staff_exp.setToolTip(
             "سند صرفٍ لجهة: إن فُعِّل يُحمَّل المبلغ (نقداً أو ذهباً) على"
             " الحساب المختار ويظهر في كشف الجهة مدفوعاً ومُحمَّلاً.\n"
@@ -152,7 +154,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             " المورد ← مصروفات تشغيلية (أو ما تختاره).\n"
             "وإن لم يُفعَّل فالسند سدادٌ لما لها أو سلفةٌ عليها — لا مصروف"
             " (فاتورة المورد ومسير الرواتب أثبتا المصروف من قبل).")
-        self.exp_account = QtWidgets.QComboBox()
+        self.exp_account = kit.ComboBox()
         self.exp_account.setMinimumWidth(320)
         self._staff_touched = False
         self.staff_exp.clicked.connect(
@@ -168,7 +170,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         _er.addStretch(1)
         self.exp_row.setVisible(False)
 
-        btn_save = QtWidgets.QPushButton("✔ ترحيل السند")
+        btn_save = kit.PushButton("✔ ترحيل السند")
         btn_save.clicked.connect(self.save)
         self.init_edit_mode(btn_save, "السند")
 

@@ -15,6 +15,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import stock_aging as sa
 from models.aging import BUCKET_LABELS
@@ -39,21 +41,21 @@ class StockAgingScreen(QtWidgets.QWidget):
         # فلا يتعلّم المستخدم طريقتين.
         self.models_sel = []                    # فارغة = كل الموديلات
         self.all_models = []
-        self.btn_models = QtWidgets.QPushButton("الموديلات: الكل ▾")
+        self.btn_models = kit.PushButton("الموديلات: الكل ▾")
         self.btn_models.setObjectName("ghost")
         self.btn_models.setMinimumWidth(200)
         self.btn_models.clicked.connect(self.pick_models)
-        self.btn_models_clear = QtWidgets.QPushButton("↺")
+        self.btn_models_clear = kit.PushButton("↺")
         self.btn_models_clear.setObjectName("ghost")
         self.btn_models_clear.setMaximumWidth(36)
         self.btn_models_clear.setToolTip("إلغاء التحديد — يعود الكل")
         self.btn_models_clear.clicked.connect(self.clear_models)
 
-        btn = QtWidgets.QPushButton("📦 إعداد التقرير")
+        btn = kit.PushButton("📦 إعداد التقرير")
         btn.clicked.connect(self.load)
-        btn_print = QtWidgets.QPushButton("👁 معاينة وطباعة")
+        btn_print = kit.PushButton("👁 معاينة وطباعة")
         btn_print.clicked.connect(self.print_report)
-        btn_copy = QtWidgets.QPushButton("📋 نسخ الخلاصة")
+        btn_copy = kit.PushButton("📋 نسخ الخلاصة")
         btn_copy.setObjectName("ghost")
         btn_copy.clicked.connect(self.copy_summary)
 
@@ -147,7 +149,7 @@ class StockAgingScreen(QtWidgets.QWidget):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("اختيار الموديلات")
         dlg.setMinimumSize(420, 480)
-        search = QtWidgets.QLineEdit()
+        search = kit.LineEdit()
         search.setPlaceholderText("اكتب أول حروف الموديل للتصفية…")
         lst = QtWidgets.QListWidget()
         chosen = set(self.models_sel)
@@ -171,10 +173,10 @@ class StockAgingScreen(QtWidgets.QWidget):
                 if not lst.item(i).isHidden():
                     lst.item(i).setCheckState(state)
 
-        btn_all = QtWidgets.QPushButton("تحديد الظاهر")
+        btn_all = kit.PushButton("تحديد الظاهر")
         btn_all.setObjectName("ghost")
         btn_all.clicked.connect(lambda: _set_all(QtCore.Qt.Checked))
-        btn_none = QtWidgets.QPushButton("إلغاء التحديد")
+        btn_none = kit.PushButton("إلغاء التحديد")
         btn_none.setObjectName("ghost")
         btn_none.clicked.connect(lambda: _set_all(QtCore.Qt.Unchecked))
         box = QtWidgets.QDialogButtonBox(

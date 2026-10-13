@@ -7,6 +7,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from services import karat_view as kv
 from models import entities, invoices, operations
@@ -50,20 +52,20 @@ class OperationsScreen(QtWidgets.QWidget):
     # ══════════ تبويب العمليات ══════════
     def _docs_tab(self):
         w = QtWidgets.QWidget()
-        self.kind = QtWidgets.QComboBox()
+        self.kind = kit.ComboBox()
         self.kind.addItem("فواتير المبيعات والمرتجعات", "invoices")
         self.kind.addItem("سندات القبض والصرف", "vouchers")
         self.kind.currentIndexChanged.connect(self.load_docs)
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-3))
         self.d_to = date_edit()
-        btn_load = QtWidgets.QPushButton("عرض العمليات")
+        btn_load = kit.PushButton("عرض العمليات")
         btn_load.clicked.connect(self.load_docs)
-        self.search_no = QtWidgets.QLineEdit()
+        self.search_no = kit.LineEdit()
         self.search_no.setPlaceholderText("بحث برقم الفاتورة أو السند…")
         self.search_no.setMaximumWidth(220)
         self.search_no.returnPressed.connect(self.search_doc)
-        btn_search = QtWidgets.QPushButton("🔍 بحث بالرقم")
+        btn_search = kit.PushButton("🔍 بحث بالرقم")
         btn_search.clicked.connect(self.search_doc)
 
         top = QtWidgets.QHBoxLayout()
@@ -82,14 +84,14 @@ class OperationsScreen(QtWidgets.QWidget):
         self.table.itemSelectionChanged.connect(self.on_pick)
 
         self.target = search_combo("اكتب اسم الجهة الجديدة…")
-        self.reason = QtWidgets.QLineEdit()
+        self.reason = kit.LineEdit()
         self.reason.setPlaceholderText("سبب التحويل / التعديل (يُسجَّل)")
-        btn_transfer = QtWidgets.QPushButton("↪ تحويل العملية للجهة المحددة")
+        btn_transfer = kit.PushButton("↪ تحويل العملية للجهة المحددة")
         btn_transfer.setObjectName("homeBtn")
         btn_transfer.clicked.connect(self.do_transfer)
-        btn_edit = QtWidgets.QPushButton("✎ تعديل بنود الفاتورة")
+        btn_edit = kit.PushButton("✎ تعديل بنود الفاتورة")
         btn_edit.clicked.connect(self.do_edit_items)
-        btn_flip = QtWidgets.QPushButton("⇄ عكس نوع الفاتورة")
+        btn_flip = kit.PushButton("⇄ عكس نوع الفاتورة")
         btn_flip.setToolTip("تحويل مبيعات ⇄ مرتجع لنفس الجهة")
         btn_flip.clicked.connect(self.do_flip)
 
@@ -106,7 +108,7 @@ class OperationsScreen(QtWidgets.QWidget):
         # مرتجعٌ من جهة ثم بيعُ القطع نفسها لجهةٍ أخرى: المرتجع يبقى،
         # وتُصدر فاتورة مبيعات جديدة بنفس البنود وبيانها «مرتجع من …».
         self.resell_date = date_edit()
-        btn_resell = QtWidgets.QPushButton(
+        btn_resell = kit.PushButton(
             "🧾 إصدار فاتورة مبيعات من هذا المرتجع للجهة المحددة")
         btn_resell.setObjectName("homeBtn")
         btn_resell.setToolTip(
@@ -137,11 +139,11 @@ class OperationsScreen(QtWidgets.QWidget):
         self.a_from = date_edit()
         self.a_from.setDate(QtCore.QDate.currentDate().addMonths(-3))
         self.a_to = date_edit()
-        self.a_action = QtWidgets.QComboBox()
+        self.a_action = kit.ComboBox()
         self.a_action.addItem("كل الأنواع", None)
         for k, v in operations.AUDIT_ACTIONS.items():
             self.a_action.addItem(v, k)
-        btn = QtWidgets.QPushButton("عرض السجل")
+        btn = kit.PushButton("عرض السجل")
         btn.clicked.connect(self.load_audit)
 
         top = QtWidgets.QHBoxLayout()
@@ -374,12 +376,12 @@ class InvoiceItemsDialog(QtWidgets.QDialog):
                           ).fetchone()["n"]} for it in items]
         self.inv = inv
 
-        self.wo_no = QtWidgets.QLineEdit()
+        self.wo_no = kit.LineEdit()
         self.wo_no.setPlaceholderText("رقم التشغيل المراد إضافته")
         self.wo_no.returnPressed.connect(self.add_item)
-        btn_add = QtWidgets.QPushButton("➕ إضافة")
+        btn_add = kit.PushButton("➕ إضافة")
         btn_add.clicked.connect(self.add_item)
-        btn_del = QtWidgets.QPushButton("🗑 حذف المحدد")
+        btn_del = kit.PushButton("🗑 حذف المحدد")
         btn_del.setObjectName("ghost")
         btn_del.clicked.connect(self.del_item)
 

@@ -19,7 +19,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-python -m pip install PyQt5 qrcode pillow python-barcode pyinstaller
+python -m pip install PyQt5 qrcode pillow python-barcode pyinstaller "PyQt-Fluent-Widgets==1.11.3"
 echo.
 echo  Building... wait 3-10 minutes
 echo.

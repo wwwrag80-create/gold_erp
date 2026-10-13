@@ -11,6 +11,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import coa
 from ui.widgets.common import ask, big_label, err, info, title_label
@@ -26,9 +28,9 @@ class AddSubDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("إضافة حساب فرعي")
         self.setMinimumWidth(460)
-        self.name = QtWidgets.QLineEdit()
+        self.name = kit.LineEdit()
         self.name.setPlaceholderText("اسم الحساب الجديد")
-        self.measure = QtWidgets.QComboBox()
+        self.measure = kit.ComboBox()
         for key, label in coa.MEASURE_LABELS.items():
             self.measure.addItem(label, key)
         i = self.measure.findData(parent_acc["balance_type"])
@@ -69,7 +71,7 @@ class MoveAccountDialog(QtWidgets.QDialog):
         self.setLayoutDirection(QtCore.Qt.RightToLeft)
         self.setMinimumWidth(620)
         self.targets = list(targets)
-        self.combo = QtWidgets.QComboBox()
+        self.combo = kit.ComboBox()
         self.combo.setEditable(True)
         self.combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         for t in self.targets:
@@ -80,7 +82,7 @@ class MoveAccountDialog(QtWidgets.QDialog):
         comp = self.combo.completer()
         comp.setFilterMode(QtCore.Qt.MatchContains)
         comp.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
-        self.recode = QtWidgets.QCheckBox(
+        self.recode = kit.CheckBox(
             "إعادة ترقيم الكود تحت الحساب الجديد (يبقى كوده كما هو إن لم"
             " يُختر)")
         self.preview = QtWidgets.QLabel()
@@ -146,28 +148,28 @@ class CoaScreen(QtWidgets.QWidget):
         self.tree.setModel(self.model)
         self.tree.doubleClicked.connect(self.open_ledger)
 
-        self.search = QtWidgets.QLineEdit()
+        self.search = kit.LineEdit()
         self.search.setPlaceholderText("بحث بالاسم أو الكود…")
         self.search.textChanged.connect(self.apply_filter)
-        self.show_frozen = QtWidgets.QCheckBox("إظهار الحسابات المجمَّدة")
+        self.show_frozen = kit.CheckBox("إظهار الحسابات المجمَّدة")
         self.show_frozen.setChecked(True)
         self.show_frozen.stateChanged.connect(self.refresh)
-        btn_expand = QtWidgets.QPushButton("توسيع الكل")
+        btn_expand = kit.PushButton("توسيع الكل")
         btn_expand.setObjectName("ghost")
         btn_expand.clicked.connect(self.tree.expandAll)
-        btn_collapse = QtWidgets.QPushButton("طي الكل")
+        btn_collapse = kit.PushButton("طي الكل")
         btn_collapse.setObjectName("ghost")
         btn_collapse.clicked.connect(self.tree.collapseAll)
 
-        btn_audit = QtWidgets.QPushButton("🔍 فحص سلامة الدليل")
+        btn_audit = kit.PushButton("🔍 فحص سلامة الدليل")
         btn_audit.setObjectName("homeBtn")
         btn_audit.setToolTip("ما يسأل عنه المراجع: قيود غير متوازنة، حركة على"
                              " مجموعات، أرصدة على خلاف طبيعتها، حسابات"
                              " وسيطة لم تُصفَّر…")
         btn_audit.clicked.connect(self.run_audit)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة الدليل")
+        btn_print = kit.PushButton("🖨 طباعة الدليل")
         btn_print.clicked.connect(self.print_coa)
-        btn_move = QtWidgets.QPushButton("⇄ نقل الحساب المحدد")
+        btn_move = kit.PushButton("⇄ نقل الحساب المحدد")
         btn_move.setToolTip("نقل الحساب بفروعه وحركته تحت حسابٍ رئيسي أو"
                             " فرعي آخر")
         btn_move.clicked.connect(
@@ -348,7 +350,7 @@ class CoaScreen(QtWidgets.QWidget):
             head.setStyleSheet(
                 "font-weight:bold;color:%s" % ("#0F5A24" if s["ok"]
                                                 else "#9A0018"))
-            t = QtWidgets.QTableWidget(len(s["items"]), 4)
+            t = kit.TableWidget(len(s["items"]), 4)
             t.setHorizontalHeaderLabels(["الخطورة", "البند", "التفصيل",
                                          "الحسابات"])
             colors = {"خطأ": "#9A0018", "تنبيه": "#8A5A00",
@@ -373,9 +375,9 @@ class CoaScreen(QtWidgets.QWidget):
             if not s["items"]:
                 lay.addWidget(QtWidgets.QLabel("لا ملاحظات."))
             row = QtWidgets.QHBoxLayout()
-            b_print = QtWidgets.QPushButton("🖨 طباعة الدليل مع الفحص")
+            b_print = kit.PushButton("🖨 طباعة الدليل مع الفحص")
             b_print.clicked.connect(self.print_coa)
-            b_close = QtWidgets.QPushButton("إغلاق")
+            b_close = kit.PushButton("إغلاق")
             b_close.clicked.connect(dlg.reject)
             row.addWidget(b_print)
             row.addStretch(1)

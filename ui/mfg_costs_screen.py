@@ -12,6 +12,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import mfg_costs
 from ui.widgets.common import (ask, big_label, dstr, err, info, make_table, title_label)
@@ -165,22 +167,22 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self._loading = False
 
         today = QtCore.QDate.currentDate()
-        self.month = QtWidgets.QComboBox()
+        self.month = kit.ComboBox()
         for i, m in enumerate(MONTHS, 1):
             self.month.addItem(m, i)
         self.month.setCurrentIndex(today.month() - 1)
-        self.year = QtWidgets.QSpinBox()
+        self.year = kit.SpinBox()
         self.year.setRange(2000, 2100)
         self.year.setValue(today.year())
         # تبديل الشهر يحفظ ما كُتب في الشهر السابق أولاً (حفظٌ تلقائي)
         self.month.currentIndexChanged.connect(self._period_changed)
         self.year.valueChanged.connect(self._period_changed)
-        btn_reload = QtWidgets.QPushButton("↻ تحديث")
+        btn_reload = kit.PushButton("↻ تحديث")
         btn_reload.clicked.connect(self._reload_saving)
         self._dirty = {"t": False, "s": False}
         self._loaded_period = None
 
-        self.s_date = QtWidgets.QDateEdit()
+        self.s_date = kit.DateEdit()
         self.s_date.setCalendarPopup(True)
         self.s_date.setDisplayFormat("yyyy-MM-dd")
         self.s_date.setDate(QtCore.QDate.currentDate())
@@ -190,27 +192,27 @@ class MfgCostsScreen(QtWidgets.QWidget):
         # آخر أو لشهرٍ آخر أو الخروج من الشاشة (4.48)
         self.save_state = QtWidgets.QLabel("")
         self.save_state.setObjectName("cardSub")
-        btn_post = QtWidgets.QPushButton("📥 إنزال الرواتب")
+        btn_post = kit.PushButton("📥 إنزال الرواتب")
         btn_post.setObjectName("homeBtn")
         btn_post.clicked.connect(self.post_salaries)
-        btn_print = QtWidgets.QPushButton("🖨 طباعة")
+        btn_print = kit.PushButton("🖨 طباعة")
         btn_print.clicked.connect(self.print_current)
-        btn_add = QtWidgets.QPushButton("➕ إضافة / إعادة")
+        btn_add = kit.PushButton("➕ إضافة / إعادة")
         btn_add.setObjectName("ghost")
         btn_add.setToolTip("يعيد من أُزيل من هذا الجدول (عاد من إجازته "
                            "مثلاً)، أو يضيف موظفاً إليه")
         btn_add.clicked.connect(self.add_staff)
-        btn_drop = QtWidgets.QPushButton("➖ إزالة من الجدول")
+        btn_drop = kit.PushButton("➖ إزالة من الجدول")
         btn_drop.setObjectName("ghost")
         btn_drop.setToolTip("يُزيل العامل أو الموظف المحدَّد من هذا الجدول "
                             "فلا ينزل له راتب — حسابه وقيوده باقية")
         btn_drop.clicked.connect(self.drop_staff)
-        btn_up = QtWidgets.QPushButton("▲ أعلى")
+        btn_up = kit.PushButton("▲ أعلى")
         btn_up.setObjectName("ghost")
         btn_up.setMaximumWidth(90)
         btn_up.setToolTip("تحريك العامل المحدَّد لأعلى — الترتيب يُحفظ")
         btn_up.clicked.connect(lambda: self.move_staff(-1))
-        btn_dn = QtWidgets.QPushButton("▼ أسفل")
+        btn_dn = kit.PushButton("▼ أسفل")
         btn_dn.setObjectName("ghost")
         btn_dn.setMaximumWidth(90)
         btn_dn.setToolTip("تحريك العامل المحدَّد لأسفل — الترتيب يُحفظ")
@@ -313,14 +315,14 @@ class MfgCostsScreen(QtWidgets.QWidget):
     def _summary_tab(self):
         w = QtWidgets.QWidget()
         self.sum_table = make_table()
-        btn_add = QtWidgets.QPushButton("➕ إضافة حساب للملخص")
+        btn_add = kit.PushButton("➕ إضافة حساب للملخص")
         btn_add.setToolTip("يضيف صفاً يعرض حركة حساب من دليل الحسابات")
         btn_add.clicked.connect(self.add_summary_account)
-        btn_del = QtWidgets.QPushButton("🗑 حذف الصف المحدد")
+        btn_del = kit.PushButton("🗑 حذف الصف المحدد")
         btn_del.setToolTip(
             "الصف المضاف يُحذف نهائياً، والأساسي يُخفى")
         btn_del.clicked.connect(self.del_summary_row)
-        btn_reset = QtWidgets.QPushButton("↺ استعادة الصفوف الأساسية")
+        btn_reset = kit.PushButton("↺ استعادة الصفوف الأساسية")
         btn_reset.clicked.connect(self.reset_summary)
         row = QtWidgets.QHBoxLayout()
         row.addWidget(btn_add)

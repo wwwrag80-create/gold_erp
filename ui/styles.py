@@ -100,12 +100,12 @@ QRadioButton::indicator:checked { background: @gold; border-color: @goldDim; }
 /* ══ الجداول ══
    الرأس فاتح لا أسود: الرأس الداكن يسحب العين إليه وهي يجب أن تكون
    على الأرقام. التمييز بالثقل والخط الفاصل يكفي. */
-QTableWidget, QTreeWidget, QListWidget {
+QTableWidget, QTreeWidget, QListWidget, QTableView#ledgerView {
   background: @surface; alternate-background-color: @surface2;
   gridline-color: @grid; border: 1px solid @line; border-radius: 10px;
   color: @ink; selection-background-color: @goldSoft; selection-color: @ink;
   font-size: 13pt; font-weight: 500; }
-QTableWidget::item { padding: 8px 5px; }
+QTableWidget::item, QTableView#ledgerView::item { padding: 8px 5px; }
 QTableWidget::item:hover { background: @hover; }
 /* ══ إطارٌ حديث (4.25) ══
    لا مستطيل تركيزٍ منقّط حول الخلية، ورأسٌ أعلى بخطٍّ أوضح، وزاوية
@@ -387,7 +387,8 @@ QFrame#header QPushButton, QFrame#header QPushButton#ghost {
 QFrame#header QPushButton:hover { background: @barBtnHi; }
 
 QTableWidget::item:selected, QTreeWidget::item:selected,
-QListWidget::item:selected { background: @goldSel; color: @ink2; }
+QListWidget::item:selected, QTableView#ledgerView::item:selected {
+  background: @goldSel; color: @ink2; }
 QTableWidget:focus, QTreeWidget:focus { border: 1px solid @goldEdge; }
 QHeaderView::section:hover { background: @goldSoft2; }
 QLineEdit:hover, QDoubleSpinBox:hover, QSpinBox:hover, QComboBox:hover,

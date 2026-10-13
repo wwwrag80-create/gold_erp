@@ -336,6 +336,7 @@ class GateWindow(QtWidgets.QDialog):
         # ── المسرح: مشهدٌ مصوَّر يملأ الشاشة، وكل شيءٍ بعده فوقه (4.68) ──
         self.stage = CinemaStage(self)
         self.stage.lower()
+        self.stage.first_paint.connect(self._announce_painted)
 
         # ══ الترحيب أولاً، ولوحةُ الدخول **لا تُبنى** إلا في وقتها ══
         # إخفاءُ اللوحة لم يكفِ: نوافذ ويندوز تُرسم أول إطارها قبل
@@ -630,6 +631,11 @@ class GateWindow(QtWidgets.QDialog):
         كانت تُرى: شعارٌ يختفي ثم سوادٌ ثم البوابة.
         """
         super().paintEvent(e)
+        self._announce_painted()
+
+    def _announce_painted(self):
+        # المسرح يغطّي البوابة كلها (4.68) فيُرسم هو لا هي — فأول إطارٍ
+        # منه أو منها يُعلن مرةً واحدة
         if not self._painted:
             self._painted = True
             try:

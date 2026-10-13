@@ -4,6 +4,8 @@
 الأعمدة الثمانية المزدوجة (ذهب/نقد) بغض النظر عن طبيعة الحساب."""
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import entities, journal
 from models.accounts import list_postable
@@ -61,7 +63,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
         self.d_to = date_edit()
         # مرشّح نوع العملية: يعرض حركة الحساب من نوع بعينه
-        self.op_kind = QtWidgets.QComboBox()
+        self.op_kind = kit.ComboBox()
         self.op_kind.setMaximumWidth(130)
         for label, val in (("كل العمليات", ""), ("سند قبض", "قبض"),
                            ("سند صرف", "صرف"), ("مبيعات", "مبيعات"),
@@ -73,7 +75,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         # العيارات: يعرض الكشف نفسه بالعيار المختار (عرضٌ محض)
         self.karat = karat_combo()
         self.karat.currentIndexChanged.connect(self._karat_changed)
-        btn = QtWidgets.QPushButton("عرض")
+        btn = kit.PushButton("عرض")
         btn.clicked.connect(self.load)
         # ست بطاقات: مدين · دائن · الرصيد — للذهب والنقد
         self.g_debit = Card("إجمالي المدين — ذهب", f"جم {kv.label()}")
@@ -113,19 +115,19 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             "دفتر الأستاذ العام — أي حساب من الشجرة، ميزان الذهب وميزان "
             "النقد معاً"))
         lay.addLayout(head)
-        btn_edit = QtWidgets.QPushButton("✎ تعديل")
+        btn_edit = kit.PushButton("✎ تعديل")
         btn_edit.clicked.connect(self.edit_doc)
-        btn_move = QtWidgets.QPushButton("⇄ نقل لحساب آخر")
+        btn_move = kit.PushButton("⇄ نقل لحساب آخر")
         btn_move.setToolTip(
             "ينقل العملية لجهة أخرى بنفس التاريخ والرقم والمبالغ")
         btn_move.clicked.connect(self.transfer_doc)
-        btn_del = QtWidgets.QPushButton("🗑 حذف وعكس")
+        btn_del = kit.PushButton("🗑 حذف وعكس")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_doc)
         actions = QtWidgets.QHBoxLayout()
-        btn_print = QtWidgets.QPushButton("👁 معاينة")
+        btn_print = kit.PushButton("👁 معاينة")
         btn_print.clicked.connect(self.print_statement)
-        btn_direct = QtWidgets.QPushButton("🖨 طباعة")
+        btn_direct = kit.PushButton("🖨 طباعة")
         btn_direct.setToolTip(
             "يفتح نافذة طباعة النظام مباشرةً متجاوزاً شاشة المعاينة")
         btn_direct.clicked.connect(self.print_statement_direct)
@@ -228,7 +230,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         if target is None:
             return None
         src, sid = target
-        b = QtWidgets.QPushButton("👁")
+        b = kit.PushButton("👁")
         b.setObjectName("ghost")
         b.setToolTip("فتح المستند في المتصفح للمعاينة والطباعة")
         b.setMaximumWidth(40)
@@ -546,7 +548,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 f"يُبدَّل الطرف المقابل فقط — المبالغ والأوزان "
                 f"والتاريخ والرقم تبقى كما هي.")
             note.setWordWrap(True)
-            reason = QtWidgets.QLineEdit()
+            reason = kit.LineEdit()
             reason.setPlaceholderText("سبب النقل (يُسجَّل في التدقيق)")
             box = QtWidgets.QDialogButtonBox(
                 QtWidgets.QDialogButtonBox.Ok

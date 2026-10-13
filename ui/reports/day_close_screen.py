@@ -6,6 +6,8 @@
 """
 from PyQt5 import QtCore, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import day_close
 from services import karat_view as kv
@@ -21,12 +23,12 @@ class DayCloseScreen(QtWidgets.QWidget):
         self.data = None
 
         self.date = date_edit()
-        btn = QtWidgets.QPushButton("عرض اليوم")
+        btn = kit.PushButton("عرض اليوم")
         btn.clicked.connect(self.refresh)
-        btn_yesterday = QtWidgets.QPushButton("أمس")
+        btn_yesterday = kit.PushButton("أمس")
         btn_yesterday.setObjectName("ghost")
         btn_yesterday.clicked.connect(self._yesterday)
-        btn_print = QtWidgets.QPushButton("👁 معاينة وطباعة")
+        btn_print = kit.PushButton("👁 معاينة وطباعة")
         btn_print.clicked.connect(self.print_report)
 
         head = QtWidgets.QHBoxLayout()

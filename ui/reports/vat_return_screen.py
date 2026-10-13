@@ -6,6 +6,8 @@ from datetime import date
 
 from PyQt5 import QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models.reports import vat_return
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
@@ -37,16 +39,16 @@ class VatReturnScreen(QtWidgets.QWidget):
     def __init__(self, user):
         super().__init__()
         self.last = None
-        self.period = QtWidgets.QComboBox()
+        self.period = kit.ComboBox()
         for label, key in PERIODS:
             self.period.addItem(label, key)
         self.period.setCurrentIndex(1)
         self.period.currentIndexChanged.connect(self.apply_period)
         self.d_from = date_edit()
         self.d_to = date_edit()
-        btn = QtWidgets.QPushButton("إعداد الإقرار")
+        btn = kit.PushButton("إعداد الإقرار")
         btn.clicked.connect(self.load)
-        btn_exp = QtWidgets.QPushButton("تصدير CSV")
+        btn_exp = kit.PushButton("تصدير CSV")
         btn_exp.setObjectName("ghost")
         btn_exp.clicked.connect(self.export_csv)
 

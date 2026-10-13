@@ -15,6 +15,8 @@ import os
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from database.database import db
 from models import model_orders as mo
 from models import models_catalog as mc
@@ -118,7 +120,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
     # ══════════════════════════════════════════════════════════════
     def _editor_tab(self):
         w = QtWidgets.QWidget()
-        self.cust = QtWidgets.QComboBox()
+        self.cust = kit.ComboBox()
         self.cust.setEditable(True)
         self.cust.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         self.cust.setMinimumWidth(260)
@@ -132,7 +134,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         self.cust.editTextChanged.connect(self._touch)
         self.o_date = date_edit()
         self.o_date.dateChanged.connect(self._touch)
-        self.due_on = QtWidgets.QCheckBox("موعد التسليم:")
+        self.due_on = kit.CheckBox("موعد التسليم:")
         self.due_date = date_edit()
         self.due_date.setDate(QtCore.QDate.currentDate().addDays(7))
         self.due_date.setEnabled(False)
@@ -153,10 +155,10 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         head.addWidget(self.no_lbl)
 
         # ── منتقي الموديلات بصورها ──
-        self.pick_search = QtWidgets.QLineEdit()
+        self.pick_search = kit.LineEdit()
         self.pick_search.setPlaceholderText("🔍 ابحث برقم الموديل…")
         self.pick_search.textChanged.connect(self._filter_pick)
-        self.only_imgs = QtWidgets.QCheckBox("بصورٍ فقط")
+        self.only_imgs = kit.CheckBox("بصورٍ فقط")
         self.only_imgs.toggled.connect(self._filter_pick)
         self.pick = QtWidgets.QListWidget()
         self.pick.setViewMode(QtWidgets.QListView.IconMode)
@@ -174,7 +176,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
             QtWidgets.QAbstractItemView.ExtendedSelection)
         self.pick.itemDoubleClicked.connect(
             lambda it: self.add_model(it.data(QtCore.Qt.UserRole)))
-        btn_add = QtWidgets.QPushButton("إضافة المحدَّد إلى الطلب ←")
+        btn_add = kit.PushButton("إضافة المحدَّد إلى الطلب ←")
         btn_add.clicked.connect(self._add_selected)
         pick_box = QtWidgets.QGroupBox(
             "الموديلات — نقرٌ مزدوج على الصورة يضيفها (ومرةً أخرى يزيد"
@@ -209,7 +211,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
             pass
         self.totals = QtWidgets.QLabel("")
         self.totals.setObjectName("cardSub")
-        self.notes = QtWidgets.QLineEdit()
+        self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("ملاحظات الطلب (اختياري) — المقاس،"
                                       " اللون، العيار…")
         self.notes.textChanged.connect(self._touch)
@@ -225,15 +227,15 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         split.setStretchFactor(0, 5)
         split.setStretchFactor(1, 5)
 
-        self.btn_save = QtWidgets.QPushButton("💾 حفظ الطلب")
+        self.btn_save = kit.PushButton("💾 حفظ الطلب")
         self.btn_save.setObjectName("homeBtn")
         self.btn_save.clicked.connect(self.save)
-        btn_save_print = QtWidgets.QPushButton("🖨 حفظ ومعاينة")
+        btn_save_print = kit.PushButton("🖨 حفظ ومعاينة")
         btn_save_print.clicked.connect(self._save_and_print)
-        btn_share = QtWidgets.QPushButton("📋 نسخ للواتساب")
+        btn_share = kit.PushButton("📋 نسخ للواتساب")
         btn_share.setObjectName("ghost")
         btn_share.clicked.connect(self._share_current)
-        btn_new = QtWidgets.QPushButton("🗋 طلب جديد")
+        btn_new = kit.PushButton("🗋 طلب جديد")
         btn_new.setObjectName("ghost")
         btn_new.clicked.connect(lambda: self.new_order())
         acts = QtWidgets.QHBoxLayout()
@@ -353,7 +355,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         f.setBold(True)
         mi.setFont(f)
         self.lines.setItem(r, self.C_MODEL, mi)
-        sp = QtWidgets.QSpinBox()
+        sp = kit.SpinBox()
         sp.setRange(1, 9999)
         sp.setValue(max(1, int(qty or 1)))
         sp.setAlignment(QtCore.Qt.AlignCenter)
@@ -507,17 +509,17 @@ class ModelOrdersDialog(QtWidgets.QDialog):
 
     def _list_tab(self):
         w = QtWidgets.QWidget()
-        self.st_filter = QtWidgets.QComboBox()
+        self.st_filter = kit.ComboBox()
         for k, t in (("open", "المفتوحة"), ("all", "الكل"),
                      ("done", "المُسلَّمة"), ("cancelled", "الملغاة")):
             self.st_filter.addItem(t, k)
         self.st_filter.currentIndexChanged.connect(
             lambda *_: self.refresh_list())
-        self.l_search = QtWidgets.QLineEdit()
+        self.l_search = kit.LineEdit()
         self.l_search.setPlaceholderText(
             "🔍 ابحث باسم العميل أو رقم الطلب أو رقم موديل…")
         self.l_search.textChanged.connect(lambda *_: self.refresh_list())
-        btn_prod = QtWidgets.QPushButton("🏭 خلاصة التصنيع")
+        btn_prod = kit.PushButton("🏭 خلاصة التصنيع")
         btn_prod.setToolTip("ما تطلبه الطلبات المفتوحة كلها مجتمعةً من كل"
                             " موديل، وما بالخزنة منه، وما يلزم تصنيعه")
         btn_prod.clicked.connect(self.print_production)
@@ -557,7 +559,7 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         split.setStretchFactor(1, 5)
 
         def _b(text, fn, name=None):
-            b = QtWidgets.QPushButton(text)
+            b = kit.PushButton(text)
             if name:
                 b.setObjectName(name)
             b.clicked.connect(fn)
@@ -749,13 +751,13 @@ class ModelOrdersDialog(QtWidgets.QDialog):
         bgc = photo_bg_choice(dlg)
         dlg._bg_choice = bgc
         dlg.setMinimumWidth(420)
-        per = QtWidgets.QSpinBox()
+        per = kit.SpinBox()
         per.setRange(1, 60)
         try:
             per.setValue(int(load_pref("orders.per_page", "4") or 4))
         except Exception:
             per.setValue(4)
-        stock = QtWidgets.QCheckBox(
+        stock = kit.CheckBox(
             "ورقة الورشة: تحت كل صورة ما بالخزنة منه وما يلزم تصنيعه")
         stock.setChecked(load_pref("orders.show_stock", "0") == "1")
         grid = QtWidgets.QLabel()

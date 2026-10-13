@@ -16,6 +16,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 from ui.widgets.common import _norm
 
 # أنواع النتائج — النوع يحدّد ما يحدث عند الاختيار
@@ -63,7 +65,7 @@ class CommandPalette(QtWidgets.QDialog):
         self._db_search = db_search
         self._rows = []
 
-        self.input = QtWidgets.QLineEdit()
+        self.input = kit.LineEdit()
         self.input.setObjectName("paletteInput")
         self.input.setPlaceholderText(
             "اكتب اسم عميل أو حساب · رقم تشغيل · رقم فاتورة · اسم شاشة…")

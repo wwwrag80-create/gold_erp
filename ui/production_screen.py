@@ -10,6 +10,8 @@
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from ui import kit
+
 import config
 from database.database import db
 from models import inventory, pending
@@ -81,7 +83,7 @@ class DiscountDialog(QtWidgets.QDialog):
     def __init__(self, parent, current_rate):
         super().__init__(parent)
         self.setWindowTitle("نسبة الخصم على الأحجار")
-        self.rate = QtWidgets.QDoubleSpinBox()
+        self.rate = kit.DoubleSpinBox()
         self.rate.setDecimals(1)
         self.rate.setRange(0, 100)
         self.rate.setSuffix(" %")
@@ -117,7 +119,7 @@ class NewDestDialog(QtWidgets.QDialog):
         self.account_id = None
         self.setWindowTitle("حساب مخزن جديد")
         self.setMinimumWidth(420)
-        self.name = QtWidgets.QLineEdit()
+        self.name = kit.LineEdit()
         self.name.setPlaceholderText("مثال: مخزن الوارد الجديد")
         note = QtWidgets.QLabel(
             "يُنشأ الحساب تحت «الأصول المتداولة — الذهب والمخازن» "
@@ -212,13 +214,13 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         # كانت تدخل الذهب المشغول وحده مهما كانت حقيقتها، فمن ورّد
         # إلى صندوق الكسر احتاج قيداً يدوياً بعدها يُصحّح المخزن —
         # قيدٌ يُنسى فيختلّ الصندوقان. وآخر اختيارٍ يُحفظ ويعود.
-        self.dest = QtWidgets.QComboBox()
+        self.dest = kit.ComboBox()
         self.dest.setMinimumWidth(260)
         self.dest.setToolTip(
             "الحساب الذي تدخل إليه بضاعة هذه الدفعة — الطرف المدين "
             "من قيدها. والدائن خزينة التصنيع كما هو دائماً.")
         self.dest.currentIndexChanged.connect(self._dest_changed)
-        self.scrap_karat = QtWidgets.QComboBox()
+        self.scrap_karat = kit.ComboBox()
         self.scrap_karat.setMaximumWidth(120)
         for k in config.KARATS:
             self.scrap_karat.addItem(f"عيار {k}", k)
@@ -227,7 +229,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             "إلى أي عيارٍ أُضيف الوزن فعلاً.")
         self.scrap_karat.currentIndexChanged.connect(self._save_dest_pref)
         self.scrap_lbl = QtWidgets.QLabel("عيار الإضافة:")
-        btn_new_dest = QtWidgets.QPushButton("+ حساب")
+        btn_new_dest = kit.PushButton("+ حساب")
         btn_new_dest.setObjectName("ghost")
         btn_new_dest.setToolTip("إضافة حساب مخزنٍ جديد تدخل إليه البضاعة")
         btn_new_dest.clicked.connect(self.new_dest)
@@ -236,7 +238,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         # النظام يعود إليه المحاسب حين يُسأل «من أين جاءت هذه؟».
         # يُحفظ مع القيد ويظهر في بيان كشف الحساب وحده مُسمّى، فلا
         # يلتبس برقم التشغيل ولا برقم القيد.
-        self.reference = QtWidgets.QLineEdit()
+        self.reference = kit.LineEdit()
         self.reference.setPlaceholderText("رقم ورقة الورشة أو الطلب…")
         self.reference.setToolTip(
             "مرجع هذه الدفعة — يظهر في بيان كشف الحساب هكذا: "
@@ -278,11 +280,11 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         # رقم الموديل: تصنيف وصفي يجمع الأطقم المتشابهة تصميماً.
         # يُدخَل قبل رقم التشغيل ويبقى ثابتاً لأطقم الدفعة الواحدة،
         # فيُدخل مرة ويُربط بكل ما بعده حتى يُغيّره المستخدم.
-        self.model_no = QtWidgets.QComboBox()
+        self.model_no = kit.ComboBox()
         self.model_no.setEditable(True)
         self.model_no.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         self.model_no.lineEdit().setPlaceholderText("رقم الموديل")
-        self.wo_no = QtWidgets.QLineEdit()
+        self.wo_no = kit.LineEdit()
         # المقيد والقائم **مشتقّان** من المكوّنات لا يُكتبان: إدخالهما
         # يدوياً يجعل السطر يناقض نفسه (مجموعٌ لا يساوي أجزاءه).
         self.reg = wspin()
@@ -301,7 +303,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         # شيئاً ويقف عندها المؤشر في كل سطر. يُحفظ للطقم الأجر
         # الافتراضي للنظام كما كان يُحفظ، وشاشة المبيعات تقدّم عليه
         # اتفاق العميل.
-        self.karat = QtWidgets.QComboBox()
+        self.karat = kit.ComboBox()
         for k in config.KARATS:
             self.karat.addItem(f"عيار {k}", k)
         self.karat.setToolTip(
@@ -320,11 +322,11 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.after.setReadOnly(True)
         self.after.setToolTip(
             "الأحجار بعد الخصم = وزن الأحجار × (1 − نسبة الخصم)")
-        self.btn_rate = QtWidgets.QPushButton(f"خصم {self.rate*100:.0f}%")
+        self.btn_rate = kit.PushButton(f"خصم {self.rate*100:.0f}%")
         self.btn_rate.setObjectName("ghost")
         self.btn_rate.setMaximumWidth(96)
         self.btn_rate.clicked.connect(self.edit_rate)
-        self.notes = QtWidgets.QLineEdit()
+        self.notes = kit.LineEdit()
         # ثلاث منازلٍ لا منزلتان في خانات الوزن: تبديل العيار يقسم
         # ويضرب، وتقريبُ منزلتين يُرجع 40.01 بدل 40.000 بعد ذهابٍ
         # وإياب — فيبدو للمستخدم أن الرقم تغيّر من تلقاء نفسه.
@@ -333,7 +335,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             w.setDecimals(3)
         for w in (self.gold, self.small, self.big):
             w.valueChanged.connect(self._parts_typed)
-        btn_add = QtWidgets.QPushButton("+ إضافة")
+        btn_add = kit.PushButton("+ إضافة")
         btn_add.clicked.connect(self.add_row)
 
         def _sub(t):
@@ -405,12 +407,12 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             "  ·   كلاهما في أول عمودٍ من الجدول")
         hint.setObjectName("cardSub")
         self.totals = big_label()
-        btn_post = QtWidgets.QPushButton(
+        btn_post = kit.PushButton(
             "ترحيل الدفعة (قيد محاسبي مجمّع واحد)")
         btn_post.clicked.connect(lambda: self.post_batch(urgent=False))
         # دفعةٌ وصل بعضها: يُرحَّل الواصل الآن ويُثبت في الحسابات، وتبقى
         # في «المستعجل» حتى يُستكمل باقيها
-        self.btn_urgent = QtWidgets.QPushButton("⚡ ترحيل كدفعة مستعجلة")
+        self.btn_urgent = kit.PushButton("⚡ ترحيل كدفعة مستعجلة")
         self.btn_urgent.setObjectName("ghost")
         self.btn_urgent.setToolTip(
             "يُرحَّل ما في الجدول الآن بقيده المعتاد، وتبقى الدفعة في قسم"
@@ -447,16 +449,16 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.urgent_tbl.doubleClicked.connect(
             lambda *_: self.complete_selected())
         self.urgent_rows = []
-        b_open = QtWidgets.QPushButton("✎ استكمال الدفعة")
+        b_open = kit.PushButton("✎ استكمال الدفعة")
         b_open.setObjectName("homeBtn")
         b_open.setToolTip("تُفتح الدفعة في «توريد دفعة» بأطقمها المرحَّلة —"
                           " أضف الباقي ثم رحّلها فيُعدَّل قيدها وتخرج من هنا")
         b_open.clicked.connect(self.complete_selected)
-        b_done = QtWidgets.QPushButton("✔ اكتملت كما هي")
+        b_done = kit.PushButton("✔ اكتملت كما هي")
         b_done.setToolTip("إخراج الدفعة من «المستعجل» بلا إضافة — وصلت"
                           " كاملةً أو لن يصل غيرها")
         b_done.clicked.connect(self.close_urgent)
-        b_view = QtWidgets.QPushButton("👁 معاينة سند التوريد")
+        b_view = kit.PushButton("👁 معاينة سند التوريد")
         b_view.setObjectName("ghost")
         b_view.clicked.connect(self.preview_urgent)
         row = QtWidgets.QHBoxLayout()
@@ -754,9 +756,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f"تعديل السطر — {b['wo_no']}")
         dlg.setMinimumWidth(460)
-        w_model = QtWidgets.QLineEdit(str(b.get("model_no") or ""))
-        w_no = QtWidgets.QLineEdit(str(b["wo_no"]))
-        w_karat = QtWidgets.QComboBox()
+        w_model = kit.LineEdit(str(b.get("model_no") or ""))
+        w_no = kit.LineEdit(str(b["wo_no"]))
+        w_karat = kit.ComboBox()
         for kk in config.KARATS:
             w_karat.addItem(f"عيار {kk}", kk)
         i = w_karat.findData(k0)
@@ -768,7 +770,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         w_big.setValue(b["big_stones"])
         w_rate = mspin()
         w_rate.setValue(b["discount_rate"] * 100)
-        w_notes = QtWidgets.QLineEdit(str(b.get("notes") or ""))
+        w_notes = kit.LineEdit(str(b.get("notes") or ""))
         prev = QtWidgets.QLabel("")
         prev.setObjectName("cardSub")
 
