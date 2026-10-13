@@ -369,6 +369,12 @@ def _about_cli():
                 "overlay": dict(code_overlay.STATE)}
     except Exception as e:                       # noqa: BLE001
         info = {"error": f"{type(e).__name__}: {e}"}
+    # مكتبة الواجهة الحديثة (4.69): هل بُني هذا الـexe بها؟
+    try:
+        from ui import kit
+        info["ui_kit"] = kit.status()
+    except Exception as e:                       # noqa: BLE001
+        info["ui_kit"] = {"error": f"{type(e).__name__}: {e}"}
     txt = json.dumps(info, ensure_ascii=False, indent=1)
     if out:
         with open(out, "w", encoding="utf-8") as f:
