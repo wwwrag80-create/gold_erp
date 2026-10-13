@@ -12,6 +12,12 @@
 البوابة في أول لحظة، ويجري التجهيز وهو يرى سطر حالةٍ يتقدّم —
 فالانتظار نفسه صار جزءاً من العرض لا عطلاً فيه.
 
+**المشهد منذ 4.68 مصوَّرٌ لا مرسوم** (`ui.widgets.cinema_stage`):
+سبائكُ ذهبٍ وخاتمٌ على سطحٍ أسود لامع، صُيِّرت بمحرّك تتبّع أشعّةٍ
+فيزيائي بإضاءة استوديو وكاميرا تدور ببطء — حلقةٌ صامتة متّصلة، ولها
+صورةٌ ساكنة بديلة تحترم «تقليل الحركة». ولوحة الدخول في الجهة اليمنى
+فوق فضاءٍ داكن، والذهب يساراً — فلا يتزاحمان.
+
 **والتجهيز على خيط الواجهة بقصد**: لمسُ SQLite من خيطٍ ثانٍ يفتح
 باب أعطالٍ لا تُشخَّص، ومكسبُ الثواني لا يساوي ثمنها. تُنفَّذ الخطوة
 ثم تُعالَج الأحداث، فتبقى الحركة حيّة والسطر يتقدّم بلا خيوط.
@@ -23,8 +29,14 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 import config
 from services import login_flow
+from ui.widgets.cinema_stage import CinemaStage
 from ui.widgets.gold_frame import GlassCard, screen_overlay
-from ui.widgets.gold_stage import GoldStage, ShineLabel, animations_on
+from ui.widgets.gold_stage import ShineLabel, animations_on
+
+# 4.68: لوحة الدخول في الجهة اليمنى (بداية القراءة) والذهب في يسار
+# المشهد — على الشاشات العريضة. والضيّقة (4:3) تتوسّطها اللوحة.
+BLOCK_X = 0.72
+WIDE = 1.5
 
 # اسمُ النظام كما يُخاطَب به صاحبه — لا العنوان التقني
 WELCOME = "مرحباً بك في نظام إدارة مصانع الذهب"
@@ -123,6 +135,30 @@ def _screen_dpr():
 
 
 def _emblem(size=104):
+    """شعار البوابة حين لا شعار للمصنع (4.68): خاتمٌ ذهبيٌّ مصوَّر.
+
+    صُيِّر بالمحرّك الفيزيائي نفسه الذي صُوّر به مشهد البوابة — معدنٌ
+    حقيقيٌّ بانعكاساته لا رسمٌ — ويُحمل من `assets/gate/emblem.png`.
+    وإن غاب الملف يُرسم البديل القديم أدناه، فلا تظهر البوابة ناقصة.
+    """
+    try:
+        from ui.widgets.cinema_stage import asset
+        path = asset("emblem.png")
+        if path is not None:
+            src = QtGui.QPixmap(str(path))
+            if not src.isNull():
+                dpr = _screen_dpr()
+                pix = src.scaled(int(size * dpr), int(size * dpr),
+                                 QtCore.Qt.KeepAspectRatio,
+                                 QtCore.Qt.SmoothTransformation)
+                pix.setDevicePixelRatio(dpr)
+                return pix
+    except Exception:
+        pass
+    return _drawn_emblem(size)
+
+
+def _drawn_emblem(size=104):
     """خاتمٌ بحجرٍ يُرسم رسماً — شعارٌ لا يضيع مع نقل الملفات.
 
     الملف التنفيذي قد يُنسخ وحده بلا مجلد الأصول، فيُفتح النظام
@@ -297,9 +333,8 @@ class GateWindow(QtWidgets.QDialog):
         except Exception:
             pass
 
-        # ── المسرح: يملأ الشاشة، وكل شيءٍ بعده فوقه ──
-        self.stage = GoldStage(self)
-        self.stage.calm = True          # هادئ: بلا أشعّةٍ ولا لمعاتٍ تدور
+        # ── المسرح: مشهدٌ مصوَّر يملأ الشاشة، وكل شيءٍ بعده فوقه (4.68) ──
+        self.stage = CinemaStage(self)
         self.stage.lower()
 
         # ══ الترحيب أولاً، ولوحةُ الدخول **لا تُبنى** إلا في وقتها ══
@@ -644,6 +679,8 @@ class GateWindow(QtWidgets.QDialog):
 
     def _build_overlay(self):
         """حواف الشاشة: تعتيمٌ وإطارٌ ذهبي بأركانٍ مزخرفة — مرةً للمقاس."""
+        if not getattr(self.stage, "uses_overlay", True):
+            return              # المسرح السينمائي يعتّم حوافه بنفسه بلا إطار
         try:
             size = (self.width(), self.height())
             if getattr(self, "_overlay_size", None) == size:
@@ -674,15 +711,34 @@ class GateWindow(QtWidgets.QDialog):
         k = getattr(self, "_card_k", 0.0)
         total = hero_h + (gap + card_h) * k
         top = (h - total) / 2.0 - h * 0.015
-        self.hero.move(int((self.width() - self.hero.width()) / 2),
+        cx = self._block_x()
+        self.hero.move(int(cx - self.hero.width() / 2),
                        int(max(0.0, top)))
         self.hero.raise_()
         if self.card is not None:
             cy = top + hero_h + gap + (1.0 - k) * 26
-            self.card.move(int((self.width() - self.card.width()) / 2),
+            self.card.move(int(cx - self.card.width() / 2),
                            int(max(0.0, cy)))
             self.card.raise_()
         self._sync_stage()
+
+    def _block_x(self):
+        """مركز الترحيب واللوحة أفقياً: يمين الشاشة العريضة، ووسط الضيّقة.
+
+        على اليمين يبقى الذهب في يسار المشهد ظاهراً كاملاً واللوحة فوق
+        فضاءٍ داكن هادئ — فلا يتزاحمان. ولا تقترب الكتلة من الحافة.
+        """
+        w, h = max(1, self.width()), max(1, self.height())
+        wide = w / float(h) >= WIDE
+        side = "right" if wide else "center"
+        if getattr(self.stage, "side", None) != side:
+            self.stage.side = side
+            self.stage.update()
+        if not wide:
+            return w / 2.0
+        half = max(self.hero.width(),
+                   self.card.width() if self.card is not None else 0) / 2.0
+        return min(w - half - 36.0, max(w / 2.0, w * BLOCK_X))
 
     def _sync_stage(self):
         """يُخبر المسرحَ بموضع الشعار واللوحة: أشعّته خلف الشعار،
@@ -1023,7 +1079,10 @@ class GateWindow(QtWidgets.QDialog):
         except Exception:
             pass
         self._after_exit = None
-        self.stage.exit = 0.0
+        if hasattr(self.stage, "set_exit"):
+            self.stage.set_exit(0.0)
+        else:
+            self.stage.exit = 0.0
         self.farewell.hide()
         self.hero.show()
         if self.card is not None:
@@ -1085,7 +1144,7 @@ class GateWindow(QtWidgets.QDialog):
         self.farewell.adjustSize()
         self.farewell.resize(max(420, self.farewell.width() + 60),
                              self.farewell.height() + 16)
-        self.farewell.move((self.width() - self.farewell.width()) // 2,
+        self.farewell.move(int(self._block_x() - self.farewell.width() / 2),
                            int(self.height() * 0.44
                                - self.farewell.height() / 2))
         self._fade_text(self.farewell, "#F6E7B6", 0.0)
@@ -1094,7 +1153,10 @@ class GateWindow(QtWidgets.QDialog):
         self._exit.start()
 
     def _on_exit(self, v):
-        self.stage.exit = float(v)
+        if hasattr(self.stage, "set_exit"):
+            self.stage.set_exit(float(v))   # تعتيمٌ واقترابٌ خفيف
+        else:
+            self.stage.exit = float(v)
         # التحيّة تتّضح في النصف الثاني من الموجة، حين يهدأ المشهد
         self._fade_text(self.farewell, "#F6E7B6",
                         max(0.0, min(1.0, (float(v) - 0.45) / 0.45)))

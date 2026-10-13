@@ -7917,6 +7917,47 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    step("100) 4.68: بوابة الدخول — مشهدٌ مصوَّر واقعي بديلُه ساكن")
+    try:
+        import inspect as _in100
+        from PyQt5 import QtGui as _QG100, QtWidgets as _QW100
+        _QW100.QApplication.instance() or _QW100.QApplication([])
+        from ui import gate_window as _gw100
+        from ui.widgets import cinema_stage as _cs100
+        _loop100 = _cs100.asset(_cs100.LOOP)
+        _post100 = _cs100.asset(_cs100.POSTER)
+        _rd100 = _QG100.QImageReader(str(_loop100)) if _loop100 else None
+        check("المقطع الذهبي: WebP متحرّك حلقةً لا تنتهي، خفيفٌ أقلّ من 6 م.ب",
+              _rd100 is not None and _rd100.supportsAnimation()
+              and _rd100.imageCount() >= 150
+              and 38 <= _rd100.nextImageDelay() <= 46
+              and _loop100.stat().st_size < 6 * 1024 * 1024,
+              str((_rd100.imageCount() if _rd100 else None,
+                   _loop100.stat().st_size if _loop100 else None)))
+        _p100 = _QG100.QImage(str(_post100)) if _post100 else _QG100.QImage()
+        check("والبديل الساكن صورةٌ من المشهد نفسه بمقاسه",
+              not _p100.isNull() and _rd100 is not None
+              and _p100.size() == _rd100.size())
+        _old100 = os.environ.get("GOLD_ERP_REDUCE_MOTION")
+        os.environ["GOLD_ERP_REDUCE_MOTION"] = "1"
+        _st100 = _cs100.CinemaStage()
+        check("و«تقليل الحركة» في الجهاز يُحترم: صورةٌ ساكنة لا مقطع",
+              _cs100.motion_allowed() is False and _st100.mode == "poster"
+              and _st100._movie is None)
+        if _old100 is None:
+            os.environ.pop("GOLD_ERP_REDUCE_MOTION", None)
+        else:
+            os.environ["GOLD_ERP_REDUCE_MOTION"] = _old100
+        _src100 = _in100.getsource(_gw100.GateWindow.__init__)
+        check("والبوابة تعرض المشهد خلفيةً، واللوحة يمين الشاشة العريضة",
+              "CinemaStage(self)" in _src100 and _gw100.BLOCK_X > 0.6
+              and _cs100.CinemaStage.uses_overlay is False)
+        _em100 = _gw100._emblem(96)
+        check("وشعار المصنع الجديد خاتمٌ مصوَّر لا رسمٌ",
+              _cs100.asset("emblem.png") is not None and not _em100.isNull())
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

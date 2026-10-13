@@ -165,13 +165,28 @@ def _splash_png():
         w, h = 560, 330
         img = QtGui.QImage(w, h, QtGui.QImage.Format_ARGB32_Premultiplied)
         img.fill(QtGui.QColor("#17120C"))
-        from ui.widgets.gold_stage import GoldStage
-        stage = GoldStage()
-        stage.resize(w, h)
-        stage.intro = 0.22
-        stage.t = 0.6
-        stage.logo_center = QtCore.QPointF(w / 2, h * 0.34)
-        stage.render(img)
+        # 4.68: خلفية البطاقة صورةٌ من مشهد البوابة نفسه (سبائكٌ مصوَّرة)
+        # — فالانتقال من البطاقة إلى البوابة مشهدٌ واحد متّصل
+        poster = ROOT / "assets" / "gate" / "gold_poster.jpg"
+        pimg = QtGui.QImage(str(poster)) if poster.exists() else QtGui.QImage()
+        if not pimg.isNull():
+            pp = QtGui.QPainter(img)
+            pp.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+            s_ = max(w / pimg.width(), h / pimg.height()) * 1.18
+            vw, vh = w / s_, h / s_
+            pp.drawImage(QtCore.QRectF(0, 0, w, h), pimg, QtCore.QRectF(
+                pimg.width() * 0.40 - vw * 0.5, pimg.height() * 0.52 - vh * 0.5,
+                vw, vh))
+            pp.fillRect(QtCore.QRectF(0, 0, w, h), QtGui.QColor(0, 0, 0, 120))
+            pp.end()
+        else:
+            from ui.widgets.gold_stage import GoldStage
+            stage = GoldStage()
+            stage.resize(w, h)
+            stage.intro = 0.22
+            stage.t = 0.6
+            stage.logo_center = QtCore.QPointF(w / 2, h * 0.34)
+            stage.render(img)
         p = QtGui.QPainter(img)
         p.setRenderHint(QtGui.QPainter.Antialiasing, True)
         p.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
