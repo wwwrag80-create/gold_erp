@@ -717,28 +717,43 @@ def handle(method, parts, query, headers, body):
 
 def _ver_of(path):
     """إصدار الصورة من تاريخ ملفها وحجمه — يتغيّر متى استُبدلت أو عولجت."""
+    from models.models_catalog import file_stamp
     try:
         st = os.stat(path)
     except OSError:
         return ""
-    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    return f"{file_stamp(st):x}-{st.st_size:x}"
+
+
+def _vkey(model):
+    """مفتاح صورة الموديل في `_img_versions` — بلا فرقٍ بين الحروف
+    الكبيرة والصغيرة كملفات ويندوز (A12 وa12 ملفٌ واحد هناك)."""
+    from models.models_catalog import _safe_name
+    return _safe_name(model).casefold()
 
 
 def _img_versions():
-    """{اسم ملف الصورة: إصدارها} لكل صور الدليل — بقراءة المجلد مرةً واحدة.
+    """{مفتاح الصورة: إصدارها} لكل صور الدليل — بقراءة المجلد مرةً واحدة.
 
     **لماذا**: كان رابط الصورة ثابتاً والجوال يحتفظ بها عشر دقائق، فإن
     استُبدلت صورة موديلٍ بقي الجوال يعرض القديمة. الآن الإصدار جزءٌ من
-    الرابط (`?v=`) — صورةٌ جديدة = رابطٌ جديد، فتظهر فوراً.
+    الرابط (`?v=`) — صورةٌ جديدة = رابطٌ جديد، فتظهر فوراً. وإن تعدّد
+    للموديل ملفان فالأحدث — كما يختار `image_path` تماماً.
     """
     from models import models_catalog as mc
-    out = {}
+    out, newest = {}, {}
     try:
         for f in mc.images_dir().iterdir():
             if f.suffix.lower() in mc.IMAGE_EXTS:
-                v = _ver_of(f)
-                if v:
-                    out[f.stem] = v
+                try:
+                    st = f.stat()
+                except OSError:
+                    continue
+                k = f.stem.casefold()
+                t = mc.file_stamp(st)
+                if t > newest.get(k, -1):
+                    newest[k] = t
+                    out[k] = f"{t:x}-{st.st_size:x}"
     except Exception:
         pass
     return out
@@ -750,10 +765,28 @@ def _img_url(base, model, ver, full=False):
             + ("?" + "&".join(q) if q else ""))
 
 
+def _find_ci(model_no):
+    """صورة الموديل بلا فرقٍ بين الحروف الكبيرة والصغيرة — كما تراها
+    الصفحة (`_vkey`)، على أي نظام ملفات. يُستدعى عند تعذّر المطابقة
+    التامة وحدها."""
+    from models import models_catalog as mc
+    key, best, best_t = _vkey(model_no), None, -1
+    try:
+        for f in mc.images_dir().iterdir():
+            if f.suffix.lower() in mc.IMAGE_EXTS \
+                    and f.stem.casefold() == key:
+                t = mc.file_stamp(f.stat())
+                if t > best_t:
+                    best, best_t = f, t
+    except OSError:
+        return None
+    return best
+
+
 def _image(model_no, full, v=None, headers=None):
     from models import models_catalog as mc
     try:
-        p = mc.image_path(model_no)
+        p = mc.image_path(model_no) or _find_ci(model_no)
     except Exception:
         p = None
     if p is None:
@@ -813,7 +846,8 @@ def thumb(path, width):
         st = os.stat(path)
     except OSError:
         return b"", ""
-    key = (str(path), st.st_mtime_ns, st.st_size, int(width))
+    from models.models_catalog import file_stamp
+    key = (str(path), file_stamp(st), st.st_size, int(width))
     with _lock:
         hit = _thumbs.get(key)
         if hit is not None:
@@ -1151,8 +1185,7 @@ def _link(base, **kw):
 def _photo(base, model, ver):
     """صورة الموديل برابطٍ يحمل إصدارها — أو «لا توجد صورة» تتحوّل إلى
     الصورة وحدها إن أُضيفت والصفحة مفتوحة (`_IMG_JS`)."""
-    from models.models_catalog import _safe_name
-    s = _e(_safe_name(model))
+    s = _e(_vkey(model))
     if not ver:
         return (f'<div class="noimg" data-s="{s}" data-n="{_e(model)}">'
                 'لا توجد صورة</div>')
@@ -1295,7 +1328,7 @@ def _guide(conn, base, view, sort, imgs, unit, sort_sel):
         cards.append(
             f'<article class="card" data-s="{_e(keys)}"'
             f' data-m="{_e(str(name).lower())}">'
-            f'{_photo(base, name, imgs.get(mc._safe_name(name)))}'
+            f'{_photo(base, name, imgs.get(_vkey(name)))}'
             f'<div class="b"><h2>الموديل {_e(name)}</h2>'
             f'<div class="chips">{"".join(chips)}'
             f'<span class="chip pick" style="display:none"></span></div>'
@@ -1373,7 +1406,7 @@ def _received(conn, query, base, view, sort, imgs, unit, sort_sel):
         cards.append(
             f'<article class="card" data-s="{_e(keys)}"'
             f' data-m="{_e(str(name).lower())}">'
-            f'{_photo(base, name, imgs.get(mc._safe_name(name)))}'
+            f'{_photo(base, name, imgs.get(_vkey(name)))}'
             f'<div class="b"><h2>الموديل {_e(name)}</h2>'
             f'<div class="chips"><span class="chip pick" style="display:none">'
             f'</span><span class="chip">{m["count"]} طقم ·'
@@ -1404,7 +1437,6 @@ def _orders(conn, base, status, imgs):
     التصنيع» للطلبات المفتوحة مجتمعةً. ومنذ 4.65: «➕ طلب جديد»، ولكل
     طلبٍ «🖨 عرض وطباعة» و«✏ تعديل» — كما في البرنامج."""
     from models import model_orders as mo
-    from models import models_catalog as mc
     rows = mo.list_orders(conn, status)
     arts = []
     tot_pieces = tot_short = 0
@@ -1429,7 +1461,7 @@ def _orders(conn, base, status, imgs):
                     if ln.get("note") else "")
             cards.append(
                 f'<div class="oc">'
-                f'{_photo(base, ln["model"], imgs.get(mc._safe_name(ln["model"])))}'
+                f'{_photo(base, ln["model"], imgs.get(_vkey(ln["model"])))}'
                 f'<div class="b"><h2>{_e(ln["model"])}</h2>'
                 f'<div class="chips">{"".join(chips)}</div>{note}</div></div>')
         due = (f'<span class="m">التسليم {_e(o["due_date"])}</span>'
@@ -1698,7 +1730,6 @@ def order_form(conn, base, order, csrf, no_pin, error=""):
     from datetime import date
 
     from models import model_orders as mo
-    from models import models_catalog as mc
     order = order or {}
     picked = {ln["model"]: ln for ln in order.get("lines", [])}
     cat = mo.catalog(conn)
@@ -1711,7 +1742,7 @@ def order_form(conn, base, order, csrf, no_pin, error=""):
         ln = picked.get(m, {})
         q = int(ln.get("qty") or 0)
         c = stock.get(m, {})
-        sn = mc._safe_name(m)
+        sn = _vkey(m)
         ver = imgs.get(sn)
         ph = (f'<div class="ph"><img loading="lazy"'
               f' src="{_e(_img_url(base, m, ver))}" alt="{_e(m)}"'
@@ -1822,11 +1853,10 @@ def order_page(base, o, query, csrf):
     ws = query.get("stock") == "1"
     cols, rows = _GRID[pp]
     oid = o["id"]
-    from models.models_catalog import _safe_name
     vers = _img_versions()
     cells = []
     for ln in o["lines"]:
-        sn = _safe_name(ln["model"])
+        sn = _vkey(ln["model"])
         ver = vers.get(sn)
         im = (f'<img src="{_e(_img_url(base, ln["model"], ver, True))}"'
               f' alt="{_e(ln["model"])}" data-s="{_e(sn)}"'

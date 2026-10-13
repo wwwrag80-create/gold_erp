@@ -15,6 +15,7 @@
         └─ الموجود                  (متاح للبيع في الذهب المشغول)
              └─ رقم التشغيل + الوزن
 """
+import os
 import re
 
 
@@ -393,14 +394,67 @@ def _safe_name(model_no):
                    if c.isalnum() or c in keep or "\u0600" <= c <= "\u06FF")[:80]
 
 
-def image_path(model_no):
-    """مسار صورة الموديل إن وُجدت."""
-    base = images_dir() / _safe_name(model_no)
+def file_stamp(st):
+    """متى وُضع الملف في مجلد الصور — الأحدث من تاريخ تعديله وإنشائه.
+
+    النسخ بـ`copy2` (حتى 4.66) كان يُبقي تاريخ تعديل الملف المصدر، فقد
+    تبدو الصورة المضافة الآن أقدم من سابقتها؛ وتاريخ الإنشاء (ويندوز)
+    أو تغيّر الملف (غيره) يقول متى وُضعت هنا فعلاً.
+    """
+    return max(st.st_mtime_ns, getattr(st, "st_ctime_ns", 0))
+
+
+def prune_stale_images():
+    """يحذف الصور المكرّرة للموديل نفسه بامتدادٍ آخر — ويُبقي الأحدث.
+
+    بقايا إصداراتٍ سابقة: صورةٌ استُبدلت بامتدادٍ مختلف فبقيت القديمة
+    بجانبها، وكانت تُختار أحياناً بدل الجديدة. ويعيد عدد المحذوف.
+    """
+    n = 0
+    for folder in (images_dir(), _orig_dir()):
+        groups = {}
+        try:
+            for f in folder.iterdir():
+                if f.suffix.lower() in IMAGE_EXTS and f.is_file():
+                    groups.setdefault(f.stem.casefold(), []).append(f)
+        except OSError:
+            continue
+        for files in groups.values():
+            if len(files) < 2:
+                continue
+            files.sort(key=lambda f: file_stamp(f.stat()), reverse=True)
+            for f in files[1:]:
+                try:
+                    f.unlink()
+                    n += 1
+                except OSError:
+                    pass
+    return n
+
+
+def _newest(base):
+    """أحدث ملفٍ باسم `base` بأي امتدادٍ من امتدادات الصور — أو None.
+
+    **لماذا الأحدث لا الأول (4.67)**: إن بقي للموديل ملفان (صورةٌ قديمة
+    بامتدادٍ وجديدةٌ بآخر — حذفٌ تعذّر لأن الملف كان مفتوحاً لحظتها) كان
+    يُختار ‎.png‎ دائماً لأنه أول القائمة، فتظهر الصورة القديمة بعد
+    استبدالها. الأحدث هو ما أضافه المستخدم آخراً.
+    """
+    best, best_t = None, -1
     for ext in IMAGE_EXTS:
         p = base.with_suffix(ext)
-        if p.exists():
-            return p
-    return None
+        try:
+            t = file_stamp(p.stat())
+        except OSError:
+            continue
+        if t > best_t:
+            best, best_t = p, t
+    return best
+
+
+def image_path(model_no):
+    """مسار صورة الموديل إن وُجدت (الأحدث إن تعدّدت امتداداتها)."""
+    return _newest(images_dir() / _safe_name(model_no))
 
 
 # ══ الصورة الأصلية بخلفيتها (4.61) ══
@@ -417,12 +471,7 @@ def _orig_dir():
 
 def original_path(model_no):
     """الأصل المحفوظ قبل إزالة الخلفية — أو None."""
-    base = images_dir() / ORIG_DIR / _safe_name(model_no)
-    for ext in IMAGE_EXTS:
-        p = base.with_suffix(ext)
-        if p.exists():
-            return p
-    return None
+    return _newest(images_dir() / ORIG_DIR / _safe_name(model_no))
 
 
 def image_for(model_no, with_bg=False):
@@ -438,14 +487,29 @@ def image_for(model_no, with_bg=False):
     return image_path(model_no)
 
 
-def _drop_files(base):
+def _drop_files(base, tries=8):
+    """يحذف ملفات `base` بكل امتدادات الصور — ويعيد ما تعذّر حذفه.
+
+    ويندوز لا يحذف ملفاً مفتوحاً: رابط المدير يقرأ الصورة ليصغّرها،
+    والشاشات تقرؤها لتعرضها — لحظاتٍ قصيرة. فيُعاد الحذف قليلاً بدل أن
+    يُترك القديم بصمتٍ فيظهر مكان الجديد.
+    """
+    import time
+    left = []
     for ext in IMAGE_EXTS:
         p = base.with_suffix(ext)
-        try:
-            if p.exists():
+        for i in range(tries):
+            try:
                 p.unlink()
-        except OSError:
-            pass
+                break
+            except FileNotFoundError:
+                break
+            except OSError:
+                if i == tries - 1:
+                    left.append(p)
+                else:
+                    time.sleep(0.08 * (i + 1))
+    return left
 
 
 # ══ سجلّ المعالجة (4.63) ══
@@ -584,7 +648,12 @@ def restore_original(model_no):
         return False
     safe = _safe_name(model_no)
     _drop_files(images_dir() / safe)
-    orig.replace(images_dir() / (safe + orig.suffix))
+    dst = images_dir() / (safe + orig.suffix)
+    orig.replace(dst)
+    try:
+        os.utime(dst, None)          # الأحدث — ورابطه في رابط المدير يتغيّر
+    except OSError:
+        pass
     _meta_set(model_no, None)
     return True
 
@@ -629,28 +698,30 @@ def set_image(model_no, src_path, username="admin"):
     if src.stat().st_size > 8 * 1024 * 1024:
         raise ValueError("حجم الصورة يتجاوز 8 ميجابايت")
     remove_image(model_no)            # ومعها أصل الصورة السابقة
+    left = _drop_files(images_dir() / _safe_name(model_no)) + \
+        _drop_files(_orig_dir() / _safe_name(model_no))
+    if left:
+        raise ValueError("تعذّر حذف الصورة السابقة لهذا الموديل — قد تكون"
+                         " مفتوحةً في برنامجٍ آخر. أغلقه ثم أعد المحاولة.")
     dst = images_dir() / (_safe_name(model_no) + ext)
-    shutil.copy2(src, dst)
+    shutil.copyfile(src, dst)
+    # تاريخ الملف «الآن» لا تاريخ الملف المصدر: به يُعرف أنه الأحدث،
+    # ويتغيّر رابطه في رابط المدير فلا يعرض الجوال الصورة السابقة
+    os.utime(dst, None)
     return str(dst)
 
 
 def remove_image(model_no):
-    """يحذف صورة الموديل إن وُجدت — وأصلها المحفوظ وسجلّها معها."""
+    """يحذف صورة الموديل إن وُجدت — وأصلها المحفوظ وسجلّها معها.
+
+    بكل امتداداتها (4.67): كان يُحذف ملفٌ واحد فيبقى غيره إن تعدّد.
+    """
     _meta_set(model_no, None)
-    o = original_path(model_no)
-    if o is not None:
-        try:
-            o.unlink()
-        except OSError:
-            pass
-    p = image_path(model_no)
-    if p is None:
-        return False
-    try:
-        p.unlink()
-        return True
-    except Exception:
-        return False
+    safe = _safe_name(model_no)
+    _drop_files(_orig_dir() / safe)
+    had = image_path(model_no) is not None
+    left = _drop_files(images_dir() / safe)
+    return had and not left
 
 
 def models_with_images(conn=None):

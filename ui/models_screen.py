@@ -39,7 +39,12 @@ class ModelsScreen(QtWidgets.QWidget):
 
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…")
-        self.search.setMaximumWidth(280)
+        self.search.setToolTip("بحث برقم الموديل أو رقم التشغيل أو اسم الجهة")
+        # 4.67: يتّسع ويضيق مع الشاشة — لا يفرض عرضاً يمدّها
+        self.search.setMinimumWidth(150)
+        self.search.setMaximumWidth(340)
+        self.search.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                                  QtWidgets.QSizePolicy.Fixed)
         self.search.textChanged.connect(self.apply_filter)
 
         # مرشّح العرض: يحدّد أي الفروع تُعرض
@@ -62,22 +67,37 @@ class ModelsScreen(QtWidgets.QWidget):
         self.sort_mode.currentIndexChanged.connect(
             lambda: self.refresh(force=True))
 
-        btn_refresh = QtWidgets.QPushButton("↻ تحديث")
+        # ── 4.67: شريطٌ مرتّب لا يمدّ الشاشة — أزرارٌ مدموجة ورموز ──
+        btn_refresh = self.btn_refresh = QtWidgets.QPushButton("↻")
+        btn_refresh.setToolTip("تحديث")
+        btn_refresh.setObjectName("ghost")
+        btn_refresh.setFixedWidth(46)
         btn_refresh.clicked.connect(lambda: self.refresh(force=True))
-        btn_expand = QtWidgets.QPushButton("توسيع الكل")
-        btn_expand.clicked.connect(lambda: self.tree.expandAll())
-        btn_collapse = QtWidgets.QPushButton("طيّ الكل")
-        btn_collapse.clicked.connect(lambda: self.tree.collapseAll())
-        btn_print = self.btn_print = QtWidgets.QPushButton("🖨 طباعة الدليل")
-        btn_print.clicked.connect(self.print_catalog)
-        btn_photos = self.btn_photos = QtWidgets.QPushButton("🖼 طباعة الصور")
-        btn_photos.setToolTip(
+        # طيّ الكل وتوسيع الكل زرٌّ واحد يتبدّل
+        btn_fold = self.btn_fold = QtWidgets.QPushButton("⊞ توسيع الكل")
+        btn_fold.setObjectName("ghost")
+        btn_fold.setToolTip("توسيع كل الموديلات أو طيّها")
+        btn_fold.clicked.connect(self._toggle_fold)
+        # الطباعتان في زرٍّ واحد بقائمة
+        self.btn_print = QtWidgets.QAction("🖨 طباعة الدليل", self)
+        self.btn_print.triggered.connect(self.print_catalog)
+        self.btn_photos = QtWidgets.QAction("🖼 طباعة الصور", self)
+        self.btn_photos.setToolTip(
             "صور الموديلات بالعدد الذي تختاره في كل صفحة A4 — تحت كل\n"
             "صورة اسم الموديل وكم بالخزنة وكم عند المناديب")
-        btn_photos.clicked.connect(self.print_photos)
-        # 4.61: الصور بلا خلفية — لكل صورةٍ أُضيفت قبل هذه الميزة
-        btn_cut = self.btn_cutout = QtWidgets.QPushButton("🪄 تحسين الصور")
+        self.btn_photos.triggered.connect(self.print_photos)
+        pmenu = QtWidgets.QMenu(self)
+        pmenu.setToolTipsVisible(True)
+        pmenu.addAction(self.btn_print)
+        pmenu.addAction(self.btn_photos)
+        btn_pr = self.btn_print_menu = QtWidgets.QPushButton("🖨 طباعة")
+        btn_pr.setMenu(pmenu)
+        # 4.61: الصور بلا خلفية — رمزٌ صغير (4.67): يُستعمل نادراً
+        btn_cut = self.btn_cutout = QtWidgets.QPushButton("🪄")
+        btn_cut.setObjectName("ghost")
+        btn_cut.setFixedWidth(46)
         btn_cut.setToolTip(
+            "🪄 تحسين الصور\n"
             "يحسّن كل صورةٍ لم تُحسَّن بعد: الرسم الممسوح خطٌّ واضحٌ بارز على\n"
             "ورقٍ أبيض ناصع (بلا ظلالٍ ولا بقع)، والصورة الفوتوغرافية بلا\n"
             "خلفية — مقصوصةً على القطعة.\n"
@@ -108,7 +128,11 @@ class ModelsScreen(QtWidgets.QWidget):
         self.by_date.toggled.connect(self._on_date_mode)
 
         self.day = QtWidgets.QComboBox()
-        self.day.setMinimumWidth(330)
+        # يضيق مع الشاشة (والقائمة المنسدلة تُظهر النص كاملاً)
+        self.day.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.day.setMinimumContentsLength(18)
+        self.day.view().setMinimumWidth(380)
         self.day.setToolTip("أيام التوريد الفعلية — الأحدث أولاً")
         self.day.currentIndexChanged.connect(self._pick_day)
 
@@ -140,19 +164,24 @@ class ModelsScreen(QtWidgets.QWidget):
         head.addWidget(self.view_mode, 0)
         head.addWidget(QtWidgets.QLabel("فرز:"))
         head.addWidget(self.sort_mode, 0)
-        head.addWidget(QtWidgets.QLabel("بحث:"))
-        head.addWidget(self.search, 0)
+        head.addWidget(self.search, 3)
         head.addWidget(btn_refresh)
-        head.addWidget(btn_expand)
-        head.addWidget(btn_collapse)
-        head.addWidget(btn_print)
-        head.addWidget(btn_photos)
-        head.addWidget(btn_cut)
-        head.addWidget(btn_orders)
-        head.addWidget(btn_link)
+        head.addWidget(btn_fold)
         head.addStretch(1)
+        # أزرار الأوامر بجانب العنوان — فلا يجتمع كل شيءٍ في سطرٍ يمدّ
+        # الشاشة يميناً ويساراً
+        tbar = QtWidgets.QHBoxLayout()
+        tbar.setSpacing(6)
+        tbar.addWidget(title_label("دليل الموديلات"))
+        tbar.addStretch(1)
+        tbar.addWidget(btn_pr)
+        tbar.addWidget(btn_orders)
+        tbar.addWidget(btn_link)
+        tbar.addWidget(btn_cut)
 
         self.tree = QtWidgets.QTreeView()
+        self.tree.expanded.connect(self._fold_label)
+        self.tree.collapsed.connect(self._fold_label)
         self.tree.setAlternatingRowColors(True)
         self.tree.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
@@ -171,13 +200,17 @@ class ModelsScreen(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
         lay.setSpacing(4)
-        lay.addWidget(title_label("دليل الموديلات"))
+        lay.addLayout(tbar)
         lay.addWidget(note)
         lay.addLayout(head)
         lay.addLayout(drow)
         lay.addWidget(self.tree, 1)
         lay.addWidget(self.summary)
         self._date_widgets(False)
+        try:                  # بقايا صورٍ مكرّرة من إصداراتٍ سابقة (4.67)
+            mc.prune_stale_images()
+        except Exception:
+            pass
         self.refresh()
 
     # ══════════ البناء ══════════
@@ -213,6 +246,23 @@ class ModelsScreen(QtWidgets.QWidget):
         return cells
 
     # ══════════ الوارد بتاريخ ══════════
+    def _any_expanded(self):
+        m = self.tree.model()
+        return any(self.tree.isExpanded(m.index(r, 0))
+                   for r in range(m.rowCount()))
+
+    def _toggle_fold(self):
+        """زرٌّ واحد: يطوي الكل إن كان شيءٌ مفتوحاً، وإلا يوسّع الكل."""
+        if self._any_expanded():
+            self.tree.collapseAll()
+        else:
+            self.tree.expandAll()
+        self._fold_label()
+
+    def _fold_label(self, *_):
+        self.btn_fold.setText("⊟ طيّ الكل" if self._any_expanded()
+                              else "⊞ توسيع الكل")
+
     def _date_widgets(self, on):
         for w in (self.lbl_day, self.day, self.lbl_from, self.d_from,
                   self.lbl_to, self.d_to):
@@ -369,6 +419,7 @@ class ModelsScreen(QtWidgets.QWidget):
             # الوارد يوماً واحداً قصير — يُفتح مباشرةً فلا يُطوى ما
             # جاء المستخدم من أجله.
             self.tree.expandAll()
+            self._fold_label()
         finally:
             try:
                 self.tree.setUpdatesEnabled(True)
@@ -535,6 +586,7 @@ class ModelsScreen(QtWidgets.QWidget):
             # مطوية عند الفتح: القائمة قد تطول، والمستخدم يفتح ما
             # يعنيه فقط — أسرع وأوضح.
             self.tree.collapseAll()
+            self._fold_label()
         finally:
             try:
                 self.tree.setUpdatesEnabled(True)

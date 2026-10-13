@@ -31,7 +31,8 @@ def thumb(model, size=110):
     if p is None:
         return None
     try:
-        key = (str(p), os.stat(p).st_mtime_ns, int(size))
+        st = os.stat(p)
+        key = (str(p), mc.file_stamp(st), st.st_size, int(size))
     except OSError:
         return None
     pm = _THUMBS.get(key)

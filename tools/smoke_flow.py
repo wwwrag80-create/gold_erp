@@ -7838,7 +7838,7 @@ def main():
         _put98("#ffffff")
         _v1 = _js98.loads(_mw98.handle("GET", [_tok98, "imgver"], {}, {},
                                        None)["body"])
-        _sn98 = _mc98._safe_name(_m98)
+        _sn98 = _mw98._vkey(_m98)
         _pg98 = _mw98.handle("GET", [_tok98], {}, {}, None)["body"]
         _r98 = _mw98.handle("GET", [_tok98, "img", _m98],
                             {"v": _v1.get(_sn98, "")}, {}, None)
@@ -7872,6 +7872,48 @@ def main():
             _mc98.set_image(_m98, str(_b98))
         with db() as conn:
             _mw98.set_enabled(conn, False, "admin")
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
+    step("99) 4.67: استبدال صورة الموديل لا يُبقي القديمة")
+    try:
+        import shutil as _sh99
+        from PyQt5 import QtGui as _QG99, QtWidgets as _QW99
+        _QW99.QApplication.instance() or _QW99.QApplication([])
+        from models import models_catalog as _mc99
+        _D99 = _mc99.images_dir()
+
+        def _img99(path, color, fmt=None):
+            im = _QG99.QImage(60, 40, _QG99.QImage.Format_RGB32)
+            im.fill(_QG99.QColor(color))
+            im.save(str(path), fmt)
+        # بقايا إصدارٍ سابق: قديمةٌ ‎.png‎ وجديدةٌ نُسخت بتاريخ مصدرها القديم
+        _img99(_D99 / "SMK-99.png", "#ff0000")
+        _src99 = Path(_TMP) / "smk99_new.jpg"
+        _img99(_src99, "#00ff00", "JPG")
+        _old99 = time.time() - 30 * 86400
+        os.utime(_src99, (_old99, _old99))
+        time.sleep(0.02)
+        _sh99.copy2(_src99, _D99 / "SMK-99.jpg")
+        check("ملفان للموديل: يُختار ما وُضع آخراً لا ‎.png‎ دائماً",
+              _mc99.image_path("SMK-99").suffix == ".jpg")
+        check("وتنظيف البقايا يحذف المكرّر الأقدم وحده",
+              _mc99.prune_stale_images() >= 1
+              and not (_D99 / "SMK-99.png").exists()
+              and (_D99 / "SMK-99.jpg").exists())
+        _img99(_D99 / "SMK-99.bmp", "#ff0000", "BMP")
+        _src99b = Path(_TMP) / "smk99_b.png"
+        _img99(_src99b, "#0000ff")
+        _mc99.set_image("SMK-99", str(_src99b))
+        _left99 = sorted(f.name for f in _D99.iterdir()
+                         if f.stem == "SMK-99")
+        check("والاستبدال يحذف السابقة بكل امتداداتها وتاريخ الجديدة الآن",
+              _left99 == ["SMK-99.png"]
+              and abs((_D99 / "SMK-99.png").stat().st_mtime
+                      - time.time()) < 120, str(_left99))
+        _mc99.remove_image("SMK-99")
+        check("والحذف لا يُبقي شيئاً",
+              not any(f.stem == "SMK-99" for f in _D99.iterdir()))
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
