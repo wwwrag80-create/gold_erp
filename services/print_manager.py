@@ -184,7 +184,7 @@ BASE_CSS = """
              text-align: center; vertical-align: middle; }
   .ca-title { font-size: 9.5pt; white-space: nowrap; }
   .ca-value { font-size: 14pt; font-weight: bold; padding-top: 3px; }
-  .ca-detail { width: 25%; vertical-align: top; }
+  .ca-detail { width: 25%; vertical-align: top; padding-top: 6px; }
   table.ca-tbl { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
   table.ca-tbl th { background-color: #EFEFEF; border: 1px solid #999;
                     padding: 3px; font-weight: bold; text-align: center;
@@ -1383,11 +1383,13 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
 
 def _tpl_customer_analytics(conn, customer_id, date_from=None,
                             date_to=None, visible=None, expanded=None,
-                            karat=None, mode="detail"):
-    """قالب طبق الأصل من شاشة تحليل المبيعات (WYSIWYG).
+                            karat=None, mode="detail", merged=None):
+    """قالب طبق الأصل من شاشة تحليل المبيعات (WYSIWYG) — ورقة عمودية.
 
     يحاكي الشاشة تماماً: اللوحة المخفية لا تُطبع، والجدول المطويّ
-    يُطبع بإجمالياته بلا تفاصيله — فالورقة تطابق ما يراه المستخدم.
+    يُطبع بإجمالياته بلا تفاصيله، واللوحة المفروزة (`merged`) تُطبع
+    بأرقام تشغيلها بلا تكرار وأوزانها وحدها، وجدول المباع الفعلي غير
+    المفروز بأعمدته الأربعة كما على الشاشة — فالورقة تطابق ما يُرى.
 
     مسمّيات الورقة مسمّيات كشف الحساب لا مسمّيات الشاشة: ما يخرج
     للعميل «مصروف» و«مرتجع» و«مباع صافي» و«سداد» — وهي لغته التي
@@ -1432,6 +1434,8 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
         vis -= {"collection"}
         exp = set()
     panels = [x for x in panels if x[2] in vis]
+    mrg = set(merged or ()) & set(sa.MERGEABLE)
+    wo_head = thw("رقم التشغيل<br/>(بلا تكرار)")
 
     head_cells, detail_cells = [], []
     for title, value, key in panels:
@@ -1439,8 +1443,11 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
             f'<td class="ca-head"><div class="ca-title">{title}</div>'
             f'<div class="ca-value num">{value}</div></td>')
         # الجدول المطويّ يُطبع بإجمالياته فقط بلا تفاصيله
-        rows = (sa.panel_details(conn, key, customer_id, date_from, date_to)
+        rows = (sa.panel_details(conn, key, customer_id, date_from, date_to,
+                                 merged=key in mrg)
                 if key in exp else [])
+        # المباع الفعلي غير المفروز: المباع · المرتجع · الصافي كالشاشة
+        net4 = key == "net_sold" and key not in mrg
         if key == "collection":
             body_rows = "".join(
                 "<tr>" + cells(
@@ -1448,13 +1455,22 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
                     f'<td>{_w(_g(r["weight"]))}</td>',
                     f'<td>{_w(r.get("cash", 0), 2)}</td>') + "</tr>"
                 for r in rows)
+        elif net4:
+            body_rows = "".join(
+                "<tr>" + cells(
+                    f'<td>{en(r["wo"])}</td>',
+                    f'<td>{_w(_g(r.get("sold", 0)))}</td>',
+                    f'<td>{_w(_g(r.get("returned", 0)))}</td>',
+                    f'<td>{_w(_g(r["weight"]))}</td>') + "</tr>"
+                for r in rows)
         else:
             body_rows = "".join(
                 "<tr>" + cells(f'<td>{en(r["wo"])}</td>',
                                f'<td>{_w(_g(r["weight"]))}</td>') + "</tr>"
                 for r in rows)
         if not body_rows:
-            body_rows = '<tr><td colspan="3">لا يوجد</td></tr>'
+            body_rows = (f'<tr><td colspan="{4 if net4 else 3}">'
+                         'لا يوجد</td></tr>')
         total = (p["sales"]["weight"] if key == "sales" else
                  p["returns"]["weight"] if key == "returns" else
                  p["net_sold"]["weight"] if key == "net_sold" else
@@ -1466,9 +1482,23 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
             foot = ("<tr class=\"total\">" + cells(
                 f'<td>الإجمالي</td>', f'<td>{_w(_g(coll["gold"]))}</td>',
                 f'<td>{_w(coll["cash"], 2)}</td>') + "</tr>")
+        elif net4:
+            # الإجماليات من كل الأرقام ولو طُوي الجدول
+            allr = rows or ([] if report else sa.panel_details(
+                conn, key, customer_id, date_from, date_to))
+            head = ("<tr>" + cells(thw("رقم التشغيل"), thw("المباع"),
+                                   thw("المرتجع"),
+                                   thw(f"الصافي {en(k)}")) + "</tr>")
+            foot = ("<tr class=\"total\">" + cells(
+                f'<td>الإجمالي</td>',
+                f'<td>{_w(_g(sum(r.get("sold", 0) for r in allr)))}</td>',
+                f'<td>{_w(_g(sum(r.get("returned", 0) for r in allr)))}</td>',
+                f'<td>{_w(_g(total))}</td>') + "</tr>")
         else:
-            head = ("<tr>" + cells(thw("رقم التشغيل"),
-                                   thw(f"الوزن {en(k)}")) + "</tr>")
+            head = ("<tr>" + cells(
+                wo_head if key in mrg else thw("رقم التشغيل"),
+                thw(f"الصافي {en(k)}" if key == "net_sold"
+                    else f"الوزن {en(k)}")) + "</tr>")
             foot = ("<tr class=\"total\">" + cells(
                 f'<td>الإجمالي</td>', f'<td>{_w(_g(total))}</td>')
                 + "</tr>")
@@ -1476,6 +1506,11 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
             detail_cells.append(
                 f'<td class="ca-detail"><table class="ca-tbl">'
                 f'{head}{body_rows}{foot}</table></td>')
+
+    # المربعات وجداولها في جدولٍ واحد كالشاشة: كل جدولٍ تحت مربعه تماماً
+    # وبعرضه (4.72) — كانا جدولين يقيس كلٌّ أعمدته بمحتواه فيزيحان
+    panel_tables = (f'<tr>{"".join(detail_cells)}</tr>'
+                    if detail_cells else "")
 
     # الرصيد المتبقي = رصيد حساب العميل في الدليل (لا الفترة وحدها)
     rem_g = rem_c = 0.0
@@ -1526,8 +1561,7 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
       <tr>{cells(f'<td width="38%" valign="top">{bal_pair}</td>',
                  '<td width="62%"></td>')}</tr>
     </table><br/>
-    <table class="ca-wrap"><tr>{''.join(head_cells)}</tr></table>
-    <table class="ca-wrap" style="margin-top:6px"><tr>{''.join(detail_cells)}</tr></table>
+    <table class="ca-wrap"><tr>{''.join(head_cells)}</tr>{panel_tables}</table>
     '''
     return (_header("تقرير المبيعات", ent["name"],
                     _qd(QtCore.QDate.currentDate()))
@@ -1769,7 +1803,8 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("visible"), kw.get("expanded"),
-                _karat_kw(kw), kw.get("mode") or "detail"))
+                _karat_kw(kw), kw.get("mode") or "detail",
+                kw.get("merged")))
         if doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             return en(_tpl_mfg(conn, doc_id, kw.get("period"),
                                kw.get("targets"), kw.get("salaries"),
@@ -4412,7 +4447,8 @@ def build_html(doc_type, doc_id, **kw):
             html = _tpl_customer_analytics(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("visible"), kw.get("expanded"),
-                _karat_kw(kw), kw.get("mode") or "detail")
+                _karat_kw(kw), kw.get("mode") or "detail",
+                kw.get("merged"))
         elif doc_type in ("mfg_target", "mfg_salary", "mfg_summary"):
             html = _tpl_mfg(conn, doc_id, kw.get("period"),
                             kw.get("targets"), kw.get("salaries"),
@@ -4555,7 +4591,7 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     """معاينة Qt الاحتياطية (تُستخدم فقط إن تعذّر فتح المتصفح)."""
     html = build_html(doc_type, doc_id, **kw)
     wide = doc_type in ("statement", "journal", "manual", "balances",
-                        "customer_analytics", "turnover", "aging",
+                        "turnover", "aging",
                         "day_close", "mfg_target", "mfg_salary",
                         "customer_board", "trial_balance",
                         "equity_changes", "doc_edits")
@@ -4581,7 +4617,7 @@ def print_document(parent, doc_type, doc_id, **kw):
     """
     html = build_html(doc_type, doc_id, **kw)
     printer = _printer(doc_type in ("statement", "journal", "manual",
-                                    "balances", "customer_analytics"))
+                                    "balances"))
     dlg = QtPrintSupport.QPrintDialog(printer, parent)
     dlg.setWindowTitle("الطباعة المباشرة")
     if dlg.exec_() == QtWidgets.QDialog.Accepted:

@@ -131,7 +131,7 @@ PRINT_CSS = """
               text-align: center; }
   .ca-title { font-size: 10pt; white-space: nowrap; }
   .ca-value { font-size: 15pt; font-weight: bold; }
-  .ca-detail{ width: 25%%; vertical-align: top; }
+  .ca-detail{ width: 25%%; vertical-align: top; padding-top: 6px; }
   table.ca-tbl th, table.ca-tbl td { border: 1px solid #999; padding: 3px;
                                      text-align: center; font-size: 9pt; }
 
@@ -168,8 +168,9 @@ PRINT_CSS = """
 
 def _page_setup(doc_type):
     """اتجاه الصفحة والهوامش بحسب نوع المستند."""
+    # تقرير تحليل المبيعات عمودي (4.72): أربع لوحات بجداول ضيّقة
     wide = doc_type in ("statement", "journal", "manual", "balances",
-                        "customer_analytics", "turnover", "balance_tree",
+                        "turnover", "balance_tree",
                         "dash_panel", "aging", "day_close", "customer_board",
                         "mfg_target", "mfg_salary", "tax_sales_register",
                         "purchases_register", "trial_balance",

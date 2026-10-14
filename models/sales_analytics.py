@@ -11,6 +11,11 @@
 
 كل لوحة لها تفاصيل قابلة للعرض (رقم التشغيل والوزن المقيد).
 """
+import re
+
+# اللوحات التي تفاصيلها أرقام تشغيل — فتقبل «الفرز» بلا تكرار
+MERGEABLE = ("sales", "returns", "net_sold")
+OPENING_LABEL = "رصيد افتتاحي"
 
 
 def _period_clause(alias, date_from, date_to, params):
@@ -137,7 +142,7 @@ def opening_balance_row(conn, customer_id, date_from=None, date_to=None):
     g, c = _ek.opening_part(conn, r["account_id"], date_from, date_to)
     if abs(g) < 0.001 and abs(c) < 0.01:
         return None
-    return {"wo": "رصيد افتتاحي", "weight": g, "cash": c, "ref": "—"}
+    return {"wo": OPENING_LABEL, "weight": g, "cash": c, "ref": "—"}
 
 
 def net_sold_panel(conn, customer_id, date_from=None, date_to=None):
@@ -161,11 +166,48 @@ def collection_panel(conn, customer_id, date_from=None, date_to=None):
             "gold": round(r["gold"], 3)}
 
 
-def panel_details(conn, panel, customer_id, date_from=None, date_to=None):
+def _wo_key(wo):
+    """ترتيبٌ طبيعي لأرقام التشغيل: 2 قبل 10، و00002 قبل 00010."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t)
+            for t in re.split(r"(\d+)", str(wo or "")) if t]
+
+
+def merge_by_wo(rows):
+    """«فرز» (4.72): كل رقم تشغيل سطرٌ واحد بمجموع أوزانه.
+
+    أخذ العميل 1 و2 ثم ردّ 2 ثم أخذه ثانيةً: لوحة المبيعات تسرد
+    1 · 2 · 2 (سطراً لكل بند فاتورة)، والفرز يعرض 1 · 2 — الرقمين اللذين
+    أخذ منهما — ووزن 2 مجموع ما أخذه منه. فإجمالي اللوحة لا يتغيّر.
+    الرصيد الافتتاحي ليس رقم تشغيل: يبقى سطره أولاً كما هو.
+    """
+    head, agg = [], {}
+    for r in rows:
+        if r.get("wo") == OPENING_LABEL:
+            head.append(r)
+            continue
+        a = agg.setdefault(str(r["wo"]), {"wo": r["wo"], "weight": 0.0,
+                                          "ref": r.get("ref")})
+        a["weight"] += float(r.get("weight") or 0)
+    out = sorted(agg.values(), key=lambda x: _wo_key(x["wo"]))
+    for a in out:
+        a["weight"] = round(a["weight"], 3)
+    return head + out
+
+
+def panel_details(conn, panel, customer_id, date_from=None, date_to=None,
+                  merged=False):
     """تفاصيل لوحة معيّنة: قائمة (رقم التشغيل، الوزن المقيد).
 
     للوحة التحصيل تُعاد قائمة سندات القبض (الرقم، النقد، الذهب).
+    `merged`: أرقام التشغيل بلا تكرار بأوزانها وحدها (`merge_by_wo`).
     """
+    rows = _panel_rows(conn, panel, customer_id, date_from, date_to)
+    if merged and panel in MERGEABLE:
+        return merge_by_wo(rows)
+    return rows
+
+
+def _panel_rows(conn, panel, customer_id, date_from=None, date_to=None):
     if panel == "sales":
         rows = _sold_items(conn, customer_id, date_from, date_to)
         out = [{"wo": r["wo"], "weight": round(r["rw"], 3),

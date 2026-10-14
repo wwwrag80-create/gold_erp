@@ -8148,6 +8148,67 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    step("103) 4.72: «فرز» لوحات تحليل العميل — أرقام تشغيل بلا تكرار")
+    from models import sales_analytics as _sa103, invoices as _iv103
+    from models import entities as _en103
+    from models.inventory import create_work_orders_batch as _b103
+    _d103 = date.today().isoformat()
+    with db() as conn:
+        _c103 = _en103.add_entity(conn, "عميل ١٠٣", "customer",
+                                  username="admin")
+        _b103(conn, [{"wo_no": "F103-1", "gold": 50.0, "wage_per_gram": 5},
+                     {"wo_no": "F103-2", "gold": 30.0, "wage_per_gram": 5}],
+              _d103, "admin")
+        _w103 = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'F103-%'")}
+        # أخذ 1 و2، ثم ردّ 2، ثم أخذ 2 من جديد
+        _iv103.create_sale(conn, _c103, [{"work_order_id": _w103["F103-1"]},
+                                         {"work_order_id": _w103["F103-2"]}],
+                           _d103, "admin", apply_vat=False)
+        _iv103.create_sale_return(conn, _c103,
+                                  [{"work_order_id": _w103["F103-2"]}],
+                                  _d103, "admin", apply_vat=False)
+        _iv103.create_sale(conn, _c103, [{"work_order_id": _w103["F103-2"]}],
+                           _d103, "admin", apply_vat=False)
+        _raw103 = _sa103.panel_details(conn, "sales", _c103, _d103, _d103)
+        _m103 = _sa103.panel_details(conn, "sales", _c103, _d103, _d103,
+                                     merged=True)
+        _p103 = _sa103.all_panels(conn, _c103, _d103, _d103)
+    check("المبيعات بلا فرز: 1 · 2 · 2 (سطرٌ لكل بند فاتورة)",
+          sorted(r["wo"] for r in _raw103) == ["F103-1", "F103-2", "F103-2"],
+          str([r["wo"] for r in _raw103]))
+    check("وبالفرز: 1 · 2 مرةً واحدة، ووزن 2 مجموع ما أخذه منه (60)",
+          [r["wo"] for r in _m103] == ["F103-1", "F103-2"]
+          and abs(_m103[1]["weight"] - 60.0) < 0.001
+          and abs(sum(r["weight"] for r in _m103)
+                  - _p103["sales"]["weight"]) < 0.001,
+          str(_m103))
+    _mo103 = _sa103.merge_by_wo([
+        {"wo": "10", "weight": 1}, {"wo": _sa103.OPENING_LABEL, "weight": 5},
+        {"wo": "2", "weight": 2}, {"wo": "10", "weight": 3}])
+    check("ترتيبٌ طبيعي (2 قبل 10) والرصيد الافتتاحي أولاً كما هو",
+          [r["wo"] for r in _mo103] == [_sa103.OPENING_LABEL, "2", "10"]
+          and _mo103[2]["weight"] == 4, str(_mo103))
+    _h103 = _pm.build_body("customer_analytics", _c103, date_from=_d103,
+                           date_to=_d103, merged=["sales"])
+    _hr103 = _pm.build_body("customer_analytics", _c103, date_from=_d103,
+                            date_to=_d103)
+    # F103-2: المبيعات (2 ← 1 بالفرز) + المرتجعات (1) + المباع الفعلي (1)
+    check("الورقة تطبع المفروز كما يُرى: «بلا تكرار» وكل رقمٍ مرةً واحدة",
+          "بلا تكرار" in _h103 and "بلا تكرار" not in _hr103
+          and _hr103.count("F103-2") == 4 and _h103.count("F103-2") == 3,
+          f"{_hr103.count('F103-2')} → {_h103.count('F103-2')}")
+    from services import browser_print as _bp103
+    check("وورقة تحليل العميل عمودية لا أفقية",
+          "portrait" in _bp103._page_setup("customer_analytics")["size"])
+    try:
+        from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
+        check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",
+              hasattr(_S103, "set_merged") and hasattr(_S103, "_merged_panels"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

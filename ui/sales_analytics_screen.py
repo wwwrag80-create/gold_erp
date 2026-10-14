@@ -4,7 +4,8 @@
 أربع لوحات علوية (المبيعات · المرتجعات · المباع الفعلي · التحصيل)
 لعميل مختار خلال فترة، وتحت كل لوحة جدولها التفصيلي المستقل (رقم
 التشغيل والوزن المقيد) مع زر إخفاء/إظهار لطيّه أو فرده، وزر لطباعة
-تقرير العميل.
+تقرير العميل. وزر «فرز» يعرض أرقام تشغيل اللوحات المختارة بلا تكرار
+بأوزانها، والورقة تطبعها كما تُرى.
 """
 from PyQt5 import QtCore, QtWidgets
 
@@ -15,12 +16,26 @@ from models import entities, sales_analytics as sa
 from services import gold_math
 
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
-                               karat_combo, make_table, reload_combo,
-                               search_combo, title_label)
+                               karat_combo, load_pref, make_table,
+                               reload_combo, save_pref, search_combo,
+                               title_label)
 from ui.widgets.table_tools import enhance as _enhance
 
 PANELS = [("sales", "إجمالي المبيعات"), ("returns", "إجمالي المرتجعات"),
           ("net_sold", "إجمالي المباع الفعلي"), ("collection", "إجمالي التحصيل")]
+MERGE_PREF = "sales_analytics_merged"
+WO_UNIQUE = "رقم التشغيل (بلا تكرار)"
+
+
+class _StayOpenMenu(QtWidgets.QMenu):
+    """قائمةٌ تبقى مفتوحة عند تأشير خياراتها — تُختار عدة لوحات معاً."""
+
+    def mouseReleaseEvent(self, e):
+        a = self.activeAction()
+        if a is not None and a.isEnabled() and a.isCheckable():
+            a.trigger()
+            return
+        super().mouseReleaseEvent(e)
 
 
 class PanelColumn(QtWidgets.QFrame):
@@ -111,6 +126,26 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                        lambda: self.run_mode("report"))
         btn_run.setMenu(menu)
         self.btn_run = btn_run
+        # «فرز» (4.72): لوحةٌ أو أكثر تُعرض أرقام تشغيلها بلا تكرار —
+        # كل رقمٍ سطرٌ واحد بمجموع وزنه. الاختيار يُحفظ للمرة القادمة
+        saved = str(load_pref(MERGE_PREF, "") or "")
+        self.merged = {k for k in saved.split(",") if k in sa.MERGEABLE}
+        self.btn_sort = kit.PushButton()
+        sort_menu = _StayOpenMenu(self.btn_sort)
+        self._sort_actions = {}
+        titles = dict(PANELS)
+        for key in sa.MERGEABLE:
+            a = sort_menu.addAction(titles[key])
+            a.setCheckable(True)
+            a.setChecked(key in self.merged)
+            a.toggled.connect(lambda on, k=key: self._toggle_merge(k, on))
+            self._sort_actions[key] = a
+        sort_menu.addSeparator()
+        sort_menu.addAction("فرز كل اللوحات",
+                            lambda: self.set_merged(sa.MERGEABLE))
+        sort_menu.addAction("إلغاء الفرز", lambda: self.set_merged(()))
+        self.btn_sort.setMenu(sort_menu)
+        self._sort_label()
         btn_print = kit.PushButton("🖨 طباعة تقرير العميل")
         btn_print.clicked.connect(self.print_report)
 
@@ -124,6 +159,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         filt.addWidget(QtWidgets.QLabel("العيارات:"))
         filt.addWidget(self.karat)
         filt.addWidget(btn_run)
+        filt.addWidget(self.btn_sort)
         filt.addWidget(btn_print)
 
         self.columns = {}
@@ -154,7 +190,47 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
             "المصروف (المبيعات)" if report else "إجمالي المبيعات")
         self.columns["net_sold"].set_title(
             "المباع الصافي" if report else "إجمالي المباع الفعلي")
+        # التقرير بلا جداول أرقام تشغيل — فلا شيء يُفرز
+        self.btn_sort.setEnabled(not report)
         self.reload_panels()
+
+    # ══════════════════════════════════════════════════════════════
+    #  الفرز: أرقام التشغيل بلا تكرار بأوزانها وحدها (4.72)
+    # ══════════════════════════════════════════════════════════════
+
+    def set_merged(self, keys):
+        """يحدّد اللوحات المفروزة دفعةً واحدة (الكل · لا شيء · قائمة)."""
+        self.merged = {k for k in keys if k in sa.MERGEABLE}
+        for k, a in self._sort_actions.items():
+            a.blockSignals(True)
+            a.setChecked(k in self.merged)
+            a.blockSignals(False)
+        self._merge_changed()
+
+    def _toggle_merge(self, key, on):
+        (self.merged.add if on else self.merged.discard)(key)
+        self._merge_changed()
+
+    def _merge_changed(self):
+        self._sort_label()
+        u = self.user if isinstance(self.user, dict) else {}
+        save_pref(MERGE_PREF, ",".join(k for k in sa.MERGEABLE
+                                       if k in self.merged),
+                  u.get("username"))
+        self.reload_panels()
+
+    def _sort_label(self):
+        n = len(self.merged)
+        self.btn_sort.setText(f"فرز ({n}) ▾" if n else "فرز ▾")
+        titles = dict(PANELS)
+        self.btn_sort.setToolTip(
+            "أرقام التشغيل بلا تكرار في: "
+            + "، ".join(titles[k] for k in sa.MERGEABLE if k in self.merged)
+            if n else "اختر لوحةً أو أكثر لعرض أرقام تشغيلها بلا تكرار")
+
+    def _merged_panels(self):
+        """اللوحات المفروزة بترتيب الشاشة — ليطبعها القالب كما تُرى."""
+        return [k for k in sa.MERGEABLE if k in self.merged]
 
     def on_customer(self):
         self.customer_id = self.customer.currentData()
@@ -189,7 +265,8 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                 p = sa.all_panels(conn, self.customer_id,
                                   dstr(self.d_from), dstr(self.d_to))
                 details = {k: sa.panel_details(conn, k, self.customer_id,
-                                               dstr(self.d_from), dstr(self.d_to))
+                                               dstr(self.d_from), dstr(self.d_to),
+                                               merged=k in self.merged)
                            for k, _ in PANELS}
             k = self._k()
             if self.mode == "report":
@@ -234,6 +311,14 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                     self.columns[key].set_rows(
                         rows, ["رقم السند", f"الذهب (جم {k})",
                                "المبلغ (ريال)"])
+                elif key in self.merged:
+                    # مفروزة: رقم التشغيل مرةً واحدة ووزنه وحده
+                    rows = [(d["wo"], f"{self._g(d['weight']):,.2f}")
+                            for d in details[key]]
+                    self.columns[key].set_rows(
+                        rows, [WO_UNIQUE,
+                               f"الصافي (جم {k})" if key == "net_sold"
+                               else f"الوزن المقيد (جم {k})"])
                 elif key == "net_sold":
                     # المباع الفعلي: المبيعات والمرتجعات والصافي
                     rows = [(d["wo"], f"{self._g(d.get('sold', 0)):,.2f}",
@@ -258,12 +343,14 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         try:
             from services import print_manager
             # القالب يحاكي الشاشة: اللوحات المخفية لا تُطبع، والجداول
-            # المطوية تُطبع بإجمالياتها فقط بلا تفاصيل.
+            # المطوية تُطبع بإجمالياتها فقط بلا تفاصيل، والمفروزة تُطبع
+            # بأرقامها بلا تكرار — على ورقةٍ عمودية.
             print_manager.preview_document(
                 self, "customer_analytics", self.customer_id,
                 date_from=dstr(self.d_from), date_to=dstr(self.d_to),
                 visible=self._visible_panels(),
                 expanded=self._expanded_panels(),
+                merged=self._merged_panels(),
                 karat=self._k(), mode=self.mode)
         except Exception as e:
             err(self, e)
