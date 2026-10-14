@@ -508,6 +508,10 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addWidget(subbar)
         v.addLayout(body, 1)
         self.setCentralWidget(central)
+        # أوراق مكوّنات الواجهة الحديثة على حاوية الشاشات مرةً واحدة — لا
+        # على كل زرٍّ وخانة (4.71: فتح الشاشات أسرع). بعد أن استقرّت الحاوية
+        # في مكانها: حاويةٌ لها ورقة تُعاد أوراقُ كل ما فيها مع كل نقلٍ لها
+        kit.install_root(self.stack)
         self._build_status_bar()
         self._start_account_guard()
 

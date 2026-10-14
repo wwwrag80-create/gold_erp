@@ -155,25 +155,21 @@ def notes_in(root):
     return out
 
 
-class _Folder(QtCore.QObject):
-    def eventFilter(self, obj, ev):
-        if ev.type() == QtCore.QEvent.Show and isinstance(obj,
-                                                          QtWidgets.QLabel):
-            try:
-                if not showing() and foldable(obj):
-                    fold(obj)
-            except Exception:
-                pass
-        return False
+def _on_show(lbl):
+    if not showing() and foldable(lbl):
+        fold(lbl)
 
 
 _installed = None
 
 
 def install(app):
-    """يركّب المرشّح على التطبيق — مرةً واحدة."""
+    """يسجّل الطيّ عند ظهور كل ملصق — مرةً واحدة.
+
+    عبر مرشّح الظهور المشترك (`show_hooks`): مرشّحٌ خاصٌّ على التطبيق
+    كان يُستدعى في بايثون مع كل حدثٍ في البرنامج."""
     global _installed
     if _installed is None:
-        _installed = _Folder(app)
-        app.installEventFilter(_installed)
+        from ui.widgets import show_hooks
+        _installed = show_hooks.register(app, (QtWidgets.QLabel,), _on_show)
     return _installed

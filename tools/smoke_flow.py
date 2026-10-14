@@ -8097,6 +8097,57 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    step("102) 4.71: الشاشة تُفتح من أول نقرة — أوراقٌ على النافذة وبناءٌ مؤجَّل")
+    try:
+        import gc as _gc102
+        from PyQt5 import QtWidgets as _QW102
+        from ui import kit as _k102
+        _app102 = _QW102.QApplication.instance() or _QW102.QApplication([])
+        if not _k102.ACTIVE:
+            print("  … تُخطّى (الواجهة الكلاسيكية)")
+        else:
+            _sp102 = _k102.DoubleSpinBox()
+            _lazy102 = _sp102.spinFlyout is None
+            _sp102._kit_flyout()
+            check("خانة الرقم: لوحة السهمين تُبنى عند أول نقرة لا مع الخانة",
+                  _lazy102 and _sp102.spinFlyout is not None)
+            _root102 = _QW102.QWidget()
+            _k102.install_root(_root102)
+            _lay102 = _QW102.QVBoxLayout(_root102)
+            _in102 = _k102.LineEdit()
+            _lay102.addWidget(_in102)
+            _out102 = _k102.LineEdit()
+            _root102.show(); _out102.show()
+            _app102.processEvents()
+            check("النافذة تحمل ورقة الحقول والجداول — والحقل داخلها بلا ورقةٍ "
+                  "خاصّة تُبنى له",
+                  "TableWidget" in _root102.styleSheet()
+                  and len(_in102.styleSheet()) < len(_out102.styleSheet()),
+                  f"{len(_in102.styleSheet())}/{len(_out102.styleSheet())}")
+            _t102 = [_k102.TableWidget(3, 3) for _ in range(6)]
+            for _t in _t102:
+                _lay102.addWidget(_t)
+            _app102.processEvents()
+            _root102.grab()
+            _d102 = _t102[0].itemDelegate()
+            _first102 = _d102._edge_cols(_t102[0])[0]
+            _t102[0].setColumnHidden(_first102, True)
+            check("رسّام الصفوف يحفظ طرفَي الجدول ويُعيد حسابهما إذا تغيّر الرأس",
+                  _d102._edge_cols(_t102[0])[0] != _first102)
+            del _t102, _d102, _t
+            _gc102.collect(); _gc102.collect()
+            _f102 = _app102.font()
+            _g102 = _QW102.QApplication.font()
+            _g102.setPointSize(_g102.pointSize() + 1)
+            _app102.setFont(_g102); _app102.processEvents()
+            _app102.setFont(_f102); _app102.processEvents()
+            check("وتغيير الخط بعد كنس الذاكرة لا يُسقط البرنامج", True)
+            _out102.close(); _root102.close()
+            _out102.deleteLater(); _root102.deleteLater()
+            _app102.processEvents()
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

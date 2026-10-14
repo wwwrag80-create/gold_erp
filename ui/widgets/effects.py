@@ -92,26 +92,20 @@ def refresh_all():
                 elevate(w)
 
 
-class _Elevator(QtCore.QObject):
-    def eventFilter(self, obj, ev):
-        if ev.type() == QtCore.QEvent.Show and isinstance(obj,
-                                                          QtWidgets.QFrame):
-            try:
-                if obj.objectName() in ELEVATED and not obj.property(_FLAG) \
-                        and enabled():
-                    elevate(obj)
-            except Exception:
-                pass
-        return False
+def _on_show(frame):
+    if frame.objectName() in ELEVATED and not frame.property(_FLAG) \
+            and enabled():
+        elevate(frame)
 
 
 _installed = None
 
 
 def install(app):
-    """يركّب المرشّح على التطبيق — مرةً واحدة."""
+    """يسجّل الظلّ عند ظهور كل إطار — مرةً واحدة (عبر مرشّح الظهور
+    المشترك `show_hooks` بدل مرشّحٍ خاصٍّ على التطبيق)."""
     global _installed
     if _installed is None:
-        _installed = _Elevator(app)
-        app.installEventFilter(_installed)
+        from ui.widgets import show_hooks
+        _installed = show_hooks.register(app, (QtWidgets.QFrame,), _on_show)
     return _installed

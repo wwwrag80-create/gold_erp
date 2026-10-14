@@ -51,6 +51,7 @@ QT_INHERITED = {
     "setCursor", "mouseReleaseEvent", "setContentsMargins", "setSpacing",
     "sender", "installEventFilter", "removeEventFilter", "setProperty",
     "property", "style", "unpolish", "polish", "setSizePolicy", "geometry",
+    "testAttribute",
     "setGeometry", "move", "width", "height", "isVisible", "setCheckable",
     "setChecked", "isChecked", "addWidget", "addLayout", "setCentralWidget",
     "statusBar", "menuBar", "setWindowIcon", "setMinimumSize", "showEvent",
