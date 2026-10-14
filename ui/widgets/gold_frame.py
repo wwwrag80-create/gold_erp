@@ -60,6 +60,8 @@ class GlassCard(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAutoFillBackground(False)
+        self._cache = None          # اللوحة مرسومةً مرةً لكل مقاس
+        self._cache_key = None
 
     # توافقٌ مع من كان يستدعيهما — لا لمعة بعد اليوم
     def start_shine(self):
@@ -73,7 +75,29 @@ class GlassCard(QtWidgets.QWidget):
         return QtCore.QRectF(self.rect()).adjusted(m, m, -m, -m)
 
     def paintEvent(self, _e):
+        """اللوحة ساكنة لكنها فوق مشهدٍ يتحرّك: كل إطارٍ من المقطع يعيد
+        رسم ما فوقه — فتُرسم طبقاتها (ظلٌّ باثنتي عشرة طبقة وزجاجٌ وإطار)
+        مرةً واحدة في صورةٍ شفافة وتُلصق بعدها لصقاً (4.70)."""
+        try:
+            dpr = max(1.0, float(self.devicePixelRatioF()))
+        except Exception:
+            dpr = 1.0
+        key = (self.width(), self.height(), round(dpr, 2))
+        if self._cache is None or self._cache_key != key:
+            img = QtGui.QImage(max(1, int(self.width() * dpr)),
+                               max(1, int(self.height() * dpr)),
+                               QtGui.QImage.Format_ARGB32_Premultiplied)
+            img.setDevicePixelRatio(dpr)
+            img.fill(QtCore.Qt.transparent)
+            q = QtGui.QPainter(img)
+            self._draw(q)
+            q.end()
+            self._cache, self._cache_key = QtGui.QPixmap.fromImage(img), key
         p = QtGui.QPainter(self)
+        p.drawPixmap(0, 0, self._cache)
+        p.end()
+
+    def _draw(self, p):
         p.setRenderHint(QtGui.QPainter.Antialiasing, True)
         r = self.frame_rect()
         radius = self.RADIUS
@@ -102,7 +126,6 @@ class GlassCard(QtWidgets.QWidget):
         p.drawRoundedRect(r.adjusted(1, 1, -1, -1), radius - 1, radius - 1)
         # ── الإطار المزدوج الرفيع ──
         draw_frame(p, r, radius=radius, gap=8.0)
-        p.end()
 
 
 # الاسم القديم — لمن يستورده
