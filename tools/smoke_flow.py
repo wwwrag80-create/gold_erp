@@ -7932,12 +7932,17 @@ def main():
         # مدّة الإطار في WebP تُعرف بعد قراءة أول إطار — قبلها يعيد Qt صفراً
         _f0_100 = _rd100.read() if _rd100 else None
         _dl100 = _rd100.nextImageDelay() if _rd100 else 0
-        check("المقطع الذهبي: WebP متحرّك حلقةً لا تنتهي، خفيفٌ أقلّ من 6 م.ب",
+        _sz100 = _f0_100.size() if _f0_100 is not None else None
+        # 4.70: ‏1920×1080 بـ30 إطاراً/ث (33 م.ث) — الإطار مسحتان بالضبط على
+        # شاشة 60 هرتز؛ وحجمٌ معقول لحزمة التحديث
+        check("المقطع الذهبي: WebP متحرّك 1920×1080 بـ30 إطاراً/ث حلقةً لا تنتهي",
               _rd100 is not None and _rd100.supportsAnimation()
-              and _n100 >= 150 and 38 <= _dl100 <= 46
+              and _n100 >= 200 and 30 <= _dl100 <= 36
+              and _sz100 is not None and _sz100.width() >= 1920
+              and _sz100.height() >= 1080
               and _rd100.loopCount() in (-1, 0)
-              and _loop100.stat().st_size < 6 * 1024 * 1024,
-              str((_n100, _dl100,
+              and _loop100.stat().st_size < 24 * 1024 * 1024,
+              str((_n100, _dl100, _sz100,
                    _loop100.stat().st_size if _loop100 else None)))
         _p100 = _QG100.QImage(str(_post100)) if _post100 else _QG100.QImage()
         check("والبديل الساكن صورةٌ من المشهد نفسه بمقاسه",
@@ -7949,6 +7954,42 @@ def main():
         check("و«تقليل الحركة» في الجهاز يُحترم: صورةٌ ساكنة لا مقطع",
               _cs100.motion_allowed() is False and _st100.mode == "poster"
               and _st100._movie is None)
+        if _old100 is None:
+            os.environ.pop("GOLD_ERP_REDUCE_MOTION", None)
+        else:
+            os.environ["GOLD_ERP_REDUCE_MOTION"] = _old100
+        # المشغّل: فكٌّ وتحجيمٌ في خيطٍ خلفي، وعرضٌ بالساعة لا بـQMovie
+        import threading as _thr100, time as _tm100
+        _old100 = os.environ.get("GOLD_ERP_REDUCE_MOTION")
+        os.environ["GOLD_ERP_REDUCE_MOTION"] = "0"
+        _sg100 = _cs100.CinemaStage(animate=True)
+        _sg100.resize(960, 540)
+        _sg100.show()
+        _sg100.start()
+        _mv100 = _sg100._movie
+        _end100 = _tm100.time() + 1.2
+        while _tm100.time() < _end100:
+            _QW100.QApplication.processEvents()
+            _tm100.sleep(0.004)
+        _th100 = [t.name for t in _thr100.enumerate()]
+        _im100 = _mv100.image if _mv100 is not None else None
+        _dp100 = _im100.devicePixelRatio() if _im100 is not None else 1
+        check("ويُشغَّل بخيطٍ خلفي يجهّز الإطار بمقاس الشاشة، ويعرضه في موعده",
+              isinstance(_mv100, _cs100._Loop) and "gate-loop" in _th100
+              and _im100 is not None
+              and (_im100.width() / _dp100, _im100.height() / _dp100) == (960, 540)
+              and _mv100.seq >= 10
+              and _mv100.state() == _QG100.QMovie.Running,
+              str((type(_mv100).__name__, _mv100.seq if _mv100 else None,
+                   _im100.size() if _im100 is not None else None)))
+        _sg100.hide()
+        _QW100.QApplication.processEvents()
+        _paused100 = _mv100.state() == _QG100.QMovie.Paused if _mv100 else False
+        _mv100 and _mv100.stop()
+        _tm100.sleep(0.05)
+        check("ويسكن الخيط متى خفيت البوابة، وينتهي متى أُوقف",
+              _paused100 and "gate-loop" not in
+              [t.name for t in _thr100.enumerate()])
         if _old100 is None:
             os.environ.pop("GOLD_ERP_REDUCE_MOTION", None)
         else:
