@@ -7928,17 +7928,21 @@ def main():
         _loop100 = _cs100.asset(_cs100.LOOP)
         _post100 = _cs100.asset(_cs100.POSTER)
         _rd100 = _QG100.QImageReader(str(_loop100)) if _loop100 else None
+        _n100 = _rd100.imageCount() if _rd100 else 0
+        # مدّة الإطار في WebP تُعرف بعد قراءة أول إطار — قبلها يعيد Qt صفراً
+        _f0_100 = _rd100.read() if _rd100 else None
+        _dl100 = _rd100.nextImageDelay() if _rd100 else 0
         check("المقطع الذهبي: WebP متحرّك حلقةً لا تنتهي، خفيفٌ أقلّ من 6 م.ب",
               _rd100 is not None and _rd100.supportsAnimation()
-              and _rd100.imageCount() >= 150
-              and 38 <= _rd100.nextImageDelay() <= 46
+              and _n100 >= 150 and 38 <= _dl100 <= 46
+              and _rd100.loopCount() in (-1, 0)
               and _loop100.stat().st_size < 6 * 1024 * 1024,
-              str((_rd100.imageCount() if _rd100 else None,
+              str((_n100, _dl100,
                    _loop100.stat().st_size if _loop100 else None)))
         _p100 = _QG100.QImage(str(_post100)) if _post100 else _QG100.QImage()
         check("والبديل الساكن صورةٌ من المشهد نفسه بمقاسه",
-              not _p100.isNull() and _rd100 is not None
-              and _p100.size() == _rd100.size())
+              not _p100.isNull() and _f0_100 is not None
+              and _p100.size() == _f0_100.size())
         _old100 = os.environ.get("GOLD_ERP_REDUCE_MOTION")
         os.environ["GOLD_ERP_REDUCE_MOTION"] = "1"
         _st100 = _cs100.CinemaStage()

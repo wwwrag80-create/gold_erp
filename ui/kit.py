@@ -182,26 +182,29 @@ def _field_height(widget, extra=14):
 #  المظهر: لون الذهب والخط والوضع الليلي
 # ══════════════════════════════════════════════════════════════════
 
-# نصوص المكتبة التي لا يحملها ملف ترجمتها العربي: أيام التقويم وأشهره
-# وأزرار الحوار وقائمة التحرير. تُترجم لأصناف المكتبة وحدها (سياقٌ لا
-# يبدأ بـQ) فلا تمسّ نصوص Qt نفسها.
-AR_STRINGS = {
+# أيام التقويم وأشهره بالعربية — لا يحملها ملف ترجمة المكتبة العربي.
+# تُكتب على عناصر التقويم مباشرةً بعد إنشائه (`_arabize_calendar`):
+# مترجمٌ بايثوني (QTranslator مشتقّ) يستدعيه Qt من داخل بنائه للنوافذ
+# كان يُسقط البرنامج في بعض الشاشات — فلا مترجم بايثوني إطلاقاً.
+AR_CALENDAR = {
     "Mo": "ن", "Tu": "ث", "We": "ر", "Th": "خ", "Fr": "ج", "Sa": "س",
     "Su": "ح",
     "Jan": "يناير", "Feb": "فبراير", "Mar": "مارس", "Apr": "أبريل",
     "May": "مايو", "Jun": "يونيو", "Jul": "يوليو", "Aug": "أغسطس",
     "Sep": "سبتمبر", "Oct": "أكتوبر", "Nov": "نوفمبر", "Dec": "ديسمبر",
-    "OK": "موافق", "Cancel": "إلغاء", "Cut": "قص", "Copy": "نسخ",
-    "Paste": "لصق", "Select all": "تحديد الكل", "Undo": "تراجع",
-    "Redo": "إعادة", "Clear": "مسح",
 }
 
 
-class _ArabicFluent(QtCore.QTranslator):
-    def translate(self, context, source, disambiguation=None, n=-1):
-        if context and not str(context).startswith("Q"):
-            return AR_STRINGS.get(source, "")
-        return ""
+def _arabize_calendar(view):
+    """أيام الأسبوع وأسماء الأشهر في تقويم Fluent بالعربية."""
+    for lb in view.findChildren(QtWidgets.QLabel, "weekDayLabel"):
+        lb.setText(AR_CALENDAR.get(lb.text(), lb.text()))
+    for lw in view.findChildren(QtWidgets.QListWidget):
+        for i in range(lw.count()):
+            it = lw.item(i)
+            ar = AR_CALENDAR.get(it.text())
+            if ar:
+                it.setText(ar)
 
 
 # لون الفعل في Fluent: الوضع الفاتح يأخذه كما هو، والليلي يشتقّ منه
@@ -239,9 +242,7 @@ def apply(app, name="light", scale=1.0):
             tr = QtCore.QTranslator(app)
             if tr.load(":/qfluentwidgets/i18n/qfluentwidgets.ar_AR.qm"):
                 app.installTranslator(tr)
-            extra = _ArabicFluent(app)
-            app.installTranslator(extra)        # يُسأل أولاً (آخر مُركَّب)
-            _STATE["translator"] = (tr, extra)
+                _STATE["translator"] = tr
         except Exception:
             pass
         app.setLayoutDirection(direction)
@@ -651,6 +652,7 @@ if ACTIVE:
                 # أسماء الأشهر من لغة الأداة: عربية (والأرقام تبقى لاتينية)
                 view.setLocale(QtCore.QLocale(QtCore.QLocale.Arabic,
                                               QtCore.QLocale.SaudiArabia))
+                _arabize_calendar(view)
                 view.setDate(self.date())
                 view.dateChanged.connect(self.setDate)
                 pos = self.mapToGlobal(QtCore.QPoint(0, self.height() + 2))
