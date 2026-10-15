@@ -8216,6 +8216,13 @@ def main():
           and "الباقي" in _g104 and "نسبة السداد" in _c104
           and "منذ آخر سداد" in _o104 and 'class="cols"' not in _g104
           and 'class="cols"' in _h104)
+    with db(readonly=True) as conn:
+        _a104 = _mw104.page_html(conn, {"tab": "customers", "side": "aging"},
+                                 "/m/t")
+    check("ومعه «أعمار الديون» كالبرنامج: الفئات العمرية والإجمالي",
+          "أعمار الديون" in _g104 and "عدد الجهات المدينة" in _a104
+          and "ذهب أكثر من 90" in _a104 and "أجور أقل من 30" in _a104
+          and "له علينا" in _a104)
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

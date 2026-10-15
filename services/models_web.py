@@ -1268,7 +1268,8 @@ def page_html(conn, query, base):
     sect = ("board" if board else
             "orders" if tab == "orders" else "grid")
     again = (_link(base, tab=tab, side=query.get("side"),
-                   **{k: query.get(k) for k in ("from", "to", "all", "f")})
+                   **{k: query.get(k)
+                      for k in ("from", "to", "all", "f", "dim")})
              if board else
              _link(base, tab=tab, view=view, sort=sort,
                    day=query.get('day'), st=query.get('st')))
@@ -1312,7 +1313,7 @@ _BOARD_CSS = """
 padding:6px 8px;overflow:auto}
 .board table{font-size:13px}
 .board th{position:sticky;top:0;background:#f4efe5;color:var(--ink);
-padding:8px 6px;border-bottom:2px solid var(--line);white-space:nowrap}
+padding:8px 6px;border-bottom:2px solid var(--line);line-height:1.3}
 .board td{padding:7px 6px;border-bottom:1px solid #f0eadf;text-align:center;
 white-space:nowrap;font-variant-numeric:tabular-nums}
 .board td.n{text-align:right;font-weight:600}
@@ -1346,7 +1347,7 @@ def _board(conn, query, base):
     from models import customer_board as cb
     from services import karat_view as kv
     side = query.get("side") if query.get("side") in (
-        "gold", "cash", "over") else "gold"
+        "gold", "cash", "over", "aging") else "gold"
     d_from, frm, to, all_ = _board_period(query)
     res = cb.board(conn, d_from, to)
     rows = res["rows"]
@@ -1369,7 +1370,7 @@ def _board(conn, query, base):
         f'<a class="{"on" if side == k else ""}" href="'
         f'{_e(_link(base, tab="customers", side=k, **keep))}">{t}</a>'
         for k, t in (("gold", "الذهب"), ("cash", "النقد"),
-                     ("over", "نظرة عامة")))
+                     ("over", "نظرة عامة"), ("aging", "أعمار الديون")))
     tools = (
         f'<form class="tools" method="get" action="{_e(base)}">'
         '<input type="hidden" name="tab" value="customers">'
@@ -1380,6 +1381,8 @@ def _board(conn, query, base):
         f'<label><input type="checkbox" name="all" value="1"'
         f'{" checked" if all_ else ""}> منذ البداية</label>'
         '<button type="submit">عرض</button></form>')
+    if side == "aging":
+        return _aging(conn, query, base, to, keep, tools, seg)
 
     # اللوحات: كالشاشة — الذهب إلا في قسم النقد
     ps = "cash" if side == "cash" else "gold"
@@ -1484,6 +1487,102 @@ def _board(conn, query, base):
             + "".join(f"<th>{_e(h)}</th>" for h in head)
             + "</tr></thead><tbody>" + "".join(trs) + "</tbody><tfoot>"
             + foot + "</tfoot></table>")
+    return body, summary, tools, seg
+
+
+def _aging(conn, query, base, to, keep, tools, seg):
+    """أعمار الديون كما في البرنامج (`models.aging`): رصيد كل عميلٍ
+    موزَّعاً على فئاته العمرية حتى تاريخ «إلى» — الذهب أولاً ثم الأجور."""
+    from models import aging
+    from services import karat_view as kv
+    dim = query.get("dim") if query.get("dim") in (
+        "both", "gold", "cash") else "both"
+    rows = aging.report(conn, "customer", to)
+    t = aging.totals(rows)
+    dims = "".join(
+        f'<a class="{"on" if dim == k else ""}" href="'
+        f'{_e(_link(base, tab="customers", side="aging", dim=k, **keep))}">'
+        f'{x}</a>'
+        for k, x in (("both", "نقد وذهب معاً"), ("gold", "الذهب فقط"),
+                     ("cash", "النقد فقط")))
+    tools = (tools.replace('name="side" value="aging">',
+                           'name="side" value="aging">'
+                           f'<input type="hidden" name="dim" value="{dim}">')
+             + f'<nav class="seg">{dims}</nav>')
+    labels = aging.BUCKET_LABELS
+    late = t["cash_buckets"][1] + t["cash_buckets"][2]
+    summary = (
+        f'<div>عدد الجهات المدينة<b>{t["count"]:,}</b>لها رصيد قائم</div>'
+        f'<div class="in">جارٍ (أقل من 30)<b>{t["cash_buckets"][0]:,.2f}</b>'
+        f'أجور ريال · {t["cash_pct"][0]:.1f}%</div>'
+        f'<div>متأخر (أقل من 90)<b>{late:,.2f}</b>أجور ريال · '
+        f'{t["cash_pct"][1] + t["cash_pct"][2]:.1f}%</div>'
+        f'<div class="out">متعثّر (أكثر من 90)<b>{t["cash_buckets"][3]:,.2f}'
+        f'</b>أجور ريال · {t["cash_pct"][3]:.1f}%</div>'
+        f'<div>إجمالي الذهب<b>{kv.g(t["gold"]):,.3f}</b>{_e(kv.unit())}</div>')
+    if rows:
+        w = rows[0]
+        summary += (f'<div style="grid-column:1/-1">أقدم دين: '
+                    f'<b style="display:inline;font-size:15px">{_e(w["name"])}'
+                    f'</b> منذ {w["days"]:,} يوماً ({_e(w["oldest"])})</div>')
+    both = dim == "both"
+    head = ["العميل", "الجوال", "أحدث دين", "أقدم دين"]
+    if dim in ("both", "gold"):
+        head += [(f"ذهب {b}" if both else b) for b in labels] + [
+            "إجمالي الذهب"]
+    if dim in ("both", "cash"):
+        head += [(f"أجور {b}" if both else b) for b in labels] + [
+            "إجمالي الأجور"]
+    head.append("له علينا")
+
+    def g(x):
+        return f"{kv.g(x):,.3f}" if x else ""
+
+    def c(x):
+        return f"{x:,.2f}" if x else ""
+
+    trs = []
+    for r in rows:
+        nd, od = aging.ages(r, dim)
+        cells = [f'<td class="n">{_e(r["name"])}</td>',
+                 f'<td>{_e(r["phone"] or "—")}</td>',
+                 f'<td>{"—" if nd is None else nd}</td>',
+                 f'<td>{"—" if not od else od}</td>']
+        if dim in ("both", "gold"):
+            cells += [f"<td>{g(x)}</td>" for x in r["gold_buckets"]]
+            cells.append(f'<td class="rem">{g(r["gold"])}</td>')
+        if dim in ("both", "cash"):
+            cells += [f"<td>{c(x)}</td>" for x in r["cash_buckets"]]
+            cells.append(f'<td class="rem">{c(r["cash"])}</td>')
+        cr = []
+        if r["cash_credit"]:
+            cr.append(f"نقد {abs(r['cash_credit']):,.2f}")
+        if r["gold_credit"]:
+            cr.append(f"ذهب {kv.g(abs(r['gold_credit'])):,.3f}")
+        cells.append(f'<td class="cr">{" · ".join(cr) or "—"}</td>')
+        # المتعثّر يُلوَّن كالشاشة: العين تلتقطه قبل الأرقام
+        tone = (' style="color:#9A1414"' if r["days"] >= 91 else
+                ' style="color:#5E4A0C"' if r["days"] >= 61 else "")
+        s_ = _e(f'{r["name"]} {r.get("code") or ""}'.lower())
+        trs.append(f'<tr class="crow" data-s="{s_}"{tone}>'
+                   + "".join(cells) + "</tr>")
+    if not rows:
+        return ('<div class="empty">لا أرصدة قائمة على العملاء</div>',
+                summary, tools, seg)
+    tot = ['<td class="n">الإجمالي</td>', "<td>—</td>", "<td>—</td>",
+           "<td>—</td>"]
+    if dim in ("both", "gold"):
+        tot += [f"<td>{kv.g(x):,.3f}</td>" for x in t["gold_buckets"]]
+        tot.append(f"<td>{kv.g(t['gold']):,.3f}</td>")
+    if dim in ("both", "cash"):
+        tot += [f"<td>{x:,.2f}</td>" for x in t["cash_buckets"]]
+        tot.append(f"<td>{t['cash']:,.2f}</td>")
+    tot.append(f"<td>نقد {abs(t['cash_credit']):,.2f}</td>"
+               if t["cash_credit"] else "<td>—</td>")
+    body = ("<table><thead><tr>"
+            + "".join(f"<th>{_e(h)}</th>" for h in head)
+            + "</tr></thead><tbody>" + "".join(trs) + "</tbody><tfoot>"
+            + '<tr class="tot">' + "".join(tot) + "</tr></tfoot></table>")
     return body, summary, tools, seg
 
 
