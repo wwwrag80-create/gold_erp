@@ -1046,7 +1046,8 @@ _JS = """
    if(d&&!whole&&cn){d.open=true;}
    if(!whole){tn+=cn;tw+=cw;}});
   // 4.59: الطلبات — بالعميل أو رقم الطلب أو رقم موديلٍ فيه
-  document.querySelectorAll('.order').forEach(function(o){
+  // 4.73: والعملاء — باسم العميل أو رقم حسابه
+  document.querySelectorAll('.order,tr.crow').forEach(function(o){
    var hit=!v||(o.getAttribute('data-s')||'').indexOf(v)>=0;
    o.style.display=hit?'':'none'; if(hit)n++;});
   var e=document.getElementById('none'); if(e)e.style.display=n?'none':'';
@@ -1202,7 +1203,7 @@ def page_html(conn, query, base):
 
     from services import karat_view as kv
     tab = query.get("tab") if query.get("tab") in (
-        "guide", "received", "orders") else "guide"
+        "guide", "received", "orders", "customers") else "guide"
     view = query.get("view") if query.get("view") in (
         "all", "in_stock", "sold") else "all"
     sort = query.get("sort") if query.get("sort") in (
@@ -1222,7 +1223,8 @@ def page_html(conn, query, base):
         for k, t in (("guide", "الدليل"),
                      ("received", "البضاعة الواردة بتاريخ"),
                      ("orders", "طلبات العملاء"
-                      + (f" ({n_orders})" if n_orders else ""))))
+                      + (f" ({n_orders})" if n_orders else "")),
+                     ("customers", "العملاء — المبيعات والسداد")))
     seg = "".join(
         f'<a class="{"on" if view == k else ""}" href="'
         f'{_e(_link(base, tab=tab, view=k, sort=sort, day=query.get("day")))}'
@@ -1242,7 +1244,9 @@ def page_html(conn, query, base):
         for k, t in (("az", "أ ← ي"), ("za", "ي ← أ"),
                      ("most", "الأكثر عدداً"), ("least", "الأقل عدداً")))
 
-    if tab == "received":
+    if tab == "customers":
+        body, summary, tools, seg = _board(conn, query, base)
+    elif tab == "received":
         body, summary, tools = _received(conn, query, base, view, sort,
                                          imgs, unit, sort_sel)
     elif tab == "orders":
@@ -1252,35 +1256,235 @@ def page_html(conn, query, base):
                                       sort_sel)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     co = _company().strip()
-    title = "دليل الموديلات" + (f" — {_e(co)}" if co else "")
+    board = tab == "customers"
+    title = (("العملاء — المبيعات والسداد" if board else "دليل الموديلات")
+             + (f" — {_e(co)}" if co else ""))
     cols = "".join(f'<button type="button" data-c="{c}">{c}</button>'
                    for c in COLS)
+    cols_bar = ("" if board else
+                f'<div class="cols">الصور في الصف: {cols}</div>')
+    hint = ("ابحث باسم العميل أو رقم حسابه…" if board else
+            "ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…")
+    sect = ("board" if board else
+            "orders" if tab == "orders" else "grid")
+    again = (_link(base, tab=tab, side=query.get("side"),
+                   **{k: query.get(k) for k in ("from", "to", "all", "f")})
+             if board else
+             _link(base, tab=tab, view=view, sort=sort,
+                   day=query.get('day'), st=query.get('st')))
     return f"""<!DOCTYPE html>
 <html dir="rtl" lang="ar" data-cols="{DEFAULT_COLS}" data-base="{_e(base)}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">
 <title>{title}</title>
-<style>{_CSS}{_ORDER_CSS}</style></head><body>
+<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
 <div class="bar"><input id="q" type="search"
- placeholder="ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…"></div>
+ placeholder="{hint}"></div>
 </div></header><main>
 <div class="top"><nav class="tabs">{tabs}</nav><span class="sep"></span>
 <nav class="seg">{seg}</nav><span class="sep"></span>
 {tools}
-<div class="cols">الصور في الصف: {cols}</div></div>
+{cols_bar}</div>
 <section class="sum">{summary}<div id="pick" class="pick"
  style="display:none"></div></section>
-<section class="{"orders" if tab == "orders" else "grid"}">{body}</section>
+<section class="{sect}">{body}</section>
 <div id="none" class="empty" style="display:none">لا نتائج للبحث</div>
 </main>
-<footer><a href="{_e(_link(base, tab=tab, view=view, sort=sort,
-                                day=query.get('day'), st=query.get('st')))}">↻ تحديث</a>
+<footer><a href="{_e(again)}">↻ تحديث</a>
  · إصدار {_e(_version())}
  · <a href="{_e(base)}/logout">خروج</a></footer>
 <script>{_JS}{_IMG_JS}</script></body></html>"""
+
+
+# ══════════════════════════════════════════════════════════════════
+#  العملاء — المبيعات والسداد (4.73): شاشة العملاء نفسها في الرابط
+# ------------------------------------------------------------------
+#  الأرقام من `customer_board.board` الذي تقرأ منه الشاشة على الجهاز —
+#  فلا يختلف ما يراه المدير في الرابط عمّا في البرنامج. ثلاثة أقسام
+#  كالشاشة: الذهب · النقد · نظرة عامة، والفترة أو «منذ البداية».
+# ══════════════════════════════════════════════════════════════════
+
+_BOARD_CSS = """
+.board{background:#fff;border:1px solid var(--line);border-radius:12px;
+padding:6px 8px;overflow:auto}
+.board table{font-size:13px}
+.board th{position:sticky;top:0;background:#f4efe5;color:var(--ink);
+padding:8px 6px;border-bottom:2px solid var(--line);white-space:nowrap}
+.board td{padding:7px 6px;border-bottom:1px solid #f0eadf;text-align:center;
+white-space:nowrap;font-variant-numeric:tabular-nums}
+.board td.n{text-align:right;font-weight:600}
+.board tr.crow:nth-child(even) td{background:#fbf8f2}
+.board tr.tot td{background:#2b2723;color:#fff;font-weight:700}
+.board td.rem{font-weight:700}
+.g-ok{color:var(--in);font-weight:600} .g-mid{color:#8a6d1d;font-weight:600}
+.g-low{color:#b0791c;font-weight:600} .g-bad{color:#b3261e;font-weight:600}
+.cr{color:var(--in)} .late{color:#b3261e}
+form.tools label{display:flex;gap:4px;align-items:center;font-size:13px}
+"""
+
+_GRADE_CSS = {"مسدَّد": "g-ok", "ممتاز": "g-ok", "جيد": "g-mid",
+              "مقبول": "g-low", "سيء": "g-bad"}
+
+
+def _board_period(query):
+    """الفترة من الرابط: «منذ البداية» افتراضاً كالشاشة."""
+    from datetime import date
+    to = query.get("to") if _DATE.match(query.get("to") or "") else ""
+    to = to or date.today().isoformat()
+    frm = query.get("from") if _DATE.match(query.get("from") or "") else ""
+    # النموذج يرسل `f=1`: بلا مربّع «منذ البداية» المؤشَّر ← الفترة
+    all_ = (query.get("all") == "1") if query.get("f") == "1" else not frm
+    if not frm:
+        frm = f"{to[:4]}-01-01"
+    return (None if all_ else frm), frm, to, all_
+
+
+def _board(conn, query, base):
+    from models import customer_board as cb
+    from services import karat_view as kv
+    side = query.get("side") if query.get("side") in (
+        "gold", "cash", "over") else "gold"
+    d_from, frm, to, all_ = _board_period(query)
+    res = cb.board(conn, d_from, to)
+    rows = res["rows"]
+
+    def fmt(sd, v):
+        return f"{kv.g(v):,.3f}" if sd == "gold" else f"{v:,.2f}"
+
+    def pct(v):
+        return "—" if v is None else f"{v:,.1f}%"
+
+    def grade(gr):
+        return f'<span class="{_GRADE_CSS.get(gr, "")}">{_e(gr)}</span>'
+
+    def srch(r):
+        return _e(f'{r["name"]} {r.get("code") or ""}'.lower())
+
+    keep = {"from": None if all_ else frm, "to": to,
+            "all": "1" if all_ else None, "f": "1"}
+    seg = "".join(
+        f'<a class="{"on" if side == k else ""}" href="'
+        f'{_e(_link(base, tab="customers", side=k, **keep))}">{t}</a>'
+        for k, t in (("gold", "الذهب"), ("cash", "النقد"),
+                     ("over", "نظرة عامة")))
+    tools = (
+        f'<form class="tools" method="get" action="{_e(base)}">'
+        '<input type="hidden" name="tab" value="customers">'
+        f'<input type="hidden" name="side" value="{_e(side)}">'
+        '<input type="hidden" name="f" value="1">'
+        f'<label>من <input type="date" name="from" value="{_e(frm)}"></label>'
+        f'<label>إلى <input type="date" name="to" value="{_e(to)}"></label>'
+        f'<label><input type="checkbox" name="all" value="1"'
+        f'{" checked" if all_ else ""}> منذ البداية</label>'
+        '<button type="submit">عرض</button></form>')
+
+    # اللوحات: كالشاشة — الذهب إلا في قسم النقد
+    ps = "cash" if side == "cash" else "gold"
+    tot = {k: sum(r[ps][k] for r in rows) for k in cb.KINDS}
+    s = cb._side(tot, ps)
+    u = _e(kv.unit()) if ps == "gold" else "ريال"
+    active = sum(1 for r in rows if r["active"])
+    owing = sum(1 for r in rows if r[ps]["remaining"] > 0.0005)
+    summary = (
+        f'<div>العملاء<b>{len(rows):,}</b>{active:,} بحركة</div>'
+        f'<div>المبيعات<b>{fmt(ps, s["sales"])}</b>{u} · صافيها '
+        f'{fmt(ps, s["net"])}</div>'
+        f'<div class="out">المرتجع<b>{fmt(ps, s["returns"])}</b>{u} · '
+        f'{pct(s["ret_pct"])}</div>'
+        f'<div class="in">السداد<b>{fmt(ps, s["paid"])}</b>{u} · '
+        f'{pct(s["paid_pct"])} من الصافي</div>'
+        f'<div>الباقي<b>{fmt(ps, s["remaining"])}</b>{u} · على '
+        f'{owing:,} عميلاً</div>')
+
+    if side == "over":
+        rows = cb.by_paid(rows, "gold")
+        head = ["العميل", "الجوال", "عدد الفواتير", "آخر بيع", "آخر سداد",
+                "منذ آخر سداد", "الباقي ذهباً", "تقدير الذهب",
+                "الباقي نقداً", "تقدير النقد"]
+        trs = []
+        for r in rows:
+            d = r["days_since_paid"]
+            owes = (r["gold"]["remaining"] > 0.0005
+                    or r["cash"]["remaining"] > 0.005)
+            late = ' class="late"' if owes and (d is None or d > 60) else ""
+            trs.append(
+                f'<tr class="crow" data-s="{srch(r)}">'
+                f'<td class="n">{_e(r["name"])}</td>'
+                f'<td>{_e(r.get("phone") or "—")}</td>'
+                f'<td>{r["n_sales"]:,}</td>'
+                f'<td>{_e(r["last_sale"] or "—")}</td>'
+                f'<td>{_e(r["last_paid"] or "—")}</td>'
+                f'<td{late}>{"—" if d is None else f"{d:,} يوماً"}</td>'
+                f'<td class="rem">{fmt("gold", r["gold"]["remaining"])}</td>'
+                f'<td>{grade(r["gold"]["grade"])}</td>'
+                f'<td class="rem">{fmt("cash", r["cash"]["remaining"])}</td>'
+                f'<td>{grade(r["cash"]["grade"])}</td></tr>')
+        foot = (
+            f'<tr class="tot"><td class="n">الإجمالي ({len(rows)})</td><td></td>'
+            f'<td>{sum(r["n_sales"] for r in rows):,}</td><td></td><td></td>'
+            '<td></td>'
+            f'<td>{fmt("gold", sum(r["gold"]["remaining"] for r in rows))}</td>'
+            '<td></td>'
+            f'<td>{fmt("cash", sum(r["cash"]["remaining"] for r in rows))}</td>'
+            '<td></td></tr>')
+    else:
+        rows = cb.by_paid(rows, side)
+        # «رصيد سابق» و«حركات أخرى» يُخفيان إن خلَوا — كالشاشة
+        show_open = any(abs(r[side]["open"]) > 0.0005 for r in rows)
+        show_other = any(abs(r[side]["other"]) > 0.0005 for r in rows)
+        cols = [("العميل", None), ("رصيد سابق", "open"),
+                ("المبيعات", "sales"), ("المرتجع", "returns"),
+                ("صافي المبيعات", "net"), ("السداد", "paid"),
+                ("حركات أخرى", "other"), ("الباقي", "remaining"),
+                ("نسبة المرتجع", "ret_pct"), ("نسبة السداد", "paid_pct"),
+                ("آخر سداد", "last"), ("التقدير", "grade")]
+        cols = [c for c in cols
+                if (c[1] != "open" or show_open)
+                and (c[1] != "other" or show_other)]
+        head = [c[0] for c in cols]
+
+        def cell(r, key, x):
+            if key is None:
+                return f'<td class="n">{_e(r["name"])}</td>'
+            if key in ("ret_pct", "paid_pct"):
+                warn = (key == "ret_pct" and x[key] is not None
+                        and x[key] >= 20)
+                return f'<td{" class=late" if warn else ""}>{pct(x[key])}</td>'
+            if key == "last":
+                return f'<td>{_e(r["last_paid"] or "—")}</td>'
+            if key == "grade":
+                return f'<td>{grade(x["grade"])}</td>'
+            if key == "remaining":
+                cr = " cr" if x[key] < -0.0005 else ""
+                return f'<td class="rem{cr}">{fmt(side, x[key])}</td>'
+            return f'<td>{fmt(side, x[key])}</td>'
+        trs = [f'<tr class="crow" data-s="{srch(r)}">'
+               + "".join(cell(r, k, r[side]) for _t, k in cols) + "</tr>"
+               for r in rows]
+        t2 = cb._side({k: sum(r[side][k] for r in rows) for k in cb.KINDS},
+                      side)
+
+        def tcell(key):
+            if key is None:
+                return f'<td class="n">الإجمالي ({len(rows)})</td>'
+            if key in ("ret_pct", "paid_pct"):
+                return f"<td>{pct(t2[key])}</td>"
+            if key in ("last", "grade"):
+                return "<td></td>"
+            return f"<td>{fmt(side, t2[key])}</td>"
+        foot = ('<tr class="tot">' + "".join(tcell(k) for _t, k in cols)
+                + "</tr>")
+    if not rows:
+        return ('<div class="empty">لا عملاء في هذه الفترة</div>', summary,
+                tools, seg)
+    body = ("<table><thead><tr>"
+            + "".join(f"<th>{_e(h)}</th>" for h in head)
+            + "</tr></thead><tbody>" + "".join(trs) + "</tbody><tfoot>"
+            + foot + "</tfoot></table>")
+    return body, summary, tools, seg
 
 
 def _guide(conn, base, view, sort, imgs, unit, sort_sel):

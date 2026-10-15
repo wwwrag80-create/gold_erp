@@ -8202,6 +8202,20 @@ def main():
     from services import browser_print as _bp103
     check("وورقة تحليل العميل عمودية لا أفقية",
           "portrait" in _bp103._page_setup("customer_analytics")["size"])
+    step("104) 4.73: رابط المدير — قسم «العملاء — المبيعات والسداد»")
+    from services import models_web as _mw104
+    with db(readonly=True) as conn:
+        _g104 = _mw104.page_html(conn, {"tab": "customers"}, "/m/t")
+        _c104 = _mw104.page_html(conn, {"tab": "customers", "side": "cash"},
+                                 "/m/t")
+        _o104 = _mw104.page_html(conn, {"tab": "customers", "side": "over"},
+                                 "/m/t")
+        _h104 = _mw104.page_html(conn, {}, "/m/t")
+    check("الرابط فيه قسمٌ مستقل للعملاء بأقسامه الثلاثة (ذهب · نقد · نظرة)",
+          "tab=customers" in _h104 and "عميل ١٠٣" in _g104
+          and "الباقي" in _g104 and "نسبة السداد" in _c104
+          and "منذ آخر سداد" in _o104 and 'class="cols"' not in _g104
+          and 'class="cols"' in _h104)
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",
