@@ -218,6 +218,9 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
              bool(inv["vat_applied"] if apply_vat is None else apply_vat),
              inv["description"] or "", **_invoice_source(conn, inv))
 
+    # الأطقم المحذوفة من الفاتورة: حالتها من سلسلة حركتها لا «قبلها» (4.75)
+    from models import wo_moves
+    wo_moves.resync(conn, old_ids, username)
     log_action(conn, username, "edit_items", "invoices", invoice_id,
                f"{inv['invoice_no']} → {res['invoice_no']}"
                f" | حُذف {len(removed)} | أُضيف {len(added)}"

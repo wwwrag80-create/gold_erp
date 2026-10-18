@@ -554,6 +554,7 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     _edoc = _fatoora.on_invoice_saved(conn, inv_id, username)
     if _edoc:
         qr_b64 = _edoc["qr"]
+    _resync_wos(conn, _invoice_wos(conn, inv_id), username)
     log_action(conn, username, "create", "invoices", inv_id,
               f"{inv_no} vat={int(apply_vat)}")
     return {"id": inv_id, "invoice_no": inv_no, "total_weight": total_w,
@@ -774,6 +775,18 @@ def create_direct_adjustment(conn, entity_id, amount, adj_date, username,
             "entry_id": entry_id}
 
 
+def _resync_wos(conn, wo_ids, username):
+    """حالة الأطقم من سلسلة حركتها المنظّمة (4.75) — لا من آخر معرّف."""
+    from models import wo_moves
+    return wo_moves.resync(conn, wo_ids, username)
+
+
+def _invoice_wos(conn, invoice_id):
+    return [r[0] for r in conn.execute(
+        "SELECT work_order_id FROM invoice_items WHERE invoice_id=?",
+        (invoice_id,))]
+
+
 def is_last_movement(conn, work_order_id, invoice_id):
     """هل هذه الفاتورة **آخر حركة زمنية** لهذا الطقم؟
 
@@ -788,25 +801,12 @@ def is_last_movement(conn, work_order_id, invoice_id):
         تاريخي بحت. حالة الطقم اليوم نتيجة **آخر** حركة لا هذه،
         فلمسها يفسد الواقع.
 
-    المقارنة بالتاريخ أولاً ثم بالمعرّف: فاتورتان بنفس اليوم
-    ترتيبهما بمعرّفهما، وهو ترتيب إصدارهما الفعلي.
+    الترتيب ترتيب السلسلة المنظّمة (`models.wo_moves`, 4.75): بالتاريخ،
+    وحركات اليوم الواحد بالتناوب بيع ← مرتجع — لا بمعرّف الفاتورة، فنقل
+    فاتورةٍ أو إعادة إنشائها لا يقلب ترتيب يومها.
     """
-    me = conn.execute(
-        "SELECT invoice_date, id FROM invoices WHERE id=?",
-        (invoice_id,)).fetchone()
-    if not me:
-        return True
-    later = conn.execute(
-        "SELECT 1 FROM invoice_items it"
-        " JOIN invoices i ON i.id=it.invoice_id"
-        " WHERE it.work_order_id=? AND i.is_deleted=0 AND i.id<>?"
-        "   AND i.kind IN ('sale','sale_return')"
-        "   AND (i.invoice_date > ? OR"
-        "        (i.invoice_date = ? AND i.id > ?))"
-        " LIMIT 1",
-        (work_order_id, invoice_id, me["invoice_date"],
-         me["invoice_date"], me["id"])).fetchone()
-    return later is None
+    from models import wo_moves
+    return wo_moves.is_last(conn, work_order_id, invoice_id)
 
 
 def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
@@ -864,6 +864,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     فعلاً فالأداة الصحيحة فاتورة جديدة أو تسوية وزن، لا تعديل مستند
     قديم.
     """
+    _wos_before = _invoice_wos(conn, invoice_id)
     inv = conn.execute(
         "SELECT * FROM invoices WHERE id=? AND is_deleted=0",
         (invoice_id,)).fetchone()
@@ -1172,6 +1173,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                        entry_id=inv["entry_id"], kind="inplace",
                        before_html=_before_html,
                        note=" · ".join(_notes))
+        _resync_wos(conn, _wos_before + _invoice_wos(conn, invoice_id),
+                    username)
         return {"id": invoice_id, "invoice_no": inv["invoice_no"],
                 "added": [], "updated": [], "removed": [],
                 "stock_touched": [], "moved_date": _moved,
@@ -1242,6 +1245,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                kind="inplace", before_html=_before_html,
                note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}"
                     + _mv)
+    _resync_wos(conn, _wos_before + _invoice_wos(conn, invoice_id),
+                username)
     return {"id": invoice_id, "invoice_no": inv["invoice_no"],
             "moved_date": _moved, "moved_source": _moved_src,
             "moved_customer": _moved_cust,

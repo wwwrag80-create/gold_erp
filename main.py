@@ -251,6 +251,13 @@ def prepare_steps():
             ensure_internal_counterparties(conn)
             ensure_employee_accrual_accounts(conn)
             ensure_system_tags(conn)
+            # حالة كل طقم من سلسلة حركته المنظّمة (4.75): ما أفسدته عملياتٌ
+            # سابقة (نقل فاتورة · حذف بيعٍ قديم) يُصحَّح ويُسجَّل في السجل
+            try:
+                from models import wo_moves
+                wo_moves.resync(conn, None, "system")
+            except Exception:
+                pass
             # بقايا طابور المزامنة من الإصدارات السابقة — لا شيء يُرفع
             try:
                 from services import sync_queue

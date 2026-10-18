@@ -94,6 +94,12 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                              " WHERE ref_table='invoices' AND ref_id=?",
                              (sid,))
                 _mark(conn, "invoices", sid, username)
+                # الحالة من سلسلة الحركة لا من نوع الفاتورة المحذوفة: حذف
+                # بيعٍ قديم لطقمٍ رُدّ ثم بِيع ثانيةً لا يعيده للخزنة (4.75)
+                from models import wo_moves
+                wo_moves.resync(conn, [r[0] for r in conn.execute(
+                    "SELECT work_order_id FROM invoice_items"
+                    " WHERE invoice_id=?", (sid,))], username)
         elif src == "tax_debit_notes":
             _mark(conn, "tax_debit_notes", sid, username)
         elif src == "tax_sales":

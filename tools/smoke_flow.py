@@ -8223,6 +8223,62 @@ def main():
           "أعمار الديون" in _g104 and "عدد الجهات المدينة" in _a104
           and "ذهب أكثر من 90" in _a104 and "أجور أقل من 30" in _a104
           and "له علينا" in _a104)
+    step("105) 4.75: حركة الطقم المنظّمة — بيع ← مرتجع ← بيع")
+    from models import operations as _op105, wo_moves as _wm105
+    from models import inventory as _in105
+    from services.audit import reverse_entry as _rev105
+    with db() as conn:
+        _a105 = _en103.add_entity(conn, "مندوب ١٠٥ أ", "customer",
+                                  username="admin")
+        _b105 = _en103.add_entity(conn, "مندوب ١٠٥ ب", "customer",
+                                  username="admin")
+        _c105 = _en103.add_entity(conn, "مندوب ١٠٥ ج", "customer",
+                                  username="admin")
+        _b103(conn, [{"wo_no": f"M105-{i}", "gold": 20.0,
+                      "wage_per_gram": 5, "model_no": "105"}
+                     for i in (1, 2)], "2026-10-01", "admin")
+        _w105 = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'M105-%'")}
+        # بيع 10/10 · مرتجع 10/11 · بيع 10/11 لغيره · ثم نقل المرتجع لجهة ثالثة
+        _iv103.create_sale(conn, _a105, [{"work_order_id": _w105["M105-1"]}],
+                           "2026-10-10", "admin", apply_vat=False)
+        _r105 = _iv103.create_sale_return(
+            conn, _a105, [{"work_order_id": _w105["M105-1"]}], "2026-10-11",
+            "admin", apply_vat=False)
+        _iv103.create_sale(conn, _b105, [{"work_order_id": _w105["M105-1"]}],
+                           "2026-10-11", "admin", apply_vat=False)
+        _op105.transfer_invoice(conn, _r105["id"], _c105, "admin")
+        _st1 = conn.execute("SELECT status FROM work_orders WHERE id=?",
+                            (_w105["M105-1"],)).fetchone()[0]
+        _h105 = [r["kind"] for r in _in105.item_history(
+            conn, "M105-1")[1] if r["kind"] != "توريد"]
+        # حذف بيعٍ قديم لطقمٍ رُدّ ثم بِيع ثانيةً
+        _s105 = _iv103.create_sale(
+            conn, _a105, [{"work_order_id": _w105["M105-2"]}], "2026-10-10",
+            "admin", apply_vat=False)
+        _iv103.create_sale_return(
+            conn, _a105, [{"work_order_id": _w105["M105-2"]}], "2026-10-11",
+            "admin", apply_vat=False)
+        _iv103.create_sale(conn, _b105, [{"work_order_id": _w105["M105-2"]}],
+                           "2026-10-12", "admin", apply_vat=False)
+        _rev105(conn, _s105["entry_id"], "admin")
+        _st2 = conn.execute("SELECT status FROM work_orders WHERE id=?",
+                            (_w105["M105-2"],)).fetchone()[0]
+        conn.execute("UPDATE work_orders SET status='in_stock' WHERE id=?",
+                     (_w105["M105-1"],))
+        _fx105 = _wm105.resync(conn, None, "admin")
+        _st3 = conn.execute("SELECT status FROM work_orders WHERE id=?",
+                            (_w105["M105-1"],)).fetchone()[0]
+    check("نقل مرتجعٍ لجهة أخرى لا يُدخل الطقم الخزنة وهو عند المندوب، "
+          "وحركته بيع ← مرتجع ← بيع",
+          _st1 == "sold" and _h105 == ["مبيعات", "مرتجع", "مبيعات"],
+          f"{_st1} {_h105}")
+    check("حذف بيعٍ قديم لا يُعيد طقماً مباعاً اليوم إلى الخزنة",
+          _st2 == "sold", _st2)
+    check("فحص الإقلاع يصحّح الحالة الفاسدة من تسلسل الحركة",
+          _st3 == "sold" and any(f[0] == "M105-1" for f in _fx105),
+          str(_fx105))
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

@@ -881,14 +881,25 @@ def item_history(conn, wo_no):
         "gold": wo["gold_weight"], "small": wo["small_stones"],
         "big": wo["big_stones"], "reg": wo["registered_weight"],
         "type": wo["item_type"] or "—"})
-    # المبيعات والمرتجعات من بنود الفواتير
-    for it in conn.execute(
-            "SELECT i.kind, i.invoice_no, i.invoice_date, it.registered_weight rw,"
+    # المبيعات والمرتجعات من بنود الفواتير — بترتيب السلسلة المنظّمة
+    # (4.75): حركات اليوم الواحد بالتناوب بيع ← مرتجع، لا بمعرّف الفاتورة
+    from models import wo_moves
+    _its = conn.execute(
+            "SELECT i.id, i.kind, i.invoice_no, i.invoice_date,"
+            " it.registered_weight rw,"
             " e.name party FROM invoice_items it"
             " JOIN invoices i ON i.id=it.invoice_id"
             " LEFT JOIN entities e ON e.id=i.customer_id"
             " WHERE it.work_order_id=? AND i.is_deleted=0"
-            " ORDER BY i.invoice_date, i.id", (wo["id"],)).fetchall():
+            " ORDER BY i.invoice_date, i.id", (wo["id"],)).fetchall()
+    if not wo["is_bulk"]:
+        _rank = {m["id"]: n for n, m in enumerate(wo_moves.order(
+            [{"id": r["id"], "kind": r["kind"], "date": r["invoice_date"]}
+             for r in _its if r["kind"] in ("sale", "sale_return")]))}
+        _its = sorted(_its, key=lambda r: (r["invoice_date"] or "",
+                                           _rank.get(r["id"], 10 ** 9),
+                                           r["id"]))
+    for it in _its:
         rows.append({
             "kind": "مبيعات" if it["kind"] == "sale" else "مرتجع",
             "date": it["invoice_date"], "party": it["party"] or "—",
