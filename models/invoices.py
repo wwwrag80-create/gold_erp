@@ -88,15 +88,13 @@ def _where_is(conn, work_order_id):
     الفاتورة، أو يرتجعه، أو يترك الأمر.
     """
     try:
-        r = conn.execute(
+        from models import wo_moves
+        last = wo_moves.last_move(conn, work_order_id)
+        r = last and conn.execute(
             "SELECT i.invoice_no, i.invoice_date, i.kind,"
             "       COALESCE(e.name,'—') party"
-            "  FROM invoice_items it"
-            "  JOIN invoices i ON i.id=it.invoice_id"
-            "  LEFT JOIN entities e ON e.id=i.customer_id"
-            " WHERE it.work_order_id=? AND i.is_deleted=0"
-            " ORDER BY i.invoice_date DESC, i.id DESC LIMIT 1",
-            (work_order_id,)).fetchone()
+            "  FROM invoices i LEFT JOIN entities e ON e.id=i.customer_id"
+            " WHERE i.id=?", (last["id"],)).fetchone()
     except Exception:
         return ""
     if not r:
@@ -107,7 +105,7 @@ def _where_is(conn, work_order_id):
             f"\nاحذفه من تلك الفاتورة أو ارتجعه أولاً.")
 
 
-def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
+def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
     """يحلّ كل سطر من السلة إلى (صف الطقم، الوزن المطبَّق، أجر الجرام).
     cart: [{"work_order_id", "weight": None أو رقم للتجميعي (00010 · 0010),
             "wage_override": None أو رقم}]"""
@@ -147,8 +145,12 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None):
             # `skip_ids`: أطقم هذه الفاتورة نفسها عند تعديلها.
             # حالتها الحالية أثر **هذه** الفاتورة، فاشتراط الحالة
             # السابقة عليها يمنع تعديل الفاتورة التي غيّرتها أصلاً.
+            # الحكم بسلسلة الحركة لا بالحالة المخزّنة (4.75): حالةٌ قديمة
+            # بقيت بعد حذف فاتورة لا تمنع بيع ما تقول حركته إنه بالخزنة،
+            # وبيعٌ بتاريخٍ قديم قبل مرتجعٍ لاحق يُرفض كبيع ما هو خارج
+            from models import wo_moves as _wm
             if wo["id"] not in (skip_ids or ()) \
-                    and wo["status"] != need_status:
+                    and not _wm.can_add(conn, wo, kind, invoice_date):
                 need = "بالمخزون" if need_status == "in_stock" else "مباعاً"
                 # الرفض وحده لا يكفي: «ليس بالمخزون» تترك المستخدم
                 # يبحث. فيُدلّ على **أين ذهب** ليقرّر — يحذفه من تلك
@@ -447,7 +449,8 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
         raise ValueError("اختر الطرف المقابل")
     if not cart:
         raise ValueError("أضف طقماً واحداً على الأقل")
-    lines_info = _fetch_cart_lines(conn, cart, kind)
+    lines_info = _fetch_cart_lines(conn, cart, kind,
+                                   invoice_date=invoice_date)
     internal = ent["entity_type"] == "internal"
     if internal:
         apply_vat = False
@@ -781,6 +784,31 @@ def _resync_wos(conn, wo_ids, username):
     return wo_moves.resync(conn, wo_ids, username)
 
 
+def _chain_guard(conn, invoice_id, wo_before, bad_before):
+    """تعديل الفاتورة (تاريخها أو بنودها) لا يكسر تناوب حركة أطقمها.
+
+    نقل فاتورة بيعٍ إلى ما قبل مرتجعٍ سابق لها، أو إلى ما بعد بيعٍ
+    لاحق، يجعل الطقم يخرج مرتين — فيُرفض بما يدلّ على الحركة المعارضة.
+    ما كان مكسوراً قبل التعديل (بيانات قديمة) لا يمنع تعديلاً لا يزيده.
+    """
+    from models import wo_moves
+    ids = set(wo_before) | set(_invoice_wos(conn, invoice_id))
+    now = wo_moves.bad_ids(conn, ids)
+    if int(invoice_id) in now and int(invoice_id) not in bad_before:
+        names = []
+        for wid, no in conn.execute(
+                "SELECT w.id, w.work_order_no FROM invoice_items it"
+                " JOIN work_orders w ON w.id=it.work_order_id"
+                " WHERE it.invoice_id=? AND COALESCE(w.is_bulk,0)=0",
+                (invoice_id,)):
+            if int(invoice_id) in wo_moves.bad_ids(conn, [wid]):
+                names.append(no)
+        raise ValueError(
+            "هذا التعديل يجعل حركة الطقم غير منتظمة (بيعان أو مرتجعان "
+            "متتاليان): " + "، ".join(names or ["—"])
+            + "\nراجع تاريخ الفاتورة أو حركات الطقم في «حركة الطقم».")
+
+
 def _invoice_wos(conn, invoice_id):
     return [r[0] for r in conn.execute(
         "SELECT work_order_id FROM invoice_items WHERE invoice_id=?",
@@ -865,6 +893,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     قديم.
     """
     _wos_before = _invoice_wos(conn, invoice_id)
+    from models import wo_moves as _wm
+    _bad_before = _wm.bad_ids(conn, _wos_before)
     inv = conn.execute(
         "SELECT * FROM invoices WHERE id=? AND is_deleted=0",
         (invoice_id,)).fetchone()
@@ -1018,7 +1048,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     # الآن يُفحص المُضاف كما يُفحص في فاتورةٍ جديدة تماماً.
     new_lines = _fetch_cart_lines(
         conn, cart, kind,
-        skip_ids={r["work_order_id"] for r in old})
+        skip_ids={r["work_order_id"] for r in old},
+        invoice_date=(invoice_date or inv["invoice_date"]))
     # حالة الطقم بعد هذه الفاتورة وقبلها
     out_status = "sold" if kind == "sale" else "in_stock"
     back_status = "in_stock" if kind == "sale" else "sold"
@@ -1173,6 +1204,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                        entry_id=inv["entry_id"], kind="inplace",
                        before_html=_before_html,
                        note=" · ".join(_notes))
+        _chain_guard(conn, invoice_id, _wos_before, _bad_before)
         _resync_wos(conn, _wos_before + _invoice_wos(conn, invoice_id),
                     username)
         return {"id": invoice_id, "invoice_no": inv["invoice_no"],
@@ -1245,6 +1277,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                kind="inplace", before_html=_before_html,
                note=f"+{len(added)} · ~{len(updated)} · -{len(removed)}"
                     + _mv)
+    _chain_guard(conn, invoice_id, _wos_before, _bad_before)
     _resync_wos(conn, _wos_before + _invoice_wos(conn, invoice_id),
                 username)
     return {"id": invoice_id, "invoice_no": inv["invoice_no"],

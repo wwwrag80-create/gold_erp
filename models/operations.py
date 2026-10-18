@@ -439,39 +439,8 @@ def edit_supply(conn, wo_id, gold, small_stones, big_stones, username,
     فتعديله يُعكس القيد القديم كاملاً ويُرحَّل الجديد داخل معاملة واحدة
     — فلا يختلّ ميزان الذهب بين الخزنتين إطلاقاً.
     """
+    # في مكانه داخل دفعته (4.75): لا يُحذف إخوته ولا تنقطع فواتيره عنه
     from models import inventory
-    wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
-                      (wo_id,)).fetchone()
-    if not wo:
-        raise ValueError("الطقم غير موجود")
-    if wo["status"] != "in_stock":
-        raise ValueError(
-            f"الطقم {wo['work_order_no']} مباع حالياً — "
-            f"أعد فاتورته أولاً ثم عدّل التوريد")
-
-    _void(conn, wo["entry_id"], username,
-          f"تعديل توريد رقم التشغيل {wo['work_order_no']}")
-    conn.execute("UPDATE work_orders SET is_deleted=1 WHERE id=?", (wo_id,))
-
-    created = inventory.create_work_orders_batch(
-        conn, [{"wo_no": wo["work_order_no"], "gold": gold,
-                "small_stones": small_stones, "big_stones": big_stones,
-                "discount_rate": wo["discount_rate"],
-                "wage_per_gram": (wage_per_gram
-                                  if wage_per_gram is not None
-                                  else wo["wage_per_gram"]),
-                "notes": notes or (wo["notes"] or "")}],
-        (conn.execute("SELECT entry_date d FROM journal_entries WHERE id=?",
-                      (wo["entry_id"],)).fetchone() or {"d": None})["d"]
-        or wo["created_at"][:10],
-        username)
-
-    log_action(conn, username, "edit_supply", "work_orders", wo_id,
-               f"{wo['work_order_no']}: مقيد {wo['registered_weight']:.2f}"
-               f" → {created['total_registered']:.2f}"
-               + (f" | {notes}" if notes else ""))
-    item = (created.get("items") or [{}])[0]
-    return {"wo_no": wo["work_order_no"],
-            "old_reg": round(wo["registered_weight"], 2),
-            "new_reg": round(created["total_registered"], 2),
-            "new_id": item.get("id")}
+    return inventory.edit_supply_item(
+        conn, wo_id, gold, small_stones, big_stones, username,
+        wage_per_gram=wage_per_gram, notes=notes)

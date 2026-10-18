@@ -8279,6 +8279,56 @@ def main():
     check("فحص الإقلاع يصحّح الحالة الفاسدة من تسلسل الحركة",
           _st3 == "sold" and any(f[0] == "M105-1" for f in _fx105),
           str(_fx105))
+    step("106) 4.76: الحذف والتحويل يحفظان انتظام الحركة")
+    from services.audit import soft_delete_entry as _sd106
+    with db() as conn:
+        _b103(conn, [{"wo_no": f"N106-{i}", "gold": 15.0,
+                      "wage_per_gram": 5, "model_no": "106"}
+                     for i in (1, 2, 3)], "2026-10-02", "admin")
+        _w106 = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'N106-%' AND is_deleted=0")}
+        _s106 = _iv103.create_sale(
+            conn, _a105, [{"work_order_id": _w106["N106-1"]}], "2026-10-10",
+            "admin", apply_vat=False)
+    _sd106(_s106["entry_id"], "admin")
+    with db() as conn:
+        _iv103.create_sale(conn, _b105, [{"work_order_id": _w106["N106-1"]}],
+                           "2026-10-11", "admin", apply_vat=False)
+        _iv103.create_sale(conn, _a105, [{"work_order_id": _w106["N106-2"]}],
+                           "2026-10-10", "admin", apply_vat=False)
+        _r106 = _iv103.create_sale_return(
+            conn, _a105, [{"work_order_id": _w106["N106-2"]}], "2026-10-12",
+            "admin", apply_vat=False)
+        try:
+            _iv103.create_sale(conn, _b105,
+                               [{"work_order_id": _w106["N106-2"]}],
+                               "2026-10-11", "admin", apply_vat=False)
+            _back106 = False
+        except ValueError:
+            _back106 = True
+    try:
+        with db() as conn:
+            _op105.flip_invoice_kind(conn, _r106["id"], "admin")
+        _flip106 = False
+    except ValueError:
+        _flip106 = True
+    with db() as conn:
+        _in105.delete_supply_item(conn, _w106["N106-3"], "admin")
+        _live106 = conn.execute(
+            "SELECT COUNT(*) FROM work_orders WHERE is_deleted=0"
+            " AND work_order_no LIKE 'N106-%'").fetchone()[0]
+        try:
+            _in105.delete_supply_item(conn, _w106["N106-2"], "admin")
+            _guard106 = False
+        except ValueError:
+            _guard106 = True
+    check("حذف فاتورة البيع من الكشف ثم بيع الطقم من جديد يُقبل", True)
+    check("بيعٌ بتاريخٍ يسبق مرتجعاً لاحقاً يُرفض، وتحويل مرتجعٍ إلى بيعٍ"
+          " يُخرج الطقم مرتين يُرفض", _back106 and _flip106,
+          f"{_back106} {_flip106}")
+    check("حذف توريد طقمٍ واحد لا يحذف إخوته في دفعته، وتوريد ما تحرّك لا"
+          " يُحذف", _live106 == 2 and _guard106, f"{_live106} {_guard106}")
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

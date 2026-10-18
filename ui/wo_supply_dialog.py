@@ -155,19 +155,13 @@ class SupplyEditDialog(QtWidgets.QDialog):
                        f"وتُخصم من الذهب المشغول.\n\n"
                        f"لا يمكن التراجع."):
                 return
-            from services.audit import reverse_entry
-            from services.audit import log_action
+            # الطقم وحده — لا قيد دفعته كلها: كان حذف القيد المشترك يحذف
+            # إخوته في الدفعة معه (4.75)
+            from models import inventory
             with db() as conn:
-                if self.wo.get("entry_id"):
-                    reverse_entry(conn, self.wo["entry_id"],
-                                  self.user["username"])
-                conn.execute("UPDATE work_orders SET is_deleted=1"
-                             " WHERE id=?", (self.wo_id,))
-                log_action(conn, self.user["username"], "soft_delete",
-                           "work_orders", self.wo_id,
-                           f"حذف توريد {self.wo['work_order_no']}"
-                           + (f" | {self.notes.text().strip()}"
-                              if self.notes.text().strip() else ""))
+                inventory.delete_supply_item(
+                    conn, self.wo_id, self.user["username"],
+                    self.notes.text().strip())
             info(self, "حُذفت العملية وعُكس أثرها على الخزنتين.")
             self.accept()
         except Exception as e:

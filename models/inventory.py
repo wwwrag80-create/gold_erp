@@ -895,7 +895,8 @@ def item_history(conn, wo_no):
     if not wo["is_bulk"]:
         _rank = {m["id"]: n for n, m in enumerate(wo_moves.order(
             [{"id": r["id"], "kind": r["kind"], "date": r["invoice_date"]}
-             for r in _its if r["kind"] in ("sale", "sale_return")]))}
+             for r in _its if r["kind"] in ("sale", "sale_return")],
+            wo_moves.birth(wo)))}
         _its = sorted(_its, key=lambda r: (r["invoice_date"] or "",
                                            _rank.get(r["id"], 10 ** 9),
                                            r["id"]))
@@ -1127,6 +1128,9 @@ def adjust_or_delete_wo(conn, wo_id, username, new_gold=None,
     wo_no = wo["work_order_no"]
 
     if delete:
+        # حذف طقمٍ تحرّك يترك فواتيره بلا أصل (4.75)
+        from models import wo_moves
+        wo_moves.assert_deletable(conn, [wo_id])
         diff = -old_reg
         label = f"حذف رقم التشغيل {wo_no}"
     else:
@@ -1284,6 +1288,111 @@ def batch_reference(conn, entry_id):
     r = conn.execute("SELECT doc_no FROM journal_entries WHERE id=?",
                      (entry_id,)).fetchone()
     return (r["doc_no"] or "").strip() if r else ""
+
+
+def _batch_rows(conn, entry_id):
+    """سطور الدفعة كما يقبلها `update_supply_batch` — لتعديل طقمٍ واحد
+    منها أو حذفه دون المساس بإخوته في الدفعة نفسها (4.75)."""
+    lines = conn.execute(
+        "SELECT l.*, w.work_order_no wno FROM wo_batch_lines l"
+        " JOIN work_orders w ON w.id=l.work_order_id AND w.is_deleted=0"
+        " WHERE l.entry_id=? ORDER BY l.seq, l.id", (entry_id,)).fetchall()
+    if lines:
+        keys = lines[0].keys()
+        return [{"wo_no": l["wno"], "gold": l["gold"],
+                 "small_stones": l["small_stones"],
+                 "big_stones": l["big_stones"],
+                 "discount_rate": l["discount_rate"],
+                 "wage_per_gram": l["wage_per_gram"],
+                 "notes": l["notes"] or "", "model_no": l["model_no"],
+                 "karat": l["karat"] if "karat" in keys else 0}
+                for l in lines]
+    return [{"wo_no": w["work_order_no"], "gold": w["gold_weight"],
+             "small_stones": w["small_stones"],
+             "big_stones": w["big_stones"],
+             "discount_rate": w["discount_rate"],
+             "wage_per_gram": w["wage_per_gram"], "notes": w["notes"] or "",
+             "model_no": w["model_no"], "karat": 0}
+            for w in conn.execute(
+                "SELECT * FROM work_orders WHERE entry_id=? AND is_deleted=0"
+                " ORDER BY id", (entry_id,))]
+
+
+def edit_supply_item(conn, wo_id, gold, small_stones, big_stones, username,
+                     wage_per_gram=None, notes=None):
+    """يعدّل توريد طقمٍ واحد **في مكانه** داخل دفعته (4.75).
+
+    كان التعديل يعكس قيد الدفعة كلها ويُعيد إنشاء الطقم برقمٍ داخلي
+    جديد: فيُحذف إخوته في الدفعة معه، وتنقطع فواتيره القديمة عنه فتبقى
+    «حركته» معلّقةً بلا أصل. الآن يُعدَّل سطره وحده والقيد بالفرق.
+    """
+    wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
+                      (wo_id,)).fetchone()
+    if not wo:
+        raise ValueError("الطقم غير موجود")
+    if wo["status"] != "in_stock":
+        raise ValueError(f"الطقم {wo['work_order_no']} مباع حالياً — "
+                         f"أعد فاتورته أولاً ثم عدّل التوريد")
+    if not wo["entry_id"]:
+        raise ValueError("لا قيد توريد لهذا الطقم — عدّله بتسوية الوزن")
+    rows = _batch_rows(conn, wo["entry_id"])
+    for r in rows:
+        if r["wo_no"] == wo["work_order_no"]:
+            r.update({"gold": gold, "small_stones": small_stones,
+                      "big_stones": big_stones})
+            if wage_per_gram is not None:
+                r["wage_per_gram"] = wage_per_gram
+            if notes:
+                r["notes"] = notes
+    d = conn.execute("SELECT entry_date FROM journal_entries WHERE id=?",
+                     (wo["entry_id"],)).fetchone()
+    update_supply_batch(conn, wo["entry_id"], rows,
+                        d["entry_date"] if d else None, username)
+    new = conn.execute("SELECT registered_weight FROM work_orders"
+                       " WHERE id=?", (wo_id,)).fetchone()
+    return {"wo_no": wo["work_order_no"],
+            "old_reg": round(wo["registered_weight"] or 0, 2),
+            "new_reg": round(new["registered_weight"] or 0, 2),
+            "new_id": wo_id}
+
+
+def delete_supply_item(conn, wo_id, username, notes=""):
+    """يحذف توريد طقمٍ واحد **كأنه لم يدخل** (4.75).
+
+    · له بيعٌ أو مرتجع ← يُرفض بأرقام فواتيره: تُحذف هي أولاً.
+    · وحده في دفعته ← يُحذف قيد التوريد كله.
+    · معه أطقم أخرى ← يُخرج سطره وحده من الدفعة ويُعدَّل قيدها بالفرق،
+      فلا يُحذف إخوته معه (كان حذف القيد المشترك يحذفهم جميعاً).
+    """
+    from models import wo_moves
+    from services.audit import log_action, reverse_entry
+    wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
+                      (wo_id,)).fetchone()
+    if not wo:
+        raise ValueError("الطقم غير موجود أو محذوف مسبقاً")
+    if wo["status"] != "in_stock":
+        raise ValueError("الطقم مباع — أعد فاتورته أولاً")
+    wo_moves.assert_deletable(conn, [wo_id])
+    others = 0
+    if wo["entry_id"]:
+        others = conn.execute(
+            "SELECT COUNT(*) FROM work_orders WHERE entry_id=?"
+            " AND is_deleted=0 AND id<>?",
+            (wo["entry_id"], wo_id)).fetchone()[0]
+    if wo["entry_id"] and others:
+        rows = [r for r in _batch_rows(conn, wo["entry_id"])
+                if r["wo_no"] != wo["work_order_no"]]
+        d = conn.execute("SELECT entry_date FROM journal_entries WHERE id=?",
+                         (wo["entry_id"],)).fetchone()
+        update_supply_batch(conn, wo["entry_id"], rows,
+                            d["entry_date"] if d else None, username)
+    elif wo["entry_id"]:
+        reverse_entry(conn, wo["entry_id"], username)
+    conn.execute("UPDATE work_orders SET is_deleted=1 WHERE id=?", (wo_id,))
+    log_action(conn, username, "soft_delete", "work_orders", wo_id,
+               f"حذف توريد {wo['work_order_no']}"
+               + (f" | {notes}" if notes else ""))
+    return {"wo_no": wo["work_order_no"], "batch_kept": others}
 
 
 def update_supply_batch(conn, entry_id, rows, entry_date, username,
@@ -1455,8 +1564,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
         if no in seen:
             continue
         wo, ln = cur["wo"], cur["line"]
-        if wo["status"] == "sold":
-            # المباع لا يُحذف: فاتورته قائمة عليه
+        from models import wo_moves as _wm
+        if wo["status"] == "sold" or _wm.with_moves(conn, [wo["id"]]):
+            # المباع — أو ما بِيع ثم رُدّ — لا يُحذف: فواتيره قائمة عليه
             kept_sold.append(no)
             continue
         old_reg = float(ln["registered_weight"] or 0)

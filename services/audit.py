@@ -62,6 +62,9 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                 raise ValueError(
                     "لا يمكن حذف قيد الإنتاج — الأطقم التالية تم بيعها أو "
                     f"تحويلها: {names} — احذف الفاتورة المرتبطة أولاً")
+            # ولا ما بِيع ثم رُدّ: فواتيره قائمة عليه (4.75)
+            from models import wo_moves
+            wo_moves.assert_deletable(conn, [w["id"] for w in wos])
             for w in wos:
                 _mark(conn, "work_orders", w["id"], username)
             # دفعةٌ ورَدت إلى صندوق الكسر: حذفها يُخرج وزنها من عياره،
