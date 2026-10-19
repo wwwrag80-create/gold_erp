@@ -5,6 +5,9 @@
 الوارد والصادر بالوزن الفعلي، والرصيد المتراكم بعياره وبمكافئه —
 بتاريخ كل حركة ورقم سندها والجهة المقابلة. والنقر المزدوج على سطرٍ
 يفتح السند نفسه. (كشف الحساب 1310 يخلط الأعيرة لأنها حسابٌ واحد.)
+
+4.79: بحثٌ في الكشف (خانةٌ فوقه و Ctrl+F) يُبقي الأسطر المطابقة، و«معاينة»
+و«طباعة» تُخرجان ما يظهر — نتيجة البحث وحدها إن كان بحث، وإلا الكشف كله.
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -43,20 +46,42 @@ class ScrapKaratDialog(QtWidgets.QDialog):
         self.summary.setObjectName("big")
         self.summary.setWordWrap(True)
 
+        # ── البحث: خانةٌ ظاهرة، و Ctrl+F يضع المؤشر فيها ──
+        self.search = kit.LineEdit()
+        self.search.setPlaceholderText(
+            "🔍 ابحث في الكشف: رقم سند · جهة · بيان · وزن…  (Ctrl+F)")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self.apply_search)
+        self.found = QtWidgets.QLabel("")
+        srow = QtWidgets.QHBoxLayout()
+        srow.addWidget(self.search, 1)
+        srow.addWidget(self.found)
+        sc = QtWidgets.QShortcut(QtGui.QKeySequence.Find, self)
+        sc.activated.connect(self.focus_search)
+        self._find_sc = sc
+
         b_open = kit.PushButton("👁 فتح السند المحدد")
         b_open.setObjectName("homeBtn")
         b_open.clicked.connect(self.open_selected)
+        b_prev = kit.PushButton("🖨 معاينة")
+        b_prev.setToolTip("معاينة الكشف — نتيجة البحث وحدها إن كان بحث")
+        b_prev.clicked.connect(self.preview)
+        b_print = kit.PushButton("طباعة")
+        b_print.clicked.connect(self.print_now)
         b_close = kit.PushButton("إغلاق")
         b_close.setObjectName("ghost")
         b_close.clicked.connect(self.reject)
         btns = QtWidgets.QHBoxLayout()
         btns.addWidget(b_open)
+        btns.addWidget(b_prev)
+        btns.addWidget(b_print)
         btns.addStretch(1)
         btns.addWidget(b_close)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label(f"صندوق الكسر — عيار {self.karat}"))
         lay.addWidget(sub)
+        lay.addLayout(srow)
         lay.addWidget(self.table, 1)
         lay.addWidget(self.summary)
         lay.addLayout(btns)
@@ -104,12 +129,64 @@ class ScrapKaratDialog(QtWidgets.QDialog):
             fit_columns(t, [w for _c, w in cols])
         except Exception:
             pass
+        self.apply_search()
         n = sum(1 for r in self.rows if r["op"] != "رصيد سابق")
         self.summary.setText(
             f"عدد الحركات: {n}\n"
             f"عيار {k}: أول الفترة {st['opening']:,.3f} · وارد"
             f" {st['total_in']:,.3f} · صادر {st['total_out']:,.3f} ·"
             f" الرصيد {st['closing']:,.3f} جم")
+
+    # ══ البحث ══
+    def focus_search(self):
+        self.search.setFocus()
+        self.search.selectAll()
+
+    def _query(self):
+        from ui.widgets.table_search import _norm
+        return _norm(self.search.text()).strip()
+
+    def apply_search(self, *_):
+        """يُبقي الأسطر التي تحوي ما كُتب (بتجاهل الهمزات والأرقام العربية)."""
+        from ui.widgets.table_search import _norm
+        q = self._query()
+        t = self.table
+        shown = 0
+        for i in range(t.rowCount()):
+            hit = not q or any(
+                q in _norm(t.item(i, c).text())
+                for c in range(t.columnCount()) if t.item(i, c) is not None)
+            t.setRowHidden(i, not hit)
+            shown += int(hit)
+        self.found.setText(f"{shown:,} من {t.rowCount():,}" if q else "")
+
+    def visible_rows(self):
+        """أرقام الأسطر الظاهرة — None إن لم يكن بحث (الكشف كله)."""
+        if not self._query():
+            return None
+        return [i for i in range(self.table.rowCount())
+                if not self.table.isRowHidden(i)]
+
+    def _print_kw(self):
+        return {"date_from": self.date_from, "date_to": self.date_to,
+                "only": self.visible_rows(),
+                "query": self.search.text().strip()}
+
+    def preview(self):
+        try:
+            from services import print_manager
+            print_manager.preview_document(self, "scrap_karat", self.karat,
+                                           **self._print_kw())
+        except Exception as e:
+            err(self, e)
+
+    def print_now(self):
+        try:
+            from services import print_manager
+            print_manager.print_document(self, "scrap_karat", self.karat,
+                                         **self._print_kw())
+        except Exception as e:
+            err(self, e)
 
     def open_selected(self):
         try:

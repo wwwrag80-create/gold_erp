@@ -1042,14 +1042,15 @@ def main():
         check("لكل بند مفتاح ثابت",
               all(it.data(0, _KEY) for it, _p in w1._iter_nav()))
 
-        # ══ الترتيب المعتمد: خمس عشرة شاشة يومية ثم مجموعة واحدة ══
+        # ══ الترتيب المعتمد: ست عشرة شاشة يومية ثم مجموعة واحدة ══
+        # (4.79: «مجموعات العملاء» بعد «العملاء — المبيعات والسداد»)
         from ui.main_window import NAV_VERSION as _NAVV
         top = [w1.sidebar.topLevelItem(i).text(0)
                for i in range(w1.sidebar.topLevelItemCount())]
         want = ["لوحة التحكم", "دليل الموديلات", "حركة الطقم",
                 "كشف حساب", "الوارد من التصنيع", "مبيعات/مرتجعات",
                 "المبيعات الضريبية", "سندات قبض/صرف", "العملاء — المبيعات والسداد",
-                "التسكيرات", "المشتريات",
+                "مجموعات العملاء", "التسكيرات", "المشتريات",
                 "القيود اليومية", "تقارير مبيعات وإنتاج المصنع",
                 "التحليل والدراسات", "الإدارة والتقارير"]
         check("ترتيب القائمة هو المعتمد حرفياً",
@@ -1059,7 +1060,7 @@ def main():
                     if w1.sidebar.topLevelItem(i).text(0)
                     == "الإدارة والتقارير"), None)
         check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
-              grp is not None and grp.childCount() == len(base) - 14,
+              grp is not None and grp.childCount() == len(base) - 15,
               f"{grp.childCount() if grp else 0} بنداً")
         check("لا شاشة خارج الترتيب المعتمد",
               len(top) == len(want), str(top[len(want):]))
@@ -6299,9 +6300,12 @@ def main():
         _is73 = _bp73.build_page("income_statement", 0, auto_print=False,
                                  date_from="2026-01-01",
                                  date_to="2026-12-31", compare=True)
+        # 4.79: قائمة الدخل ببيانات منشأةٍ في سطرٍ صغير لا جدول — والجدول
+        # يبقى في المركز المالي
+        _fp73 = _bp73.build_page("financial_position", 0, auto_print=False)
         check("قوالب القوائم: بيانات المنشأة زوجان في السطر بعرضٍ ثابت"
               " · المعاينة بعرض الورقة · تصغير الجدول الأعرض من الصفحة",
-              'class="items meta"' in _is73 and "table.meta" in _is73
+              'class="items meta"' in _fp73 and "table.meta" in _is73
               and "194mm" in _is73 and "beforeprint" in _is73
               and "t.style.zoom" in _is73)
         _c72 = _C72({"id": 1, "username": "admin"})
@@ -8476,6 +8480,56 @@ def main():
               and not str(x["account"]).startswith("5805")
               for x in _gx108["rows"] if x["eid"]),
           str([x["account"] for x in _gx108["rows"]][:6]))
+
+    # ══ 109) 4.79: مجموعات العملاء · قوالب القوائم · كشف الكسر · سرعة الفتح ══
+    from models import party_groups as _pg109
+    with db() as conn:
+        _A109 = add_entity(conn, "عميل مجموعة 109", "customer",
+                           username="admin")
+        _tb109 = lambda: {r[0]: (round(r[1], 3), round(r[2], 2))
+                          for r in conn.execute(
+            "SELECT l.account_id, SUM(l.gold_debit-l.gold_credit),"
+            " SUM(l.cash_debit-l.cash_credit) FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id WHERE e.is_deleted=0"
+            " GROUP BY l.account_id")}
+        _G109 = _pg109.create_group(conn, "عملاء الرميزان 109", "admin")
+        _C109 = add_entity(conn, "عميل داخل المجموعة 109", "customer",
+                           username="admin", group_id=_G109, open_cash=75.0)
+        _b109 = _tb109()
+        _pg109.assign(conn, [_A109], _G109, "admin")
+        _m109 = {m["entity_id"]: m for m in _pg109.members(conn, _G109)}
+        _g109 = {g["id"]: g for g in _pg109.groups(conn)}[_G109]
+        _a109 = {k: v for k, v in _tb109().items() if k in _b109}
+        _t109 = get_entity(conn, _C109)["entity_type"]
+    check("مجموعة العملاء: حسابٌ تجميعي تحته عملاؤه ولكلٍّ رصيده",
+          set(_m109) == {_A109, _C109} and _g109["count"] == 2
+          and abs(_m109[_C109]["cash"] - 75.0) < 0.01
+          and abs(_g109["cash"] - sum(m["cash"] for m in _m109.values()))
+          < 0.01 and _t109 == "customer", str(_g109))
+    check("ونقل العميل إلى المجموعة لا يغيّر رصيد أي حساب", _a109 == _b109)
+    _hi109 = _pm.build_html("income_statement", 0,
+                            date_from=f"{_d107[:4]}-01-01", date_to=_d107)
+    _hc109 = _pm.build_html("cash_flow", 0, date_from=f"{_d107[:4]}-01-01",
+                            date_to=_d107)
+    check("قالبا الدخل والتدفقات: بلا نصّ شرح، وبيانات المنشأة لا تزاحم"
+          " الجدول",
+          "معيار المحاسبة الدولي" not in _hi109 + _hc109
+          and 'class="items meta"' not in _hi109 + _hc109)
+    _hs109 = _pm.build_html("scrap_karat", 18, only=[], query="لا شيء")
+    check("كشف صندوق الكسر يُطبع بنتيجة البحث", "نتيجة البحث «لا شيء»"
+          in _hs109 and "كشف صندوق الكسر — عيار" in _hs109)
+    _hp109 = _pm.build_html("party_group", _G109, kind="customer")
+    check("طباعة أرصدة المجموعة", "أرصدة مجموعة: عملاء الرميزان 109"
+          in _hp109 and "صافي المجموعة" in _hp109)
+    from services import models_web as _mw109
+    _lw109 = pathlib.Path(ROOT, "ui", "widgets", "lazy_screen.py").read_text(
+        encoding="utf-8")
+    _mwin109 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
+        encoding="utf-8")
+    check("الفتح: الشاشة تُرسم قبل بنائها، ومصغّرات الدليل بلا قفل الواجهة",
+          "_open_pending" in _mwin109 and "_build_queued" in _lw109
+          and callable(getattr(_mw109, "_pil_thumb", None))
+          and callable(getattr(_mw109, "_disk_path", None)))
 
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103

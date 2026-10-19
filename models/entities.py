@@ -152,7 +152,7 @@ def _post_opening(conn, entity_name, account_id, open_cash, open_gold,
 def add_entity(conn, name, entity_type, phone="", vat_number="", username=None,
                address="", open_cash=0.0, open_gold=0.0,
                opening_date=None, share_percent=0.0, job_title="",
-               basic_salary=0.0):
+               basic_salary=0.0, group_id=None):
     """يضيف جهة تعامل وينشئ حسابها الفرعي آلياً + قيد رصيدها الافتتاحي.
 
     عميل  → فرع تحت 1600 (رصيدا ذهب ونقد)
@@ -215,9 +215,22 @@ def add_entity(conn, name, entity_type, phone="", vat_number="", username=None,
             "liability", "cash")
     else:
         bal_type = "cash" if entity_type in ("supplier", "employee") else "both"
-        account_id = _create_sub_account(
-            conn, PARENT_CODE[entity_type], PREFIX[entity_type] + name,
-            ACC_TYPE[entity_type], bal_type)
+        if group_id and entity_type in ("customer", "other"):
+            # 4.79: عميلٌ (أو جهة) يُنشأ داخل مجموعته — «عملاء الرميزان»
+            # مثلاً — بكودٍ من كودها (1601 ← 160101)
+            from models import coa, party_groups
+            gid = party_groups._check_group(conn, group_id, entity_type)
+            atype = ACC_TYPE[entity_type]
+            lvl = (coa.get_account(conn, gid)["account_level"] or 1) + 1
+            account_id = conn.execute(
+                "INSERT INTO accounts(code,name,type,parent_id,is_postable,"
+                "nature,balance_type,account_level) VALUES(?,?,?,?,1,?,?,?)",
+                (coa.next_child_code(conn, gid), PREFIX[entity_type] + name,
+                 atype, gid, "debit", bal_type, lvl)).lastrowid
+        else:
+            account_id = _create_sub_account(
+                conn, PARENT_CODE[entity_type], PREFIX[entity_type] + name,
+                ACC_TYPE[entity_type], bal_type)
 
     if entity_type in ("employee", "worker"):
         # كلاهما يُسجَّل في `employees` لتوحيد منطق الرواتب، ويُميَّز

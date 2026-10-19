@@ -25,6 +25,7 @@ class LazyScreen(QtWidgets.QWidget):
         super().__init__()
         self._factory = factory
         self._real = None
+        self._queued = False
         self._title = title
         self._lay = QtWidgets.QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
@@ -59,12 +60,25 @@ class LazyScreen(QtWidgets.QWidget):
         return self.ensure()
 
     def showEvent(self, e):
-        """أول ظهور يبني الشاشة."""
-        try:
-            self.ensure()
-        except Exception:
-            pass
+        """أول ظهور يبني الشاشة — **بعد** أن يُرسم (4.79).
+
+        البناء داخل حدث الظهور كان يؤخّر أول رسمٍ حتى تكتمل الشاشة
+        وبياناتها، فتبدو النقرة بلا أثر. الآن يظهر «جارٍ فتح…» فوراً
+        وتُبنى الشاشة في الدورة التالية (`MainWindow._open_pending` يسبقه
+        عادةً؛ وهذا احتياطٌ لكل ظهورٍ آخر)."""
         super().showEvent(e)
+        if self.__dict__.get("_real") is None \
+                and not self.__dict__.get("_queued"):
+            self._queued = True
+            QtCore.QTimer.singleShot(30, self._build_queued)
+
+    def _build_queued(self):
+        self._queued = False
+        if self.__dict__.get("_real") is None and self.isVisible():
+            try:
+                self.ensure()
+            except Exception:
+                pass
 
     def release(self):
         """يُغلق الشاشة ويُحرّر مواردها عند مغادرتها.

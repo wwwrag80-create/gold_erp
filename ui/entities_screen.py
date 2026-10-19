@@ -83,6 +83,9 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.r_phone = self._row("رقم التواصل:", self.phone)
         self.r_address = self._row("العنوان:", self.address)
         self.r_vat = self._row("الرقم الضريبي:", self.vat)
+        # 4.79: مجموعة العميل — «عملاء الرميزان» مثلاً (اختيارية)
+        self.group = kit.ComboBox()
+        self.r_group = self._row("المجموعة:", self.group)
         self.r_share = self._row("نسبة الحصة في المصنع (%):", self.share)
         self.r_job = self._row("المسمى الوظيفي:", self.job_title)
         self.r_salary = self._row("الراتب الأساسي:", self.salary)
@@ -382,6 +385,8 @@ class EntitiesScreen(QtWidgets.QWidget):
         self._show(self.r_phone, True)
         self._show(self.r_address, is_trade)
         self._show(self.r_vat, is_trade)
+        self._show(self.r_group, t in ("customer", "other"))
+        self._reload_groups()
         self._show(self.r_share, is_partner)
         self._show(self.r_job, is_emp)
         self._show(self.r_salary, is_emp)
@@ -404,6 +409,25 @@ class EntitiesScreen(QtWidgets.QWidget):
         self._reload_completer()
         self._check_similar(self.name.text())
 
+    def _reload_groups(self):
+        """مجموعات النوع المختار: «بلا مجموعة» ثم مجموعاته بترتيب الدليل."""
+        t = self.etype.currentData()
+        keep = self.group.currentData()
+        self.group.clear()
+        self.group.addItem("— بلا مجموعة —", None)
+        if t not in ("customer", "other"):
+            return
+        try:
+            from models import party_groups
+            with db(readonly=True) as conn:
+                for g in party_groups.groups(conn, t):
+                    self.group.addItem(f"{g['code']} — {g['name']}", g["id"])
+        except Exception:
+            pass
+        i = self.group.findData(keep) if keep is not None else -1
+        if i >= 0:
+            self.group.setCurrentIndex(i)
+
     def _reload_completer(self):
         with db() as conn:
             names = [e["name"] for e in
@@ -425,7 +449,9 @@ class EntitiesScreen(QtWidgets.QWidget):
                     opening_date=dstr(self.open_date),
                     share_percent=self.share.value(),
                     job_title=self.job_title.text(),
-                    basic_salary=self.salary.value())
+                    basic_salary=self.salary.value(),
+                    group_id=(self.group.currentData()
+                              if t in ("customer", "other") else None))
             info(self, "تم حفظ الجهة وإنشاء حسابها الفرعي آلياً"
                        + (" مع قيد الرصيد الافتتاحي"
                           if (self.open_cash.value() or self.open_gold.value())
@@ -454,6 +480,8 @@ class EntitiesScreen(QtWidgets.QWidget):
 
     def refresh(self, *_):
         from services import credit_guard
+        # مجموعةٌ أُنشئت من شاشة «مجموعات العملاء» تظهر هنا فوراً
+        self._reload_groups()
         t = self.f_type.currentData()
         types = (t,) if t else None
         with db() as conn:

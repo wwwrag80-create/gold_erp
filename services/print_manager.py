@@ -2246,6 +2246,19 @@ def _entity_meta(pairs):
             f' cellpadding="4">{rows}</table><br/>')
 
 
+def _meta_strip(pairs):
+    """بيانات القائمة في سطرٍ واحد صغير (4.79) — لا جدولاً يأخذ نصف
+    الصفحة: المنشأة وسجلها ورقمها الضريبي ثم الفترة، والتركيز للجدول."""
+    items = [config.COMPANY_NAME]
+    if getattr(config, "COMPANY_CR", ""):
+        items.append(f"س.ت {en(config.COMPANY_CR)}")
+    if getattr(config, "COMPANY_VAT_NUMBER", ""):
+        items.append(f"الرقم الضريبي {en(config.COMPANY_VAT_NUMBER)}")
+    items += [f"{k}: {v}" for k, v in pairs if v and v != "—"]
+    return ('<div align="center" style="font-size:8pt;color:#444;'
+            'margin:0 0 4px 0">' + " · ".join(items) + "</div>")
+
+
 def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
                        include_zero=False, dim="cash", max_level=9):
     """ميزان المراجعة بالأرصدة والمجاميع — الشكل الذي يطلبه المراجع.
@@ -2420,31 +2433,14 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
     else:
         head = ("<tr>" + cells(thw("البيان"), thw("إيضاح"), thw("ريال"),
                                thw(f"ذهب ({_kunit()})")) + "</tr>")
-    meta = _entity_meta([
-        ("الفترة الحالية", p1),
-        ("فترة المقارنة", p2 if has_cmp else "—"),
-        ("العملة", "ريال سعودي؛ والذهب وزناً بعيار المصنع")])
-    ct = st["cash"]["totals"]
-    net = ct["net"]
-    rev = ct["net_revenue"]
-    ratios = ""
-    if abs(rev) >= 0.005:
-        gm = en(f"{ct['gross'] / rev * 100:,.1f}")
-        nm = en(f"{net / rev * 100:,.1f}")
-        ratios = f" · هامش مجمل الربح {gm}% · هامش صافي الربح {nm}%"
-    verdict = (
-        f'<div {WIDE} style="margin-top:6px"><b>صافي '
-        f'{"ربح" if net >= 0 else "خسارة"} الفترة: {_w(abs(net), 2)} ريال'
-        f'</b>{ratios}<br/>'
-        'أُعدّت بطريقة «وظيفة المصروف» وفق معيار المحاسبة الدولي 1 من دفتر'
-        ' الأستاذ على أساس الاستحقاق: الإيراد بعد المردودات والخصومات وبلا'
-        ' ضريبة القيمة المضافة؛ والمصروف ما حُمّل على حساباته لا ما دُفع'
-        ' نقداً؛ وقيد الإقفال السنوي مستبعد. الأرقام بين القوسين سالبة.'
-        '</div>')
+    # 4.79: بيانات المنشأة سطرٌ صغير، ولا نصّ شرحٍ أسفل القائمة —
+    # صافي الربح صفٌّ في الجدول نفسه
+    meta = _meta_strip([("الفترة", p1),
+                        ("المقارنة", p2 if has_cmp else "")])
     table = f"{TBL}{head}{body}</table>"
     return (_header("قائمة الدخل (الأرباح والخسائر)", "—", st["date_to"],
                     show_meta=False)
-            + meta + table + verdict + _sign_block())
+            + meta + table + _sign_block())
 
 
 def _tpl_cash_flow(conn, _id=0, date_from=None, date_to=None, compare=True,
@@ -2487,34 +2483,18 @@ def _tpl_cash_flow(conn, _id=0, date_from=None, date_to=None, compare=True,
 
     p1 = _nowrap(f"من {en(cf['date_from'])} إلى {en(cf['date_to'])}")
     p2 = _nowrap(f"من {en(cf['compare_from'])} إلى {en(cf['compare_to'])}")
-    hd = [thw("البيان"), thw("الفترة الحالية — ريال")]
-    if has_cmp:
-        hd.append(thw("فترة المقارنة — ريال"))
-    head = "<tr>" + cells(*hd) + "</tr>"
+    # 4.79: لا جدول بيانات منشأة ولا نصّ شرح — الفترة في رأس العمود
+    # والقائمة وحدها على الصفحة
     meth = ("الطريقة غير المباشرة" if (method or "indirect") == "indirect"
             else "الطريقة المباشرة")
-    meta = _entity_meta([
-        ("الفترة الحالية", p1), ("فترة المقارنة", p2 if has_cmp else "—"),
-        ("العملة", "ريال سعودي"), ("طريقة العرض", meth)])
-    t = cf["cur"]["totals"]
-    head_v = ("✔ النقد آخر الفترة = أولها + صافي التدفقات، ويطابق رصيد"
-              " الصندوق والبنوك في الدفتر" if cf["balanced"] else
-              f"✘ فرق {_w(t['diff'], 2)} ريال بين التدفقات والرصيد الدفتري")
-    noncash = ""
-    if abs(t["noncash"]) >= 0.005:
-        noncash = (f"<br/><b>معاملات غير نقدية (IAS 7.43):</b> أصول ثابتة"
-                   f" اشتُريت بالأجل ولم يُسدَّد ثمنها في الفترة"
-                   f" {_w(t['noncash'], 2)} ريال — لا تظهر تدفقاً.")
-    verdict = (
-        f'<div {WIDE} style="margin-top:6px"><b>{head_v}</b>{noncash}<br/>'
-        'أُعدّت وفق معيار المحاسبة الدولي 7: النقد وما في حكمه هو الصندوق'
-        ' والبنوك؛ والتحويل بينهما ليس تدفقاً؛ وثمن الأصول الثابتة استثماري'
-        ' ولو سُدِّد عبر حساب المورّد؛ والذهب مخزونٌ لا نقد. الأرقام بين'
-        ' القوسين تدفقٌ خارج.</div>')
+    hd = [thw(f"البيان — {meth}"), thw(f"ريال · {p1}")]
+    if has_cmp:
+        hd.append(thw(f"ريال · {p2}"))
+    head = "<tr>" + cells(*hd) + "</tr>"
     table = f"{TBL}{head}{body}</table>"
     return (_header("قائمة التدفقات النقدية", "—", cf["date_to"],
                     show_meta=False)
-            + meta + table + verdict + _sign_block())
+            + table + _sign_block())
 
 
 def _tpl_equity_changes(conn, _id=0, date_from=None, date_to=None,
@@ -4084,6 +4064,146 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
 
 
 
+def _tpl_party_group(conn, group_id=0, kind="customer", as_of=None,
+                     entity_ids=None):
+    """أرصدة مجموعة عملاء (4.79) — «عملاء الرميزان»: كل عميلٍ بمديونيته.
+
+    `entity_ids`: الظاهرون في الشاشة بعد البحث وبترتيبها؛ None = الكل."""
+    from models import party_groups as pg
+    today = _qd(QtCore.QDate.currentDate())
+    d = as_of or today
+    gid = int(group_id) if group_id else None
+    rows = pg.members(conn, gid, d, kind)
+    if entity_ids is not None:
+        order = {int(e): n for n, e in enumerate(entity_ids)}
+        rows = sorted((r for r in rows if r["entity_id"] in order),
+                      key=lambda r: order[r["entity_id"]])
+    name = "بلا مجموعة"
+    if gid:
+        g = conn.execute("SELECT code, name FROM accounts WHERE id=?",
+                         (gid,)).fetchone()
+        name = f"{g['name']} ({en(g['code'])})" if g else name
+    unit = _kunit()
+
+    def side(v, gold):
+        eps = 0.0005 if gold else 0.005
+        f = (lambda x: _gw(x, 3)) if gold else (lambda x: _w(x, 2))
+        return (f(v), "") if v > eps else (("", f(-v)) if v < -eps
+                                           else ("", ""))
+
+    body = ""
+    sums = [0.0] * 4
+    for n, r in enumerate(rows, 1):
+        gd, gc = side(r["gold"], True)
+        cd, cc = side(r["cash"], False)
+        for k, v in enumerate((r["gold"], r["cash"])):
+            if v > 0:
+                sums[k * 2] += v
+            else:
+                sums[k * 2 + 1] -= v
+        body += "<tr>" + cells(
+            f"<td>{en(n)}</td>", f"<td>{en(r['code'])}</td>",
+            f'<td class="r">{r["name"]}</td>',
+            f"<td>{en(r['phone'] or '')}</td>",
+            f'<td class="num">{gd}</td>', f'<td class="num">{gc}</td>',
+            f'<td class="num">{cd}</td>', f'<td class="num">{cc}</td>'
+        ) + "</tr>"
+    if not body:
+        body = '<tr><td colspan="8">لا عملاء في المجموعة</td></tr>'
+    tst = ' style="background-color:#F2EEE4;border-top:2px solid #333"'
+    body += "<tr>" + cells(
+        f'<td{tst} colspan="4" class="r"><b>الإجمالي — {en(len(rows))}'
+        "</b></td>",
+        f'<td class="num"{tst}><b>{_gw(sums[0], 3)}</b></td>',
+        f'<td class="num"{tst}><b>{_gw(sums[1], 3)}</b></td>',
+        f'<td class="num"{tst}><b>{_w(sums[2], 2)}</b></td>',
+        f'<td class="num"{tst}><b>{_w(sums[3], 2)}</b></td>') + "</tr>"
+    head = "<tr>" + cells(
+        thw("م"), thw("الكود"), thw("الاسم"), thw("الهاتف"),
+        thw(f"ذهب عليه ({unit})"), thw(f"ذهب له ({unit})"),
+        thw("نقد عليه (ريال)"), thw("نقد له (ريال)")) + "</tr>"
+    net_g, net_c = sums[0] - sums[1], sums[2] - sums[3]
+    summ = (f"صافي المجموعة: ذهب {_gw(abs(net_g), 3)} {unit}"
+            f" {'عليها' if net_g >= 0 else 'لها'} · نقد"
+            f" {_w(abs(net_c), 2)} ريال {'عليها' if net_c >= 0 else 'لها'}")
+    return (_header(f"أرصدة مجموعة: {name}", "—", d, show_meta=False)
+            + '<div align="center" style="font-size:8.5pt;margin:0 0 4px 0">'
+            + f"الأرصدة حتى {en(d)}</div>"
+            + f"{TBL}{head}{body}</table>"
+            + f'<div style="margin-top:6px"><b>{summ}</b></div>')
+
+
+def _tpl_scrap_karat(conn, karat, date_from=None, date_to=None, only=None,
+                     query=""):
+    """كشف صندوق الكسر لعيارٍ واحد (4.79) — كما في نافذته من لوحة التحكم.
+
+    `only`: أرقام الأسطر الظاهرة بعد البحث (Ctrl+F) — فيُطبع ما يراه
+    المستخدم مصفّى لا الكشف كلّه، ومعه نصّ البحث وعدد ما طابقه.
+    """
+    from models.inventory import scrap_karat_statement
+    from services import karat_view as kv
+    k = int(karat)
+    st = scrap_karat_statement(conn, k, date_from or None, date_to or None)
+    allr = st["rows"]
+    keep = (None if only is None
+            else {int(i) for i in only if 0 <= int(i) < len(allr)})
+    rows = [r for i, r in enumerate(allr) if keep is None or i in keep]
+    today = _qd(QtCore.QDate.currentDate())
+
+    def wt(v):
+        return _w(v, 3) if abs(v or 0) >= 0.0005 else ""
+
+    body = ""
+    tin = tout = 0.0
+    for r in rows:
+        prev = r["op"] == "رصيد سابق"
+        b0, b1 = ("<b>", "</b>") if prev else ("", "")
+        if not prev:
+            tin += r["inw"] or 0.0
+            tout += r["outw"] or 0.0
+        body += "<tr>" + cells(
+            f"<td>{en(r['date'] or '')}</td>", f"<td>{b0}{r['op']}{b1}</td>",
+            f"<td><b>{en(str(r['doc_no'] or ''))}</b></td>",
+            f'<td class="r">{r["name"] or ""}</td>',
+            f'<td class="r">{r["desc"] or ""}</td>',
+            f'<td class="num">{wt(r["inw"])}</td>',
+            f'<td class="num">{wt(r["outw"])}</td>',
+            f'<td class="num"><b>{_w(r["bal"], 3)}</b></td>',
+            f'<td class="num">{_w(kv.g(r["bal18"]), 3)}</td>') + "</tr>"
+    if not body:
+        body = '<tr><td colspan="9">لا حركات</td></tr>'
+    tst = ' style="background-color:#F2EEE4;border-top:2px solid #333"'
+    body += "<tr>" + cells(
+        f'<td{tst} colspan="5" class="r"><b>الإجمالي'
+        f'{" (نتيجة البحث)" if keep is not None else ""}</b></td>',
+        f'<td class="num"{tst}><b>{wt(tin)}</b></td>',
+        f'<td class="num"{tst}><b>{wt(tout)}</b></td>',
+        f"<td{tst}></td>", f"<td{tst}></td>") + "</tr>"
+    head = "<tr>" + cells(
+        thw("التاريخ"), thw("نوع العملية"), thw("رقم السند"),
+        thw("الجهة / الحساب المقابل"), thw("البيان"),
+        thw(f"وارد عيار {en(k)}"), thw(f"صادر عيار {en(k)}"),
+        thw(f"الرصيد عيار {en(k)}"),
+        thw(f"الرصيد بمكافئ {en(kv.active())}")) + "</tr>"
+    per = (f"من {en(date_from)} إلى {en(date_to or today)}" if date_from
+           else (f"حتى {en(date_to)}" if date_to else "كل الحركات"))
+    cap = [per, f"الأوزان فعلية بعيار {en(k)}"]
+    n_all = sum(1 for r in allr if r["op"] != "رصيد سابق")
+    if keep is not None:
+        n = sum(1 for r in rows if r["op"] != "رصيد سابق")
+        cap.append(f"نتيجة البحث «{query or ''}»: {en(n)} من {en(n_all)}"
+                   " حركة")
+    summ = (f"أول الفترة {_w(st['opening'], 3)} · وارد"
+            f" {_w(st['total_in'], 3)} · صادر {_w(st['total_out'], 3)} ·"
+            f" الرصيد {_w(st['closing'], 3)} جم")
+    return (_header(f"كشف صندوق الكسر — عيار {en(k)}", "—",
+                    date_to or today, show_meta=False)
+            + '<div align="center" style="font-size:8.5pt;margin:0 0 4px 0">'
+            + " · ".join(cap) + "</div>"
+            + f"{TBL}{head}{body}</table>"
+            + f'<div style="margin-top:6px"><b>{summ}</b></div>')
+
+
 def _tpl_customer_board(conn, _id=0, date_from=None, date_to=None,
                         side="gold", account_ids=None):
     """لوحة العملاء — جانبٌ واحد (ذهب أو نقد) بالعملاء الظاهرين.
@@ -4489,6 +4609,8 @@ BUILDERS = {
     "dossier": _tpl_dossier,
     "doc_edits": _tpl_doc_edits,
     "customer_board": _tpl_customer_board,
+    "scrap_karat": _tpl_scrap_karat,
+    "party_group": _tpl_party_group,
 }
 
 DOC_LABELS = {
@@ -4579,7 +4701,14 @@ def build_html(doc_type, doc_id, **kw):
             fn = BUILDERS.get(doc_type)
             if not fn:
                 raise ValueError(f"لا يوجد قالب طباعة للنوع: {doc_type}")
-            html = fn(conn, doc_id)
+            # كما في مسار المتصفح: القالب يأخذ ما يقبله من المعطيات
+            try:
+                import inspect
+                params = set(inspect.signature(fn).parameters)
+                extra = {k: v for k, v in kw.items() if k in params}
+            except Exception:
+                extra = {}
+            html = fn(conn, doc_id, **extra) if extra else fn(conn, doc_id)
     # إطار خارجي كامل يحيط بالمستند ويمتد بعرض ورقة A4
     framed = (
         '<table class="frame" width="100%" height="100%" cellspacing="0"'
@@ -4660,7 +4789,7 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
                         "turnover", "aging",
                         "day_close", "mfg_target", "mfg_salary",
                         "customer_board", "trial_balance",
-                        "equity_changes", "doc_edits")
+                        "equity_changes", "doc_edits", "scrap_karat")
     printer = _printer(wide if landscape is None else landscape)
     dlg = QtPrintSupport.QPrintPreviewDialog(printer, parent)
     dlg.setWindowTitle("معاينة قبل الطباعة")
@@ -4683,7 +4812,7 @@ def print_document(parent, doc_type, doc_id, **kw):
     """
     html = build_html(doc_type, doc_id, **kw)
     printer = _printer(doc_type in ("statement", "journal", "manual",
-                                    "balances"))
+                                    "balances", "scrap_karat"))
     dlg = QtPrintSupport.QPrintDialog(printer, parent)
     dlg.setWindowTitle("الطباعة المباشرة")
     if dlg.exec_() == QtWidgets.QDialog.Accepted:

@@ -2,6 +2,7 @@
 """لوحة التحكم: شريط جانبي RTL + شاشة لكل عملية حسب صلاحية المستخدم.
 تبدأ بلوحة تحكم تفاعلية (بطاقات قابلة للنقر) تتيح Drill-down إلى دفتر
 الأستاذ العام الموحّد لأي حساب في الشجرة."""
+import functools
 import json
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -55,6 +56,7 @@ from ui.subledger_screen import SubLedgerScreen
 from ui.transaction_log_screen import TransactionLogScreen
 from ui.vouchers_screen import VouchersScreen
 from ui.customers_screen import CustomersScreen
+from ui.party_groups_screen import PartyGroupsScreen
 from services import karat_view as kv
 from ui import theme
 from ui.widgets.common import (ElidedLabel, ask, busy, err, info, run_bg,
@@ -150,6 +152,13 @@ class MainWindow(QtWidgets.QMainWindow):
                             user,
                             on_drill_account=self.open_ledger_by_account),
                         "العملاء — المبيعات والسداد")),
+                    # 4.79: «عملاء الرميزان» وأمثالها — حسابٌ تجميعي
+                    # تحته عملاؤه، ولكلٍّ مديونيته
+                    ("مجموعات العملاء", Lazy(
+                        lambda: PartyGroupsScreen(
+                            user,
+                            on_drill_account=self.open_ledger_by_account),
+                        "مجموعات العملاء")),
                     ("التسكيرات", self.fixing_screen),
                     ("المشتريات", self.purchases_screen),
                     ("القيود اليومية", self.journal_screen),
@@ -717,6 +726,14 @@ class MainWindow(QtWidgets.QMainWindow):
             build(saved, None)
             # أي شاشة لم تُطابق (جديدة أو ضاع بندها) تُلحق في النهاية
             # باسمها الافتراضي — فلا تختفي شاشة من القائمة أبداً.
+            # (4.79) وشاشةٌ جديدة تُوضع بعد جارتها في الترتيب الافتراضي
+            # إن وُجدت — «مجموعات العملاء» بعد «العملاء — المبيعات
+            # والسداد» لا في ذيل القائمة
+            placed = {}
+            for item, _ in self._iter_nav():
+                i0 = item.data(0, QtCore.Qt.UserRole)
+                if i0 is not None and i0 >= 0:
+                    placed[i0] = item
             for idx, text in sorted(current.items()):
                 if idx in used:
                     continue
@@ -724,7 +741,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 it.setData(0, QtCore.Qt.UserRole, idx)
                 it.setData(0, NAV_KEY_ROLE, keys.get(idx, text))
                 it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
-                self.sidebar.addTopLevelItem(it)
+                prev = placed.get(idx - 1)
+                par = prev.parent() if prev is not None else None
+                if prev is None:
+                    self.sidebar.addTopLevelItem(it)
+                elif par is None:
+                    self.sidebar.insertTopLevelItem(
+                        self.sidebar.indexOfTopLevelItem(prev) + 1, it)
+                else:
+                    par.insertChild(par.indexOfChild(prev) + 1, it)
+                placed[idx] = it
             # إعادة بناء خريطة العناصر
             self._items = {}
             for item, _ in self._iter_nav():
@@ -824,13 +850,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _guard_screen(self, row):
         """يحرس الشاشات الحسّاسة برمز دخول قبل فتحها."""
         try:
-            name = ""
-            it = self.sidebar.topLevelItem(0)
             scr = self.screens[row] if 0 <= row < len(self.screens) else None
-            real = getattr(scr, "real", scr)
+            # بلا بناء الشاشة (4.79): `real` و`title` على غلافٍ لم يُبنَ
+            # يبنيانها هنا قبل أي رسم — فكانت كل نقرةٍ تنتظر البناء كاملاً
+            if isinstance(scr, Lazy):
+                real = scr.__dict__.get("_real")
+                label = scr.__dict__.get("_title") or ""
+            else:
+                real = scr
+                label = getattr(scr, "title", "") or ""
             cls = type(real).__name__ if real is not None else ""
-            builder = getattr(scr, "_builder", None)
-            label = getattr(scr, "title", "") or ""
             if "إيقاف المصانع" in label or cls == "SuperAdminScreen":
                 from ui.super_admin_screen import SuperAdminScreen as _S
                 return _S.request_access(self)
@@ -929,9 +958,36 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(250, self._update_notes_btn)
         # التحديث مؤجَّل لدورة أحداث لاحقة: يظهر التبديل فورياً
         # ثم تُحمَّل البيانات — فلا تتجمّد الواجهة أثناء الاستعلام.
+        # وأول فتحٍ لشاشة (4.79): يُرسم إطارها أولاً ثم تُبنى — فالنقرة
+        # تُرى فوراً ولا تنتظر بناء الشاشة وقراءة بياناتها
+        if isinstance(screen, Lazy) and not screen.built:
+            QtCore.QTimer.singleShot(
+                0, functools.partial(self._open_pending, screen))
+            return
         QtCore.QTimer.singleShot(0, lambda: self._mount_screen_tools(screen))
         if hasattr(screen, "refresh"):
             QtCore.QTimer.singleShot(0, self._refresh_current)
+
+    def _open_pending(self, screen):
+        """أول فتحٍ لشاشة: يُرسم الانتقال الآن، ثم تُبنى وتُحمَّل."""
+        row = getattr(self, "_current_row", 0)
+        if not (0 <= row < len(self.screens)) or self.screens[row] is not screen:
+            return                  # انتقل المستخدم إلى غيرها قبل البناء
+        try:
+            app = QtWidgets.QApplication.instance()
+            app.sendPostedEvents(None, QtCore.QEvent.LayoutRequest)
+            cw = self.centralWidget()
+            if cw is not None:
+                cw.repaint()
+        except Exception:
+            pass
+        try:
+            screen.ensure()
+        except Exception:
+            pass
+        self._mount_screen_tools(screen)
+        if hasattr(screen, "refresh"):
+            self._refresh_current()
 
     def _on_update_checked(self):
         """يضيء زر التحديثات إن كان هناك إصدار أحدث منشور."""

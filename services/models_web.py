@@ -78,6 +78,8 @@ _thumb_bytes = [0]
 # أن تتزاحم كلها فتبطؤ جميعاً حتى ينقطع بعضها في الطريق إلى الجوال
 _gen = threading.BoundedSemaphore(3)
 _warming = [False]
+# 4.79: مهلةٌ بين صورةٍ وأخرى في التجهيز الخلفي — يتنفّس خيط الواجهة
+WARM_PAUSE = 0.02
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -831,6 +833,7 @@ def warm_async():
                 if full:
                     break
                 thumb(f, THUMB_W)
+                time.sleep(WARM_PAUSE)
         except Exception:
             pass
         finally:
@@ -861,6 +864,54 @@ def thumb(path, width):
         return _make_thumb(path, width, key)
 
 
+def _disk_path(key):
+    """ملف المصغّرة على القرص (4.79): تُصغَّر الصورة مرةً واحدة لا في كل
+    تشغيل — فلا يعود التجهيز الخلفي يزاحم الواجهة بعد أول مرة."""
+    try:
+        import config
+        from pathlib import Path
+        d = Path(str(config.DB_PATH)).parent / "cache" / "thumbs"
+        d.mkdir(parents=True, exist_ok=True)
+        h = hashlib.sha1("|".join(map(str, key)).encode("utf-8")).hexdigest()
+        return d / f"{h}.jpg"
+    except Exception:
+        return None
+
+
+def _pil_thumb(raw, width):
+    """المصغّرة بـPillow — **تُفلت قفل بايثون** أثناء فكّ الصورة وتصغيرها.
+
+    `QImage` يمسك القفل طوال فكّ الصورة وتصغيرها (~100 م.ث للصورة)، فكان
+    التجهيز الخلفي لصور الدليل يوقف خيط الواجهة على دفعات: كل نقرةٍ على
+    شاشة تنتظر دورها خلف صورة. Pillow تعمل في C خارج القفل، فتبقى الواجهة
+    فورية. يعيد None إن لم تتوفّر فيُستعمل `QImage` كما كان."""
+    try:
+        import io
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        im = Image.open(io.BytesIO(raw))
+        if im.format == "JPEG":
+            im.draft("RGB", (int(width), 1))   # فكٌّ مصغَّر مباشرة
+        im.load()
+        if im.width > width:
+            h = max(1, round(im.height * width / im.width))
+            im = im.resize((int(width), h), Image.LANCZOS)
+        # JPEG بلا شفافية: الشفاف يوضع على أبيض البطاقة لا أسود
+        if im.mode in ("RGBA", "LA") or (im.mode == "P"
+                                         and "transparency" in im.info):
+            im = im.convert("RGBA")
+            bg = Image.new("RGB", im.size, (255, 255, 255))
+            bg.paste(im, mask=im.getchannel("A"))
+            im = bg
+        out = io.BytesIO()
+        im.convert("RGB").save(out, "JPEG", quality=84)
+        return out.getvalue()
+    except Exception:
+        return None
+
+
 def _make_thumb(path, width, key):
     import mimetypes
     try:
@@ -869,6 +920,21 @@ def _make_thumb(path, width, key):
     except OSError:                   # تُستبدل الآن — والصفحة تعيد المحاولة
         return b"", ""
     out = (raw, mimetypes.guess_type(str(path))[0] or "image/jpeg")
+    disk = _disk_path(key)
+    try:
+        if disk is not None and disk.is_file():
+            small = disk.read_bytes()
+            if small:
+                return _keep(key, (small, "image/jpeg")
+                             if len(small) < len(raw) else out)
+    except OSError:
+        pass
+    small = _pil_thumb(raw, width)
+    if small is not None:
+        if 0 < len(small) < len(raw):
+            out = (small, "image/jpeg")
+        _save_disk(disk, small)
+        return _keep(key, out)
     try:
         from PyQt5.QtCore import QBuffer, QByteArray
         from PyQt5.QtGui import QImage
@@ -888,9 +954,25 @@ def _make_thumb(path, width, key):
                 small = bytes(ba)
                 if 0 < len(small) < len(raw):
                     out = (small, "image/jpeg")
+                _save_disk(disk, small)
             buf.close()
     except Exception:
         pass
+    return _keep(key, out)
+
+
+def _save_disk(disk, data):
+    if disk is None or not data:
+        return
+    try:
+        tmp = disk.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, disk)
+    except OSError:
+        pass
+
+
+def _keep(key, out):
     with _lock:
         _thumbs[key] = out
         _thumb_bytes[0] += len(out[0])
