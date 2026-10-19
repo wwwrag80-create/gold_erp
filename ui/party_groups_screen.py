@@ -4,9 +4,12 @@
 مجموعةٌ مثل «عملاء الرميزان» حسابٌ تجميعي تحت «إجمالي العملاء» وعملاؤها
 فروعه — فلكل عميلٍ رصيده، وللمجموعة مجموعُ أرصدتهم (`models.party_groups`).
 
-يمين الشاشة المجموعات برصيد كلٍّ وعدد عملائها؛ واليسار عملاء المجموعة
-المحددة بمديونية كلٍّ منهم ذهباً ونقداً. البحث يجد المجموعة أو العميل،
-والنقر المزدوج على عميلٍ يفتح كشف حسابه، والطباعة تُخرج أرصدة المجموعة.
+يمين الشاشة المجموعات برصيد كلٍّ وحالته وعدد عملائها؛ واليسار عملاء
+المجموعة المحددة برصيد كلٍّ منهم ذهباً ونقداً وحالته (مدين/دائن). البحث
+يجد المجموعة أو العميل، والنقر المزدوج على عميلٍ يفتح كشف حسابه.
+
+4.80: المجموعة الجديدة تُنشأ ومعها عملاؤها من أي مجموعةٍ كانوا فيها
+(ينتقلون إليها ويخرجون من السابقة)، وتُطبع المجموعة أو المجموعات كلها.
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -21,36 +24,50 @@ from ui.widgets.common import (ask, date_edit, dstr, err, info, make_table,
 NO_GROUP = -1      # صفّ «بلا مجموعة» — من حساباتهم تحت الأصل مباشرة
 
 
-def _side(v, d):
-    """(عليه، له) — المدين عليه والدائن له؛ والصفر فراغ."""
-    eps = 0.5 * 10 ** -d
-    if v > eps:
-        return f"{v:,.{d}f}", ""
-    if v < -eps:
-        return "", f"{-v:,.{d}f}"
-    return "", ""
+def _bal(v, gold):
+    """(الرصيد بلا إشارة، حالته) — مدين/دائن، والصفر شرطة."""
+    v = kv.g(v) if gold else float(v or 0.0)
+    d = 3 if gold else 2
+    st = pg.state(v, gold)
+    return (f"{abs(v):,.{d}f}" if st != "—" else "—"), st
+
+
+_RED, _GREEN = QtGui.QColor("#a4262c"), QtGui.QColor("#107c10")
 
 
 class AddMembersDialog(QtWidgets.QDialog):
-    """اختيار جهاتٍ تُنقل إلى المجموعة — قائمةٌ بمربعات اختيار وبحث."""
+    """اختيار جهاتٍ تُنقل إلى المجموعة — من أي مجموعةٍ كانت فيها.
 
-    def __init__(self, parent, rows, group_name):
+    `ask_name`: نافذة «مجموعة جديدة» — الاسم ثم عملاؤها في خطوةٍ واحدة."""
+
+    def __init__(self, parent, rows, group_name, ask_name=False):
         super().__init__(parent)
-        self.setWindowTitle(f"إضافة إلى «{group_name}»")
+        self.setWindowTitle("مجموعة جديدة" if ask_name
+                            else f"إضافة إلى «{group_name}»")
         self.setLayoutDirection(QtCore.Qt.RightToLeft)
-        self.resize(460, 560)
+        self.resize(500, 600)
+        self.name = kit.LineEdit()
+        self.name.setPlaceholderText("اسم المجموعة — مثل «عملاء الرميزان»")
+        self.name.setVisible(ask_name)
+        hint = QtWidgets.QLabel(
+            "حدّد الحسابات التي تنتقل إلى المجموعة — من أي مجموعةٍ كانت"
+            " فيها: تخرج من مجموعتها السابقة، ويبقى رصيدها وكشفها كما هما.")
+        hint.setWordWrap(True)
+        hint.setObjectName("cardSub")
         self.find = kit.LineEdit()
         self.find.setPlaceholderText("🔍 ابحث بالاسم أو الكود…")
         self.find.textChanged.connect(self._filter)
         self.lst = QtWidgets.QListWidget()
         for r in rows:
-            where = f" — في «{r['group']}»" if r.get("group") else ""
+            where = (f"   ← في «{r['group']}»" if r.get("group")
+                     else "   ← بلا مجموعة")
             it = QtWidgets.QListWidgetItem(f"{r['code']} · {r['name']}{where}")
             it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
             it.setCheckState(QtCore.Qt.Unchecked)
             it.setData(QtCore.Qt.UserRole, r["entity_id"])
             self.lst.addItem(it)
-        ok = kit.PushButton("نقل المحدَّدين إلى المجموعة")
+        ok = kit.PushButton("إنشاء المجموعة ونقل المحدَّدين إليها"
+                            if ask_name else "نقل المحدَّدين إلى المجموعة")
         ok.setObjectName("homeBtn")
         ok.clicked.connect(self.accept)
         cancel = kit.PushButton("إلغاء")
@@ -61,6 +78,8 @@ class AddMembersDialog(QtWidgets.QDialog):
         b.addStretch(1)
         b.addWidget(cancel)
         lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(self.name)
+        lay.addWidget(hint)
         lay.addWidget(self.find)
         lay.addWidget(self.lst, 1)
         lay.addLayout(b)
@@ -144,10 +163,14 @@ class PartyGroupsScreen(QtWidgets.QWidget):
         b_out.clicked.connect(self.remove_members)
         b_led = kit.PushButton("📄 كشف حساب العميل")
         b_led.clicked.connect(self.open_ledger)
-        b_prn = kit.PushButton("🖨 طباعة أرصدة المجموعة")
+        b_prn = kit.PushButton("🖨 معاينة المجموعة")
+        b_prn.setToolTip("أرصدة عملاء المجموعة الظاهرين وحالة كلٍّ منهم")
         b_prn.clicked.connect(self.print_group)
+        b_all = kit.PushButton("🖨 معاينة كل المجموعات")
+        b_all.setToolTip("كل مجموعةٍ برصيدها وحالته ثم عملاؤها")
+        b_all.clicked.connect(self.print_all)
         mb = QtWidgets.QHBoxLayout()
-        for b in (b_add, b_out, b_led, b_prn):
+        for b in (b_add, b_out, b_led, b_prn, b_all):
             mb.addWidget(b)
         mb.addStretch(1)
         right = QtWidgets.QWidget()
@@ -197,15 +220,17 @@ class PartyGroupsScreen(QtWidgets.QWidget):
             t.blockSignals(True)
             t.clear()
             heads = ["المجموعة", "الكود", "العدد",
-                     f"الذهب ({kv.unit()})", "النقد (ريال)"]
+                     f"رصيد الذهب ({kv.unit()})", "حالته",
+                     "الرصيد النقدي (ريال)", "حالته"]
             t.setColumnCount(len(heads))
             t.setHorizontalHeaderLabels(heads)
             t.setRowCount(len(rows))
             sel = 0
             for i, g in enumerate(rows):
+                gv, gs = _bal(g["gold"], True)
+                cv, cs = _bal(g["cash"], False)
                 vals = ["   " * g.get("depth", 0) + g["name"], g["code"],
-                        str(g["count"]), f"{kv.g(g['gold']):,.3f}",
-                        f"{g['cash']:,.2f}"]
+                        str(g["count"]), gv, gs, cv, cs]
                 for c, v in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(v)
                     it.setTextAlignment(QtCore.Qt.AlignCenter if c else
@@ -215,6 +240,9 @@ class PartyGroupsScreen(QtWidgets.QWidget):
                         it.setData(QtCore.Qt.UserRole, g["id"])
                     if g["id"] == NO_GROUP:
                         it.setForeground(QtGui.QBrush(QtGui.QColor("#666")))
+                    elif c in (4, 6) and v != "—":
+                        it.setForeground(QtGui.QBrush(
+                            _RED if v == "مدين" else _GREEN))
                     t.setItem(i, c, it)
                 if g["id"] == keep:
                     sel = i
@@ -241,12 +269,14 @@ class PartyGroupsScreen(QtWidgets.QWidget):
         name = g["name"] if g else "بلا مجموعة"
         tg = sum(r["gold"] for r in self.rows)
         tc = sum(r["cash"] for r in self.rows)
+        tgv, tgs = _bal(tg, True)
+        tcv, tcs = _bal(tc, False)
         self.title.setText(
-            f"{name} — {len(self.rows)} · الذهب {kv.g(tg):,.3f} {kv.unit()}"
-            f" · النقد {tc:,.2f} ريال")
+            f"{name} — {len(self.rows)} · الذهب {tgv} {kv.unit()} {tgs}"
+            f" · النقد {tcv} ريال {tcs}")
         heads = ["الكود", "الاسم", "الهاتف", "مجموعة فرعية",
-                 f"ذهب عليه ({kv.unit()})", f"ذهب له ({kv.unit()})",
-                 "نقد عليه (ريال)", "نقد له (ريال)"]
+                 f"رصيد الذهب ({kv.unit()})", "حالته",
+                 "الرصيد النقدي (ريال)", "حالته"]
         t = self.m_table
         t.setUpdatesEnabled(False)
         try:
@@ -254,28 +284,23 @@ class PartyGroupsScreen(QtWidgets.QWidget):
             t.setColumnCount(len(heads))
             t.setHorizontalHeaderLabels(heads)
             t.setRowCount(len(self.rows) + 1)
-            sums = [0.0] * 4
             for i, r in enumerate(self.rows):
-                gd, gc = _side(kv.g(r["gold"]), 3)
-                cd, cc = _side(r["cash"], 2)
-                for k, v in enumerate((kv.g(r["gold"]), r["cash"])):
-                    if v > 0:
-                        sums[k * 2] += v
-                    else:
-                        sums[k * 2 + 1] -= v
+                gv, gs = _bal(r["gold"], True)
+                cv, cs = _bal(r["cash"], False)
                 vals = [r["code"], r["name"], r["phone"], r["sub"],
-                        gd, gc, cd, cc]
+                        gv, gs, cv, cs]
                 for c, v in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(str(v))
                     it.setTextAlignment(
                         (QtCore.Qt.AlignRight if c in (1, 3)
                          else QtCore.Qt.AlignCenter) | QtCore.Qt.AlignVCenter)
-                    if c in (4, 6) and v:
-                        it.setForeground(QtGui.QBrush(QtGui.QColor("#a4262c")))
+                    if c in (5, 7) and v != "—":
+                        it.setForeground(QtGui.QBrush(
+                            _RED if v == "مدين" else _GREEN))
                     t.setItem(i, c, it)
             last = len(self.rows)
-            tot = ["", "الإجمالي", "", "", f"{sums[0]:,.3f}",
-                   f"{sums[1]:,.3f}", f"{sums[2]:,.2f}", f"{sums[3]:,.2f}"]
+            tot = ["", "الإجمالي (صافي المجموعة)", "", "", tgv, tgs, tcv,
+                   tcs]
             bold = QtGui.QFont(t.font())
             bold.setBold(True)
             for c, v in enumerate(tot):
@@ -292,7 +317,7 @@ class PartyGroupsScreen(QtWidgets.QWidget):
             t.setUpdatesEnabled(True)
         try:
             from ui.widgets.table_fit import fit_columns
-            fit_columns(t, [8, 20, 10, 12, 10, 10, 10, 10])
+            fit_columns(t, [8, 20, 10, 12, 11, 7, 11, 7])
         except Exception:
             pass
         self._apply_search(groups=False)
@@ -343,15 +368,25 @@ class PartyGroupsScreen(QtWidgets.QWidget):
 
     # ══ المجموعات ══
     def new_group(self):
+        """الاسم ثم عملاؤها — من أي مجموعةٍ كانوا فيها — في خطوةٍ واحدة."""
         try:
-            name, ok = QtWidgets.QInputDialog.getText(
-                self, "مجموعة جديدة",
-                "اسم المجموعة (مثل «عملاء الرميزان»):")
-            if not ok or not name.strip():
+            with db(readonly=True) as conn:
+                cand = pg.everyone(conn, self._kind())
+            dlg = AddMembersDialog(self, cand, "", ask_name=True)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
                 return
+            name = dlg.name.text().strip()
+            if not name:
+                raise ValueError("أدخل اسم المجموعة — مثل «عملاء الرميزان»")
+            ids = dlg.chosen()
             with db() as conn:
                 gid = pg.create_group(conn, name, self.user["username"],
                                       self._kind())
+                n = (pg.assign(conn, ids, gid, self.user["username"],
+                               self._kind()) if ids else 0)
+            if n:
+                info(self, f"أُنشئت «{name}» ونُقل إليها {n} — خرجوا من"
+                           " مجموعاتهم السابقة، والأرصدة والكشوف كما هي.")
             self.refresh(keep=gid)
         except Exception as e:
             err(self, e)
@@ -395,27 +430,14 @@ class PartyGroupsScreen(QtWidgets.QWidget):
         try:
             gid = self._real_gid()
             g = next(x for x in self.groups if x["id"] == gid)
+            # من أي مجموعةٍ كانت (أو بلا مجموعة) — عدا من هم فيها أصلاً
             with db(readonly=True) as conn:
-                inside = {r["entity_id"] for r in self.rows}
-                cand = []
-                for x in [None] + [y["id"] for y in self.groups
-                                   if y["id"] != gid]:
-                    gname = "" if x is None else next(
-                        y["name"] for y in self.groups if y["id"] == x)
-                    for m in pg.members(conn, x, None, self._kind()):
-                        if m["entity_id"] in inside:
-                            continue
-                        m["group"] = gname
-                        cand.append(m)
-            seen, uniq = set(), []
-            for m in cand:
-                if m["entity_id"] not in seen:
-                    seen.add(m["entity_id"])
-                    uniq.append(m)
+                inside = pg.in_group(conn, gid, self._kind())
+                uniq = [m for m in pg.everyone(conn, self._kind())
+                        if m["entity_id"] not in inside]
             if not uniq:
                 raise ValueError("لا جهات أخرى تُضاف — كلها في هذه المجموعة")
-            dlg = AddMembersDialog(self, sorted(uniq, key=lambda m: m["code"]),
-                                   g["name"])
+            dlg = AddMembersDialog(self, uniq, g["name"])
             if dlg.exec_() != QtWidgets.QDialog.Accepted:
                 return
             ids = dlg.chosen()
@@ -424,8 +446,8 @@ class PartyGroupsScreen(QtWidgets.QWidget):
             with db() as conn:
                 n = pg.assign(conn, ids, gid, self.user["username"],
                               self._kind())
-            info(self, f"نُقل {n} إلى «{g['name']}» — الأرصدة والكشوف كما"
-                       " هي.")
+            info(self, f"نُقل {n} إلى «{g['name']}» وخرجوا من مجموعاتهم"
+                       " السابقة — الأرصدة والكشوف كما هي.")
             self.refresh(keep=gid)
         except Exception as e:
             err(self, e)
@@ -473,5 +495,15 @@ class PartyGroupsScreen(QtWidgets.QWidget):
                 self, "party_group", 0 if gid in (None, NO_GROUP) else gid,
                 kind=self._kind(), as_of=dstr(self.as_of),
                 entity_ids=self.visible_entities())
+        except Exception as e:
+            err(self, e)
+
+    def print_all(self):
+        """كل المجموعات: لكلٍّ رصيده وحالته ثم عملاؤه بأرصدتهم."""
+        try:
+            from services import print_manager
+            print_manager.preview_document(
+                self, "party_groups_all", 0, kind=self._kind(),
+                as_of=dstr(self.as_of))
         except Exception as e:
             err(self, e)

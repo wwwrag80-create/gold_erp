@@ -182,6 +182,60 @@ def members(conn, group_id, date_to=None, kind="customer"):
     return out
 
 
+def state(v, gold=False):
+    """حالة الرصيد: مدين (عليه) · دائن (له) · — (صفر)."""
+    eps = 0.0005 if gold else 0.005
+    v = float(v or 0.0)
+    return "مدين" if v > eps else ("دائن" if v < -eps else "—")
+
+
+def everyone(conn, kind="customer", date_to=None):
+    """كل جهات القسم برصيدها ومجموعتها الأقرب (`group_id` None = بلا).
+
+    للإضافة إلى مجموعة «من أي مجموعة»: كلُّ جهةٍ ومكانُها الآن، فتُنقل
+    إلى الجديدة وتخرج من القديمة — ولطباعة المجموعات كلها."""
+    root = root_id(conn, kind)
+    tree = _tree(conn, root)
+    kids = _kids_map(tree)
+    stored = _ids(conn)
+    rows = [r for r in conn.execute(
+        "SELECT id, name, phone, account_id FROM entities"
+        " WHERE is_deleted=0 AND account_id IS NOT NULL").fetchall()
+        if r["account_id"] in tree and r["account_id"] != root]
+    ents = {r["account_id"] for r in rows}
+    grp = {a for a, r in tree.items()
+           if a not in ents and _is_group(conn, r, root, stored, kids)}
+    bal = _balances(conn, ents, date_to)
+    out = []
+    for r in rows:
+        acc = tree[r["account_id"]]
+        p, gid, guard = acc["parent_id"], None, 0
+        while p and p != root and guard < 30:
+            if p in grp:
+                gid = p
+                break
+            p = tree.get(p, {}).get("parent_id")
+            guard += 1
+        g, c = bal.get(r["account_id"], (0.0, 0.0))
+        out.append({"entity_id": r["id"], "name": r["name"],
+                    "phone": r["phone"] or "", "account_id": r["account_id"],
+                    "code": acc["code"], "group_id": gid,
+                    "group": tree[gid]["name"] if gid else "",
+                    "gold": g, "cash": c})
+    out.sort(key=lambda x: x["code"])
+    return out
+
+
+def in_group(conn, group_id, kind="customer"):
+    """معرّفات جهات المجموعة وما تحتها — لاستبعادها من «إضافة إليها»."""
+    root = root_id(conn, kind)
+    tree = _tree(conn, root)
+    sub = set(_subtree(tree, _kids_map(tree), int(group_id)))
+    return {r["id"] for r in conn.execute(
+        "SELECT id, account_id FROM entities WHERE is_deleted=0")
+        if r["account_id"] in sub}
+
+
 def group_of(conn, entity_id):
     """أقرب مجموعةٍ لحساب الجهة — أو None إن كانت تحت الأصل مباشرة."""
     e = conn.execute("SELECT account_id, entity_type FROM entities"

@@ -159,6 +159,11 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         tabs = QtWidgets.QTabWidget()
         tabs.addTab(hist, "سجل حركة الطقم")
         tabs.addTab(turn, "تحليلات دوران المخزون")
+        # لوحات الدوران آلاف الأسطر — تُقرأ حين يُفتح تبويبها لا مع فتح
+        # الشاشة (4.80: كانت نصف ثانيةٍ تُدفع قبل ظهور الشاشة كل مرة)
+        self.tabs = tabs
+        self._turn_stale = True
+        tabs.currentChanged.connect(self._tab_changed)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label(
@@ -208,6 +213,7 @@ class ItemHistoryScreen(QtWidgets.QWidget):
                     conn, dstr(self.d_from), dstr(self.d_to))
             for key, pnl in self.panels.items():
                 pnl.fill_panel(data[key])
+            self._turn_stale = False
         except Exception as e:
             err(self, e)
 
@@ -221,5 +227,12 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    def _tab_changed(self, i):
+        if i == 1 and self._turn_stale:
+            self.load_turnover()
+
     def refresh(self):
-        self.load_turnover()
+        if self.tabs.currentIndex() == 1:
+            self.load_turnover()
+        else:
+            self._turn_stale = True

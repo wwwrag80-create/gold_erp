@@ -2,7 +2,6 @@
 """لوحة التحكم: شريط جانبي RTL + شاشة لكل عملية حسب صلاحية المستخدم.
 تبدأ بلوحة تحكم تفاعلية (بطاقات قابلة للنقر) تتيح Drill-down إلى دفتر
 الأستاذ العام الموحّد لأي حساب في الشجرة."""
-import functools
 import json
 
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -880,6 +879,25 @@ class MainWindow(QtWidgets.QMainWindow):
         # الشاشات الحسّاسة تُحرس برمز دخول قبل فتحها
         if not self._guard_screen(row):
             return
+        # ══ أول فتحٍ لشاشة (4.80): تُبنى وتُحمَّل بياناتها **قبل** أن
+        # تظهر، فتظهر كاملةً مرةً واحدة — لا «جارٍ فتح…» ثم الشاشة.
+        # والقائمة تُرسم أولاً فيُرى تحديدُ البند مع النقرة نفسها.
+        target = self.screens[row]
+        fresh = isinstance(target, Lazy) and not target.built
+        if fresh:
+            try:
+                sb = getattr(self, "sidebar", None)
+                if sb is not None and sb.isVisible():
+                    sb.repaint()
+            except Exception:
+                pass
+            try:
+                target.ensure()
+                fn = getattr(target.real, "refresh", None)
+                if callable(fn):
+                    fn()
+            except Exception:
+                pass
         # نتتبّع الشاشة الحالية بأنفسنا: `stack.currentIndex()` قد
         # لا يعكس الحالة فوراً في كل الأحوال.
         prev = getattr(self, "_current_row", 0)
@@ -958,36 +976,10 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(250, self._update_notes_btn)
         # التحديث مؤجَّل لدورة أحداث لاحقة: يظهر التبديل فورياً
         # ثم تُحمَّل البيانات — فلا تتجمّد الواجهة أثناء الاستعلام.
-        # وأول فتحٍ لشاشة (4.79): يُرسم إطارها أولاً ثم تُبنى — فالنقرة
-        # تُرى فوراً ولا تنتظر بناء الشاشة وقراءة بياناتها
-        if isinstance(screen, Lazy) and not screen.built:
-            QtCore.QTimer.singleShot(
-                0, functools.partial(self._open_pending, screen))
-            return
+        # والشاشة المبنيّة الآن حُمّلت قبل ظهورها: لا تُقرأ مرتين.
         QtCore.QTimer.singleShot(0, lambda: self._mount_screen_tools(screen))
-        if hasattr(screen, "refresh"):
+        if hasattr(screen, "refresh") and not fresh:
             QtCore.QTimer.singleShot(0, self._refresh_current)
-
-    def _open_pending(self, screen):
-        """أول فتحٍ لشاشة: يُرسم الانتقال الآن، ثم تُبنى وتُحمَّل."""
-        row = getattr(self, "_current_row", 0)
-        if not (0 <= row < len(self.screens)) or self.screens[row] is not screen:
-            return                  # انتقل المستخدم إلى غيرها قبل البناء
-        try:
-            app = QtWidgets.QApplication.instance()
-            app.sendPostedEvents(None, QtCore.QEvent.LayoutRequest)
-            cw = self.centralWidget()
-            if cw is not None:
-                cw.repaint()
-        except Exception:
-            pass
-        try:
-            screen.ensure()
-        except Exception:
-            pass
-        self._mount_screen_tools(screen)
-        if hasattr(screen, "refresh"):
-            self._refresh_current()
 
     def _on_update_checked(self):
         """يضيء زر التحديثات إن كان هناك إصدار أحدث منشور."""

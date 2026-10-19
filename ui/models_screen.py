@@ -481,13 +481,18 @@ class ModelsScreen(QtWidgets.QWidget):
                 elif mode == "sold":
                     models = [m for m in models if m["out_count"]]
                 models = self._sorted(models)
+                # الدليل كلّه بقراءةٍ واحدة (4.80) — لا استعلامين لكل
+                # موديل: خمسمئة موديل كانت ألف استعلام عند كل فتح
+                cat = mc.full_catalog(conn)
                 data = {}
                 for m in models:
+                    c = (cat.get(m["model"])
+                         or cat.get(str(m["model"] or "").strip())
+                         or {"sold": [], "in_stock": []})
                     data[m["model"]] = {
-                        "sold": (mc.model_items(conn, m["model"], "sold")
-                                 if mode in ("all", "sold") else []),
-                        "in_stock": (mc.model_items(conn, m["model"],
-                                                    "in_stock")
+                        "sold": (c["sold"] if mode in ("all", "sold")
+                                 else []),
+                        "in_stock": (c["in_stock"]
                                      if mode in ("all", "in_stock") else []),
                     }
             self._fp = fp

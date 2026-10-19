@@ -4064,9 +4064,56 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
 
 
 
+def _pg_bal(v, gold):
+    """(الرصيد بلا إشارة، حالته) لطباعة المجموعات — مدين/دائن."""
+    from models import party_groups as pg
+    st = pg.state(v, gold)
+    if st == "—":
+        return "—", "—"
+    return (_gw(abs(v), 3) if gold else _w(abs(v), 2)), st
+
+
+def _pg_rows(rows, n0=1):
+    body = ""
+    for n, r in enumerate(rows, n0):
+        gv, gs = _pg_bal(r["gold"], True)
+        cv, cs = _pg_bal(r["cash"], False)
+        body += "<tr>" + cells(
+            f"<td>{en(n)}</td>", f"<td>{en(r['code'])}</td>",
+            f'<td class="r">{r["name"]}</td>',
+            f"<td>{en(r['phone'] or '')}</td>",
+            f'<td class="num">{gv}</td>', f"<td>{gs}</td>",
+            f'<td class="num">{cv}</td>', f"<td>{cs}</td>") + "</tr>"
+    return body
+
+
+def _pg_total(label, rows, style):
+    gv, gs = _pg_bal(sum(r["gold"] for r in rows), True)
+    cv, cs = _pg_bal(sum(r["cash"] for r in rows), False)
+    return "<tr>" + cells(
+        f'<td{style} colspan="4" class="r"><b>{label} — {en(len(rows))}'
+        "</b></td>",
+        f'<td class="num"{style}><b>{gv}</b></td>',
+        f"<td{style}><b>{gs}</b></td>",
+        f'<td class="num"{style}><b>{cv}</b></td>',
+        f"<td{style}><b>{cs}</b></td>") + "</tr>"
+
+
+def _pg_head():
+    unit = _kunit()
+    return "<tr>" + cells(
+        thw("م"), thw("الكود"), thw("الاسم"), thw("الهاتف"),
+        thw(f"رصيد الذهب ({unit})"), thw("حالته"),
+        thw("الرصيد النقدي (ريال)"), thw("حالته")) + "</tr>"
+
+
+_PG_TOT = ' style="background-color:#F2EEE4;border-top:2px solid #333"'
+
+
 def _tpl_party_group(conn, group_id=0, kind="customer", as_of=None,
                      entity_ids=None):
-    """أرصدة مجموعة عملاء (4.79) — «عملاء الرميزان»: كل عميلٍ بمديونيته.
+    """أرصدة مجموعة عملاء (4.79) — «عملاء الرميزان»: كل عميلٍ برصيده
+    ذهباً ونقداً وحالة كلٍّ منهما (مدين/دائن)، وصافي المجموعة وحالته.
 
     `entity_ids`: الظاهرون في الشاشة بعد البحث وبترتيبها؛ None = الكل."""
     from models import party_groups as pg
@@ -4083,54 +4130,47 @@ def _tpl_party_group(conn, group_id=0, kind="customer", as_of=None,
         g = conn.execute("SELECT code, name FROM accounts WHERE id=?",
                          (gid,)).fetchone()
         name = f"{g['name']} ({en(g['code'])})" if g else name
-    unit = _kunit()
-
-    def side(v, gold):
-        eps = 0.0005 if gold else 0.005
-        f = (lambda x: _gw(x, 3)) if gold else (lambda x: _w(x, 2))
-        return (f(v), "") if v > eps else (("", f(-v)) if v < -eps
-                                           else ("", ""))
-
-    body = ""
-    sums = [0.0] * 4
-    for n, r in enumerate(rows, 1):
-        gd, gc = side(r["gold"], True)
-        cd, cc = side(r["cash"], False)
-        for k, v in enumerate((r["gold"], r["cash"])):
-            if v > 0:
-                sums[k * 2] += v
-            else:
-                sums[k * 2 + 1] -= v
-        body += "<tr>" + cells(
-            f"<td>{en(n)}</td>", f"<td>{en(r['code'])}</td>",
-            f'<td class="r">{r["name"]}</td>',
-            f"<td>{en(r['phone'] or '')}</td>",
-            f'<td class="num">{gd}</td>', f'<td class="num">{gc}</td>',
-            f'<td class="num">{cd}</td>', f'<td class="num">{cc}</td>'
-        ) + "</tr>"
-    if not body:
-        body = '<tr><td colspan="8">لا عملاء في المجموعة</td></tr>'
-    tst = ' style="background-color:#F2EEE4;border-top:2px solid #333"'
-    body += "<tr>" + cells(
-        f'<td{tst} colspan="4" class="r"><b>الإجمالي — {en(len(rows))}'
-        "</b></td>",
-        f'<td class="num"{tst}><b>{_gw(sums[0], 3)}</b></td>',
-        f'<td class="num"{tst}><b>{_gw(sums[1], 3)}</b></td>',
-        f'<td class="num"{tst}><b>{_w(sums[2], 2)}</b></td>',
-        f'<td class="num"{tst}><b>{_w(sums[3], 2)}</b></td>') + "</tr>"
-    head = "<tr>" + cells(
-        thw("م"), thw("الكود"), thw("الاسم"), thw("الهاتف"),
-        thw(f"ذهب عليه ({unit})"), thw(f"ذهب له ({unit})"),
-        thw("نقد عليه (ريال)"), thw("نقد له (ريال)")) + "</tr>"
-    net_g, net_c = sums[0] - sums[1], sums[2] - sums[3]
-    summ = (f"صافي المجموعة: ذهب {_gw(abs(net_g), 3)} {unit}"
-            f" {'عليها' if net_g >= 0 else 'لها'} · نقد"
-            f" {_w(abs(net_c), 2)} ريال {'عليها' if net_c >= 0 else 'لها'}")
+    body = _pg_rows(rows) or '<tr><td colspan="8">لا عملاء في المجموعة</td></tr>'
+    body += _pg_total("صافي المجموعة", rows, _PG_TOT)
     return (_header(f"أرصدة مجموعة: {name}", "—", d, show_meta=False)
             + '<div align="center" style="font-size:8.5pt;margin:0 0 4px 0">'
             + f"الأرصدة حتى {en(d)}</div>"
-            + f"{TBL}{head}{body}</table>"
-            + f'<div style="margin-top:6px"><b>{summ}</b></div>')
+            + f"{TBL}{_pg_head()}{body}</table>")
+
+
+def _tpl_party_groups_all(conn, _id=0, kind="customer", as_of=None):
+    """المجموعات كلها (4.80): لكل مجموعةٍ رصيدها ذهباً ونقداً وحالة كلٍّ
+    منهما ثم عملاؤها بأرصدتهم، وفي آخرها من بلا مجموعة والإجمالي العام."""
+    from models import party_groups as pg
+    today = _qd(QtCore.QDate.currentDate())
+    d = as_of or today
+    everyone = pg.everyone(conn, kind, d)
+    groups = pg.groups(conn, kind, d)
+    body = ""
+    sec = ' style="background-color:#2b2723;color:#ffffff"'
+    for g in groups:
+        rows = [r for r in everyone if r["group_id"] == g["id"]]
+        gv, gs = _pg_bal(g["gold"], True)
+        cv, cs = _pg_bal(g["cash"], False)
+        body += (f'<tr><td class="r" colspan="4"{sec}><b>{g["name"]}'
+                 f" ({en(g['code'])}) — {en(g['count'])}</b></td>"
+                 f'<td class="num"{sec}><b>{gv}</b></td><td{sec}><b>{gs}'
+                 f'</b></td><td class="num"{sec}><b>{cv}</b></td>'
+                 f"<td{sec}><b>{cs}</b></td></tr>")
+        body += _pg_rows(rows)
+    loose = [r for r in everyone if r["group_id"] is None]
+    if loose:
+        body += (f'<tr><td class="r" colspan="8"{sec}><b>بلا مجموعة — '
+                 f"{en(len(loose))}</b></td></tr>") + _pg_rows(loose)
+    if not body:
+        body = '<tr><td colspan="8">لا مجموعات</td></tr>'
+    body += _pg_total(f"الإجمالي العام — {pg.KIND_LABELS[kind]}", everyone,
+                      _PG_TOT)
+    return (_header(f"أرصدة مجموعات {pg.KIND_LABELS[kind]}", "—", d,
+                    show_meta=False)
+            + '<div align="center" style="font-size:8.5pt;margin:0 0 4px 0">'
+            + f"الأرصدة حتى {en(d)} · {en(len(groups))} مجموعة</div>"
+            + f"{TBL}{_pg_head()}{body}</table>")
 
 
 def _tpl_scrap_karat(conn, karat, date_from=None, date_to=None, only=None,
@@ -4611,6 +4651,7 @@ BUILDERS = {
     "customer_board": _tpl_customer_board,
     "scrap_karat": _tpl_scrap_karat,
     "party_group": _tpl_party_group,
+    "party_groups_all": _tpl_party_groups_all,
 }
 
 DOC_LABELS = {

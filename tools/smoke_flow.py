@@ -8526,10 +8526,40 @@ def main():
         encoding="utf-8")
     _mwin109 = pathlib.Path(ROOT, "ui", "main_window.py").read_text(
         encoding="utf-8")
-    check("الفتح: الشاشة تُرسم قبل بنائها، ومصغّرات الدليل بلا قفل الواجهة",
-          "_open_pending" in _mwin109 and "_build_queued" in _lw109
+    # 4.80: الشاشة تُبنى وتُحمَّل قبل أن تظهر — لا «جارٍ فتح» يُرى
+    check("الفتح: الشاشة تظهر كاملةً بلا «جارٍ فتح»، ومصغّرات الدليل بلا"
+          " قفل الواجهة",
+          "fresh = isinstance(target, Lazy)" in _mwin109
+          and 'QLabel("")' in _lw109
           and callable(getattr(_mw109, "_pil_thumb", None))
           and callable(getattr(_mw109, "_disk_path", None)))
+
+    # ══ 110) 4.80: حالة الرصيد في المجموعات · المجموعات كلها · فحصٌ تراكمي ══
+    from models import integrity as _ig110
+    with db() as conn:
+        _B110 = add_entity(conn, "عميل دائن 110", "customer",
+                           username="admin", open_cash=-40.0)
+        _G110 = _pg109.create_group(conn, "مجموعة 110", "admin")
+        # من مجموعته السابقة (109) إلى الجديدة — ويخرج من الأولى
+        _pg109.assign(conn, [_A109, _B110], _G110, "admin")
+        _in109 = {m["entity_id"] for m in _pg109.members(conn, _G109)}
+        _in110 = {m["entity_id"]: m for m in _pg109.members(conn, _G110)}
+    check("مجموعات العملاء: الحساب ينتقل من مجموعةٍ إلى أخرى ويخرج من"
+          " الأولى", _A109 not in _in109 and _A109 in _in110,
+          f"{_in109} · {list(_in110)}")
+    check("وحالة الرصيد: الدائن «دائن»",
+          _pg109.state(_in110[_B110]["cash"]) == "دائن")
+    _ha110 = _pm.build_html("party_groups_all", 0, kind="customer")
+    check("معاينة كل المجموعات: كلٌّ برصيده وحالته ثم عملاؤه",
+          "مجموعة 110" in _ha110 and "عملاء الرميزان 109" in _ha110
+          and "الإجمالي العام" in _ha110 and "حالته" in _ha110)
+    _ig110.forget()
+    with db(readonly=True) as conn:
+        _f110 = _ig110.verify(conn, full=True)
+        _i110 = _ig110.verify(conn)
+    check("سلامة السجل: الفحص التراكمي يطابق الكامل",
+          _f110["ok"] == _i110["ok"]
+          and _f110["checked"] == _i110["checked"], f"{_f110} · {_i110}")
 
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103

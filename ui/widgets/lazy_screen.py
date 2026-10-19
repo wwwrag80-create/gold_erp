@@ -25,11 +25,11 @@ class LazyScreen(QtWidgets.QWidget):
         super().__init__()
         self._factory = factory
         self._real = None
-        self._queued = False
         self._title = title
         self._lay = QtWidgets.QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
-        self._placeholder = QtWidgets.QLabel(f"جارٍ فتح {title}…")
+        # فارغٌ لا «جارٍ فتح…» (4.80): الشاشة تُبنى قبل أن تظهر
+        self._placeholder = QtWidgets.QLabel("")
         self._placeholder.setAlignment(QtCore.Qt.AlignCenter)
         self._lay.addWidget(self._placeholder)
 
@@ -60,25 +60,13 @@ class LazyScreen(QtWidgets.QWidget):
         return self.ensure()
 
     def showEvent(self, e):
-        """أول ظهور يبني الشاشة — **بعد** أن يُرسم (4.79).
-
-        البناء داخل حدث الظهور كان يؤخّر أول رسمٍ حتى تكتمل الشاشة
-        وبياناتها، فتبدو النقرة بلا أثر. الآن يظهر «جارٍ فتح…» فوراً
-        وتُبنى الشاشة في الدورة التالية (`MainWindow._open_pending` يسبقه
-        عادةً؛ وهذا احتياطٌ لكل ظهورٍ آخر)."""
+        """أول ظهور يبني الشاشة — احتياطاً: `MainWindow.switch` يبنيها
+        ويحمّل بياناتها قبل أن تظهر (4.80)، فلا يُرى غلافٌ فارغ."""
+        try:
+            self.ensure()
+        except Exception:
+            pass
         super().showEvent(e)
-        if self.__dict__.get("_real") is None \
-                and not self.__dict__.get("_queued"):
-            self._queued = True
-            QtCore.QTimer.singleShot(30, self._build_queued)
-
-    def _build_queued(self):
-        self._queued = False
-        if self.__dict__.get("_real") is None and self.isVisible():
-            try:
-                self.ensure()
-            except Exception:
-                pass
 
     def release(self):
         """يُغلق الشاشة ويُحرّر مواردها عند مغادرتها.
@@ -114,8 +102,7 @@ class LazyScreen(QtWidgets.QWidget):
         self._real = None
         # عنصر نائب حتى الفتح التالي
         try:
-            self._placeholder = QtWidgets.QLabel(
-                f"جارٍ فتح {self._title}…")
+            self._placeholder = QtWidgets.QLabel("")
             self._placeholder.setAlignment(QtCore.Qt.AlignCenter)
             self._lay.addWidget(self._placeholder)
         except Exception:

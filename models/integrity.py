@@ -192,6 +192,7 @@ def _rebuild_from(conn, entry_id):
     تقطع السلسلة عند موضعها (الشرح كاملاً فوق).
     """
     # بما فيه المحذوف منطقياً: حلقةٌ متروكة تقطع السلسلة عند موضعها.
+    forget()
     rows = conn.execute(
         "SELECT id FROM journal_entries WHERE id>=? ORDER BY id",
         (int(entry_id),)).fetchall()
@@ -288,6 +289,8 @@ def seal_all(conn, username=None):
     ids = [r["id"] for r in conn.execute(
         "SELECT id FROM journal_entries"
         " WHERE row_hash IS NULL OR row_hash='' ORDER BY id")]
+    if ids:
+        forget()
     for eid in ids:
         seal_entry(conn, eid)
     if ids:
@@ -300,7 +303,55 @@ def seal_all(conn, username=None):
     return len(ids)
 
 
-def verify(conn, max_breaks=50):
+# ══════════════════════════════════════════════════════════════════
+#  فحصٌ تراكمي داخل الجلسة (4.80)
+# ------------------------------------------------------------------
+#  إعادة حساب بصمة كل قيدٍ عند كل فتحٍ لشاشة «سلامة السجل» أو «صحة
+#  النظام» عملٌ يكبر مع الدفتر (ثانيةٌ لكل ~15 ألف قيد) فيؤخّر فتحها.
+#  فيُحفظ في الذاكرة آخر ما ثبتت سلامته ومعه **بصمةٌ إجمالية** لمضمون
+#  ما قبله من القاعدة نفسها (أعداد ومجاميع وأطوال)؛ فإن طابقت في الفحص
+#  التالي لم يُعَد إلا ما أُضيف بعده. وأول فحصٍ في كل تشغيل كامل،
+#  وزر «فحص الآن» كامل دائماً (`full=True`)، وأي ختمٍ أو إعادة بناء
+#  داخل النظام يُسقط المحفوظ.
+# ══════════════════════════════════════════════════════════════════
+
+_MEMO = {}
+
+
+def forget():
+    """يُسقط ما حُفظ من فحصٍ سابق — بعد كل ختمٍ أو إعادة بناء."""
+    _MEMO.clear()
+
+
+def _db_key(conn):
+    try:
+        return str(conn.execute("PRAGMA database_list").fetchone()[2])
+    except Exception:
+        return ""
+
+
+def _fingerprint(conn, upto):
+    """بصمةٌ إجمالية لمضمون القيود حتى `upto` — من SQL لا من بايثون.
+    بما فيه المحذوف منطقياً، كالسلسلة نفسها."""
+    e = conn.execute(
+        "SELECT COUNT(*), TOTAL(julianday(entry_date)),"
+        " TOTAL(LENGTH(COALESCE(doc_no,'')) + LENGTH(COALESCE(description,''))"
+        " + LENGTH(COALESCE(user_note,'')) + LENGTH(COALESCE(created_by,''))"
+        " + LENGTH(COALESCE(source_table,''))), TOTAL(COALESCE(source_id,0)),"
+        " TOTAL(LENGTH(COALESCE(row_hash,'')))"
+        " FROM journal_entries WHERE id<=?", (upto,)).fetchone()
+    l = conn.execute(
+        "SELECT COUNT(*), TOTAL(account_id), TOTAL(gold_debit),"
+        " TOTAL(gold_credit), TOTAL(cash_debit), TOTAL(cash_credit),"
+        " TOTAL(LENGTH(COALESCE(line_desc,'')))"
+        " FROM journal_lines WHERE entry_id<=?", (upto,)).fetchone()
+    h = conn.execute("SELECT row_hash FROM journal_entries WHERE id=?",
+                     (upto,)).fetchone()
+    return (tuple(round(x, 6) if isinstance(x, float) else x
+                  for x in tuple(e) + tuple(l)), (h[0] if h else None))
+
+
+def verify(conn, max_breaks=50, full=False):
     """يتحقّق من السلسلة كلها ويعيد تقريراً بما وُجد.
 
     يمرّ على القيود المختومة بترتيب معرّفاتها، ويعيد حساب بصمة كل
@@ -319,14 +370,32 @@ def verify(conn, max_breaks=50):
     """
     out = {"checked": 0, "unsealed": 0, "breaks": [], "ok": True,
            "first_sealed": None, "last_sealed": None}
+    key = _db_key(conn)
+    start, prev_seen = 0, GENESIS
+    memo = None if full else _MEMO.get(key)
     try:
+        if memo and _fingerprint(conn, memo["upto"]) == memo["fp"]:
+            out = dict(memo["out"], breaks=[])
+            start, prev_seen = memo["upto"], memo["prev"]
+    except Exception:
+        start, prev_seen = 0, GENESIS
+    try:
+        # بما فيه المحذوف منطقياً: شرطُ استمرار السلسلة (الشرح فوق)
         rows = conn.execute(
             "SELECT id, entry_date, doc_no, description, user_note,"
             " source_table, source_id, created_by, row_hash, prev_hash"
-            " FROM journal_entries ORDER BY id").fetchall()
+            " FROM journal_entries WHERE id>? ORDER BY id",
+            (start,)).fetchall()
     except Exception:
         return out
-    prev_seen = GENESIS
+    # أسطر القيود كلها بقراءةٍ واحدة مرتّبة (4.80) — لا استعلامٌ لكل قيد:
+    # كانت فحصاً يكبر مع الدفتر حتى يؤخّر فتح «صحة النظام» ثوانيَ
+    by_entry = {}
+    for l in conn.execute(
+            "SELECT entry_id, account_id, gold_debit, gold_credit,"
+            " cash_debit, cash_credit, line_desc FROM journal_lines"
+            " WHERE entry_id>? ORDER BY entry_id, id", (start,)):
+        by_entry.setdefault(l["entry_id"], []).append(l)
     for e in rows:
         stored = (e["row_hash"] or "").strip()
         if not stored:
@@ -336,10 +405,7 @@ def verify(conn, max_breaks=50):
         if out["first_sealed"] is None:
             out["first_sealed"] = e["id"]
         out["last_sealed"] = e["id"]
-        lines = conn.execute(
-            "SELECT account_id, gold_debit, gold_credit, cash_debit,"
-            " cash_credit, line_desc FROM journal_lines"
-            " WHERE entry_id=? ORDER BY id", (e["id"],)).fetchall()
+        lines = by_entry.get(e["id"], [])
         stored_prev = (e["prev_hash"] or GENESIS).strip() or GENESIS
         kind = ""
         if stored_prev != prev_seen:
@@ -355,6 +421,18 @@ def verify(conn, max_breaks=50):
         if kind:
             out["ok"] = False
         prev_seen = stored
+    # ما ثبتت سلامته يُحفظ ليُستأنف منه — ولا يُحفظ خللٌ أبداً
+    if out["ok"]:
+        try:
+            upto = rows[-1]["id"] if rows else start
+            if upto:
+                _MEMO[key] = {"upto": upto, "prev": prev_seen,
+                              "fp": _fingerprint(conn, upto),
+                              "out": dict(out, breaks=[])}
+        except Exception:
+            _MEMO.pop(key, None)
+    else:
+        _MEMO.pop(key, None)
     return out
 
 

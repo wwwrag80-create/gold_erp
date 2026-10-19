@@ -30,7 +30,8 @@ class IntegrityScreen(QtWidgets.QWidget):
         self.detail.setWordWrap(True)
 
         btn_check = kit.PushButton("🔍 تحقّق الآن")
-        btn_check.clicked.connect(self.run_check)
+        # الزرّ فحصٌ كامل دائماً؛ وفتح الشاشة يستأنف ما ثبت في الجلسة
+        btn_check.clicked.connect(self.check_full)
         self.btn_seal = kit.PushButton("🔒 ختم القيود غير المختومة")
         self.btn_seal.setObjectName("ghost")
         self.btn_seal.clicked.connect(self.seal)
@@ -76,10 +77,13 @@ class IntegrityScreen(QtWidgets.QWidget):
         note.setWordWrap(True)
         lay.addWidget(note)
 
-    def run_check(self):
+    def check_full(self):
+        self.run_check(full=True)
+
+    def run_check(self, full=False):
         try:
             with db(readonly=True) as conn:
-                rep = integrity.verify(conn)
+                rep = integrity.verify(conn, full=bool(full))
         except Exception as e:
             err(self, e)
             return
@@ -124,7 +128,7 @@ class IntegrityScreen(QtWidgets.QWidget):
             with db() as conn:
                 n = integrity.seal_all(conn, self.user.get("username"))
             info(self, f"خُتم {n:,} قيداً.")
-            self.run_check()
+            self.run_check(full=True)
         except Exception as e:
             err(self, e)
 
@@ -145,7 +149,7 @@ class IntegrityScreen(QtWidgets.QWidget):
             with db() as conn:
                 n = integrity.rebuild(conn, username=self.user.get("username"))
             info(self, f"أُعيد بناء السلسلة — {n:,} قيداً.")
-            self.run_check()
+            self.run_check(full=True)
         except Exception as e:
             err(self, e)
 
