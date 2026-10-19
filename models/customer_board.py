@@ -266,6 +266,8 @@ def board(conn, date_from=None, date_to=None):
                         THEN 'returns'
                    WHEN e.source_table='vouchers' AND v.kind='receipt'
                         THEN 'paid'
+                   WHEN e.source_table='vouchers' AND v.kind='payment'
+                        THEN 'paysale'
                    WHEN e.source_table='fixing_ops' THEN 'fixing'
                    WHEN COALESCE(e.source_table,'') IN ('', {read_src})
                         THEN 'read'
@@ -323,6 +325,12 @@ def board(conn, date_from=None, date_to=None):
                 a["ls"] = max(a["ls"], r["d"] or "")
             if "paid" in cats:
                 a["lp"] = max(a["lp"], r["d"] or "")
+            continue
+        if cat == "paysale":
+            # **سند الصرف مبيعات** (4.77): ما صُرف للعميل صار عليه كما
+            # تصير عليه الفاتورة — فيُحسب في «المبيعات» لا في «حركات
+            # أخرى». وليس فاتورةً فلا يُعدّ في عدد الفواتير ولا آخر بيع.
+            _add(a, "sales", g, c)
             continue
         if cat == "fixing":
             # **التسكير سداد**: ذهبُ العميل سُوّي بسعره فانطفأ دينُه
@@ -475,6 +483,8 @@ def detail(conn, account_id, date_from=None, date_to=None):
             why = "فاتورة " + ("مرتجع" if cat == "returns" else "بيع")
         elif src == "vouchers" and r["op"] == "قبض":
             cat, why = "paid", "سند قبض"
+        elif src == "vouchers" and r["op"] == "صرف":
+            cat, why = "sales", "سند صرف — صُرف له فصار عليه: مبيعات"
         elif src == "fixing_ops":
             _put(r, "paid", g, 0.0, "تسكير: ذهبٌ سُوّي بسعره — سداد")
             _put(r, "sales", 0.0, c, "تسكير: قيمة الذهب المسكَّر نقداً")
@@ -498,7 +508,8 @@ def _why(cat, v):
     debit = v > 0
     return {
         "open": "قيدٌ يومي مقابل «الأرصدة الافتتاحية»",
-        "sales": "قيدٌ يومي: صار مديناً مقابل جهةٍ أو بضاعةٍ أو إيراد",
+        "sales": ("قيدٌ يومي: صار مديناً مقابل جهةٍ أو بضاعةٍ أو إيراد"
+                  " أو صُرف له من الصندوق"),
         "returns": "قيدٌ يومي: صار دائناً مقابل جهةٍ أو بضاعةٍ",
         "paid": "قيدٌ يومي: صار دائناً مقابل صندوقٍ أو خزينةٍ أو خصم",
         "other": ("قيدٌ يومي: صُرف له من الصندوق" if debit

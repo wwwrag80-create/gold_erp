@@ -4621,11 +4621,13 @@ def main():
         check("وبضاعةٌ أعادها إلى الذهب المشغول مرتجع",
               abs(_M["gold"]["returns"] - 5.0) < 0.001,
               str(_M["gold"]["returns"]))
-        check("ونقدٌ دفعه للصندوق سداد، ونقدٌ صُرف له «أخرى» باسم القيد",
+        # 4.77: نقدٌ صُرف له مبيعات (صار عليه) — لا «أخرى»
+        check("ونقدٌ دفعه للصندوق سداد، ونقدٌ صُرف له مبيعات",
               abs(_M["cash"]["paid"] - 300.0) < 0.01
-              and abs(_M["cash"]["other"] - 50.0) < 0.01
-              and "قيد يومي" in _M["cash"]["other_parts"],
-              f"{_M['cash']['paid']} · {_M['cash']['other_parts']}")
+              and abs(_M["cash"]["other"]) < 0.01
+              and _M["cash"]["sales"] >= 50.0 - 0.01,
+              f"{_M['cash']['paid']} · {_M['cash']['sales']}"
+              f" · {_M['cash']['other_parts']}")
         check("والقيد المقسوم يُقسم بحصصه: نصفه مبيعات ونصفه رصيدٌ سابق",
               abs(_M["gold"]["open"] - 20.0) < 0.001,
               str(_M["gold"]["open"]))
@@ -4690,9 +4692,11 @@ def main():
         _s51.search.setText("محمد القيد")
         _s51.tabs.setCurrentIndex(1)
         _s51.t_cash.setCurrentCell(0, 0)
-        check("تلميح «حركات أخرى» يسمّي ما فيها",
-              "قيد يومي" in (_s51.t_cash.item(0, 6).toolTip() or ""),
-              _s51.t_cash.item(0, 6).toolTip()[:40])
+        # 4.77: ما صُرف له نقداً صار «مبيعات» فلا «حركات أخرى» نقدية
+        # هنا — وعمودها يُخفى إن خلا
+        check("«حركات أخرى» تُخفى حين لا يبقى فيها شيء (الصرف صار مبيعات)",
+              _s51.t_cash.isColumnHidden(6)
+              or "قيد يومي" in (_s51.t_cash.item(0, 6).toolTip() or ""))
         with db(readonly=True) as conn:
             _dd = _MD51(_s51, "محمد", _cb51.detail(conn, _ma))
         check("نافذة التفصيل تُبنى بأعمدتها وسبب كل قيد",
@@ -8329,6 +8333,39 @@ def main():
           f"{_back106} {_flip106}")
     check("حذف توريد طقمٍ واحد لا يحذف إخوته في دفعته، وتوريد ما تحرّك لا"
           " يُحذف", _live106 == 2 and _guard106, f"{_live106} {_guard106}")
+    step("107) 4.77: سند الصرف مبيعات · خزينة التصنيع صرفاً وقبضاً · تفصيل التدفقات")
+    from models import customer_board as _cb107, workshop_losses as _wl107
+    from models import statements as _st107
+    from models.vouchers import create_voucher as _cv107
+    _d107 = date.today().isoformat()
+    with db() as conn:
+        _e107 = _en103.add_entity(conn, "عميل ١٠٧", "customer",
+                                  username="admin")
+        _cv107(conn, "payment", _d107, "admin", entity_id=_e107,
+               cash_amount=250)
+        _r107 = next(r for r in _cb107.board(conn, _d107, _d107)["rows"]
+                     if r["name"] == "عميل ١٠٧")
+        _t107 = _wl107.loss_types(conn)[0]["id"]
+        _p107 = _wl107.create_loss(conn, _t107, 2.0, _d107, "admin")
+        _q107 = _wl107.create_loss(conn, _t107, 0.5, _d107, "admin",
+                                   kind="receipt")
+        _cf107 = _st107.cash_flow(conn, f"{_d107[:4]}-01-01", _d107, False)
+        _bad107 = [r["key"] for m in ("indirect", "direct")
+                   for r in _st107.cf_layout(_cf107, m)
+                   if r["kind"] != "sec" and r["key"] != "noncash"
+                   and abs(_st107.cf_detail(conn, f"{_d107[:4]}-01-01",
+                                            _d107, r["key"])["total"]
+                           - r["cash"]) > 0.011]
+    check("سند الصرف للعميل في «المبيعات» لا «حركات أخرى»",
+          abs(_r107["cash"]["sales"] - 250) < 0.01
+          and abs(_r107["cash"]["other"]) < 0.01, str(_r107["cash"]))
+    check("خزينة التصنيع: صرفٌ وقبض بقيدين متعاكسين ولكلٍّ قالبه",
+          "سند صرف — خزينة التصنيع" in _pm.build_body(
+              "workshop_losses", _p107["id"])
+          and "سند قبض — خزينة التصنيع" in _pm.build_body(
+              "workshop_losses", _q107["id"]))
+    check("التدفقات النقدية: تفصيل كل بندٍ يساوي رقمه", not _bad107,
+          str(_bad107))
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

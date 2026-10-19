@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""تسوية فواقد الورشة.
+"""تسوية فواقد الورشة — عمليات خزينة التصنيع (صرف · قبض).
 
-**المنطق المحاسبي**: الفاقد خروج فعلي للذهب من خزينة التصنيع بلا
-مقابل، فيُثبت مصروفاً بنوعه:
+**المنطق المحاسبي**: كل عمليةٍ طرفُها خزينة التصنيع، والطرف الآخر
+حسابٌ يُختار (أنواع الفاقد تحت «فواقد الورشة» ويُضاف إليها):
 
-    مدين  حـ/ فاقد <النوع>        بالوزن
-    دائن  حـ/ خزينة التصنيع       بالوزن نفسه
+    صرف (فاقد خرج من الخزينة):   مدين حـ/ <الحساب>   ·  دائن حـ/ خزينة التصنيع
+    قبض (ذهب عاد إلى الخزينة):   مدين حـ/ خزينة التصنيع  ·  دائن حـ/ <الحساب>
 
 فيبقى ميزان الذهب متوازناً، ويُعرف نصيب كل مرحلة تشغيلية من الفاقد
-على حدة (بوليش · صب · كاستنج · تلميع · الترا بوليش · وما يُضاف).
+صافياً (المصروف ناقص المسترجع). ولكل عمليةٍ سندُها المطبوع (4.77).
 """
 import datetime as _dt
 
@@ -35,11 +35,19 @@ CREATE TABLE IF NOT EXISTS workshop_losses(
 """
 
 
+KINDS = {"payment": "صرف", "receipt": "قبض"}
+
+
 def ensure_schema(conn):
     for stmt in SCHEMA.split(";"):
         stmt = stmt.strip()
         if stmt:
             conn.execute(stmt)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(workshop_losses)")}
+    if "kind" not in cols:
+        # السندات السابقة كلها فواقد مصروفة من الخزينة
+        conn.execute("ALTER TABLE workshop_losses ADD COLUMN kind TEXT"
+                     " NOT NULL DEFAULT 'payment'")
 
 
 def loss_types(conn):
@@ -80,14 +88,21 @@ def add_loss_type(conn, name, username):
 
 def next_doc_no(conn):
     ensure_schema(conn)
+    # العدّ يشمل المحذوف: لا يُعاد رقمُ سندٍ حُذف فيلتبس بغيره
     n = conn.execute("SELECT COUNT(*) c FROM workshop_losses").fetchone()["c"]
     return f"WL-{n + 1:05d}"
 
 
 def create_loss(conn, account_id, weight, loss_date, username,
-                description="", doc_no=None):
-    """يرحّل فاقد ورشة: مدين حساب الفاقد / دائن خزينة التصنيع."""
+                description="", doc_no=None, kind="payment"):
+    """يرحّل عملية خزينة التصنيع.
+
+    `kind="payment"` صرف: مدين الحساب / دائن خزينة التصنيع (الفاقد).
+    `kind="receipt"` قبض: مدين خزينة التصنيع / دائن الحساب (ما استُرجع).
+    """
     ensure_schema(conn)
+    if kind not in KINDS:
+        raise ValueError("اختر نوع العملية: صرف أو قبض")
     w = round(float(weight or 0), 3)
     if w <= 0:
         raise ValueError("أدخل وزن الفاقد")
@@ -98,29 +113,31 @@ def create_loss(conn, account_id, weight, loss_date, username,
         raise ValueError("اختر نوع الفاقد")
     date = loss_date or _dt.date.today().isoformat()
     no = doc_no or next_doc_no(conn)
-    desc = f"{acc['name']} — {w:,.2f} جم"
+    desc = f"{KINDS[kind]} خزينة التصنيع — {acc['name']} — {w:,.2f} جم"
     if description.strip():
         desc += f" — {description.strip()}"
 
     cur = conn.execute(
         "INSERT INTO workshop_losses(doc_no,loss_date,account_id,weight,"
-        "description,created_by) VALUES(?,?,?,?,?,?)",
-        (no, date, account_id, w, description.strip(), username))
+        "description,created_by,kind) VALUES(?,?,?,?,?,?,?)",
+        (no, date, account_id, w, description.strip(), username, kind))
     loss_id = cur.lastrowid
 
+    treasury = acc_id(conn, MFG_TREASURY)
+    out, back = (acc["id"], treasury) if kind == "payment" else \
+        (treasury, acc["id"])
     entry_id = post_entry(
         conn, date, desc,
-        [{"account_id": acc["id"], "gold_debit": w, "line_desc": desc},
-         {"account_id": acc_id(conn, MFG_TREASURY), "gold_credit": w,
-          "line_desc": desc}],
+        [{"account_id": out, "gold_debit": w, "line_desc": desc},
+         {"account_id": back, "gold_credit": w, "line_desc": desc}],
         source_table="workshop_losses", source_id=loss_id,
         username=username, note=description.strip() or desc)
     conn.execute("UPDATE workshop_losses SET entry_id=? WHERE id=?",
                  (entry_id, loss_id))
     log_action(conn, username, "create", "workshop_losses", loss_id,
-               f"فاقد {acc['name']}: {w:,.3f} جم")
+               f"{KINDS[kind]} خزينة التصنيع — {acc['name']}: {w:,.3f} جم")
     return {"id": loss_id, "doc_no": no, "entry_id": entry_id,
-            "weight": w, "account": acc["name"]}
+            "weight": w, "account": acc["name"], "kind": kind}
 
 
 def list_losses(conn, date_from=None, date_to=None):
@@ -142,7 +159,8 @@ def period_totals(conn, date_from, date_to):
     """إجمالي الفاقد وزناً لكل نوع خلال الفترة — للملخص الشهري."""
     ensure_schema(conn)
     rows = conn.execute(
-        "SELECT a.name, COALESCE(SUM(l.weight),0) w"
+        "SELECT a.name, COALESCE(SUM(CASE WHEN l.kind='receipt'"
+        " THEN -l.weight ELSE l.weight END),0) w"
         " FROM workshop_losses l JOIN accounts a ON a.id=l.account_id"
         " WHERE l.is_deleted=0 AND l.loss_date BETWEEN ? AND ?"
         " GROUP BY a.id ORDER BY a.code", (date_from, date_to)).fetchall()
@@ -152,7 +170,8 @@ def period_totals(conn, date_from, date_to):
 def total_weight(conn, date_from, date_to):
     ensure_schema(conn)
     r = conn.execute(
-        "SELECT COALESCE(SUM(weight),0) w FROM workshop_losses"
+        "SELECT COALESCE(SUM(CASE WHEN kind='receipt' THEN -weight"
+        " ELSE weight END),0) w FROM workshop_losses"
         " WHERE is_deleted=0 AND loss_date BETWEEN ? AND ?",
         (date_from, date_to)).fetchone()
     return round(r["w"] or 0, 3)
@@ -184,11 +203,22 @@ def delete_loss(conn, loss_id, username, reason=""):
     conn.execute("UPDATE workshop_losses SET is_deleted=1 WHERE id=?",
                  (loss_id,))
     log_action(conn, username, "delete", "workshop_losses", loss_id,
-               f"حذف سند فاقد {row['doc_no']} — {row['acc_name']} "
+               f"حذف سند {KINDS.get(row['kind'], 'صرف')} {row['doc_no']}"
+               f" — {row['acc_name']} "
                f"{row['weight']:,.3f} جم"
                + (f" | {reason}" if reason else ""))
     return {"doc_no": row["doc_no"], "weight": row["weight"],
-            "account": row["acc_name"]}
+            "account": row["acc_name"], "kind": row["kind"]}
+
+
+def get_loss(conn, loss_id):
+    """سند واحد بحسابه وقيده — لقالب طباعته."""
+    ensure_schema(conn)
+    r = conn.execute(
+        "SELECT l.*, a.name acc_name, a.code acc_code"
+        " FROM workshop_losses l JOIN accounts a ON a.id=l.account_id"
+        " WHERE l.id=?", (loss_id,)).fetchone()
+    return dict(r) if r else None
 
 
 def purge_orphans(conn, username="system"):

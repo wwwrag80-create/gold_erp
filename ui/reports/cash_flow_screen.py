@@ -85,6 +85,10 @@ class CashFlowScreen(QtWidgets.QWidget):
 
         self.table = make_table()
         _enhance(self.table, key="cash_flow")
+        # نقرةٌ على أي بندٍ تفصّل حركته (4.77): ما هو، ومن أي مستند،
+        # ونوعه وجهته — والمجموع يساوي رقم البند
+        self.table.cellClicked.connect(self.show_detail)
+        self.table.setToolTip("انقر أي بندٍ لتفصيل حركته")
         self.status = QtWidgets.QLabel("")
         self.status.setWordWrap(True)
 
@@ -188,6 +192,21 @@ class CashFlowScreen(QtWidgets.QWidget):
             "color:#0F5A24;font-weight:bold" if ok
             else "color:#9A0018;font-weight:bold")
 
+    def show_detail(self, row, _col=0):
+        """تفصيل البند المنقور: كل قيدٍ أسهم فيه بحصّته."""
+        try:
+            if not self.cf or not (0 <= row < len(self.rows)):
+                return
+            r = self.rows[row]
+            if r["kind"] == "sec":
+                return
+            f, t = self.cf["date_from"], self.cf["date_to"]
+            with db(readonly=True) as conn:
+                d = statements.cf_detail(conn, f, t, r["key"])
+            CashFlowDetail(self, r["label"].strip(), r["cash"], d, f, t).exec_()
+        except Exception as e:
+            err(self, e)
+
     def show_movement(self):
         """النقد وما في حكمه: كل صندوقٍ وبنك برصيده، ومنه كشف حركته."""
         from models.accounts import subtree_ids_by_code
@@ -256,3 +275,84 @@ class CashFlowScreen(QtWidgets.QWidget):
     def refresh(self):
         if self.cf is not None:
             self.load()
+
+
+class CashFlowDetail(QtWidgets.QDialog):
+    """حركة بندٍ من التدفقات النقدية: التاريخ · النوع · المستند · البيان ·
+    الحساب · الجهة · الصندوق/البنك · المبلغ — ونقرةٌ مزدوجة تفتح المستند."""
+
+    COLS = ["التاريخ", "النوع", "رقم المستند", "البيان", "الحساب",
+            "الجهة", "الصندوق / البنك", "المبلغ (ريال)"]
+
+    def __init__(self, parent, label, value, detail, d1, d2):
+        super().__init__(parent)
+        self.setWindowTitle(f"تفصيل: {label}")
+        self.resize(1180, 620)
+        self.rows = detail["rows"]
+        head = QtWidgets.QLabel(
+            f"<b>{label}</b>   ·   من {d1} إلى {d2}   ·   رقم البند في "
+            f"القائمة: <b>{money(value)}</b> ريال")
+        head.setWordWrap(True)
+        note = QtWidgets.QLabel(
+            (detail.get("note") or "") + ("  " if detail.get("note") else "")
+            + "الموجب يزيد النقد والسالب ينقصه. نقرةٌ مزدوجة على سطرٍ "
+              "تفتح مستنده.")
+        note.setObjectName("cardSub")
+        note.setWordWrap(True)
+        self.table = make_table()
+        _enhance(self.table, key="cash_flow_detail")
+        self.table.setColumnCount(len(self.COLS))
+        self.table.setHorizontalHeaderLabels(self.COLS)
+        self.table.setRowCount(len(self.rows))
+        for i, x in enumerate(self.rows):
+            vals = [x["date"], x["type"], x["doc_no"] or "—",
+                    x["desc"] or "—", x["account"], x["party"] or "—",
+                    x["cash_acc"], money(x["amount"])]
+            for c, v in enumerate(vals):
+                it = QtWidgets.QTableWidgetItem(str(v))
+                it.setTextAlignment(
+                    (QtCore.Qt.AlignRight if c in (3, 4, 5, 6)
+                     else QtCore.Qt.AlignCenter) | QtCore.Qt.AlignVCenter)
+                self.table.setItem(i, c, it)
+        self.table.itemDoubleClicked.connect(self.open_doc)
+        try:
+            from ui.widgets.table_fit import fit_columns
+            fit_columns(self.table, [9, 11, 9, 22, 15, 13, 12, 9])
+        except Exception:
+            pass
+        total = QtWidgets.QLabel(
+            f"{len(self.rows)} حركة   ·   المجموع: "
+            f"<b>{money(detail['total'])}</b> ريال"
+            + ("   ✔ يطابق البند" if abs(detail["total"] - value) < 0.011
+               else f"   ✘ يخالف البند بـ {money(detail['total'] - value)}"))
+        btn_open = kit.PushButton("📄 فتح المستند المحدد")
+        btn_open.clicked.connect(self.open_doc)
+        btn_close = kit.PushButton("إغلاق")
+        btn_close.setObjectName("ghost")
+        btn_close.clicked.connect(self.accept)
+        bar = QtWidgets.QHBoxLayout()
+        bar.addWidget(total, 1)
+        bar.addWidget(btn_open)
+        bar.addWidget(btn_close)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(head)
+        lay.addWidget(note)
+        lay.addWidget(self.table, 1)
+        lay.addLayout(bar)
+
+    def open_doc(self, *_):
+        try:
+            i = self.table.currentRow()
+            if not (0 <= i < len(self.rows)):
+                raise ValueError("اختر حركةً من الجدول")
+            x = self.rows[i]
+            if not x.get("eid"):
+                raise ValueError("سطرٌ محسوب لا مستند له")
+            from services import print_manager
+            src, sid = x.get("src") or "", x.get("sid")
+            if src and sid and src in print_manager.BUILDERS:
+                print_manager.preview_document(self, src, sid)
+            else:
+                print_manager.preview_document(self, "manual", x["eid"])
+        except Exception as e:
+            err(self, e)

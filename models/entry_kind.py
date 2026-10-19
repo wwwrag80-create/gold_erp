@@ -100,9 +100,9 @@ class Kinds:
         if kind == "gold":
             return "sales" if debit else "paid"
         if kind == "cash":
-            # نقدٌ خرج إليه: صرفٌ لا بيع. وذهبٌ خرج إليه من خزينةٍ
-            # نقديةٍ لا يقع (الخزائن النقدية بلا ذهب) — فيُعامل بالمثل.
-            return "other" if debit else "paid"
+            # نقدٌ صُرف له: صار عليه كما تصير عليه الفاتورة — مبيعات
+            # (4.77؛ كان «أخرى»). وما قبضناه منه سداد.
+            return "sales" if debit else "paid"
         if kind == "expense":
             return "sales" if debit else "paid"
         return "other"

@@ -1010,6 +1010,163 @@ def _cf_period(conn, d1, d2, rows, by_id):
                        "diff": round(opening_bal + net - closing_bal, 2)}}
 
 
+# ══════════════════════════════════════════════════════════════════
+#  تفصيل بندٍ من التدفقات النقدية (4.77): ما وراء كل رقم قيداً قيداً
+# ══════════════════════════════════════════════════════════════════
+
+_CF_KIND_LABEL = {"sale": "فاتورة مبيعات", "sale_return": "مرتجع مبيعات",
+                  "receipt": "سند قبض", "payment": "سند صرف"}
+
+
+def _cf_doc_type(conn, src, sid):
+    """نوع المستند بلغة المحاسب: سند قبض · فاتورة مبيعات · قيد يومية…"""
+    from models import journal
+    try:
+        if src == "invoices" and sid:
+            r = conn.execute("SELECT kind FROM invoices WHERE id=?",
+                             (sid,)).fetchone()
+            if r:
+                return _CF_KIND_LABEL.get(r["kind"], "فاتورة")
+        if src == "vouchers" and sid:
+            r = conn.execute("SELECT kind FROM vouchers WHERE id=?",
+                             (sid,)).fetchone()
+            if r:
+                return _CF_KIND_LABEL.get(r["kind"], "سند")
+    except Exception:
+        pass
+    return journal._op_label(src, "")
+
+
+def cf_detail(conn, date_from, date_to, key):
+    """حركة بندٍ من قائمة التدفقات: كل قيدٍ أسهم فيه بحصّته.
+
+    يُرجع {"rows": [{date, type, doc_no, desc, account, party, cash_acc,
+    amount, eid, src, sid}], "total", "note"} — والمجموع يساوي رقم البند
+    في القائمة (الطريقة نفسها: حصة كل سطرٍ غير نقدي من أثره على النقد).
+    `key`: بندٌ (d_customers · wc_receivables · i_ppe …) أو مجموع نشاط
+    (op · inv · fin) أو net، أو opening/closing لأرصدة النقد.
+    """
+    from models import opening as _op
+    rows_, by_id, _roots = _tree(conn)
+    cls = {n["id"]: _cf_class(n, by_id, _root_of(n, by_id)["type"])
+           for n in rows_}
+    cash_ids = [a for a, c in cls.items() if c == "cash"]
+    names = {n["id"]: (n["code"], n["name"]) for n in rows_}
+    ign = ",".join("?" * len(_CF_IGNORE))
+    op_cond, op_params = _op.sql(conn, "e")
+    base = (" FROM journal_lines l JOIN journal_entries e"
+            " ON e.id=l.entry_id AND e.is_deleted=0"
+            f" WHERE COALESCE(e.source_table,'') NOT IN ({ign})")
+
+    def acc_label(a):
+        c, n = names.get(a, ("", ""))
+        return f"{c} — {n}" if c else (n or "—")
+
+    if key in ("opening", "closing"):
+        cq = ",".join("?" * len(cash_ids)) or "NULL"
+        out = []
+        for r in conn.execute(
+                "SELECT l.account_id aid,"
+                " COALESCE(SUM(l.cash_debit-l.cash_credit),0) b" + base
+                + f" AND l.account_id IN ({cq}) AND "
+                + ("(e.entry_date<? OR (e.entry_date BETWEEN ? AND ? AND "
+                   f"{op_cond}))" if key == "opening" else "e.entry_date<=?")
+                + " GROUP BY l.account_id",
+                list(_CF_IGNORE) + cash_ids
+                + ([date_from, date_from, date_to] + op_params
+                   if key == "opening" else [date_to])):
+            if abs(r["b"] or 0) >= 0.005:
+                out.append({"date": date_from if key == "opening"
+                            else date_to, "type": "رصيد نقدية",
+                            "doc_no": "", "desc": "رصيد الحساب",
+                            "account": acc_label(r["aid"]), "party": "—",
+                            "cash_acc": acc_label(r["aid"]),
+                            "amount": round(r["b"], 2), "eid": None,
+                            "src": None, "sid": None})
+        return {"rows": out, "total": round(sum(x["amount"] for x in out), 2),
+                "note": "أرصدة الصندوق والبنوك" + (
+                    " أول الفترة (ومعها الافتتاحي المُدخل داخلها)"
+                    if key == "opening" else " آخر الفترة")}
+
+    ent = {}
+    for r in conn.execute(
+            "SELECT l.entry_id eid, l.account_id aid,"
+            " SUM(l.cash_debit-l.cash_credit) m" + base
+            + f" AND e.entry_date BETWEEN ? AND ? AND NOT {op_cond}"
+            " GROUP BY l.entry_id, l.account_id",
+            list(_CF_IGNORE) + [date_from, date_to] + op_params):
+        if abs(r["m"] or 0.0) > 1e-9:
+            ent.setdefault(r["eid"], []).append((r["aid"], r["m"]))
+    indirect_keys = {k for k, _t in CF_INDIRECT}
+    picked = []
+    for eid, lines in ent.items():
+        cash_lines = [(a, m) for a, m in lines if cls.get(a) == "cash"]
+        touches = abs(sum(m for _a, m in cash_lines)) > 0.0005
+        for a, m in lines:
+            c = cls.get(a, "other_wc")
+            if c == "cash":
+                continue
+            direct, indirect, sec = _CF_ROUTE.get(c, _CF_ROUTE["other_wc"])
+            hit = ((key in indirect_keys and indirect == key)
+                   or (key not in indirect_keys and touches
+                       and (direct == key or sec == key or key == "net")))
+            if hit:
+                picked.append((eid, a, -m, cash_lines))
+    if not picked:
+        out = []
+    else:
+        eids = sorted({p[0] for p in picked})
+        meta = {}
+        for i in range(0, len(eids), 400):
+            ch = eids[i:i + 400]
+            for r in conn.execute(
+                    "SELECT id, entry_date, source_table, source_id,"
+                    " doc_no, description FROM journal_entries"
+                    f" WHERE is_deleted=0 AND id IN ({','.join('?' * len(ch))})",
+                    ch):
+                meta[r["id"]] = dict(r)
+        party_of = {r["account_id"]: r["name"] for r in conn.execute(
+            "SELECT account_id, name FROM entities WHERE is_deleted=0"
+            " AND account_id IS NOT NULL")}
+        out = []
+        for eid, a, eff, cash_lines in picked:
+            e = meta.get(eid, {})
+            cash = "، ".join(acc_label(x) for x, _m in cash_lines) or "—"
+            out.append({
+                "date": e.get("entry_date") or "",
+                "type": _cf_doc_type(conn, e.get("source_table"),
+                                     e.get("source_id")),
+                "doc_no": e.get("doc_no") or "",
+                "desc": e.get("description") or "",
+                "account": acc_label(a),
+                "party": party_of.get(a) or names.get(a, ("", "—"))[1],
+                "cash_acc": cash, "amount": round(eff, 2), "eid": eid,
+                "src": e.get("source_table"), "sid": e.get("source_id")})
+        out.sort(key=lambda x: (x["date"], x["eid"] or 0))
+    note = ""
+    if key == "noncash":
+        note = ("بندٌ محسوب لا قيود له: الفرق بين صافي التشغيل بالطريقة"
+                " المباشرة ومجموع بنود غير المباشرة — أثر أصولٍ اشتُريت"
+                " بالأجل ونحوها.")
+    else:
+        # ما لا يُرى قيداً قيداً (إعادة تصنيف سداد أصلٍ بالأجل بين
+        # المدفوع للموردين والاستثمار) يظهر سطراً صريحاً — فيطابق مجموعُ
+        # التفصيل رقمَ البند في القائمة دائماً
+        cur = _cf_period(conn, date_from, date_to, rows_, by_id)
+        val = (cur["totals"] if key in cur["totals"] else
+               cur["values"]).get(key, 0.0)
+        gap = round(val - sum(x["amount"] for x in out), 2)
+        if abs(gap) >= 0.005:
+            out.append({"date": date_to, "type": "إعادة تصنيف",
+                        "doc_no": "", "account": "—", "party": "—",
+                        "cash_acc": "—", "amount": gap, "eid": None,
+                        "src": None, "sid": None,
+                        "desc": "سداد ثمن أصلٍ ثابت اشتُري بالأجل — يُنقل"
+                                " بين المدفوع للموردين والاستثمار (IAS 7.16)"})
+    return {"rows": out, "total": round(sum(x["amount"] for x in out), 2),
+            "note": note}
+
+
 def cash_flow(conn, date_from, date_to, compare=True):
     """قائمة التدفقات النقدية للفترة، ومقارنةً بالمماثلة من السنة السابقة."""
     rows, by_id, _roots = _tree(conn)

@@ -1818,6 +1818,8 @@ def build_body(doc_type, doc_id, **kw):
         if doc_type == "purchases_register":
             return en(_tpl_purchases_register(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to")))
+        if doc_type == "workshop_losses" and doc_id:
+            return en(_tpl_workshop_loss_doc(conn, doc_id))
         if doc_type in ("workshop_losses", "workshop_losses_log"):
             return en(_tpl_workshop_losses(conn, doc_id,
                                            kw.get("date_from"),
@@ -2014,20 +2016,83 @@ def _tpl_workshop_losses(conn, _id=0, date_from=None, date_to=None):
     body = "".join(
         "<tr>" + cells(
             tdw(en(r["doc_no"] or "—")), tdw(en(r["loss_date"])),
+            tdw(wl.KINDS.get(r.get("kind") or "payment", "صرف")),
             f'<td class="r">{r["acc_name"]}</td>',
             tdw(_gw(r["weight"])),
             f'<td class="r">{r["description"] or ""}</td>') + "</tr>"
         for r in rows)
     if not body:
-        body = f'<tr><td {TD} colspan="5">لا توجد سندات</td></tr>'
-    tot = round(sum(float(r["weight"] or 0) for r in rows), 3)
-    head = cells(thw("رقم السند"), thw("التاريخ"), thw("نوع الفاقد"),
-                 thw("الوزن (جم)"), thw("البيان"))
+        body = f'<tr><td {TD} colspan="6">لا توجد سندات</td></tr>'
+    pay = round(sum(float(r["weight"] or 0) for r in rows
+                    if (r.get("kind") or "payment") == "payment"), 3)
+    rec = round(sum(float(r["weight"] or 0) for r in rows
+                    if r.get("kind") == "receipt"), 3)
+    head = cells(thw("رقم السند"), thw("التاريخ"), thw("العملية"),
+                 thw("الحساب"), thw("الوزن (جم)"), thw("البيان"))
     foot = cells(thw("الإجمالي"), thw(""), thw(f"{len(rows)} سند"),
-                 thw(_gw(tot)), thw(""))
+                 thw(f"صرف {_gw(pay)} · قبض {_gw(rec)}"),
+                 thw(f"صافي {_gw(pay - rec)}"), thw(""))
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
-    return (_header("سجل فواقد الورشة", "—", today, show_meta=False)
+    return (_header("سجل عمليات خزينة التصنيع — فواقد الورشة", "—", today,
+                    show_meta=False)
             + table)
+
+
+def _tpl_workshop_losses_any(conn, _id=0, date_from=None, date_to=None):
+    """سندٌ بعينه (صرف/قبض) إن عُيِّن، وإلا السجل كله."""
+    if _id:
+        return _tpl_workshop_loss_doc(conn, _id)
+    return _tpl_workshop_losses(conn, _id, date_from, date_to)
+
+
+def _tpl_workshop_loss_doc(conn, loss_id):
+    """سند صرف / سند قبض — خزينة التصنيع (4.77): لكل عمليةٍ قالبها."""
+    from models import workshop_losses as wl
+    from services.accounting_engine import account_balance
+    r = wl.get_loss(conn, loss_id)
+    if not r:
+        raise ValueError("السند غير موجود")
+    kind = r.get("kind") or "payment"
+    pay = kind == "payment"
+    title = ("سند صرف — خزينة التصنيع" if pay
+             else "سند قبض — خزينة التصنيع")
+    lead = ("صُرف من خزينة التصنيع إلى حساب" if pay
+            else "قُبض إلى خزينة التصنيع من حساب")
+    t = conn.execute("SELECT id, name, code FROM accounts WHERE code='1100'"
+                     ).fetchone()
+    tg, _tc = account_balance(conn, t["id"]) if t else (0.0, 0.0)
+    debit = (f'{r["acc_name"]} ({en(r["acc_code"])})' if pay
+             else f'{t["name"]} ({en(t["code"])})')
+    credit = (f'{t["name"]} ({en(t["code"])})' if pay
+              else f'{r["acc_name"]} ({en(r["acc_code"])})')
+    deleted = (' <span style="color:#9A1414">(محذوف — عُكس أثره)</span>'
+               if r.get("is_deleted") else "")
+    body = f'''
+    <div class="party">{lead}:
+      <span class="party-name">{r["acc_name"]}</span>{deleted}</div>
+    <br/>
+    {TBL}
+      <tr>{cells(thw("العملية", 20), thw("الحساب", 35),
+                 thw(f"الوزن ({_kunit()})", 20), thw("البيان", 25))}</tr>
+      <tr>{cells(tdw(wl.KINDS[kind], 20), tdw(r["acc_name"], 35),
+                 tdw(_gw(r["weight"]), 20),
+                 tdw(r["description"] or "—", 25, "right"))}</tr>
+    </table>
+    <br/>
+    {TBL}
+      <tr>{cells(thw("القيد", 20), thw("الحساب", 50),
+                 thw(f"مدين ({_kunit()})", 15),
+                 thw(f"دائن ({_kunit()})", 15))}</tr>
+      <tr>{cells(tdw("مدين", 20), tdw(debit, 50, "right"),
+                 tdw(_gw(r["weight"]), 15), tdw("", 15))}</tr>
+      <tr>{cells(tdw("دائن", 20), tdw(credit, 50, "right"),
+                 tdw("", 15), tdw(_gw(r["weight"]), 15))}</tr>
+    </table>
+    <div class="note" style="margin-top:6px">رصيد خزينة التصنيع الآن:
+      <b>{_gw(tg)}</b> {_kunit()}</div>
+    '''
+    return (_header(title, r["doc_no"] or "—", en(r["loss_date"]))
+            + body + _footer(""))
 
 
 def _tpl_workshop_accounts(conn, _id=0, rows=None, date_from=None,
@@ -4396,7 +4461,7 @@ BUILDERS = {
     "fixing": _tpl_fixing, "fixing_ops": _tpl_fixing,
     "work_orders": _tpl_work_order, "wo_supply": _tpl_work_order,
     "wo_adjust": _tpl_work_order,
-    "workshop_losses": _tpl_workshop_losses,
+    "workshop_losses": _tpl_workshop_losses_any,
     "workshop_losses_log": _tpl_workshop_losses,
     "workshop_accounts": _tpl_workshop_accounts,
     "balance_tree": _tpl_balance_tree,
@@ -4431,7 +4496,8 @@ DOC_LABELS = {
     "purchases": "فاتورة مشتريات", "tax_sales": "فاتورة ضريبية/إشعار دائن",
     "melting_ops": "صب وتصفية",
     "fixing_ops": "تسكير", "manual": "قيد يومية",
-    "work_orders": "سند توريد", "workshop_losses": "سند فاقد ورشة",
+    "work_orders": "سند توريد",
+    "workshop_losses": "سند خزينة التصنيع (صرف/قبض)",
 }
 
 
