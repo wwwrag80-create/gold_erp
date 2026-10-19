@@ -2,8 +2,8 @@
 """رواتب العمال والإدارة — وتكاليف قسم التصنيع.
 
 **المنطق المحاسبي**: العمال جهات من نوع `employee` تماماً كالموظفين،
-فلكلٍّ حسابه الشخصي في شجرة الحسابات. وقيد الرواتب مفصّل بسطرين لكل
-عامل داخل سند واحد:
+فلكلٍّ حسابه الشخصي في شجرة الحسابات. ولكل عامل قيدُ راتبه المستقل
+بسطرين (4.78 — كان قيداً واحداً للشهر):
 
     مدين  حـ/ مصروف رواتب عمال التصنيع (5710)   بصافي راتبه
     دائن  حـ/ حساب العامل الشخصي                 بصافي راتبه
@@ -716,7 +716,11 @@ def list_salaries(conn, period):
     return rows
 
 
-def save_salaries(conn, period, rows, username):
+def save_salaries(conn, period, rows, username, edited=()):
+    """يحفظ صفوف الشهر. ومن في `edited` (معرّفات من عُدّل صفُّه) وكان
+    راتبه مرحّلاً يتبعه قيدُه بالصافي الجديد (`repost_salary`). أما من
+    لم يُلمَس صفُّه فلا يُعاد قيده ولو اختلف حسابُه الآن — شهرٌ مضى لا
+    يتغيّر رقمه لأن صفاً آخر عُدّل بجواره."""
     ensure_schema(conn)
     n = 0
     for r in rows:
@@ -747,6 +751,8 @@ def save_salaries(conn, period, rows, username):
         n += 1
     log_action(conn, username, "update", "mfg_salaries", None,
                f"رواتب عمال {period}: {n} عامل")
+    for eid in {int(i) for i in edited or ()}:
+        repost_salary(conn, period, eid, username)
     return n
 
 
@@ -754,14 +760,60 @@ def save_salaries(conn, period, rows, username):
 # الترحيل المحاسبي
 # ══════════════════════════════════════════════════════════════════
 
-def post_salaries(conn, period, username, entry_date=None, rows=None):
-    """يرحّل رواتب العمال بقيد واحد مفصّل بسطرين لكل عامل.
+def _salary_row_id(conn, period, employee_id, net):
+    """معرّف صفّ الشهر — يُنشأ إن لم يُحفظ بعد، فلكل قيدٍ مستندُه."""
+    conn.execute(
+        "INSERT INTO mfg_salaries(period,employee_id,net_salary)"
+        " VALUES(?,?,?) ON CONFLICT(period,employee_id) DO NOTHING",
+        (period, employee_id, net))
+    return conn.execute(
+        "SELECT id FROM mfg_salaries WHERE period=? AND employee_id=?",
+        (period, employee_id)).fetchone()["id"]
 
-        مدين  5710 مصروف رواتب عمال التصنيع   بصافي الراتب
-        دائن  حساب العامل الشخصي               بصافي الراتب
+
+def _post_one(conn, period, employee_id, net, date, username, note=""):
+    """قيدُ راتب شخصٍ واحد — سطران باسمه:
+
+        مدين  مصروف الرواتب (5710 للعامل · مصروف الرواتب للإداري)
+        دائن  حسابه الشخصي
+
+    **قيدٌ لكل عامل لا قيدٌ للشهر**: القيد الجامع يجعل المقابل في كشف
+    العامل عاملاً آخر من القيد نفسه، ولا يُعدَّل راتب واحدٍ منه إلا
+    بإعادة قيد الجميع."""
+    from models import payroll as _pr
+    net = round(float(net), 2)
+    emp = conn.execute(
+        "SELECT name, COALESCE(staff_kind,'employee') k FROM employees"
+        " WHERE id=?", (employee_id,)).fetchone()
+    # حسابه الشخصي في الدليل — وموظفٌ قديم غير مُكوَّد يُقيَّد على
+    # الحساب الأب «سلف الموظفين» كما كانت تفعل شاشة الموظفين
+    acc = _pr.advance_account_id(conn, employee_id)
+    if not emp or not acc:
+        raise ValueError(f"الموظف «{emp['name'] if emp else employee_id}»"
+                         " بلا حساب في الشجرة")
+    worker = emp["k"] == "worker"
+    # عامل التصنيع على «مصروف رواتب عمال التصنيع»، والإداري على
+    # «مصروف الرواتب والأجور» — فتبقى قائمة الدخل تفصل الصنفين
+    exp = acc_id(conn, WORKER_EXPENSE if worker else _pr.SALARY_EXP)
+    desc = (f"راتب عمال شهر {period} - {emp['name']}" if worker
+            else f"راتب شهر {period} - {emp['name']}")
+    rid = _salary_row_id(conn, period, employee_id, net)
+    entry_id = post_entry(
+        conn, date, f"راتب شهر {period} - {emp['name']}",
+        [{"account_id": exp, "cash_debit": net, "line_desc": desc},
+         {"account_id": acc, "cash_credit": net, "line_desc": desc}],
+        source_table="mfg_salaries", source_id=rid, username=username,
+        note=note or "")
+    conn.execute("UPDATE mfg_salaries SET is_posted=1, entry_id=?"
+                 " WHERE id=?", (entry_id, rid))
+    return {"id": rid, "entry_id": entry_id, "net": net}
+
+
+def post_salaries(conn, period, username, entry_date=None, rows=None):
+    """يرحّل رواتب الشهر **بقيدٍ مستقل لكل عامل** (انظر `_post_one`).
 
     البيان على الطرفين: «راتب عمال شهر YYYY-MM - اسم العامل» فيظهر
-    في كشف المصروف سطرٌ باسم كل عامل لا «مذكورين».
+    في كشف المصروف سطرٌ باسم كل عامل، وفي كشف العامل مقابلُه المصروف.
     """
     import datetime as _dt
     ensure_schema(conn)
@@ -775,45 +827,156 @@ def post_salaries(conn, period, username, entry_date=None, rows=None):
             f"لا توجد رواتب معلّقة لشهر {period} — ربما رُحّلت مسبقاً")
 
     date = entry_date or _dt.date.today().isoformat()
-    # عامل التصنيع على «مصروف رواتب عمال التصنيع»، والإداري على
-    # «مصروف الرواتب والأجور» — فتبقى قائمة الدخل تفصل الصنفين
-    from models import payroll as _pr
-    exp_worker = acc_id(conn, WORKER_EXPENSE)
-    exp_admin = acc_id(conn, _pr.SALARY_EXP)
-    lines, total = [], 0.0
+    ids, total = [], 0.0
     for r in pending:
-        net = round(float(r["net_salary"]), 2)
-        emp = conn.execute(
-            "SELECT COALESCE(staff_kind,'employee') k FROM employees"
-            " WHERE id=?", (r["employee_id"],)).fetchone()
-        # حسابه الشخصي في الدليل — وموظفٌ قديم غير مُكوَّد يُقيَّد على
-        # الحساب الأب «سلف الموظفين» كما كانت تفعل شاشة الموظفين
-        acc = _pr.advance_account_id(conn, r["employee_id"])
-        if not emp or not acc:
-            raise ValueError(f"الموظف «{r['name']}» بلا حساب في الشجرة")
-        ent = {"account_id": acc}
-        worker = emp["k"] == "worker"
-        desc = (f"راتب عمال شهر {period} - {r['name']}" if worker
-                else f"راتب شهر {period} - {r['name']}")
-        lines.append({"account_id": exp_worker if worker else exp_admin,
-                      "cash_debit": net, "line_desc": desc})
-        lines.append({"account_id": ent["account_id"], "cash_credit": net,
-                      "line_desc": desc})
-        total += net
-
-    entry_id = post_entry(conn, date, f"رواتب العمال والإدارة {period}",
-                          lines, source_table="mfg_salaries",
-                          source_id=None, username=username)
-    for r in pending:
-        conn.execute(
-            "UPDATE mfg_salaries SET is_posted=1, entry_id=?"
-            " WHERE period=? AND employee_id=?",
-            (entry_id, period, r["employee_id"]))
-    log_action(conn, username, "create", "mfg_salaries", entry_id,
-               f"ترحيل رواتب {period}: {len(pending)} موظف"
+        res = _post_one(conn, period, r["employee_id"], r["net_salary"],
+                        date, username)
+        ids.append(res["entry_id"])
+        r["is_posted"] = True
+        total += res["net"]
+    log_action(conn, username, "create", "mfg_salaries", ids[0],
+               f"ترحيل رواتب {period}: {len(pending)} موظف بقيدٍ لكلٍّ"
                f" بإجمالي {total:,.2f}")
-    return {"entry_id": entry_id, "count": len(pending),
+    return {"entry_id": ids[0], "entry_ids": ids, "count": len(pending),
             "total": round(total, 2)}
+
+
+def _entry_amount(conn, entry_id):
+    return round(float(conn.execute(
+        "SELECT COALESCE(SUM(cash_debit),0) v FROM journal_lines"
+        " WHERE entry_id=?", (entry_id,)).fetchone()["v"]), 2)
+
+
+def _shared(conn, entry_id):
+    """قيدٌ جامع من قبل 4.78 يحمل رواتب أكثر من شخص."""
+    return conn.execute(
+        "SELECT COUNT(*) n FROM mfg_salaries WHERE entry_id=?",
+        (entry_id,)).fetchone()["n"] > 1
+
+
+def repost_salary(conn, period, employee_id, username):
+    """راتبٌ مرحّل عُدّل: يتبعه قيدُه بالصافي الجديد.
+
+    التعديل عندنا إلغاءٌ ثم ترحيل (`editing.repost`) لا تحريرُ أسطر —
+    فسلسلة البصمات تبقى سليمة، والقيد الجديد يرث تاريخ القديم وموضعه
+    في الكشوف، و«من عدّل ماذا» يحفظ القيمتين. وصافٍ صار صفراً يُلغي
+    القيد ويعيد الصف معلّقاً. يعيد None إن لم يتغيّر شيء."""
+    saved = conn.execute(
+        "SELECT * FROM mfg_salaries WHERE period=? AND employee_id=?",
+        (period, employee_id)).fetchone()
+    if not saved or not saved["entry_id"] or not _posted(conn, saved):
+        return None
+    if _shared(conn, saved["entry_id"]):
+        split_combined(conn, username, only=saved["entry_id"], strict=True)
+        saved = conn.execute("SELECT * FROM mfg_salaries WHERE id=?",
+                             (saved["id"],)).fetchone()
+    eid = saved["entry_id"]
+    net = round(float(saved["net_salary"] or 0), 2)
+    if abs(_entry_amount(conn, eid) - net) < 0.005:
+        return None
+    from services.audit import reverse_entry
+    if not net:
+        reverse_entry(conn, eid, username)
+        return {"entry_id": None, "old_entry_id": eid, "net": 0.0}
+    from models import editing
+    e = conn.execute("SELECT entry_date, user_note FROM journal_entries"
+                     " WHERE id=?", (eid,)).fetchone()
+    res = editing.repost(conn, eid, username, _post_one, period,
+                         employee_id, net, e["entry_date"], username,
+                         e["user_note"] or "")
+    res["old_entry_id"] = eid
+    return res
+
+
+def split_combined(conn, username="system", only=None, strict=False):
+    """يقسم قيود الرواتب الجامعة (قبل 4.78) قيداً لكل عامل.
+
+    كل زوج أسطر ببيانٍ واحد (مدين مصروف · دائن حساب العامل) يصير
+    قيداً مستقلاً بتاريخ الأصل وموضعه، ويُحذف الجامع حذفاً منطقياً.
+    فيصحّ المقابل في كشف كل عامل: المصروف لا العامل الذي تحته.
+    وأي شكٍّ في المطابقة (سطرٌ بلا زوج · صفٌّ بلا سطر · فترةٌ مقفلة)
+    يترك القيد كما هو — التقسيم إصلاحُ عرضٍ لا يجوز أن يغيّر رقماً.
+    كل قيدٍ داخل نقطة حفظ: يُقسم كاملاً أو لا يُمسّ."""
+    from models import payroll as _pr
+    from services.audit import reverse_entry
+    ensure_schema(conn)
+    q = ("SELECT e.* FROM journal_entries e WHERE e.is_deleted=0"
+         " AND e.source_table='mfg_salaries'"
+         " AND (SELECT COUNT(*) FROM mfg_salaries s"
+         "      WHERE s.entry_id=e.id) > 1")
+    args = ()
+    if only:
+        q += " AND e.id=?"
+        args = (only,)
+    done = 0
+    for e in conn.execute(q, args).fetchall():
+        conn.execute("SAVEPOINT sal_split")
+        try:
+            rows = conn.execute(
+                "SELECT s.*, m.name FROM mfg_salaries s"
+                " JOIN employees m ON m.id=s.employee_id"
+                " WHERE s.entry_id=?", (e["id"],)).fetchall()
+            groups = {}
+            for l in conn.execute("SELECT * FROM journal_lines"
+                                  " WHERE entry_id=? ORDER BY id",
+                                  (e["id"],)):
+                groups.setdefault(l["line_desc"] or "", []).append(l)
+            pairs = []
+            for desc, ls in groups.items():
+                dr = [l for l in ls if (l["cash_debit"] or 0) > 0]
+                cr = [l for l in ls if (l["cash_credit"] or 0) > 0]
+                if (len(ls) != 2 or len(dr) != 1 or len(cr) != 1
+                        or abs(dr[0]["cash_debit"]
+                               - cr[0]["cash_credit"]) > 0.005
+                        or any((l["gold_debit"] or 0)
+                               or (l["gold_credit"] or 0) for l in ls)):
+                    raise ValueError(f"أسطر غير مزدوجة: {desc}")
+                pairs.append((desc, dr[0], cr[0]))
+            if len(pairs) != len(rows):
+                raise ValueError("عدد الأسطر لا يطابق عدد الرواتب")
+            matched, used = [], set()
+            for r in rows:
+                acc = _pr.advance_account_id(conn, r["employee_id"])
+                cand = [p for p in pairs if p[2]["account_id"] == acc
+                        and id(p) not in used]
+                if len(cand) > 1:
+                    cand = [p for p in cand
+                            if p[0].endswith(f"- {r['name']}")]
+                if len(cand) != 1:
+                    raise ValueError(f"تعذّرت مطابقة «{r['name']}»")
+                used.add(id(cand[0]))
+                matched.append((r, cand[0]))
+            key = e["sort_key"] if "sort_key" in e.keys() else None
+            reverse_entry(conn, e["id"], username)
+            new_ids = []
+            for r, (desc, dr, cr) in matched:
+                amt = round(float(cr["cash_credit"]), 2)
+                nid = post_entry(
+                    conn, e["entry_date"],
+                    f"راتب شهر {r['period']} - {r['name']}",
+                    [{"account_id": dr["account_id"], "cash_debit": amt,
+                      "line_desc": desc},
+                     {"account_id": cr["account_id"], "cash_credit": amt,
+                      "line_desc": desc}],
+                    source_table="mfg_salaries", source_id=r["id"],
+                    username=e["created_by"] or username,
+                    note=e["user_note"] or "")
+                conn.execute("UPDATE journal_entries SET sort_key=?"
+                             " WHERE id=?", (key or e["id"], nid))
+                conn.execute("UPDATE mfg_salaries SET is_posted=1,"
+                             " entry_id=? WHERE id=?", (nid, r["id"]))
+                new_ids.append(nid)
+            log_action(conn, username, "update", "mfg_salaries", e["id"],
+                       f"تقسيم قيد الرواتب الجامع {e['doc_no'] or e['id']}"
+                       f" إلى {len(new_ids)} قيد — قيدٌ لكل عامل")
+            conn.execute("RELEASE sal_split")
+            done += 1
+        except Exception:
+            conn.execute("ROLLBACK TO sal_split")
+            conn.execute("RELEASE sal_split")
+            if strict:
+                raise
+    return done
 
 
 # ══════════════════════════════════════════════════════════════════

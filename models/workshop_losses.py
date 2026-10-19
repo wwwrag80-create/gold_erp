@@ -61,6 +61,15 @@ def loss_types(conn):
         " AND is_postable=1 ORDER BY code", (parent["id"],))]
 
 
+def accounts(conn):
+    """كل حسابٍ قابلٍ للترحيل في الدليل — الطرف الآخر لعملية الخزينة
+    (4.78: أي حسابٍ لا خياراتٌ محدودة). خزينة التصنيع نفسها مستثناة."""
+    return [dict(r) for r in conn.execute(
+        "SELECT id, code, name FROM accounts WHERE is_postable=1"
+        " AND COALESCE(is_active,1)=1 AND code<>? ORDER BY code",
+        (MFG_TREASURY,))]
+
+
 def add_loss_type(conn, name, username):
     """ينشئ نوع فاقد جديداً بحسابه في الدليل تلقائياً."""
     name = (name or "").strip()
@@ -110,7 +119,9 @@ def create_loss(conn, account_id, weight, loss_date, username,
         "SELECT id, name FROM accounts WHERE id=? AND is_postable=1",
         (account_id,)).fetchone()
     if not acc:
-        raise ValueError("اختر نوع الفاقد")
+        raise ValueError("اختر الحساب")
+    if acc["id"] == acc_id(conn, MFG_TREASURY):
+        raise ValueError("الطرف الآخر لا يكون خزينة التصنيع نفسها")
     date = loss_date or _dt.date.today().isoformat()
     no = doc_no or next_doc_no(conn)
     desc = f"{KINDS[kind]} خزينة التصنيع — {acc['name']} — {w:,.2f} جم"

@@ -62,6 +62,9 @@ SALARY_COLS = [
     # 4.48: الرصيد بطرفه — «مدين» عليه · «دائن» له
     ("owed", "الرصيد", True),
     ("due", "المستحق", True),
+    # 4.78: لكل شخص قيدُ راتبه — فيظهر عند اسمه «مرحّل» أو «معلّق»،
+    # وتعديلُ راتبٍ مرحّل يُعدّل قيدَه هو وحده عند الحفظ
+    ("status", "الحالة", True),
 ]
 
 # أعمدةٌ يُترك فيها الصفر فراغاً لا «0.00»
@@ -70,7 +73,7 @@ BLANK_IF_ZERO = {"owed"}
 # أوزان أعمدة الجدولين — تُوزَّع على العرض المتاح بلا تمرير أفقي
 # ولا سحبٍ باليد. الاسم أعرضها لأنه نصٌّ، والباقي أرقام.
 TARGET_W = [20, 7, 7, 7, 7, 7, 9, 9, 8, 8, 7, 8]
-SALARY_W = [18, 8, 6, 5, 7, 6, 7, 7, 7, 7, 7, 8, 10, 8]
+SALARY_W = [18, 8, 6, 5, 7, 6, 7, 7, 7, 7, 7, 8, 10, 8, 8]
 
 
 class VerticalEnterTable(QtWidgets.QTableWidget):
@@ -180,6 +183,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
         btn_reload = kit.PushButton("↻ تحديث")
         btn_reload.clicked.connect(self._reload_saving)
         self._dirty = {"t": False, "s": False}
+        # من عُدّل صفُّه منذ آخر حفظ — راتبُه المرحّل يتبعه قيده
+        self._edited = set()
         self._loaded_period = None
 
         self.s_date = kit.DateEdit()
@@ -448,6 +453,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
                     v = r.get(key, "")
                     if key == "name":
                         txt = v
+                    elif key == "status":
+                        txt = "✔ مرحّل" if r.get("is_posted") else "معلّق"
                     elif key == "owed":
                         # الرصيد بإشارته: سالبٌ عليه · موجبٌ له — والصفر
                         # فراغ
@@ -463,6 +470,15 @@ class MfgCostsScreen(QtWidgets.QWidget):
                         if float(v or 0) > 0.004:      # عليه: بالأحمر
                             it.setForeground(QtGui.QBrush(
                                 QtGui.QColor("#a4262c")))
+                    if key == "status":
+                        it.setToolTip(
+                            "مرحّل: لراتبه قيدٌ مستقل باسمه — وتعديلُ "
+                            "راتبه هنا يُعدّل قيده عند الحفظ"
+                            if r.get("is_posted") else
+                            "لم يُنزَل راتب هذا الشهر بعد")
+                        if r.get("is_posted"):
+                            it.setForeground(QtGui.QBrush(
+                                QtGui.QColor("#107c10")))
                     if not ro:
                         it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
                     if ro:
@@ -474,6 +490,9 @@ class MfgCostsScreen(QtWidgets.QWidget):
             for j, (key, _, _) in enumerate(cols):
                 if key in totals_skip:
                     txt = "الإجمالي"
+                elif key == "status":
+                    n = sum(1 for r in rows if r.get("is_posted"))
+                    txt = f"مرحّل {n} من {len(rows)}"
                 else:
                     tot = sum(float(r.get(key) or 0) for r in rows)
                     txt = mfg_costs.bal_text(tot) if key == "owed" \
@@ -533,6 +552,13 @@ class MfgCostsScreen(QtWidgets.QWidget):
             self._rename_worker()
             return
         self._mark_dirty("s")
+        cur_row = self.s_table.currentRow()
+        if 0 <= cur_row < len(self.salary_rows):
+            person = self.salary_rows[cur_row]
+            self._edited.add(person.get("employee_id"))
+            if person.get("is_posted"):
+                self.save_state.setText(
+                    "✎ راتبٌ مرحّل عُدّل — يُعدَّل قيدُه عند الحفظ")
         self._read(self.s_table, SALARY_COLS, self.salary_rows)
         for i, r in enumerate(self.salary_rows):
             # الكتابة في خانة الخصم تعني خصماً يدوياً يتجاوز المعادلة
@@ -612,8 +638,10 @@ class MfgCostsScreen(QtWidgets.QWidget):
                                            self.user["username"])
                 if self._dirty["s"]:
                     mfg_costs.save_salaries(conn, per, self.salary_rows,
-                                            self.user["username"])
+                                            self.user["username"],
+                                            edited=self._edited)
             self._dirty = {"t": False, "s": False}
+            self._edited = set()
             self.save_state.setText("✔ حُفظ تلقائياً")
             return True
         except Exception as e:
@@ -844,6 +872,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 self.salary_rows = mfg_costs.list_salaries(conn, per)
             self._loaded_period = per
             self._dirty = {"t": False, "s": False}
+            self._edited = set()
             self._fill(self.t_table, TARGET_COLS, self.target_rows)
             self._fill(self.s_table, SALARY_COLS, self.salary_rows)
             self._update_total()
@@ -926,15 +955,17 @@ class MfgCostsScreen(QtWidgets.QWidget):
             with db() as conn:
                 n = mfg_costs.save_salaries(conn, self.period(),
                                             self.salary_rows,
-                                            self.user["username"])
+                                            self.user["username"],
+                                            edited=self._edited)
             self._dirty["s"] = False
+            self._edited = set()
             self.save_state.setText(f"✔ حُفظت رواتب {n} عامل")
             self.reload()
         except Exception as e:
             err(self, e)
 
     def post_salaries(self):
-        """يرحّل الرواتب بقيد مفصّل بسطرين لكل عامل."""
+        """يرحّل الرواتب بقيدٍ مستقل لكل عامل (سطران باسمه)."""
         try:
             if self._dirty["t"] and not self.autosave():
                 return
@@ -958,22 +989,27 @@ class MfgCostsScreen(QtWidgets.QWidget):
                        f"عدد العمال والموظفين: {len(pending)}\n"
                        f"إجمالي الصافي: {tot:,.2f} ريال\n"
                        f"تاريخ القيد: {date}\n\n"
-                       f"سيُنشأ قيد واحد بسطرين لكل شخص:\n"
+                       f"سيُنشأ لكل شخص قيدٌ مستقل باسمه:\n"
                        f"  مدين حـ/ مصروف الرواتب (عمال التصنيع أو الإدارة)\n"
-                       f"  دائن حـ/ حسابه الشخصي"):
+                       f"  دائن حـ/ حسابه الشخصي\n\n"
+                       f"ويبقى راتب كل مرحّل قابلاً للتعديل هنا،"
+                       f" فيتعدّل قيدُه وحده."):
                 return
             with db() as conn:
                 mfg_costs.save_salaries(conn, self.period(),
                                         self.salary_rows,
-                                        self.user["username"])
+                                        self.user["username"],
+                                        edited=self._edited)
                 res = mfg_costs.post_salaries(
                     conn, self.period(), self.user["username"],
                     entry_date=date, rows=self.salary_rows)
             self._dirty["s"] = False
-            info(self, f"تم الترحيل.\nعدد العمال: {res['count']}\n"
+            self._edited = set()
+            info(self, f"تم الترحيل.\nعدد القيود: {res['count']}"
+                       f" — قيدٌ لكل شخص\n"
                        f"الإجمالي: {res['total']:,.2f} ريال\n\n"
-                       f"يظهر في كشف مصروف رواتب العمال سطرٌ باسم كل "
-                       f"عامل، وفي كشف حسابه راتبه دائناً.")
+                       f"يظهر عند كل اسمٍ «✔ مرحّل»، وفي كشف حسابه راتبه "
+                       f"دائناً مقابل مصروف الرواتب.")
             self.reload()
         except Exception as e:
             err(self, e)

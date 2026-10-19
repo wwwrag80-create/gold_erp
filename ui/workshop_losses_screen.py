@@ -6,7 +6,8 @@
     صرف (فاقد خرج):        مدين حـ/ <الحساب>         ·  دائن حـ/ خزينة التصنيع
     قبض (ذهب عاد للخزينة):  مدين حـ/ خزينة التصنيع    ·  دائن حـ/ <الحساب>
 
-الحساب يُختار من حسابات «فواقد الورشة» ويُضاف إليها بزرّ «+ إضافة حساب»،
+الحساب أيُّ حسابٍ من الدليل بالبحث، و«+ إضافة حساب» يُنشئ جديداً تحت
+«فواقد الورشة»،
 ولكل عمليةٍ سندُها المطبوع (سند صرف · سند قبض) من الجدول بنقرةٍ مزدوجة.
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -19,7 +20,7 @@ from models import workshop_losses as wl
 from services.accounting_engine import balance_by_code
 from ui.widgets.common import (ask, big_label, confirm_post, date_edit, dstr,
                                err, fill, info, make_table, posted,
-                               title_label, wspin)
+                               reload_combo, search_combo, title_label, wspin)
 
 KIND_ITEMS = (("payment", "صرف — يخرج الذهب من خزينة التصنيع"),
               ("receipt", "قبض — يعود الذهب إلى خزينة التصنيع"))
@@ -43,9 +44,9 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
         self.doc_no.setPlaceholderText("يُولَّد تلقائياً")
         self.doc_no.setMaximumWidth(140)
 
-        # ── الحساب ──
-        self.account = kit.ComboBox()
-        self.account.setMinimumWidth(240)
+        # ── الحساب: أي حسابٍ من الدليل بالبحث (4.78) ──
+        self.account = search_combo("اكتب رقم الحساب أو اسمه…")
+        self.account.setMinimumWidth(300)
         self.account.currentIndexChanged.connect(self._preview)
         btn_add_acc = kit.PushButton("➕ إضافة حساب")
         btn_add_acc.setToolTip(
@@ -145,20 +146,12 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
             with db() as conn:
                 # مزامنة: سندات حُذف قيدها من مكان آخر تُخفى هنا أيضاً
                 wl.purge_orphans(conn, self.user["username"])
-                self.types = wl.loss_types(conn)
+                self.types = wl.accounts(conn)
                 rows = wl.list_losses(conn)
                 g, _c = balance_by_code(conn, "1100")
                 self.doc_no.setPlaceholderText(wl.next_doc_no(conn))
-            cur = self.account.currentData()
-            self.account.blockSignals(True)
-            self.account.clear()
-            for t in self.types:
-                self.account.addItem(f"{t['code']} — {t['name']}", t["id"])
-            if cur is not None:
-                i = self.account.findData(cur)
-                if i >= 0:
-                    self.account.setCurrentIndex(i)
-            self.account.blockSignals(False)
+            reload_combo(self.account, self.types,
+                         lambda t: f"{t['code']} — {t['name']}")
             self.treasury.setText(
                 f"رصيد خزينة التصنيع: {kv.g(g):,.2f} جم {kv.label()}")
             self.rows = rows

@@ -258,6 +258,13 @@ def prepare_steps():
                 wo_moves.resync(conn, None, "system")
             except Exception:
                 pass
+            # قيود الرواتب الجامعة (قبل 4.78) تُقسم قيداً لكل عامل، فيصحّ
+            # المقابل في كشف كل عامل — وأي شكٍّ يترك القيد كما هو
+            try:
+                from models import mfg_costs
+                mfg_costs.split_combined(conn, "system")
+            except Exception:
+                pass
             # بقايا طابور المزامنة من الإصدارات السابقة — لا شيء يُرفع
             try:
                 from services import sync_queue

@@ -7217,7 +7217,9 @@ def main():
         _posted87 = {r["employee_id"]: r["is_posted"]
                      for r in _mc87.list_salaries(conn, _per87)}[_weid]
     with db() as conn:
-        _rev87(conn, _p1["entry_id"], "admin")
+        # 4.78: قيدٌ لكل عامل ⇒ حذف قيود الشهر كلها
+        for _e87 in _p1["entry_ids"]:
+            _rev87(conn, _e87, "admin")
     with db(readonly=True) as conn:
         _r87b = [r for r in _mc87.list_salaries(conn, _per87)
                  if r["employee_id"] == _weid]
@@ -7243,12 +7245,13 @@ def main():
             "SELECT COUNT(*) n FROM journal_entries WHERE is_deleted=0"
             " AND source_table='mfg_salaries' AND description LIKE ?",
             (f"%{_per87}%",)).fetchone()["n"]
-    check("ويبقى للشهر قيدٌ قائم واحد لا قيدان", _live87 == 1,
-          f"{_live87}")
+    check("ويبقى لكل عاملٍ قيدٌ قائم واحد لا قيدان",
+          _live87 == _p2["count"], f"{_live87} · {_p2['count']}")
     # قاعدةٌ حُذف فيها القيد قبل هذا الإصلاح: الوسم باقٍ والقيد محذوف
     with db() as conn:
-        conn.execute("UPDATE journal_entries SET is_deleted=1 WHERE id=?",
-                     (_p2["entry_id"],))
+        for _e87 in _p2["entry_ids"]:
+            conn.execute("UPDATE journal_entries SET is_deleted=1"
+                         " WHERE id=?", (_e87,))
     with db(readonly=True) as conn:
         _old87 = {r["employee_id"]: r["is_posted"]
                   for r in _mc87.list_salaries(conn, _per87)}[_weid]
@@ -7275,8 +7278,9 @@ def main():
                                    entry_date="2026-11-30")
         _lines88 = conn.execute(
             "SELECT a.code, l.line_desc, l.cash_debit FROM journal_lines l"
-            " JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=?"
-            " AND l.cash_debit>0", (_p88["entry_id"],)).fetchall()
+            " JOIN accounts a ON a.id=l.account_id"
+            f" WHERE l.entry_id IN ({','.join('?' * len(_p88['entry_ids']))})"
+            " AND l.cash_debit>0", _p88["entry_ids"]).fetchall()
     _adm_line = [x for x in _lines88 if "محاسبة الإدارة ٨٨" in x["line_desc"]]
     _wk_line = [x for x in _lines88 if "عامل" in x["line_desc"]
                 and x["code"] == "5710"]
@@ -8366,6 +8370,113 @@ def main():
               "workshop_losses", _q107["id"]))
     check("التدفقات النقدية: تفصيل كل بندٍ يساوي رقمه", not _bad107,
           str(_bad107))
+    # ══ 108) 4.78: الرواتب قيدٌ لكل عامل · التدفقات · حساب الفواقد ══
+    # (1) قيد الشهر الجامع جعل المقابل في كشف العامل عاملاً آخر، ولا
+    #     يُعدَّل راتبُ واحدٍ إلا بإعادة قيد الجميع. (2) «المصروفات
+    #     التشغيلية المدفوعة» حملت الخصم وفروق الصافي وصرف العمال.
+    #     (3) حساب سند الفواقد كان من قائمة أنواعٍ لا من الدليل.
+    from models import mfg_costs as _mc108
+    from models import workshop_losses as _wl108
+    from services.accounting_engine import post_entry as _pe108
+    _per108 = "2026-08"
+    with db() as conn:
+        _w108a = add_entity(conn, "عامل 108 أ", "worker", username="admin",
+                            basic_salary=2000.0)
+        _w108b = add_entity(conn, "عامل 108 ب", "worker", username="admin",
+                            basic_salary=1500.0)
+        _e108 = {k: get_entity(conn, k) for k in (_w108a, _w108b)}
+        _mc108.save_salaries(conn, _per108,
+                             _mc108.list_salaries(conn, _per108), "admin")
+        _r108 = _mc108.post_salaries(conn, _per108, "admin",
+                                     entry_date="2026-08-31")
+        _n108 = {r["n"] for r in conn.execute(
+            "SELECT COUNT(*) n FROM journal_lines WHERE entry_id IN"
+            f" ({','.join('?' * len(_r108['entry_ids']))})"
+            " GROUP BY entry_id", _r108["entry_ids"])}
+    check("الرواتب: قيدٌ مستقل بسطرين لكل شخص",
+          len(set(_r108["entry_ids"])) == _r108["count"] >= 2
+          and _n108 == {2}, f"{_r108} · {_n108}")
+    _ea108 = _e108[_w108a]["employee_id"]
+    with db() as conn:
+        _old108 = conn.execute(
+            "SELECT entry_id FROM mfg_salaries WHERE period=?"
+            " AND employee_id=?", (_per108, _ea108)).fetchone()[0]
+        _rows108 = _mc108.list_salaries(conn, _per108)
+        for _x in _rows108:
+            if _x["employee_id"] == _ea108:
+                _x["bonus"] = 250
+            _x.update(_mc108.compute_salary_row(_x))
+        _mc108.save_salaries(conn, _per108, _rows108, "admin",
+                             edited={_ea108})
+        _s108 = conn.execute(
+            "SELECT * FROM mfg_salaries WHERE period=? AND employee_id=?",
+            (_per108, _ea108)).fetchone()
+        _amt108 = conn.execute(
+            "SELECT SUM(cash_debit) v FROM journal_lines WHERE entry_id=?",
+            (_s108["entry_id"],)).fetchone()["v"]
+        _gone108 = conn.execute(
+            "SELECT is_deleted FROM journal_entries WHERE id=?",
+            (_old108,)).fetchone()[0]
+    check("تعديل راتبٍ مرحّل يُعدّل قيدَه وحده بالصافي الجديد",
+          _s108["entry_id"] != _old108 and _gone108 == 1
+          and abs(_amt108 - _s108["net_salary"]) < 0.01,
+          f"{_amt108} · {_s108['net_salary']}")
+    # قيدٌ جامع بصيغة ما قبل 4.78 يُقسم بلا تغيير رصيد
+    _per108b = "2026-07"
+    with db() as conn:
+        _mc108.save_salaries(conn, _per108b,
+                             _mc108.list_salaries(conn, _per108b), "admin")
+        _ls108, _ids108 = [], []
+        for _k in (_w108a, _w108b):
+            _sr = conn.execute(
+                "SELECT s.id, s.net_salary, m.name FROM mfg_salaries s"
+                " JOIN employees m ON m.id=s.employee_id"
+                " WHERE s.period=? AND s.employee_id=?",
+                (_per108b, _e108[_k]["employee_id"])).fetchone()
+            _dsc = f"راتب عمال شهر {_per108b} - {_sr['name']}"
+            _ls108 += [{"account_id": acc_id(conn, "5710"),
+                        "cash_debit": _sr["net_salary"], "line_desc": _dsc},
+                       {"account_id": _e108[_k]["account_id"],
+                        "cash_credit": _sr["net_salary"], "line_desc": _dsc}]
+            _ids108.append(_sr["id"])
+        _leg108 = _pe108(conn, "2026-07-31", "رواتب جامعة", _ls108,
+                         source_table="mfg_salaries", username="admin")
+        conn.execute("UPDATE mfg_salaries SET is_posted=1, entry_id=?"
+                     f" WHERE id IN ({','.join('?' * len(_ids108))})",
+                     [_leg108] + _ids108)
+        _tb = lambda: {r[0]: round(r[1], 2) for r in conn.execute(
+            "SELECT l.account_id, SUM(l.cash_debit-l.cash_credit)"
+            " FROM journal_lines l JOIN journal_entries e"
+            " ON e.id=l.entry_id WHERE e.is_deleted=0"
+            " GROUP BY l.account_id")}
+        _tb1 = _tb()
+        _sp108 = _mc108.split_combined(conn, "system", only=_leg108)
+        _tb2 = _tb()
+        _new108 = {r[0] for r in conn.execute(
+            "SELECT entry_id FROM mfg_salaries"
+            f" WHERE id IN ({','.join('?' * len(_ids108))})", _ids108)}
+    check("القيد الجامع القديم يُقسم قيداً لكل عامل بلا تغيير رصيد",
+          _sp108 == 1 and len(_new108) == 2 and _leg108 not in _new108
+          and _tb1 == _tb2, f"{_sp108} · {_new108}")
+    with db() as conn:
+        _accs108 = {a["code"] for a in _wl108.accounts(conn)}
+        _cf108 = _st107.cash_flow(conn, f"{_d107[:4]}-01-01", _d107, False)
+        _lay108 = _st107.cf_layout(_cf108, "direct")
+        _gx108 = _st107.cf_detail(conn, f"{_d107[:4]}-01-01", _d107,
+                                  "d_expenses")
+    check("سند الفواقد: الحساب من الدليل كله عدا خزينة التصنيع",
+          {"5111", "5500", "5810"} <= _accs108 and "1100" not in _accs108)
+    check("التدفقات: النقد أول الفترة أول صف",
+          _lay108[0]["key"] == "opening", _lay108[0]["key"])
+    # 58xx ومقدّمها ومستحقّها (1980 · 2280) — لا خصم ولا فروق ولا رواتب
+    check("والمصاريف العمومية المدفوعة من 58xx وحدها (لا خصم ولا فروق"
+          " ولا رواتب)",
+          all((str(x["account"])[:2] == "58"
+               or str(x["account"])[:4] in ("1980", "2280"))
+              and not str(x["account"]).startswith("5805")
+              for x in _gx108["rows"] if x["eid"]),
+          str([x["account"] for x in _gx108["rows"]][:6]))
+
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

@@ -837,9 +837,9 @@ CF_DIRECT = [
     ("d_revenue", "إيرادات مقبوضة مباشرة"),
     ("d_fixing", "تسكير الذهب نقداً (بيع/شراء الذهب)"),
     ("d_suppliers", "المدفوع للموردين"),
-    ("d_inventory", "مشتريات ذهب ومواد نقداً"),
+    ("d_inventory", "مشتريات ذهب ومواد تشغيل نقداً"),
     ("d_staff", "المدفوع للموظفين والعمال"),
-    ("d_expenses", "المصروفات التشغيلية المدفوعة"),
+    ("d_expenses", "المصاريف العمومية والإدارية المدفوعة"),
     ("d_vat", "ضريبة القيمة المضافة المسددة (المستردة)"),
     ("d_zakat", "الزكاة المسددة"),
     ("d_other", "متحصلات ومدفوعات تشغيلية أخرى"),
@@ -860,13 +860,29 @@ def _cf_class(node, by_id, rows_type):
     """(نوع الحساب في التدفقات) — مفتاحٌ واحد لكل حساب."""
     rtype = rows_type
     if rtype in ("revenue", "expense"):
+        # المصروف بمجموعته (4.78): «المصروفات التشغيلية المدفوعة» هي
+        # المصاريف العمومية والإدارية وحدها — الرواتب للموظفين والعمال،
+        # ومواد التشغيل مشتريات، والخصم وفروق الصافي تسويةٌ لا نقد فيها
         cur, seen = node, 0
         while cur is not None and seen < 20:
-            if cur["code"] in ("5700", "5710"):
+            code = cur["code"]
+            # 5805 «رواتب وأجور الإدارة» تحت 5800 لكنها أجورٌ مدفوعة
+            # لأشخاص — فمكانها «المدفوع للموظفين والعمال» لا العمومية
+            if code in ("5690", "5700", "5710", "5805"):
                 return "exp_staff"
+            if code == "5800":
+                return "exp"
+            if code == "5050":
+                return "exp_mat"
+            if code == "5250":
+                return "exp_cust"
+            if code in ("5200", "5300", "5600"):
+                return "exp_contra"
+            if code == "5950":
+                return "exp_zakat"
             cur = by_id.get(cur["parent_id"])
             seen += 1
-        return "rev" if rtype == "revenue" else "exp"
+        return "rev" if rtype == "revenue" else "exp_other"
     kind = _classify(node, by_id)
     if kind == "cash":
         return "cash"
@@ -899,6 +915,11 @@ _CF_ROUTE = {
     "ecl": ("d_customers", "provisions", "op"),
     "rev": ("d_revenue", "profit", "op"),
     "exp": ("d_expenses", "profit", "op"),
+    "exp_mat": ("d_inventory", "profit", "op"),
+    "exp_cust": ("d_customers", "profit", "op"),
+    "exp_contra": ("d_customers", "profit", "op"),
+    "exp_zakat": ("d_zakat", "profit", "op"),
+    "exp_other": ("d_other", "profit", "op"),
     "bridge": ("d_fixing", "wc_other", "op"),
     "other_wc": ("d_other", "wc_other", "op"),
     "ppe_dep": ("d_other", "dep", "op"),
@@ -914,6 +935,31 @@ _CF_ROUTE = {
     "opening_susp": ("f_opening", None, "fin"),
     "eq_other": ("f_other", None, "fin"),
 }
+
+
+# تسويةٌ لا نقد فيها: لا تُنسب إليها حصةٌ من النقد ما وُجد مقابلٌ حقيقي
+_CF_NO_CASH = ("exp_contra",)
+
+
+def _cf_alloc(lines, cls):
+    """حصة كل سطرٍ غير نقدي من النقد الذي تحرّك في القيد (المباشرة).
+
+    النقد يُنسب إلى **مقابله** — الأسطر في الجهة المعاكسة له — بنسبها.
+    فقبضٌ 1000 مع خصمٍ 50 من عميلٍ مدينٍ 1050 متحصلاتٌ من العملاء 1000
+    لا 1050 ومصروفٌ −50: الخصم والفروق تسويةٌ لا نقد فيها (4.78).
+    يُرجع [(الحساب، الأثر على النقد)] ومجموعه = صافي النقد في القيد.
+    """
+    d_cash = sum(m for a, m in lines if cls.get(a) == "cash")
+    if abs(d_cash) <= 0.0005:
+        return []
+    other = [(a, m) for a, m in lines if cls.get(a) != "cash"]
+    opp = [(a, m) for a, m in other if m * d_cash < 0]
+    real = [(a, m) for a, m in opp if cls.get(a) not in _CF_NO_CASH]
+    use = real or opp
+    tot = sum(abs(m) for _a, m in use)
+    if tot <= 1e-12:
+        return [(a, -m) for a, m in other]
+    return [(a, d_cash * abs(m) / tot) for a, m in use]
 
 
 def _cf_period(conn, d1, d2, rows, by_id):
@@ -956,19 +1002,18 @@ def _cf_period(conn, d1, d2, rows, by_id):
     v = {k: 0.0 for k in keys}
     act = {"op": 0.0, "inv": 0.0, "fin": 0.0}
     for lines in ent.values():
-        d_cash = sum(m for a, m in lines if cls.get(a) == "cash")
-        touches = abs(d_cash) > 0.0005
         for a, m in lines:
             c = cls.get(a, "other_wc")
             if c == "cash":
                 continue
-            direct, indirect, sec = _CF_ROUTE.get(c, _CF_ROUTE["other_wc"])
-            eff = -m                       # أثره على النقد
+            _d, indirect, _s = _CF_ROUTE.get(c, _CF_ROUTE["other_wc"])
             if indirect:
-                v[indirect] += eff         # غير المباشرة: كل القيود
-            if touches:
-                v[direct] += eff           # المباشرة/الاستثمار/التمويل
-                act[sec] += eff
+                v[indirect] += -m          # غير المباشرة: كل القيود
+        for a, eff in _cf_alloc(lines, cls):
+            direct, _i, sec = _CF_ROUTE.get(cls.get(a, "other_wc"),
+                                            _CF_ROUTE["other_wc"])
+            v[direct] += eff               # المباشرة/الاستثمار/التمويل
+            act[sec] += eff
     # ══ أصلٌ اشتُري بالأجل ثم سُدِّد ثمنه ══
     # السداد يمرّ بحساب المورّد فيُقرأ «مدفوعاً للموردين» (تشغيلياً)،
     # وهو في حقيقته ثمن أصلٍ ثابت ⇒ استثماري (IAS 7.16). فيُعاد تصنيف
@@ -1101,17 +1146,19 @@ def cf_detail(conn, date_from, date_to, key):
     picked = []
     for eid, lines in ent.items():
         cash_lines = [(a, m) for a, m in lines if cls.get(a) == "cash"]
-        touches = abs(sum(m for _a, m in cash_lines)) > 0.0005
-        for a, m in lines:
-            c = cls.get(a, "other_wc")
-            if c == "cash":
-                continue
-            direct, indirect, sec = _CF_ROUTE.get(c, _CF_ROUTE["other_wc"])
-            hit = ((key in indirect_keys and indirect == key)
-                   or (key not in indirect_keys and touches
-                       and (direct == key or sec == key or key == "net")))
-            if hit:
-                picked.append((eid, a, -m, cash_lines))
+        if key in indirect_keys:
+            for a, m in lines:
+                c = cls.get(a, "other_wc")
+                if c == "cash":
+                    continue
+                if _CF_ROUTE.get(c, _CF_ROUTE["other_wc"])[1] == key:
+                    picked.append((eid, a, -m, cash_lines))
+            continue
+        for a, eff in _cf_alloc(lines, cls):
+            direct, _i, sec = _CF_ROUTE.get(cls.get(a, "other_wc"),
+                                            _CF_ROUTE["other_wc"])
+            if direct == key or sec == key or key == "net":
+                picked.append((eid, a, eff, cash_lines))
     if not picked:
         out = []
     else:
@@ -1200,7 +1247,8 @@ def cf_layout(cf, method="indirect"):
         return [r for r in out_
                 if abs(r["cash"]) >= 0.005 or abs(r["cash_cmp"]) >= 0.005]
 
-    out = []
+    # النقد أول الفترة أول صفٍّ في القائمة (4.78): منه تبدأ القراءة
+    out = [row("bal", "النقد وما في حكمه أول الفترة", "opening", tot=True)]
     spec = {"op": CF_INDIRECT if method == "indirect" else CF_DIRECT,
             "inv": CF_INVESTING, "fin": CF_FINANCING}
     for sec, title, total in CF_SECTIONS:
@@ -1214,8 +1262,6 @@ def cf_layout(cf, method="indirect"):
         out.append(row("sub", total, sec, tot=True))
     out.append(row("grand", "صافي الزيادة (النقص) في النقد وما في حكمه",
                    "net", tot=True))
-    out.append(row("bal", "النقد وما في حكمه أول الفترة", "opening",
-                   tot=True))
     out.append(row("grand", "النقد وما في حكمه آخر الفترة", "closing",
                    tot=True))
     return out
