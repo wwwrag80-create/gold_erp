@@ -90,7 +90,7 @@ def items(conn, as_of=None, model=None):
         p += [NO_MODEL] + chosen
     rows = conn.execute(
         "SELECT w.id, w.work_order_no wo, w.model_no,"
-        "  w.registered_weight wt, w.wage_per_gram wpg, w.is_bulk,"
+        "  COALESCE(w.remaining_weight, w.registered_weight) wt, w.wage_per_gram wpg, w.is_bulk,"
         "  w.item_type, w.small_stones, w.big_stones,"
         "  COALESCE(e.entry_date, substr(w.created_at,1,10)) in_date"
         " FROM work_orders w"

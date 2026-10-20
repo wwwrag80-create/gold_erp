@@ -39,6 +39,11 @@ def ensure_schema(conn):
     if wcols and "is_service" not in wcols:
         conn.execute("ALTER TABLE work_orders ADD COLUMN is_service"
                      " INTEGER NOT NULL DEFAULT 0")
+    # 4.82: الوزن الباقي في الخزنة للطقم المفرد (بيعُ جزءٍ منه) — يُشتقّ
+    # من سلسلة حركته (`wo_moves.resync`)؛ NULL = وزن بطاقته كاملاً
+    if wcols and "remaining_weight" not in wcols:
+        conn.execute("ALTER TABLE work_orders ADD COLUMN remaining_weight"
+                     " REAL")
     icols = {r["name"] for r in conn.execute(
         "PRAGMA table_info(invoice_items)")}
     if icols and "stock_account_id" not in icols:

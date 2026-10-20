@@ -17,7 +17,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
                                make_table, title_label)
 
 COLS = ["نوع الحركة", "التاريخ", "الجهة المقابلة", "الذهب", "الفصوص",
-        "الأحجار", "الوزن المقيد", "نوع الطقم"]
+        "الأحجار", "الوزن المقيد", "في الخزنة بعدها", "نوع الطقم"]
 
 
 class TurnoverPanel(QtWidgets.QFrame):
@@ -191,14 +191,24 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         try:
             with db(readonly=True) as conn:
                 wo, rows = inventory.item_history(conn, no)
+                st = None
+                if not wo["is_bulk"]:
+                    from models import wo_moves
+                    st = wo_moves.state(conn, wo)
+            where = ""
+            if st is not None:
+                # 4.82: كم منه في الخزنة وكم عند الجهات — بيعُ جزءٍ يُرى
+                where = (f"  ·  في الخزنة {kv.g(st['rem']):,.2f} · عند الجهات"
+                         f" {kv.g(st['out']):,.2f} {kv.unit()}")
             self.info.setText(
                 f"الطقم {wo['work_order_no']}  ·  النوع: {wo['item_type'] or '—'}"
-                f"  ·  الوزن المقيد الحالي: "
+                f"  ·  الوزن المقيد: "
                 f"{kv.g(wo['registered_weight']):,.2f} {kv.unit()}"
-                f"  ·  الحالة: {'بالمخزون' if wo['status'] == 'in_stock' else 'خارج/مباع'}")
+                f"  ·  الحالة: {'بالمخزون' if wo['status'] == 'in_stock' else 'خارج/مباع'}"
+                + where)
             data = [(r["kind"], r["date"], r["party"], self._w(r["gold"]),
                      self._w(r["small"]), self._w(r["big"]), self._w(r["reg"]),
-                     r["type"]) for r in rows]
+                     self._w(r.get("left", "")), r["type"]) for r in rows]
             fill(self.table, COLS, data)
         except Exception as e:
             self.info.setText("")

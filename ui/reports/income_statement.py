@@ -222,17 +222,18 @@ class StandardIncomeTab(QtWidgets.QWidget):
         self.period = kit.ComboBox()
         for label, key in PERIODS:
             self.period.addItem(label, key)
-        self.period.setCurrentIndex(3)
+        # 4.82: تُفتح على الشهر الحالي مباشرةً وبلا مقارنة — والمقارنة
+        # والفترات الأطول بالاختيار
+        self.period.setCurrentIndex(0)
         self.period.currentIndexChanged.connect(self.apply_period)
+        _s, _e = period_range("month", date.today())
         self.d_from = date_edit()
-        self.d_from.setDate(
-            QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+        self.d_from.setDate(QtCore.QDate(_s.year, _s.month, _s.day))
         self.d_to = date_edit()
-        self.d_to.setDate(
-            QtCore.QDate(QtCore.QDate.currentDate().year(), 12, 31))
+        self.d_to.setDate(QtCore.QDate(_e.year, _e.month, _e.day))
         self.cmp_on = kit.CheckBox(
             "مقارنة بالفترة المماثلة من السنة السابقة")
-        self.cmp_on.setChecked(True)
+        self.cmp_on.setChecked(False)
         self.accounts = kit.CheckBox("إظهار الحسابات تحت كل بند")
         self.accounts.stateChanged.connect(self._rerender)
         btn_mov = kit.PushButton("🔎 تفصيل البند وحركته")

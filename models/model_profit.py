@@ -112,11 +112,11 @@ def unsold(conn, date_from=None, date_to=None):
         p.append(date_to)
     rows = conn.execute(
         "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') mno,"
-        "  COUNT(*) n, ROUND(SUM(w.registered_weight),3) wt,"
+        "  COUNT(*) n, ROUND(SUM(COALESCE(w.remaining_weight, w.registered_weight)),3) wt,"
         "  ROUND(AVG(w.wage_per_gram),2) wpg"
         " FROM work_orders w"
         " WHERE w.is_deleted=0 AND w.status='in_stock'" + c +
-        " GROUP BY mno ORDER BY SUM(w.registered_weight) DESC", p).fetchall()
+        " GROUP BY mno ORDER BY SUM(COALESCE(w.remaining_weight, w.registered_weight)) DESC", p).fetchall()
     return [{"model": r["mno"], "count": int(r["n"] or 0),
              "weight": float(r["wt"] or 0),
              "wage_per_gram": float(r["wpg"] or 0),

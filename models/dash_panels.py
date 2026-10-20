@@ -376,7 +376,7 @@ def stock_rows(conn, search=""):
         " COALESCE(NULLIF(TRIM(w.model_no),''),'') model,"
         " w.gold_weight gold, w.small_stones small, w.big_stones big,"
         " w.stones_after_discount after, w.discount_rate rate,"
-        " w.registered_weight reg, w.standing_gold standing,"
+        " COALESCE(w.remaining_weight, w.registered_weight) reg, w.standing_gold standing,"
         " w.wage_per_gram wage, w.is_bulk bulk"
         " FROM work_orders w"
         " WHERE w.is_deleted=0 AND w.status='in_stock'" + clause +

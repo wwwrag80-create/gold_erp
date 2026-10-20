@@ -270,6 +270,12 @@ class MfgCostsScreen(QtWidgets.QWidget):
         # آخر أو لشهرٍ آخر أو الخروج من الشاشة (4.48)
         self.save_state = QtWidgets.QLabel("")
         self.save_state.setObjectName("cardSub")
+        # 4.82: تاريخٌ أُدخل خطأً عند الإنزال يُصحَّح لقيود الشهر كلها بنقرة
+        self.btn_redate = kit.PushButton("📅 تطبيقه على القيود")
+        self.btn_redate.setToolTip(
+            "يغيّر تاريخ قيود رواتب هذا الشهر المرحّلة كلها إلى التاريخ"
+            " المكتوب — المبالغ كما هي")
+        self.btn_redate.clicked.connect(self.redate_posted)
         btn_post = kit.PushButton("📥 إنزال الرواتب")
         btn_post.setObjectName("homeBtn")
         btn_post.clicked.connect(self.post_salaries)
@@ -314,6 +320,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
         head.addWidget(btn_reload)
         head.addWidget(QtWidgets.QLabel("تاريخ القيد:"))
         head.addWidget(self.s_date)
+        head.addWidget(self.btn_redate)
         head.addStretch(1)
         head.addWidget(self.save_state)
         head.addWidget(btn_post)
@@ -967,6 +974,17 @@ class MfgCostsScreen(QtWidgets.QWidget):
             self._loaded_period = per
             self._dirty = {"t": False, "s": False}
             self._edited = set()
+            # شهرٌ نزلت رواتبه: يظهر تاريخ قيوده لا آخرُ الشهر (4.82)
+            try:
+                with db(readonly=True) as conn:
+                    pd = mfg_costs.posted_date(conn, per)
+                if pd:
+                    self.s_date.setDate(
+                        QtCore.QDate.fromString(pd, "yyyy-MM-dd"))
+                    self.save_state.setText(f"✔ نزلت رواتبه بتاريخ {pd}")
+                self.btn_redate.setEnabled(bool(pd))
+            except Exception:
+                pass
             self._fill(self.t_table, TARGET_COLS, self.target_rows)
             self._fill(self.s_table, SALARY_COLS, self.salary_rows)
             self._update_total()
@@ -1110,6 +1128,30 @@ class MfgCostsScreen(QtWidgets.QWidget):
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
             return None
         return dstr(d)
+
+    def redate_posted(self):
+        """يطبّق تاريخ القيد المكتوب أعلاه على قيود الشهر المرحّلة كلها."""
+        try:
+            if self._dirty["s"] and not self.autosave():
+                return
+            per, date = self.period(), dstr(self.s_date)
+            with db(readonly=True) as conn:
+                n = sum(1 for r in mfg_costs.list_salaries(conn, per)
+                        if r.get("is_posted"))
+            if not n:
+                raise ValueError(f"لا رواتب مرحّلة لشهر {per}")
+            if not ask(self, f"تغيير تاريخ قيود رواتب شهر {per} المرحّلة"
+                             f" ({n}) إلى {date}؟\n\nالمبالغ كما هي —"
+                             " يتغيّر التاريخ وحده."):
+                return
+            with db() as conn:
+                k = mfg_costs.redate_salaries(conn, per, date,
+                                              self.user["username"])
+            info(self, f"تغيّر تاريخ {k} قيداً إلى {date}." if k else
+                       "كل القيود بهذا التاريخ أصلاً.")
+            self.reload()
+        except Exception as e:
+            err(self, e)
 
     def _edit_row(self, employee_id):
         """نافذة تعديل راتب عاملٍ مرحّل وتاريخ قيده (4.81)."""

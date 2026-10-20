@@ -211,7 +211,7 @@ class StocktakeScreen(QtWidgets.QWidget):
             scanned_set = set(self.scanned)
             missing = system_nos - scanned_set
             excess = scanned_set - system_nos
-            missing_w = sum(r["registered_weight"] for r in system_rows
+            missing_w = sum(r["avail_weight"] for r in system_rows
                             if r["work_order_no"] in missing)
             msg = (f"مطابق: {len(scanned_set & system_nos)} | "
                   f"عجز/مفقود: {len(missing)} "

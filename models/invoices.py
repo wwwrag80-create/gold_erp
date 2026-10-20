@@ -149,23 +149,31 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
             # بقيت بعد حذف فاتورة لا تمنع بيع ما تقول حركته إنه بالخزنة،
             # وبيعٌ بتاريخٍ قديم قبل مرتجعٍ لاحق يُرفض كبيع ما هو خارج
             from models import wo_moves as _wm
+            # الوزن المُدخل صراحةً يُعتمد (4.82): أقلّ من الباقي في الخزنة
+            # = بيعُ جزءٍ يبقى باقيه للبيع لاحقاً، وفي المرتجع = جزءٌ عاد.
+            # والفارغ يُقترح له الباقي في الخزنة (بيع) أو الخارج (مرتجع).
+            _w = c.get("weight")
+            weight = (float(_w) if _w not in (None, "", 0)
+                      else _wm.default_weight(conn, wo, kind))
             if wo["id"] not in (skip_ids or ()) \
-                    and not _wm.can_add(conn, wo, kind, invoice_date):
+                    and not _wm.can_add(conn, wo, kind, invoice_date,
+                                        weight):
                 need = "بالمخزون" if need_status == "in_stock" else "مباعاً"
+                st = _wm.state(conn, wo)
+                part = st["rem"] if kind == "sale" else st["out"]
+                if part > _wm.EPS:
+                    # فيه وزنٌ لكنه أقل مما كُتب
+                    raise ValueError(
+                        f"الطقم {wo['work_order_no']}: "
+                        + ("الباقي منه في الخزنة" if kind == "sale"
+                           else "الخارج منه عند الجهات")
+                        + f" {part:,.3f} جم فقط، والمكتوب {weight:,.3f} جم")
                 # الرفض وحده لا يكفي: «ليس بالمخزون» تترك المستخدم
                 # يبحث. فيُدلّ على **أين ذهب** ليقرّر — يحذفه من تلك
                 # الفاتورة أو يرتجعه أو يتركه.
                 raise ValueError(
                     f"الطقم {wo['work_order_no']} ليس {need}"
                     + _where_is(conn, wo["id"]))
-            # الوزن المُدخل صراحةً يُعتمد بدل وزن البطاقة.
-            # **المبرّر المحاسبي**: الطقم قد يعود بوزن مختلف عمّا
-            # سُجّل (خطأ إدخال أصلي أو تصحيح ميزان)، والواقع المادي
-            # هو المرجع لا السجل. والوزن الجديد يُعتمد في البطاقة
-            # كذلك (أدناه) فلا ينفصل المخزون عن الدفتر.
-            _w = c.get("weight")
-            weight = (float(_w) if _w not in (None, "", 0)
-                      else wo["registered_weight"])
         # ══ الطقم المفرد لا يتكرّر في فاتورة ══
         # قطعةٌ واحدة تخرج مرة: سطران لها في فاتورةٍ واحدة يعني أن
         # العميل حوسب على أجرتها مرتين ووزنها خرج مرتين من المخزون،
@@ -531,12 +539,9 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
             delta = li["weight"] if kind == "sale_return" else -li["weight"]
             adjust_bulk_wo(conn, delta, username, wo_id=wo["id"])
         else:
-            # المرتجع بوزن مختلف: تُحدَّث بطاقة الطقم بالوزن العائد
-            # فعلاً — فيتطابق المخزون مع ما دخل الخزنة حقيقةً.
-            if kind == "sale_return" and \
-                    abs(float(li["weight"] or 0)
-                        - float(wo["registered_weight"] or 0)) > 0.001:
-                _sync_wo_weight(conn, wo, float(li["weight"]), username)
+            # 4.82: البطاقة لا تُمسّ — وزن الطقم في الخزنة يُشتقّ من سلسلة
+            # حركته بأوزانها (`wo_moves.resync` بعد الحفظ): بيعُ جزءٍ يُبقي
+            # باقيه، ومرتجعٌ بوزنٍ آخر يُدخل الخزنة ما عاد فعلاً.
             conn.execute("UPDATE work_orders SET status=? WHERE id=?",
                         (new_status, wo["id"]))
 

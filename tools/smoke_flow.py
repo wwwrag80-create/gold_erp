@@ -8599,6 +8599,53 @@ def main():
           callable(getattr(_mcs111, "edit_posted_salary", None))
           and "entry_date" in _mcs111.repost_salary.__code__.co_varnames)
 
+    # ══ 112) 4.82: بيع جزءٍ من الطقم · المرتجع بوزنه · تاريخ قيود الرواتب ══
+    from models import wo_moves as _wm112
+    with db() as conn:
+        _A112 = add_entity(conn, "عميل 112", "customer", username="admin")
+        create_work_orders_batch(
+            conn, [{"wo_no": "PART-112", "gold": 10.0, "wage_per_gram": 5}],
+            "2026-10-01", "admin")
+        _w112 = conn.execute("SELECT * FROM work_orders"
+                             " WHERE work_order_no='PART-112'").fetchone()
+        _s112 = _iv103.create_sale(conn, _A112, [
+            {"work_order_id": _w112["id"], "weight": 4.0}], "2026-10-02",
+            "admin", apply_vat=False)
+        _st112a = _wm112.state(conn, _w112)
+        _stat112 = conn.execute("SELECT status, remaining_weight r FROM"
+                                " work_orders WHERE id=?",
+                                (_w112["id"],)).fetchone()
+        try:
+            _iv103.create_sale(conn, _A112, [
+                {"work_order_id": _w112["id"], "weight": 7.0}],
+                "2026-10-03", "admin", apply_vat=False)
+            _over112 = False
+        except ValueError:
+            _over112 = True
+    check("بيع جزءٍ من الطقم يُبقي باقيه في الخزنة يُباع لاحقاً",
+          _st112a["rem"] == 6.0 and _st112a["out"] == 4.0
+          and _stat112["status"] == "in_stock" and _stat112["r"] == 6.0,
+          f"{_st112a} · {dict(_stat112)}")
+    check("ولا يُباع منه أكثر من باقيه", _over112)
+    _sd111(_s112["entry_id"], "admin")
+    with db(readonly=True) as conn:
+        _st112b = _wm112.state(conn, _w112)
+    check("وحذف فاتورته من الكشف يعيده كاملاً", _st112b["rem"] == 10.0
+          and _st112b["out"] == 0.0, str(_st112b))
+    with db() as conn:
+        _wk112 = add_entity(conn, "عامل 112", "worker", username="admin",
+                            basic_salary=1000.0)
+        _mcs111.save_salaries(conn, "2026-06",
+                              _mcs111.list_salaries(conn, "2026-06"),
+                              "admin")
+        _mcs111.post_salaries(conn, "2026-06", "admin",
+                              entry_date="2026-06-15")
+        _n112 = _mcs111.redate_salaries(conn, "2026-06", "2026-06-30",
+                                        "admin")
+        _pd112 = _mcs111.posted_date(conn, "2026-06")
+    check("الرواتب: تاريخ قيود الشهر كلها يُعدَّل بنقرة",
+          _n112 >= 1 and _pd112 == "2026-06-30", f"{_n112} · {_pd112}")
+
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

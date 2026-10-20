@@ -68,7 +68,7 @@ def list_models(conn, date_from=None, date_to=None):
         " SUM(CASE WHEN w.status='in_stock' THEN 1 ELSE 0 END) in_n,"
         " SUM(CASE WHEN w.status='sold' THEN 1 ELSE 0 END) out_n,"
         " ROUND(SUM(CASE WHEN w.status='in_stock'"
-        "   THEN w.registered_weight ELSE 0 END),2) in_w,"
+        "   THEN COALESCE(w.remaining_weight, w.registered_weight) ELSE 0 END),2) in_w,"
         " ROUND(SUM(CASE WHEN w.status='sold'"
         "   THEN w.registered_weight ELSE 0 END),2) out_w"
         " FROM work_orders w WHERE w.is_deleted=0"
@@ -92,7 +92,9 @@ def model_items(conn, model_no, branch):
     p = [] if bare else [str(model_no).strip()]
     status = "sold" if branch == "sold" else "in_stock"
     rows = conn.execute(
-        "SELECT w.id, w.work_order_no wo, w.registered_weight reg,"
+        "SELECT w.id, w.work_order_no wo,"
+        " (CASE WHEN w.status='in_stock' THEN COALESCE(w.remaining_weight, w.registered_weight)"
+        "  ELSE w.registered_weight END) reg,"
         " w.standing_gold standing, w.gold_weight gold,"
         " substr(w.created_at,1,10) created,"
         " (SELECT en.name FROM invoice_items it"
@@ -126,7 +128,9 @@ def full_catalog(conn):
     واحدة، ومصنعٌ بخمسمئة موديل كان يعني ألف استعلام لكل فتح.
     """
     rows = conn.execute(
-        "SELECT w.id, w.work_order_no wo, w.registered_weight reg,"
+        "SELECT w.id, w.work_order_no wo,"
+        " (CASE WHEN w.status='in_stock' THEN COALESCE(w.remaining_weight, w.registered_weight)"
+        "  ELSE w.registered_weight END) reg,"
         " w.standing_gold standing, w.gold_weight gold, w.status st,"
         " COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') mno,"
         " substr(w.created_at,1,10) created"

@@ -903,6 +903,52 @@ def entry_date_of(conn, period, employee_id):
     return r["entry_date"] if r else None
 
 
+def posted_date(conn, period):
+    """تاريخ قيود رواتب الشهر المرحّلة (الأكثر تكراراً) — أو None."""
+    r = conn.execute(
+        "SELECT e.entry_date d, COUNT(*) n FROM mfg_salaries s"
+        " JOIN journal_entries e ON e.id=s.entry_id AND e.is_deleted=0"
+        " WHERE s.period=? AND s.is_posted=1 GROUP BY e.entry_date"
+        " ORDER BY n DESC, d DESC LIMIT 1", (period,)).fetchone()
+    return r["d"] if r else None
+
+
+def redate_salaries(conn, period, entry_date, username):
+    """يغيّر تاريخ قيود رواتب الشهر المرحّلة كلها إلى `entry_date` (4.82).
+
+    تاريخٌ أُدخل خطأً عند الإنزال يُصحَّح بنقرةٍ واحدة لا قيداً قيداً.
+    المبالغ كما هي في القيود — يتغيّر التاريخ وحده — وكل قيدٍ يُلغى
+    ويُرحَّل بديله (`editing.repost`) فيبقى أثره في «من عدّل ماذا».
+    يعيد عدد القيود التي تغيّر تاريخها."""
+    from services.dates import normalize_date
+    from models import editing
+    date = normalize_date(entry_date, "تاريخ القيد")
+    n = 0
+    for s in conn.execute(
+            "SELECT * FROM mfg_salaries WHERE period=? AND is_posted=1"
+            " AND entry_id IS NOT NULL", (period,)).fetchall():
+        if not _posted(conn, s):
+            continue
+        if _shared(conn, s["entry_id"]):
+            split_combined(conn, username, only=s["entry_id"], strict=True)
+            s = conn.execute("SELECT * FROM mfg_salaries WHERE id=?",
+                             (s["id"],)).fetchone()
+        eid = s["entry_id"]
+        e = conn.execute("SELECT entry_date, user_note FROM journal_entries"
+                         " WHERE id=?", (eid,)).fetchone()
+        if str(e["entry_date"])[:10] == date:
+            continue
+        amt = _entry_amount(conn, eid)
+        editing.repost(conn, eid, username, _post_one, period,
+                       s["employee_id"], amt, date, username,
+                       e["user_note"] or "")
+        n += 1
+    if n:
+        log_action(conn, username, "update", "mfg_salaries", None,
+                   f"تاريخ قيود رواتب {period}: {n} قيد ← {date}")
+    return n
+
+
 EDIT_KEYS = ("basic_salary", "overtime_rate", "deduction_manual",
              "gold_loss", "gold_deduction", "target_amount", "bonus")
 

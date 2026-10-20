@@ -66,7 +66,10 @@ def create_itemized_reconcile(conn, scanned_numbers, stocktake_date, username,
     ترحيل آلي لعدم توفر بيانات موثوقة لوزنها/مصدرها)."""
     scanned = {s.strip() for s in scanned_numbers if s and s.strip()}
     system_rows = conn.execute(
-        "SELECT id, work_order_no, registered_weight FROM work_orders"
+        # الوزن الباقي في الخزنة (4.82) — طقمٌ بِيع جزءٌ منه يُجرد بباقيه
+        "SELECT id, work_order_no,"
+        " COALESCE(remaining_weight, registered_weight) registered_weight"
+        " FROM work_orders"
         " WHERE is_deleted=0 AND status='in_stock'").fetchall()
     system = {r["work_order_no"]: r for r in system_rows}
 

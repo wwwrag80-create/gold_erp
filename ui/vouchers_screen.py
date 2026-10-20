@@ -45,8 +45,15 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
 
         self.entity_combo = search_combo("اكتب اسم الجهة…")
         self.entity_combo.currentIndexChanged.connect(self.show_balances)
-        self.account_combo = search_combo("اكتب رقم الحساب أو اسمه…")
+        # 4.82: حقلٌ واحد عام — أيُّ حسابٍ في شجرة الحسابات مباشرةً، وحساب
+        # الجهة (عميل · مورد · عامل…) منها: يُعرف بحسابه فيبقى سند الجهة
+        # كما كان (رصيدها ومصروف العامل). اختيار «الوجهة» أُلغي
+        self.account_combo = search_combo(
+            "اكتب رقم الحساب أو اسمه — أي حساب في شجرة الحسابات…")
         self.account_combo.currentIndexChanged.connect(self.show_balances)
+        self.account_combo.currentIndexChanged.connect(
+            self._apply_measurement_safe)
+        self._acc_ent = {}
         self.target_stack = QtWidgets.QStackedWidget()
         self.target_stack.addWidget(self.entity_combo)
         self.target_stack.addWidget(self.account_combo)
@@ -179,9 +186,12 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         head.addWidget(self.kind)
         head.addWidget(QtWidgets.QLabel("التاريخ:"))
         head.addWidget(self.date)
-        head.addWidget(QtWidgets.QLabel("الوجهة:"))
+        head.addWidget(QtWidgets.QLabel("الحساب:"))
         head.addWidget(self.target_mode)
         head.addWidget(self.target_stack, 1)
+        self.target_mode.setCurrentIndex(1)       # حسابٌ من الشجرة دائماً
+        self.target_mode.setVisible(False)
+        self.target_stack.setCurrentIndex(1)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("السندات والخصومات — ميزان مزدوج (ذهب/نقد)"))
@@ -244,9 +254,28 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self.g_equiv.setText(f"المكافئ بـ{kv.label()}: {kv.g(eq):.2f} جم")
 
     def _current_target(self):
-        if self.target_mode.currentData() == "entity":
-            return "entity", self.entity_combo.currentData()
-        return "account", self.account_combo.currentData()
+        """(entity، معرّف الجهة) إن كان الحساب المختار حسابَ جهة، وإلا
+        (account، معرّف الحساب) — فسند الجهة يُرحَّل كما كان تماماً."""
+        aid = self.account_combo.currentData()
+        if aid is not None and aid in self._acc_ent:
+            return "entity", self._acc_ent[aid]
+        return "account", aid
+
+    def _apply_measurement_safe(self, *_):
+        try:
+            self._apply_measurement()
+        except Exception:
+            pass
+
+    def _select_entity(self, entity_id):
+        """يختار حساب الجهة في الحقل العام."""
+        for aid, eid in self._acc_ent.items():
+            if eid == entity_id:
+                i = self.account_combo.findData(aid)
+                if i >= 0:
+                    self.account_combo.setCurrentIndex(i)
+                return True
+        return False
 
     def _apply_measurement(self):
         """يربط حقول النقد/الذهب بنوع قياس الحساب المختار: حساب نقدي
@@ -417,9 +446,6 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
     def _target_label(self):
         """اسم الجهة أو الحساب المختار — لعرضه في تأكيد الترحيل."""
         try:
-            mode, _val = self._current_target()
-            if mode == "entity":
-                return self.entity_combo.currentText()
             return self.account_combo.currentText()
         except Exception:
             return "—"
@@ -545,12 +571,8 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                 self.kind.setCurrentIndex(i)
             # الأعمدة الفعلية: customer_id (جهة التعامل) و target_account_id
             if v.get("customer_id"):
-                self.target_mode.setCurrentIndex(0)
-                i = self.entity_combo.findData(v["customer_id"])
-                if i >= 0:
-                    self.entity_combo.setCurrentIndex(i)
+                self._select_entity(v["customer_id"])
             elif v.get("target_account_id"):
-                self.target_mode.setCurrentIndex(1)
                 i = self.account_combo.findData(v["target_account_id"])
                 if i >= 0:
                     self.account_combo.setCurrentIndex(i)
@@ -623,8 +645,6 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             return None
         return {
             "kind": self.kind.currentData(),
-            "target_mode": self.target_mode.currentData(),
-            "entity_id": self.entity_combo.currentData(),
             "account_id": self.account_combo.currentData(),
             "date": dstr(self.date),
             "notes": self.notes.text().strip(),
@@ -635,12 +655,13 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         if not d or not d.get("rows"):
             return False
         for combo, key in ((self.kind, "kind"),
-                           (self.target_mode, "target_mode"),
-                           (self.entity_combo, "entity_id"),
                            (self.account_combo, "account_id")):
             i = combo.findData(d.get(key))
             if i >= 0:
                 combo.setCurrentIndex(i)
+        # مسوّدةٌ قديمة بوجهة «جهة تعامل»: يُختار حساب الجهة
+        if d.get("target_mode") == "entity" and d.get("entity_id"):
+            self._select_entity(d["entity_id"])
         if d.get("date"):
             self.date.setDate(QtCore.QDate.fromString(d["date"],
                                                       "yyyy-MM-dd"))
@@ -686,6 +707,9 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                                   + r["name"]))
             reload_combo(self.account_combo, list_postable(conn),
                         lambda r: f"{r['code']} — {r['name']}")
+            self._acc_ent = {r["account_id"]: r["id"] for r in conn.execute(
+                "SELECT id, account_id FROM entities WHERE is_deleted=0"
+                " AND account_id IS NOT NULL")}
         self._reload_exp_accounts()
         self.show_balances()
         self._apply_measurement()

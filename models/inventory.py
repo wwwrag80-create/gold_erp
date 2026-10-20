@@ -383,8 +383,10 @@ def create_work_orders_batch(conn, rows, entry_date, username,
 
 
 def list_in_stock(conn):
+    """الأطقم في الخزنة — و`avail_weight` وزنها الباقي فيها (4.82)."""
     return conn.execute(
-        "SELECT * FROM work_orders WHERE is_deleted=0 AND status='in_stock'"
+        "SELECT *, COALESCE(remaining_weight, registered_weight) avail_weight"
+        " FROM work_orders WHERE is_deleted=0 AND status='in_stock'"
         " ORDER BY id DESC").fetchall()
 
 
@@ -603,7 +605,9 @@ def stock_snapshot(conn):
     scrap_total = round(acc_bal.get(SCRAP_ACCOUNT, 0.0), 3)
     pure_total = round(acc_bal.get(PURE_ACCOUNT, 0.0), 3)
     wo = conn.execute(
-        "SELECT COUNT(*) c, COALESCE(SUM(registered_weight),0) w FROM work_orders"
+        "SELECT COUNT(*) c,"
+        " COALESCE(SUM(COALESCE(remaining_weight, registered_weight)),0) w"
+        " FROM work_orders"
         " WHERE is_deleted=0 AND status='in_stock'").fetchone()
     return {
         "scrap_total18": scrap_total,      # صندوق الكسر الموحّد
@@ -880,7 +884,10 @@ def item_history(conn, wo_no):
         "party": "المصنع (خزينة التصنيع)",
         "gold": wo["gold_weight"], "small": wo["small_stones"],
         "big": wo["big_stones"], "reg": wo["registered_weight"],
+        "left": (wo["registered_weight"] if not wo["is_bulk"]
+                 and wo["entry_id"] else ""),
         "type": wo["item_type"] or "—"})
+    _left = {}
     # المبيعات والمرتجعات من بنود الفواتير — بترتيب السلسلة المنظّمة
     # (4.75): حركات اليوم الواحد بالتناوب بيع ← مرتجع، لا بمعرّف الفاتورة
     from models import wo_moves
@@ -893,10 +900,18 @@ def item_history(conn, wo_no):
             " WHERE it.work_order_id=? AND i.is_deleted=0"
             " ORDER BY i.invoice_date, i.id", (wo["id"],)).fetchall()
     if not wo["is_bulk"]:
-        _rank = {m["id"]: n for n, m in enumerate(wo_moves.order(
-            [{"id": r["id"], "kind": r["kind"], "date": r["invoice_date"]}
-             for r in _its if r["kind"] in ("sale", "sale_return")],
-            wo_moves.birth(wo)))}
+        _mv = {}
+        for r in _its:
+            if r["kind"] in ("sale", "sale_return"):
+                m = _mv.setdefault(r["id"], {"id": r["id"], "kind": r["kind"],
+                                            "date": r["invoice_date"],
+                                            "w": 0.0})
+                m["w"] += float(r["rw"] or 0)
+        _tr = wo_moves.trail(list(_mv.values()), wo_moves.birth(wo),
+                             wo["registered_weight"])
+        _rank = {m["id"]: n for n, (m, _r, _o) in enumerate(_tr)}
+        # 4.82: ما بقي في الخزنة بعد كل حركة — بيعُ جزءٍ يُرى باقيه
+        _left = {m["id"]: r for m, r, _o in _tr}
         _its = sorted(_its, key=lambda r: (r["invoice_date"] or "",
                                            _rank.get(r["id"], 10 ** 9),
                                            r["id"]))
@@ -905,6 +920,7 @@ def item_history(conn, wo_no):
             "kind": "مبيعات" if it["kind"] == "sale" else "مرتجع",
             "date": it["invoice_date"], "party": it["party"] or "—",
             "gold": "", "small": "", "big": "", "reg": it["rw"],
+            "left": _left.get(it["id"], ""),
             "type": wo["item_type"] or "—"})
     # تسويات الوزن على هذا الطقم
     for a in conn.execute(
@@ -914,7 +930,7 @@ def item_history(conn, wo_no):
             (wo["id"],)).fetchall():
         rows.append({
             "kind": "تسوية", "date": a["d"], "party": a["note"] or "—",
-            "gold": "", "small": "", "big": "", "reg": "",
+            "gold": "", "small": "", "big": "", "reg": "", "left": "",
             "type": wo["item_type"] or "—"})
     rows.sort(key=lambda r: (r["date"] or "", 0 if r["kind"] == "توريد" else 1))
     return wo, rows
@@ -1184,6 +1200,8 @@ def adjust_or_delete_wo(conn, wo_id, username, new_gold=None,
 
     log_action(conn, username, "adjust", "work_orders", wo_id,
                f"{label} | فرق {diff:+.3f} جم")
+    from models import wo_moves as _wm
+    _wm.resync(conn, [wo_id], username)
     return {"wo_no": wo_no, "old_reg": old_reg,
             "new_reg": 0.0 if delete else new_reg,
             "diff": diff, "entry_id": entry_id, "label": label}
@@ -1700,6 +1718,11 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     sync_scrap_moves(conn, "work_orders", entry_id,
                      _dline["account_id"] if _dline else None, _k,
                      round(float(total_reg or 0), 3), sign=1)
+    # وزن البطاقة تغيّر: الباقي في الخزنة يُعاد من سلسلة الحركة (4.82)
+    from models import wo_moves as _wm
+    _wm.resync(conn, [r["id"] for r in conn.execute(
+        "SELECT id FROM work_orders WHERE entry_id=? AND is_deleted=0",
+        (entry_id,))], username)
     return {"entry_id": entry_id, "added": added, "updated": updated,
             "removed": removed, "kept_sold": sorted(set(kept_sold)),
             "delta": delta, "moved_dest": moved_dest, "reference": _ref,

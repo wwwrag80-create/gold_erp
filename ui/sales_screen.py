@@ -1680,13 +1680,33 @@ class SalesScreen(QtWidgets.QWidget):
                 self.line_standing.setValue(0)
                 self.line_reg.setValue(0)
             else:
-                self.line_gold.setValue(kv.g(wo["gold_weight"], k))
-                self.line_small.setValue(kv.g(wo["small_stones"], k))
-                self.line_big.setValue(kv.g(wo["big_stones"], k))
+                # 4.82: المقترح الباقي في الخزنة (بيع) أو الخارج (مرتجع) —
+                # طقمٌ بِيع منه جزءٌ يُعرض بباقيه، ومكوّناته بنسبته
+                full = float(wo["registered_weight"] or 0)
+                avail = full
+                try:
+                    from models import wo_moves as _wm
+                    kind = ("sale" if self.kind.currentData() == "sale"
+                            else "sale_return")
+                    with db(readonly=True) as conn:
+                        avail = _wm.default_weight(conn, wo, kind)
+                except Exception:
+                    pass
+                f = avail / full if full > 0.001 else 1.0
+                self.line_gold.setValue(kv.g((wo["gold_weight"] or 0) * f, k))
+                self.line_small.setValue(
+                    kv.g((wo["small_stones"] or 0) * f, k))
+                self.line_big.setValue(kv.g((wo["big_stones"] or 0) * f, k))
                 self.line_after.setValue(
-                    kv.g(wo["stones_after_discount"], k))
-                self.line_standing.setValue(kv.g(wo["standing_gold"], k))
-                self.line_reg.setValue(kv.g(wo["registered_weight"], k))
+                    kv.g((wo["stones_after_discount"] or 0) * f, k))
+                self.line_standing.setValue(
+                    kv.g((wo["standing_gold"] or 0) * f, k))
+                self.line_reg.setValue(kv.g(avail, k))
+                self.line_reg.setToolTip(
+                    "" if abs(avail - full) < 0.001 else
+                    f"وزن الطقم {kv.g(full, k):,.2f} — المقترح هنا"
+                    f" {kv.g(avail, k):,.2f} (الباقي بعد ما بِيع/رُدّ منه)."
+                    " اكتب وزناً أقل لبيع جزءٍ يبقى باقيه في الخزنة.")
             self._rate = float(wo["discount_rate"]
                                if "discount_rate" in wo.keys()
                                else config.STONE_DISCOUNT_RATE)
@@ -2053,16 +2073,22 @@ class SalesScreen(QtWidgets.QWidget):
                 # الطقم اليوم نتيجة آخر حركة له — وقد تكون حركةً بعد
                 # هذه الفاتورة — و`update_invoice` لا يمسّ المخزون إلا
                 # إن كانت هذه الفاتورة آخر حركة فعلاً.
-                need = "in_stock" if is_sale else "sold"
-                if self.editing_id is None and wo["status"] != need:
+                # 4.82: بالوزن لا بالحالة — يُباع ما بقي منه في الخزنة
+                # ولو بِيع جزءٌ قبله، ويُرتجع ما خرج منه ولو بقي جزءٌ فيها
+                from models import wo_moves as _wm
+                with db(readonly=True) as conn:
+                    _st = _wm.state(conn, wo)
+                part = _st["rem"] if is_sale else _st["out"]
+                if self.editing_id is None and part <= _wm.EPS:
                     raise ValueError(
                         f"الطقم {no} حالته لا تسمح: "
-                        + ("يجب أن يكون بالمخزون للبيع/التحويل" if is_sale
-                           else "يجب أن يكون خارجاً/مباعاً للمرتجع"))
+                        + ("خرج بوزنه كله — لا باقي منه في الخزنة يُباع"
+                           if is_sale else
+                           "لا شيء منه خارجٌ عند الجهات يُرتجع"))
                 if any(i["wo"]["id"] == wo["id"] for i in self.items):
                     raise ValueError("الطقم مضاف مسبقاً للفاتورة")
                 weight = reg_view if reg_view > 0 else kv.g(
-                    wo["registered_weight"], k)
+                    part if part > _wm.EPS else wo["registered_weight"], k)
                 parts = {"gold": self.line_gold.value(),
                          "small": self.line_small.value(),
                          "big": self.line_big.value(),
@@ -2315,17 +2341,34 @@ class SalesScreen(QtWidgets.QWidget):
         if reg <= 0:
             err(self, "الوزن المقيد يجب أن يكون أكبر من صفر")
             return
-        # وزن الطقم المفرد من بطاقته: تغييره هنا يخالفها، فيُسأل عنه
-        if not wo["is_bulk"] and \
-                abs(kv.store(reg, k) - float(wo["registered_weight"] or 0)) \
-                > 0.001:
-            if not ask(self,
-                       f"الطقم {wo['work_order_no']} وزنه المقيد في "
-                       f"بطاقته {kv.g(wo['registered_weight'], k):,.2f} "
-                       f"{kv.unit(k)}، وأنت تكتب {reg:,.2f}.\n\n"
-                       f"الأصحّ تعديل البطاقة من شاشة تسوية وزن "
-                       f"الطقم.\n\nهل تريد المتابعة على أي حال؟"):
-                return
+        # 4.82: وزنٌ أقل من المتاح = جزءٌ يبقى باقيه (في الخزنة للبيع، وعند
+        # الجهة للمرتجع) — يُقال صراحةً؛ والأكثر منه يُسأل عنه
+        if not wo["is_bulk"]:
+            try:
+                from models import wo_moves as _wm
+                with db(readonly=True) as conn:
+                    _st = _wm.state(conn, wo)
+                avail = (_st["rem"] if self.kind.currentData() == "sale"
+                         else _st["out"]) or _st["full"]
+                if self.editing_id is not None:
+                    avail = max(avail, float(it.get("weight_store") or 0),
+                                kv.store(float(it.get("weight") or 0), k0))
+            except Exception:
+                avail = float(wo["registered_weight"] or 0)
+            new18 = kv.store(reg, k)
+            if new18 > avail + 0.001:
+                if not ask(self,
+                           f"الطقم {wo['work_order_no']} المتاح منه"
+                           f" {kv.g(avail, k):,.2f} {kv.unit(k)}، وأنت تكتب"
+                           f" {reg:,.2f}.\n\nالمتابعة على أي حال؟"):
+                    return
+            elif new18 < avail - 0.001:
+                where = ("في الخزنة ويُباع لاحقاً"
+                         if self.kind.currentData() == "sale"
+                         else "عند الجهة")
+                info(self, f"يبقى من الطقم {wo['work_order_no']}"
+                           f" {kv.g(avail - new18, k):,.2f} {kv.unit(k)}"
+                           f" {where}.")
         # الأجر الدقيق (أجرةٌ مقطوعة قُسمت على الوزن) يبقى كما هو ما لم
         # يُغيَّر رقمه الظاهر أو عياره — فحفظ النافذة بلا تغييرٍ لا يقرّبه
         wage = round(w_wage.value(), 2)

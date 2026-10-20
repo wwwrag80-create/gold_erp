@@ -641,6 +641,7 @@ _SEC = {
     "Content-Security-Policy": (
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline';"
         " script-src 'unsafe-inline'; connect-src 'self';"
+        " manifest-src 'self';"
         " form-action 'self'; base-uri 'none'"),
 }
 
@@ -659,6 +660,71 @@ _GONE = ("<!DOCTYPE html><html dir='rtl' lang='ar'><meta charset='utf-8'>"
          "</body></html>")
 
 
+# ══════════════════════════════════════════════════════════════════
+#  التثبيت واختصار سطح المكتب (4.82)
+# ------------------------------------------------------------------
+#  الرابط يعمل في المتصفح ولا يعمل من اختصاره: كان رمز الدخول في ملف
+#  تعريفٍ بـ`SameSite=Strict`، وكثيرٌ من المتصفحات لا ترسله حين تُفتح
+#  الصفحة من خارجها (اختصارٌ على سطح المكتب · تطبيقٌ مثبّت) فتُسأل عن
+#  الرمز أو تُرفض. صار `Lax` — يُرسل عند فتح الرابط ولا يُرسل مع طلبٍ
+#  من موقعٍ آخر (والطلبات المعدِّلة تحمل رمز CSRF أصلاً). ومعه ملف
+#  تثبيتٍ (manifest) وأيقونة، وملفّ اختصارٍ لسطح المكتب يُنزَّل من الصفحة.
+# ══════════════════════════════════════════════════════════════════
+
+def _manifest(base):
+    co = _company().strip() or "دليل الموديلات"
+    return json.dumps({
+        "name": f"{co} — دليل الموديلات",
+        "short_name": co[:24],
+        "start_url": base,
+        "scope": base + "/",
+        "display": "standalone",
+        "dir": "rtl", "lang": "ar",
+        "background_color": "#f7f4ee", "theme_color": "#2b2723",
+        "icons": [{"src": f"{base}/icon.png", "sizes": "512x512",
+                   "type": "image/png", "purpose": "any"},
+                  {"src": f"{base}/icon.png", "sizes": "192x192",
+                   "type": "image/png", "purpose": "any"}],
+    }, ensure_ascii=False)
+
+
+def _icon():
+    try:
+        import config
+        data = config.LOGO_PATH.read_bytes()
+        return _resp(200, data, "image/png",
+                     {"Cache-Control": "private, max-age=86400"})
+    except Exception:
+        return _resp(404, b"", "text/plain")
+
+
+def _shortcut(base, headers):
+    """ملف اختصارٍ لسطح المكتب (Windows .url) يفتح الرابط في المتصفح."""
+    h = {str(k).lower(): v for k, v in (headers or {}).items()}
+    host = (h.get("x-forwarded-host") or h.get("host") or "").strip()
+    proto = (h.get("x-forwarded-proto") or "").strip()
+    if not proto:
+        proto = "https" if host.split(":")[0].endswith(".ts.net") else "http"
+    url = f"{proto}://{host}{base}"
+    body = f"[InternetShortcut]\r\nURL={url}\r\n".encode("utf-8")
+    name = quote("دليل الموديلات.url")
+    return _resp(200, body, "application/internet-shortcut",
+                 {"Content-Disposition":
+                  f"attachment; filename=\"models.url\"; filename*=UTF-8''{name}",
+                  "Cache-Control": "no-store"})
+
+
+def _install_head(base):
+    """وسوم التثبيت في رأس كل صفحة."""
+    b = _e(base)
+    return (f'<link rel="manifest" href="{b}/manifest.webmanifest">'
+            f'<link rel="icon" href="{b}/icon.png">'
+            f'<link rel="apple-touch-icon" href="{b}/icon.png">'
+            '<meta name="mobile-web-app-capable" content="yes">'
+            '<meta name="apple-mobile-web-app-capable" content="yes">'
+            '<meta name="theme-color" content="#2b2723">')
+
+
 def handle(method, parts, query, headers, body):
     """معالج `/m/<رمز>/…` — يستدعيه `photo_server` في خيط الطلب."""
     from database.database import db
@@ -673,7 +739,17 @@ def handle(method, parts, query, headers, body):
             and hmac.compare_digest(str(parts[0]), token)):
         return _resp(404, _GONE)
     base = f"/{PREFIX}/{token}"
-    rest = list(parts[1:])
+    # «/m/<رمز>/» بشرطةٍ في آخره (اختصارٌ أو مفضّلةٌ تُضيفها) هو الصفحة
+    # نفسها — كانت تُرفض «غير موجودة» (4.82)
+    rest = [p for p in parts[1:] if p != ""]
+    # ملفات التثبيت بلا دخول: لا تكشف شيئاً لا يعرفه حامل الرابط
+    if rest == ["manifest.webmanifest"]:
+        return _resp(200, _manifest(base), "application/manifest+json",
+                     {"Cache-Control": "no-cache"})
+    if rest == ["icon.png"]:
+        return _icon()
+    if rest == ["shortcut.url"]:
+        return _shortcut(base, headers)
     authed = (not pin_hash) or hmac.compare_digest(
         _cookies(headers).get(COOKIE, ""),
         _cookie_value(token, secret, pin_hash))
@@ -691,10 +767,10 @@ def handle(method, parts, query, headers, body):
             return _resp(401, login_page(base, "الرمز غير صحيح"))
         ck = (f"{COOKIE}={_cookie_value(token, secret, pin_hash)}; "
               f"Path={base}; Max-Age={COOKIE_DAYS * 86400}; HttpOnly;"
-              " SameSite=Strict")
+              " SameSite=Lax")
         return _resp(303, "", headers={"Location": base, "Set-Cookie": ck})
     if rest[:1] == ["logout"]:
-        ck = f"{COOKIE}=; Path={base}; Max-Age=0; HttpOnly; SameSite=Strict"
+        ck = f"{COOKIE}=; Path={base}; Max-Age=0; HttpOnly; SameSite=Lax"
         return _resp(303, "", headers={"Location": base, "Set-Cookie": ck})
     if not authed:
         if rest[:1] == ["img"]:
@@ -1359,7 +1435,7 @@ def page_html(conn, query, base):
 <html dir="rtl" lang="ar" data-cols="{DEFAULT_COLS}" data-base="{_e(base)}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width={DESKTOP_W}">
-<meta name="robots" content="noindex,nofollow">
+<meta name="robots" content="noindex,nofollow">{_install_head(base)}
 <title>{title}</title>
 <style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
@@ -1378,6 +1454,8 @@ def page_html(conn, query, base):
 </main>
 <footer><a href="{_e(again)}">↻ تحديث</a>
  · إصدار {_e(_version())}
+ · <a href="{_e(base)}/shortcut.url"
+ title="ملفّ يوضع على سطح المكتب فيفتح الرابط بنقرة">⬇ اختصار سطح المكتب</a>
  · <a href="{_e(base)}/logout">خروج</a></footer>
 <script>{_JS}{_IMG_JS}</script></body></html>"""
 
@@ -2093,7 +2171,7 @@ def _shell(base, title, inner, css="", js="", back=True):
     return f"""<!DOCTYPE html>
 <html dir="rtl" lang="ar" data-base="{_e(base)}"><head><meta charset="utf-8">
 <meta name="viewport" content="width={DESKTOP_W}">
-<meta name="robots" content="noindex,nofollow">
+<meta name="robots" content="noindex,nofollow">{_install_head(base)}
 <title>{_e(title)}</title>
 <style>{_CSS}{_ORDER_CSS}{css}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{_e(title)}</h1>
@@ -2335,7 +2413,7 @@ def login_page(base, error=""):
     return f"""<!DOCTYPE html>
 <html dir="rtl" lang="ar"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>دخول</title>
+<meta name="robots" content="noindex,nofollow">{_install_head(base)}<title>دخول</title>
 <style>{_CSS}
 .box{{max-width:340px;margin:12vh auto;background:#fff;border-radius:16px;
 border:1px solid var(--line);padding:22px;text-align:center}}
