@@ -1361,7 +1361,7 @@ def page_html(conn, query, base):
 
     from services import karat_view as kv
     tab = query.get("tab") if query.get("tab") in (
-        "guide", "received", "orders", "customers") else "guide"
+        "guide", "received", "orders", "customers", "income") else "guide"
     view = query.get("view") if query.get("view") in (
         "all", "in_stock", "sold") else "all"
     sort = query.get("sort") if query.get("sort") in (
@@ -1382,7 +1382,8 @@ def page_html(conn, query, base):
                      ("received", "البضاعة الواردة بتاريخ"),
                      ("orders", "طلبات العملاء"
                       + (f" ({n_orders})" if n_orders else "")),
-                     ("customers", "العملاء — المبيعات والسداد")))
+                     ("customers", "العملاء — المبيعات والسداد"),
+                     ("income", "قائمة الدخل")))
     seg = "".join(
         f'<a class="{"on" if view == k else ""}" href="'
         f'{_e(_link(base, tab=tab, view=k, sort=sort, day=query.get("day")))}'
@@ -1404,6 +1405,8 @@ def page_html(conn, query, base):
 
     if tab == "customers":
         body, summary, tools, seg = _board(conn, query, base)
+    elif tab == "income":
+        body, summary, tools, seg = _income(conn)
     elif tab == "received":
         body, summary, tools = _received(conn, query, base, view, sort,
                                          imgs, unit, sort_sel)
@@ -1414,17 +1417,23 @@ def page_html(conn, query, base):
                                       sort_sel)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     co = _company().strip()
-    board = tab == "customers"
-    title = (("العملاء — المبيعات والسداد" if board else "دليل الموديلات")
+    board = tab in ("customers", "income")
+    title = (("قائمة الدخل" if tab == "income" else
+              "العملاء — المبيعات والسداد" if board else "دليل الموديلات")
              + (f" — {_e(co)}" if co else ""))
     cols = "".join(f'<button type="button" data-c="{c}">{c}</button>'
                    for c in COLS)
     cols_bar = ("" if board else
                 f'<div class="cols">الصور في الصف: {cols}</div>')
-    hint = ("ابحث باسم العميل أو رقم حسابه…" if board else
+    hint = ("ابحث في بنود القائمة…" if tab == "income" else
+            "ابحث باسم العميل أو رقم حسابه…" if board else
             "ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…")
     sect = ("board" if board else
             "orders" if tab == "orders" else "grid")
+    # قائمة الدخل تتجدّد وحدها كل ربع ساعة: مفتوحةً حتى أول الشهر
+    # تنتقل إليه بلا لمس، وأرقام اليوم تتبع ما يُرحَّل
+    refresh = ('<meta http-equiv="refresh" content="900">'
+               if tab == "income" else "")
     again = (_link(base, tab=tab, side=query.get("side"),
                    **{k: query.get(k)
                       for k in ("from", "to", "all", "f", "dim")})
@@ -1435,9 +1444,9 @@ def page_html(conn, query, base):
 <html dir="rtl" lang="ar" data-cols="{DEFAULT_COLS}" data-base="{_e(base)}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width={DESKTOP_W}">
-<meta name="robots" content="noindex,nofollow">{_install_head(base)}
+<meta name="robots" content="noindex,nofollow">{_install_head(base)}{refresh}
 <title>{title}</title>
-<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}</style></head><body>
+<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_INCOME_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
 <div class="bar"><input id="q" type="search"
@@ -1488,6 +1497,78 @@ form.tools label{display:flex;gap:4px;align-items:center;font-size:13px}
 
 _GRADE_CSS = {"مسدَّد": "g-ok", "ممتاز": "g-ok", "جيد": "g-mid",
               "مقبول": "g-low", "سيء": "g-bad"}
+
+
+# ══════════════════════════════════════════════════════════════════
+#  قائمة الدخل (4.83): الشهر الحالي وحده — بلا فترةٍ تُختار ولا مقارنة
+# ------------------------------------------------------------------
+#  الأرقام من `statements.income_statement` نفسها التي تقرأ منها شاشة
+#  القوائم المالية. والشهر يُحسب عند كل فتح: فإذا دخل شهرٌ جديد صارت
+#  القائمة له تلقائياً. والسالب بإشارة ناقص «-10» كما في البرنامج.
+# ══════════════════════════════════════════════════════════════════
+
+_INCOME_CSS = """
+.board tr.isec td{background:#efe9dc;text-align:right;font-weight:700}
+.board td.lbl{text-align:right;white-space:normal}
+.board tr.isub td{border-top:1.5px solid #333;font-weight:700}
+.board tr.igrand td{background:#2b2723;color:#fff;font-weight:700;
+font-size:14px}
+.board tr.imemo td{color:#666;font-style:italic}
+.board td.neg{color:#b3261e}
+"""
+
+_MONTHS_AR = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر")
+
+
+def _month_range(today=None):
+    from datetime import date, timedelta
+    d = today or date.today()
+    start = d.replace(day=1)
+    nxt = (start + timedelta(days=32)).replace(day=1)
+    return start, nxt - timedelta(days=1)
+
+
+def _income(conn, today=None):
+    from models import statements
+    from services import karat_view as kv
+    d1, d2 = _month_range(today)
+    st = statements.income_statement(conn, d1.isoformat(), d2.isoformat(),
+                                      False)
+    rows = statements.is_layout(st, False)
+
+    def num(v, gold=False):
+        v = kv.g(v or 0.0) if gold else float(v or 0.0)
+        eps = 0.0005 if gold else 0.005
+        if abs(v) < eps:
+            return "—", ""
+        txt = f"{abs(v):,.3f}" if gold else f"{abs(v):,.2f}"
+        # علامة LRM قبل الناقص: في سطرٍ عربي يُعرض «-300» بلا قلب «300-»
+        return (f"\u200e-{txt}", "neg") if v < 0 else (txt, "")
+
+    body = ""
+    for r in rows:
+        k = r["kind"]
+        if k in ("sec", "memohead"):
+            body += (f'<tr class="isec"><td colspan="3">{_e(r["label"])}'
+                     "</td></tr>")
+            continue
+        c, cc = num(r.get("cash"))
+        g, gc = num(r.get("gold"), True)
+        cls = {"sub": "isub", "grand": "igrand", "memo": "imemo"}.get(k, "")
+        body += (f'<tr class="{cls}"><td class="lbl">{_e(r["label"])}</td>'
+                 f'<td class="{cc}">{c}</td><td class="{gc}">{g}</td></tr>')
+    month = f"{_MONTHS_AR[d1.month - 1]} {d1.year}"
+    body = (f'<table><thead><tr><th>البيان — شهر {_e(month)}</th>'
+            f"<th>ريال</th><th>ذهب ({_e(kv.unit())})</th></tr></thead>"
+            f"<tbody>{body}</tbody></table>")
+    net = st["cash"]["totals"].get("net", 0.0)
+    n_txt, _c = num(net)
+    summary = (f'<div class="chip">شهر {_e(month)} — من {d1.isoformat()}'
+               f' إلى {d2.isoformat()}</div>'
+               f'<div class="chip">صافي {"ربح" if net >= 0 else "خسارة"}'
+               f' الشهر: <b>{n_txt}</b> ريال</div>')
+    return body, summary, "", ""
 
 
 def _board_period(query):

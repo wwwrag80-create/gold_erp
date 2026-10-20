@@ -2361,7 +2361,8 @@ def _fp_money(v, gold=False, paren=True):
         return "—"
     s = _gw(abs(v), 3) if gold else _w(abs(v), 2)
     if v < 0:
-        return f"({s})" if paren else f"-{s}"
+        # LRM قبل الناقص: الصفحة عربية الاتجاه فتقلب «-10» إلى «10-»
+        return f"({s})" if paren else f"\u200e-{s}"
     return s
 
 

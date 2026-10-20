@@ -205,7 +205,8 @@ def money(v, gold=False, paren=True):
         return "—"
     s = f"{abs(v):,.3f}" if gold else f"{abs(v):,.2f}"
     if v < 0:
-        return f"({s})" if paren else f"-{s}"
+        # LRM قبل الناقص: الخلية عربية الاتجاه فتقلب «-10» إلى «10-»
+        return f"({s})" if paren else f"\u200e-{s}"
     return s
 
 

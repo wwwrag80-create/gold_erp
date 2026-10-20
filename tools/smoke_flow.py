@@ -8646,6 +8646,20 @@ def main():
     check("الرواتب: تاريخ قيود الشهر كلها يُعدَّل بنقرة",
           _n112 >= 1 and _pd112 == "2026-06-30", f"{_n112} · {_pd112}")
 
+    # ══ 113) 4.83: قائمة الدخل في رابط المدير — الشهر الحالي وحده ══
+    from services import models_web as _mw113
+    from datetime import timedelta as _td113
+    with db(readonly=True) as conn:
+        _b113, _s113, _t113, _g113 = _mw113._income(conn)
+        _m1 = date.today().replace(day=1)
+        _nx = (_m1 + _td113(days=40)).replace(day=2)
+        _b113n, _s113n, _x, _y = _mw113._income(conn, _nx)
+    check("رابط المدير: قائمة الدخل للشهر الحالي بلا فترة ولا مقارنة",
+          _m1.isoformat() in _s113 and "المقارنة" not in _b113
+          and not _t113, _s113)
+    check("وتنتقل وحدها إلى الشهر الجديد",
+          _nx.replace(day=1).isoformat() in _s113n, _s113n)
+
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",
