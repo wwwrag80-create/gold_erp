@@ -8768,6 +8768,12 @@ def main():
         from ui.sales_screen import SalesScreen as _S115
         check("شاشة المبيعات: إشعار المدة عند رقم التشغيل في المرتجع",
               hasattr(_S115, "_held_note"))
+        # 4.88: ثابتٌ حتى «إضافة سطر» أو طقمٍ آخر أو مغادرة الشاشة
+        import inspect as _isp115
+        check("وإشعار المدة ثابت يُغلق بإضافة السطر ومغادرة الشاشة",
+              "ms=-1" in _isp115.getsource(_S115._held_note)
+              and "_clear_held" in _isp115.getsource(_S115._clear_entry)
+              and "_clear_held" in _isp115.getsource(_S115.hideEvent))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

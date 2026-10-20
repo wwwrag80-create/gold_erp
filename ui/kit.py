@@ -1733,6 +1733,7 @@ def _classic(parent, text, title, kind, buttons, detail, default):
 def notify(parent, text, kind="success", title="", ms=2400):
     """إشعارٌ عابر أعلى النافذة (InfoBar) لا يحتاج «موافق».
 
+    `ms` سالبٌ ⇒ ثابتٌ لا يختفي وحده (يُغلق بزرّه أو بـ`close()`).
     يعيد عنصر الإشعار، أو `None` إن لم تكن نافذةٌ ظاهرة.
     """
     try:
@@ -1748,7 +1749,8 @@ def notify(parent, text, kind="success", title="", ms=2400):
             bar = fn(title=str(title or ""), content=str(text),
                      orient=QtCore.Qt.Horizontal, isClosable=True,
                      position=qf.InfoBarPosition.TOP,
-                     duration=max(800, int(ms)), parent=win)
+                     duration=(-1 if int(ms) < 0 else max(800, int(ms))),
+                     parent=win)
             bar.setObjectName("kitNotify")
             return bar
         except Exception:

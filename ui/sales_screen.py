@@ -651,6 +651,7 @@ class SalesScreen(QtWidgets.QWidget):
         self.kind.addItem("مرتجع بيع", "sale_return")
         self.kind.setMinimumWidth(150)
         self.kind.currentIndexChanged.connect(self.clear_items)
+        self.kind.currentIndexChanged.connect(self._clear_held)
         self.kind.currentIndexChanged.connect(self._sync_kind_labels)
         self.date = date_edit()
         self.customer = search_combo("اكتب اسم العميل أو الطرف المقابل…")
@@ -1662,6 +1663,7 @@ class SalesScreen(QtWidgets.QWidget):
         self._reg_manual = False
         self._rate = config.STONE_DISCOUNT_RATE
         self._wo = None
+        self._clear_held()            # أُضيف السطر ⇒ يُغلق إشعار المدة
 
     def _fill_from_wo(self, wo):
         """ينسخ بطاقة الطقم إلى سطر الإدخال بعيار السطر المختار."""
@@ -1728,8 +1730,13 @@ class SalesScreen(QtWidgets.QWidget):
     def _wo_lookup(self):
         """يستدعي بطاقة الطقم من رقم التشغيل ويملأ السطر بها."""
         no = self.barcode.text().strip()
-        if not no or (self._wo is not None
-                      and self._wo["work_order_no"] == no):
+        if not no:
+            return
+        if self._wo is not None and self._wo["work_order_no"] == no:
+            # الطقم نفسه أُعيد إدخاله: يعود إشعاره إن أُغلق (4.88)
+            if (self._is_return() and not self._wo["is_bulk"]
+                    and not self._held_shown()):
+                self._held_note(self._wo)
             return
         try:
             with db(readonly=True) as conn:
@@ -1740,11 +1747,14 @@ class SalesScreen(QtWidgets.QWidget):
             # لا رسالةَ خطأ هنا: قد يكون الرقم جديداً في مرتجع، أو
             # ما زال المستخدم يكتبه. الرفض موضعه الإضافة لا الكتابة.
             self._wo = None
+            self._clear_held()
             return
         self._wo = wo
         self._fill_from_wo(wo)
         if self._is_return() and not wo["is_bulk"]:
             self._held_note(wo)
+        else:
+            self._clear_held()
         # الخانة التي انتقل إليها المؤشر تُحدَّد كاملة، فيُكتب فوقها
         # مباشرةً إن أراد المستخدم تصحيح ما جاء من البطاقة.
         fw = QtWidgets.QApplication.focusWidget()
@@ -1753,7 +1763,15 @@ class SalesScreen(QtWidgets.QWidget):
 
     def _held_note(self, wo):
         """المرتجع (4.87): إشعارٌ بكم جلس الطقم عند الجهة منذ بِيع لها —
-        حتى تاريخ هذه الفاتورة. وإن بِيع لغير العميل المختار يُنبَّه."""
+        حتى تاريخ هذه الفاتورة. وإن بِيع لغير العميل المختار يُنبَّه.
+
+        ثابتٌ (4.88): يبقى حتى «إضافة سطر» أو إدخال طقمٍ آخر أو مغادرة
+        الشاشة — ويعود إن أُعيد إدخال الطقم نفسه."""
+        self._clear_held()
+        if not self.isVisible():
+            # مغادرة الشاشة تُفقد رقمَ التشغيل التركيز فيُستدعى الطقم —
+            # والإشعار لا يُعرض فوق شاشةٍ أخرى
+            return None
         try:
             from models import wo_moves as _wm
             with db(readonly=True) as conn:
@@ -1773,19 +1791,38 @@ class SalesScreen(QtWidgets.QWidget):
                      and int(cust) != int(h["party_id"]))
         if other:
             txt += f"\n⚠ بِيع لـ«{h['party']}» لا للعميل المختار"
-        # إشعارٌ واحد: طقمٌ تالٍ يحلّ محل إشعار سابقه لا يتراكم فوقه
-        try:
-            if self._held_bar is not None:
-                self._held_bar.close()
-        except (AttributeError, RuntimeError):
-            pass
-        bar = self._held_bar = kit.notify(
-            self, txt, "warning" if other else "info",
-            title="مدة بقاء الطقم", ms=8000)
+        bar = kit.notify(self, txt, "warning" if other else "info",
+                         title="مدة بقاء الطقم", ms=-1)
         if bar is None:
             from ui.widgets import toast
-            toast.show(self, txt, 8000)
+            bar = toast.show(self, txt, -1)
+        self._held_bar = bar
         return txt
+
+    def _held_shown(self):
+        try:
+            bar = getattr(self, "_held_bar", None)
+            return bar is not None and bar.isVisible()
+        except RuntimeError:          # أُغلق بزرّه فحُذف
+            return False
+
+    def _clear_held(self, *_):
+        """يُغلق إشعار «مدة بقاء الطقم» إن كان ظاهراً."""
+        bar, self._held_bar = getattr(self, "_held_bar", None), None
+        if bar is None:
+            return
+        try:
+            if isinstance(bar, QtWidgets.QLabel):
+                bar.deleteLater()
+            else:
+                bar.close()
+        except RuntimeError:
+            pass
+
+    def hideEvent(self, e):
+        # الإشعار على النافذة لا على الشاشة: لا يبقى فوق شاشةٍ أخرى
+        self._clear_held()
+        super().hideEvent(e)
 
     def _w_fields(self):
         """خانات الوزن الست بترتيبها — مرجعٌ واحد لكل ما يمسّها."""

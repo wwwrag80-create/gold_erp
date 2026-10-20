@@ -9,7 +9,8 @@ from PyQt5 import QtCore, QtWidgets
 
 
 def show(parent, text, ms=2200):
-    """يعرض الإشعار فوق `parent` (أو نافذته العليا). يعيد الملصق."""
+    """يعرض الإشعار فوق `parent` (أو نافذته العليا). يعيد الملصق.
+    `ms` سالبٌ ⇒ يبقى حتى يُحذف (`deleteLater`)."""
     try:
         win = parent.window() if parent is not None else None
     except Exception:
@@ -51,6 +52,7 @@ def show(parent, text, ms=2200):
     fade_out.setEndValue(0.0)
     fade_out.finished.connect(lbl.deleteLater)
     fade_in.start()
-    QtCore.QTimer.singleShot(max(600, int(ms)), lbl, fade_out.start)
+    if int(ms) >= 0:
+        QtCore.QTimer.singleShot(max(600, int(ms)), lbl, fade_out.start)
     lbl._anims = (fade_in, fade_out)
     return lbl
