@@ -641,7 +641,7 @@ _SEC = {
     "Content-Security-Policy": (
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline';"
         " script-src 'unsafe-inline'; connect-src 'self';"
-        " manifest-src 'self';"
+        " manifest-src 'self'; worker-src 'self';"
         " form-action 'self'; base-uri 'none'"),
 }
 
@@ -676,26 +676,87 @@ def _manifest(base):
     return json.dumps({
         "name": f"{co} — دليل الموديلات",
         "short_name": co[:24],
+        "id": base,
         "start_url": base,
-        "scope": base + "/",
+        # النطاق بلا شرطة: الصفحة نفسها `/m/<رمز>` داخله (بشرطةٍ كانت
+        # خارجه فيُهمل المتصفح النطاق)
+        "scope": base,
         "display": "standalone",
         "dir": "rtl", "lang": "ar",
         "background_color": "#f7f4ee", "theme_color": "#2b2723",
-        "icons": [{"src": f"{base}/icon.png", "sizes": "512x512",
+        "icons": [{"src": f"{base}/icon-512.png", "sizes": "512x512",
                    "type": "image/png", "purpose": "any"},
-                  {"src": f"{base}/icon.png", "sizes": "192x192",
+                  {"src": f"{base}/icon-192.png", "sizes": "192x192",
                    "type": "image/png", "purpose": "any"}],
     }, ensure_ascii=False)
 
 
-def _icon():
+_ICONS = {}
+
+
+def _logo_file():
+    """شعار المصنع (هويته إن ضُبطت) — وإلا شعار البرنامج من أصوله."""
+    from pathlib import Path
+    cands = []
     try:
         import config
-        data = config.LOGO_PATH.read_bytes()
-        return _resp(200, data, "image/png",
+        if getattr(config, "LOGO_PATH", None):
+            cands.append(Path(config.LOGO_PATH))
+    except Exception:
+        pass
+    try:
+        from services import app_icon
+        for root in app_icon._roots():
+            for n in ("logo.png", "logo_gold.png", "logo.ico"):
+                cands.append(Path(root) / "assets" / n)
+    except Exception:
+        pass
+    for p in cands:
+        try:
+            if p.is_file():
+                return p
+        except OSError:
+            continue
+    return None
+
+
+def _icon(size=512):
+    """أيقونة التطبيق المثبّت بمقاسها الحقيقي — المتصفح يرفض التثبيت إن
+    لم تطابق المقاس المعلن في ملف التثبيت."""
+    try:
+        if size not in _ICONS:
+            import io
+            from PIL import Image
+            im = Image.open(_logo_file()).convert("RGBA")
+            bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+            bg.alpha_composite(im)
+            out = io.BytesIO()
+            bg.convert("RGB").resize((size, size), Image.LANCZOS).save(
+                out, "PNG")
+            _ICONS[size] = out.getvalue()
+        return _resp(200, _ICONS[size], "image/png",
                      {"Cache-Control": "private, max-age=86400"})
     except Exception:
-        return _resp(404, b"", "text/plain")
+        try:
+            return _resp(200, _logo_file().read_bytes(), "image/png")
+        except Exception:
+            return _resp(404, b"", "text/plain")
+
+
+# عاملٌ خفيف يجعل الرابط قابلاً للتثبيت في المتصفحات التي تشترطه — لا
+# يخزّن شيئاً: كل طلبٍ يمضي إلى جهاز المصنع كما هو (أرقامٌ حيّة دائماً)
+_SW_JS = """self.addEventListener('install',function(){self.skipWaiting();});
+self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim());});
+self.addEventListener('fetch',function(e){
+ if(e.request.method!=='GET')return;
+ e.respondWith(fetch(e.request));});
+"""
+
+
+def _sw(base):
+    return _resp(200, _SW_JS, "text/javascript; charset=utf-8",
+                 {"Cache-Control": "no-cache",
+                  "Service-Worker-Allowed": base})
 
 
 def _shortcut(base, headers):
@@ -746,8 +807,12 @@ def handle(method, parts, query, headers, body):
     if rest == ["manifest.webmanifest"]:
         return _resp(200, _manifest(base), "application/manifest+json",
                      {"Cache-Control": "no-cache"})
-    if rest == ["icon.png"]:
-        return _icon()
+    if rest in (["icon.png"], ["icon-512.png"]):
+        return _icon(512)
+    if rest == ["icon-192.png"]:
+        return _icon(192)
+    if rest == ["sw.js"]:
+        return _sw(base)
     if rest == ["shortcut.url"]:
         return _shortcut(base, headers)
     authed = (not pin_hash) or hmac.compare_digest(
@@ -1083,7 +1148,13 @@ header .hi{max-width:1500px;margin:auto;padding:12px 22px;display:flex;
 align-items:center;gap:20px}
 header h1{font-size:20px;margin:0;white-space:nowrap}
 header .sub{font-size:12px;opacity:.85;margin-top:3px;white-space:nowrap}
-.bar{flex:1 1 auto;display:flex;justify-content:flex-end}
+.bar{flex:1 1 auto;display:flex;justify-content:flex-end;gap:10px}
+.inst{border:0;border-radius:9px;padding:9px 14px;font-size:14px;
+background:#c9a24a;color:#2b2723;font-weight:700;cursor:pointer;
+white-space:nowrap}
+.instmsg{max-width:1500px;margin:0 auto;padding:10px 22px;background:#fff7e0;
+color:#2b2723;font-size:14px;line-height:1.7;border-top:1px solid #e8d9a8}
+@media (display-mode: standalone){.inst{display:none}}
 .bar input[type=search]{width:460px;padding:9px 12px;border:0;
 border-radius:9px;font-size:14px}
 main{padding:16px 22px;max-width:1500px;margin:auto}
@@ -1449,9 +1520,11 @@ def page_html(conn, query, base):
 <style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_INCOME_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
-<div class="bar"><input id="q" type="search"
+<div class="bar"><button type="button" id="inst" class="inst"
+ title="يضع الرابط على سطح مكتب هذا الجهاز أيقونةً تفتحه بنقرة">📌 تثبيت
+ على سطح المكتب</button><input id="q" type="search"
  placeholder="{hint}"></div>
-</div></header><main>
+</div><div id="instmsg" class="instmsg" style="display:none"></div></header><main>
 <div class="top"><nav class="tabs">{tabs}</nav><span class="sep"></span>
 <nav class="seg">{seg}</nav><span class="sep"></span>
 {tools}
@@ -1463,10 +1536,8 @@ def page_html(conn, query, base):
 </main>
 <footer><a href="{_e(again)}">↻ تحديث</a>
  · إصدار {_e(_version())}
- · <a href="{_e(base)}/shortcut.url"
- title="ملفّ يوضع على سطح المكتب فيفتح الرابط بنقرة">⬇ اختصار سطح المكتب</a>
  · <a href="{_e(base)}/logout">خروج</a></footer>
-<script>{_JS}{_IMG_JS}</script></body></html>"""
+<script>{_JS}{_IMG_JS}{_INSTALL_JS}</script></body></html>"""
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1563,12 +1634,73 @@ def _income(conn, today=None):
             f"<th>ريال</th><th>ذهب ({_e(kv.unit())})</th></tr></thead>"
             f"<tbody>{body}</tbody></table>")
     net = st["cash"]["totals"].get("net", 0.0)
+    gnet = st["gold"]["totals"].get("net", 0.0)
     n_txt, _c = num(net)
+    g_txt, _gc = num(gnet, True)
+    # صافي الشهر ريالاً **وذهباً** (4.84) — كالسطر الأخير في الجدول
     summary = (f'<div class="chip">شهر {_e(month)} — من {d1.isoformat()}'
                f' إلى {d2.isoformat()}</div>'
                f'<div class="chip">صافي {"ربح" if net >= 0 else "خسارة"}'
-               f' الشهر: <b>{n_txt}</b> ريال</div>')
+               f' الشهر نقداً: <b>{n_txt}</b> ريال</div>'
+               f'<div class="chip">صافي {"ربح" if gnet >= 0 else "خسارة"}'
+               f' الشهر ذهباً: <b>{g_txt}</b> {_e(kv.unit())}</div>')
     return body, summary, "", ""
+
+
+# ══════════════════════════════════════════════════════════════════
+#  «📌 تثبيت على سطح المكتب» (4.84)
+# ------------------------------------------------------------------
+#  المتصفح لا يسمح لأي موقعٍ بأن يكتب ملفاً على سطح المكتب بنفسه — في
+#  أي جهاز. الطريق المسموح «تثبيت التطبيق»: نقرةٌ واحدة ونافذة تأكيد من
+#  المتصفح، فيضع أيقونةً على سطح المكتب (ويندوز وماك وأندرويد في كروم
+#  وإيدج) تفتح الرابط في نافذته بلا شريط عنوان. والآيفون لا يسمح بزرٍّ
+#  لذلك: يُشرح الطريق (مشاركة ← إضافة إلى الشاشة الرئيسية). والرابط غير
+#  الآمن (شبكة المصنع http) لا يُثبَّت: يُنزَّل ملف اختصارٍ بديلاً.
+# ══════════════════════════════════════════════════════════════════
+
+_INSTALL_JS = r"""
+(function(){
+ var b=document.getElementById('inst'),m=document.getElementById('instmsg');
+ if(!b)return;
+ var base=document.documentElement.getAttribute('data-base')||'';
+ var ask=null;
+ function say(t){m.innerHTML=t;m.style.display='block';}
+ if(window.matchMedia&&matchMedia('(display-mode: standalone)').matches){
+  b.style.display='none';}
+ if('serviceWorker' in navigator&&window.isSecureContext){
+  try{navigator.serviceWorker.register(base+'/sw.js',{scope:base})
+   .catch(function(){});}catch(e){}}
+ window.addEventListener('beforeinstallprompt',function(e){
+  e.preventDefault();ask=e;b.textContent='📌 تثبيت على سطح المكتب ✓';});
+ window.addEventListener('appinstalled',function(){
+  b.style.display='none';
+  say('✔ ثُبّت الرابط — أيقونته على سطح المكتب وفي قائمة البرامج، تفتحه'+
+      ' بنقرة.');});
+ b.addEventListener('click',function(){
+  var ua=navigator.userAgent||'';
+  if(ask){ask.prompt();ask.userChoice.then(function(r){
+    if(r&&r.outcome==='accepted'){b.style.display='none';
+     say('✔ ثُبّت الرابط — أيقونته على سطح المكتب وفي قائمة البرامج.');}
+    ask=null;});return;}
+  if(/iphone|ipad|ipod/i.test(ua)||(/macintosh/i.test(ua)&&
+     navigator.maxTouchPoints>1)){
+   say('على الآيفون والآيباد: زرّ المشاركة <b>⬆</b> أسفل الصفحة ثم'+
+       ' <b>«إضافة إلى الشاشة الرئيسية»</b> — تظهر أيقونة الرابط على'+
+       ' الشاشة وتفتحه بنقرة.');return;}
+  if(!window.isSecureContext){
+   say('التثبيت يحتاج الرابط الآمن (يبدأ بـ https). هذا رابط شبكة المصنع'+
+       ' — نُزّل لك ملف اختصار: انقله إلى سطح المكتب وافتحه بنقرة.');
+   location.href=base+'/shortcut.url';return;}
+  if(/firefox/i.test(ua)){
+   say('فايرفوكس لا يثبّت الروابط: اسحب القفل 🔒 بجانب العنوان إلى سطح'+
+       ' المكتب فيصير اختصاراً — أو افتح الرابط في كروم أو إيدج واضغط'+
+       ' هذا الزرّ.');return;}
+  say('من قائمة المتصفح <b>⋮</b> اختر <b>«تثبيت…»</b> (كروم: «حفظ'+
+      ' ومشاركة ← تثبيت الصفحة كتطبيق» · إيدج: «التطبيقات ← تثبيت هذا'+
+      ' الموقع كتطبيق») — فتظهر أيقونته على سطح المكتب.');
+ });
+})();
+"""
 
 
 def _board_period(query):

@@ -8659,6 +8659,17 @@ def main():
           and not _t113, _s113)
     check("وتنتقل وحدها إلى الشهر الجديد",
           _nx.replace(day=1).isoformat() in _s113n, _s113n)
+    # 4.84: صافي الشهر ذهباً أيضاً · وزرّ التثبيت على سطح المكتب
+    check("وصافي الشهر ريالاً وذهباً", "الشهر نقداً" in _s113
+          and "الشهر ذهباً" in _s113)
+    import json as _json113
+    _man113 = _json113.loads(_mw113._manifest("/m/x"))
+    check("رابط المدير قابلٌ للتثبيت: نطاقٌ يحوي الصفحة وأيقونتان وعامل",
+          _man113["scope"] == _man113["start_url"] == "/m/x"
+          and len(_man113["icons"]) == 2
+          and "beforeinstallprompt" in _mw113._INSTALL_JS
+          and _mw113._sw("/m/x")["headers"]["Service-Worker-Allowed"]
+          == "/m/x")
 
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
