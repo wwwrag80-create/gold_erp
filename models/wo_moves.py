@@ -400,6 +400,61 @@ def last_move(conn, wo_id):
     return seq[-1] if seq else None
 
 
+def last_out(conn, wo, as_of=None):
+    """آخر بيعٍ أخرج الطقم حتى `as_of` — للمرتجع: «كم جلس عند الجهة» (4.87).
+
+    بترتيب السلسلة المنظّمة: البيع الذي بعده لا يزال منه شيءٌ خارجاً.
+    يعيد {"invoice_no", "date", "party", "party_id", "days", "out"} أو
+    None (لا بيع، أو لا شيء منه خارجٌ في ذلك التاريخ)."""
+    import datetime as _dt
+    mv = moves_of(conn, wo["id"])
+    if not mv:
+        return None
+    d = str(as_of or _dt.date.today().isoformat())[:10]
+    sale, out = None, 0.0
+    for m, _rem, o in trail(mv, birth(wo), _full(wo)):
+        if (m["date"] or "") > d:
+            break
+        if m["kind"] == SALE:
+            sale = m
+        out = o
+    if sale is None or out <= EPS:
+        return None
+    r = conn.execute(
+        "SELECT i.invoice_no, i.customer_id, e.name FROM invoices i"
+        " LEFT JOIN entities e ON e.id=i.customer_id WHERE i.id=?",
+        (sale["id"],)).fetchone()
+    try:
+        days = (_dt.date.fromisoformat(d)
+                - _dt.date.fromisoformat(str(sale["date"])[:10])).days
+    except ValueError:
+        return None
+    return {"invoice_no": r[0] if r else "", "date": sale["date"],
+            "party": (r[2] if r else "") or "—",
+            "party_id": r[1] if r else None, "days": days, "out": out}
+
+
+def days_ar(n):
+    """المدة بالعربية: «يومٌ واحد» · «يومان» · «5 أيام» · «23 يوماً» —
+    ومن الشهر فأكثر تُضاف الأشهر: «47 يوماً (شهر و17 يوماً)»."""
+    n = int(n)
+
+    def one(k, w1, w2, w3, w11):
+        if k == 1:
+            return w1
+        if k == 2:
+            return w2
+        return f"{k} {w3 if 3 <= k % 100 <= 10 else w11}"
+    txt = one(n, "يومٌ واحد", "يومان", "أيام", "يوماً")
+    if n < 30:
+        return txt
+    mo, dd = divmod(n, 30)
+    m_txt = one(mo, "شهر", "شهران", "أشهر", "شهراً")
+    if dd:
+        m_txt += " و" + one(dd, "يوم", "يومان", "أيام", "يوماً")
+    return f"{txt} ({m_txt} تقريباً)"
+
+
 # حركة كل فاتورة على الطقم بوزنها (مجموع أسطره فيها)
 _MOVES_SQL = (
     "SELECT it.work_order_id wid, i.id, i.kind, i.invoice_date date,"

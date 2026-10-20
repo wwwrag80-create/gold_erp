@@ -8748,6 +8748,29 @@ def main():
           and not any(r.get("bad") for r in _hist114)
           and all(r.get("inv") for r in _hist114[1:]), _hist114[0]["party"])
 
+    # ══ 115) 4.87: المرتجع — كم جلس الطقم عند الجهة ══
+    with db(readonly=True) as conn:
+        _wd115 = conn.execute("SELECT * FROM work_orders"
+                              " WHERE work_order_no='DATE-114'").fetchone()
+        _wh115 = conn.execute("SELECT * FROM work_orders"
+                              " WHERE work_order_no='HALF-114'").fetchone()
+        _o115 = _wm114.last_out(conn, _wh115, "2026-10-20")
+        _back115 = _wm114.last_out(conn, _wd115, "2026-10-20")
+    check("المرتجع: آخر بيعٍ أخرجه وجهته ومدة بقائه عندها",
+          _o115 is not None and _o115["days"] == 17
+          and _o115["party"] == "عميل 114" and _o115["date"] == "2026-10-03",
+          str(_o115))
+    check("وطقمٌ عاد كله لا مدة له · والمدة بالعربية",
+          _back115 is None
+          and _wm114.days_ar(47) == "47 يوماً (شهر و17 يوماً تقريباً)"
+          and _wm114.days_ar(2) == "يومان", str(_back115))
+    try:
+        from ui.sales_screen import SalesScreen as _S115
+        check("شاشة المبيعات: إشعار المدة عند رقم التشغيل في المرتجع",
+              hasattr(_S115, "_held_note"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

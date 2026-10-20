@@ -613,6 +613,7 @@ class SalesScreen(QtWidgets.QWidget):
         self._reg_manual = False     # هل كُتب الوزن المقيد يدوياً؟
         self._rate = config.STONE_DISCOUNT_RATE
         self._wo = None              # آخر طقمٍ استُدعي في سطر الإدخال
+        self._held_bar = None        # إشعار «مدة بقاء الطقم» في المرتجع
         self._w18 = [0.0] * 6        # ظلُّ الأوزان بمكافئ 18
         self._wage18 = 0.0           # وظلُّ الأجر
         self._held_id = None         # المعلّقة المفتوحة للاستكمال
@@ -1742,11 +1743,49 @@ class SalesScreen(QtWidgets.QWidget):
             return
         self._wo = wo
         self._fill_from_wo(wo)
+        if self._is_return() and not wo["is_bulk"]:
+            self._held_note(wo)
         # الخانة التي انتقل إليها المؤشر تُحدَّد كاملة، فيُكتب فوقها
         # مباشرةً إن أراد المستخدم تصحيح ما جاء من البطاقة.
         fw = QtWidgets.QApplication.focusWidget()
         if fw is not None and hasattr(fw, "selectAll"):
             fw.selectAll()
+
+    def _held_note(self, wo):
+        """المرتجع (4.87): إشعارٌ بكم جلس الطقم عند الجهة منذ بِيع لها —
+        حتى تاريخ هذه الفاتورة. وإن بِيع لغير العميل المختار يُنبَّه."""
+        try:
+            from models import wo_moves as _wm
+            with db(readonly=True) as conn:
+                h = _wm.last_out(conn, wo, dstr(self.date))
+        except Exception:
+            return None
+        if not h:
+            return None
+        n = h["days"]
+        span = ("أُرجع في يوم بيعه نفسه" if n <= 0
+                else f"جلس عند «{h['party']}» {_wm.days_ar(n)}")
+        # LRM حول التاريخ: بدونه يُقلب في السطر العربي (05-10-2026)
+        txt = (f"الطقم {wo['work_order_no']}: {span} — بِيع بالفاتورة"
+               f" {h['invoice_no']} بتاريخ \u200e{h['date']}\u200e")
+        cust = self.customer.currentData()
+        other = bool(cust and h["party_id"]
+                     and int(cust) != int(h["party_id"]))
+        if other:
+            txt += f"\n⚠ بِيع لـ«{h['party']}» لا للعميل المختار"
+        # إشعارٌ واحد: طقمٌ تالٍ يحلّ محل إشعار سابقه لا يتراكم فوقه
+        try:
+            if self._held_bar is not None:
+                self._held_bar.close()
+        except (AttributeError, RuntimeError):
+            pass
+        bar = self._held_bar = kit.notify(
+            self, txt, "warning" if other else "info",
+            title="مدة بقاء الطقم", ms=8000)
+        if bar is None:
+            from ui.widgets import toast
+            toast.show(self, txt, 8000)
+        return txt
 
     def _w_fields(self):
         """خانات الوزن الست بترتيبها — مرجعٌ واحد لكل ما يمسّها."""
