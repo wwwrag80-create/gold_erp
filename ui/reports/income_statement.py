@@ -5,7 +5,7 @@
    من دفتر الأستاذ نفسه على أساس الاستحقاق — الإيرادات ثم مردوداتها
    وخصومها ⇒ صافي الإيرادات، ثم تكلفة الإيرادات ⇒ مجمل الربح، ثم
    المصاريف التشغيلية ⇒ الربح التشغيلي، ثم الأخرى ⇒ صافي ربح الفترة؛
-   مقارنةً بالفترة المماثلة من السنة السابقة، والسالب بين قوسين.
+   مقارنةً بالفترة المماثلة من السنة السابقة، والسالب بإشارة ناقص «-10» (4.81).
    وصافيها يساوي «صافي ربح الفترة» في قائمة المركز المالي.
 2. **نموذج التصريف (نقد ووزن)** — العرض الإداري السابق كما هو:
 
@@ -195,14 +195,23 @@ class ConsignmentTab(QtWidgets.QWidget):
 # ══════════════════════════════════════════════════════════════════
 #  قائمة الدخل بالنهج المحاسبي المعتمد
 # ══════════════════════════════════════════════════════════════════
-def money(v, gold=False):
-    """مبلغ القائمة: السالب بين قوسين والصفر شرطة."""
+def money(v, gold=False, paren=True):
+    """مبلغ القائمة: السالب بين قوسين والصفر شرطة.
+
+    `paren=False` (قائمة الدخل، 4.81): السالب بإشارة ناقص «-10» لا «(10)»."""
     v = kv.g(v or 0.0) if gold else (v or 0.0)
     eps = 0.0005 if gold else 0.005
     if abs(v) < eps:
         return "—"
     s = f"{abs(v):,.3f}" if gold else f"{abs(v):,.2f}"
-    return f"({s})" if v < 0 else s
+    if v < 0:
+        return f"({s})" if paren else f"-{s}"
+    return s
+
+
+def _is_money(v, gold=False):
+    """قائمة الدخل: السالب بإشارة ناقص."""
+    return money(v, gold, paren=False)
 
 
 class StandardIncomeTab(QtWidgets.QWidget):
@@ -309,13 +318,13 @@ class StandardIncomeTab(QtWidgets.QWidget):
         cmp = bool(self.st["compare_from"])
         if r["kind"] == "acct" and cmp:
             # الإيضاح للفترة الحالية وحدها
-            return [money(r["cash"]), "", money(r["gold"], True), ""]
-        v = [money(r["cash"])]
+            return [_is_money(r["cash"]), "", _is_money(r["gold"], True), ""]
+        v = [_is_money(r["cash"])]
         if cmp:
-            v.append(money(r["cash_cmp"]))
-        v.append(money(r["gold"], True))
+            v.append(_is_money(r["cash_cmp"]))
+        v.append(_is_money(r["gold"], True))
         if cmp:
-            v.append(money(r["gold_cmp"], True))
+            v.append(_is_money(r["gold_cmp"], True))
         return v
 
     def show_movement(self):

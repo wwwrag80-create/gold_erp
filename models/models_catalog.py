@@ -71,7 +71,8 @@ def list_models(conn, date_from=None, date_to=None):
         "   THEN w.registered_weight ELSE 0 END),2) in_w,"
         " ROUND(SUM(CASE WHEN w.status='sold'"
         "   THEN w.registered_weight ELSE 0 END),2) out_w"
-        " FROM work_orders w WHERE w.is_deleted=0" + clause +
+        " FROM work_orders w WHERE w.is_deleted=0"
+        " AND COALESCE(w.is_service,0)=0" + clause +
         " GROUP BY mno ORDER BY mno", p).fetchall()
     return [{"model": r["mno"], "count": r["n"],
              "in_count": r["in_n"] or 0, "out_count": r["out_n"] or 0,
@@ -105,7 +106,8 @@ def model_items(conn, model_no, branch):
         "  WHERE it.work_order_id=w.id AND i.is_deleted=0"
         "    AND i.kind='sale'"
         "  ORDER BY i.invoice_date DESC, i.id DESC LIMIT 1) sold_date"
-        f" FROM work_orders w WHERE w.is_deleted=0 AND {where}"
+        f" FROM work_orders w WHERE w.is_deleted=0"
+        f" AND COALESCE(w.is_service,0)=0 AND {where}"
         f" AND w.status=? ORDER BY w.work_order_no", p + [status]).fetchall()
     return [{"id": r["id"], "wo": r["wo"],
              "reg": round(r["reg"] or 0, 2),
@@ -129,6 +131,7 @@ def full_catalog(conn):
         " COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') mno,"
         " substr(w.created_at,1,10) created"
         " FROM work_orders w WHERE w.is_deleted=0"
+        " AND COALESCE(w.is_service,0)=0"
         " AND w.status IN ('sold','in_stock')"
         " ORDER BY w.work_order_no").fetchall()
     sold_ids = [r["id"] for r in rows if r["st"] == "sold"]
@@ -188,10 +191,15 @@ SELECT {IN_DATE} d, w.id wid, w.work_order_no wo,
        w.status st, w.is_bulk bulk
   FROM work_orders w
  WHERE w.is_deleted=0
+   AND COALESCE(w.is_service,0)=0 AND COALESCE(w.is_bulk,0)=0
    AND NOT EXISTS (SELECT 1 FROM wo_batch_lines l2
                     WHERE l2.work_order_id=w.id)
    AND {IN_DATE} BETWEEN ? AND ?
 """
+# (4.81) الشقّ الثاني للأطقم القديمة وحدها (قبل جدول السطور): لا الطقم
+# الخدمي «أجر» ولا رقمٌ تجميعيّ أنشأه بيعٌ أو مرتجع — كلاهما يُنشأ بتاريخ
+# أول فاتورةٍ تمسّه فكان يظهر «وارداً من التصنيع» يومها. والتجميعي يرد
+# من التصنيع بسطور دفعاته في الشقّ الأول دائماً.
 
 
 def _holders(conn, ids):

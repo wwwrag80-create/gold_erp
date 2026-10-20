@@ -56,6 +56,26 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                 wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
                                   (sid,)).fetchone()
                 wos = [wo] if wo else []
+            # ══ الرقم التجميعي (4.81) ══ رصيدٌ تراكمي لا قطعة: حذف توريدٍ
+            # منه يُنقص رصيده بحصة ذلك التوريد وحدها — لا يحذف السجل كله
+            # (فتضيع معه توريداتٌ أخرى ومبيعاته). وكان يُحذف كاملاً إن كان
+            # هذا آخر توريدٍ له، ولا يُنقص شيئاً إن كان أقدم.
+            bulk = [w for w in wos if w["is_bulk"]]
+            wos = [w for w in wos if not w["is_bulk"]]
+            shares = {r["wid"]: r["reg"] for r in conn.execute(
+                "SELECT l.work_order_id wid, SUM(l.registered_weight) reg"
+                " FROM wo_batch_lines l JOIN work_orders w"
+                " ON w.id=l.work_order_id AND w.is_bulk=1"
+                " WHERE l.entry_id=? GROUP BY l.work_order_id", (entry_id,))}
+            for b in bulk:
+                if b["id"] not in shares:
+                    # توريدٌ قديم بلا سطور: حصته = وزن القيد − أطقمه المفردة
+                    tot = conn.execute(
+                        "SELECT COALESCE(SUM(gold_debit),0) g FROM journal_lines"
+                        " WHERE entry_id=?", (entry_id,)).fetchone()["g"]
+                    singles = sum(float(w["registered_weight"] or 0)
+                                  for w in wos)
+                    shares[b["id"]] = max(0.0, round(tot - singles, 3))
             sold = [w for w in wos if w["status"] == "sold"]
             if sold:
                 names = "، ".join(w["work_order_no"] for w in sold)
@@ -67,6 +87,19 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
             wo_moves.assert_deletable(conn, [w["id"] for w in wos])
             for w in wos:
                 _mark(conn, "work_orders", w["id"], username)
+            from models.inventory import adjust_bulk_wo
+            for wid, reg in shares.items():
+                adjust_bulk_wo(conn, -float(reg or 0), username, wo_id=wid)
+                # مرجعُه آخرُ توريدٍ باقٍ له، لا القيد المحذوف
+                conn.execute(
+                    "UPDATE work_orders SET entry_id=(SELECT MAX(l.entry_id)"
+                    " FROM wo_batch_lines l JOIN journal_entries e"
+                    " ON e.id=l.entry_id AND e.is_deleted=0"
+                    " WHERE l.work_order_id=? AND l.entry_id<>?)"
+                    " WHERE id=? AND entry_id=?",
+                    (wid, entry_id, wid, entry_id))
+                log_action(conn, username, "update", "work_orders", wid,
+                           f"حذف توريد تجميعي: −{float(reg or 0):.3f} جم")
             # دفعةٌ ورَدت إلى صندوق الكسر: حذفها يُخرج وزنها من عياره،
             # وإلا بقي الصندوق زائداً بعيارٍ بلا مستندٍ يفسّره.
             conn.execute("UPDATE scrap_moves SET is_deleted=1"

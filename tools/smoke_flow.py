@@ -8561,6 +8561,44 @@ def main():
           _f110["ok"] == _i110["ok"]
           and _f110["checked"] == _i110["checked"], f"{_f110} · {_i110}")
 
+    # ══ 111) 4.81: الوارد بلا مرتجعات · حذف التوريد التجميعي · الدخل بإشارة ناقص ══
+    from models import models_catalog as _mc111
+    from models import inventory as _inv111
+    from services.audit import soft_delete_entry as _sd111
+    with db() as conn:
+        from models import stock_home as _sh111
+        _s111 = _sh111.service_wo(conn, "admin")
+        _r111 = [i["wo"] for m in _mc111.received(
+            conn, "2000-01-01", "2100-12-31")["models"] for i in m["items"]]
+        _e111a = _inv111.create_work_orders_batch(
+            conn, [{"wo_no": "0010", "gold": 40.0, "wage_per_gram": 5}],
+            "2026-10-01", "admin")["entry_id"]
+        _w111 = conn.execute("SELECT registered_weight r FROM work_orders"
+                             " WHERE work_order_no='0010' AND is_deleted=0"
+                             ).fetchone()["r"]
+        _e111b = _inv111.create_work_orders_batch(
+            conn, [{"wo_no": "0010", "gold": 25.0, "wage_per_gram": 5}],
+            "2026-10-02", "admin")["entry_id"]
+    check("الوارد من التصنيع: لا الطقم الخدمي «أجر» ولا مرتجع",
+          _s111["work_order_no"] not in _r111)
+    _sd111(_e111b, "admin")
+    with db(readonly=True) as conn:
+        _b111 = conn.execute(
+            "SELECT registered_weight r, is_deleted d FROM work_orders"
+            " WHERE work_order_no='0010'").fetchone()
+    check("حذف توريدٍ تجميعي يُنقص حصته وحدها ولا يحذف الرقم",
+          _b111["d"] == 0 and abs(_b111["r"] - _w111) < 0.001,
+          f"{dict(_b111)} · {_w111}")
+    _hi111 = _pm.build_html("income_statement", 0,
+                            date_from=f"{_d107[:4]}-01-01", date_to=_d107)
+    import re as _re111
+    check("قائمة الدخل: السالب بإشارة ناقص لا بين قوسين",
+          not _re111.search(r'class="num"[^>]*>(<b>)?\(', _hi111))
+    from models import mfg_costs as _mcs111
+    check("الرواتب: تعديل المرحّل بنافذته وتاريخ قيده",
+          callable(getattr(_mcs111, "edit_posted_salary", None))
+          and "entry_date" in _mcs111.repost_salary.__code__.co_varnames)
+
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

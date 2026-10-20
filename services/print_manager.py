@@ -2352,13 +2352,17 @@ def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
             + meta + table + verdict + summary + _sign_block())
 
 
-def _fp_money(v, gold=False):
-    """مبلغ القائمة: السالب بين قوسين والصفر شرطة — كالقوائم المدقّقة."""
+def _fp_money(v, gold=False, paren=True):
+    """مبلغ القائمة: السالب بين قوسين والصفر شرطة — كالقوائم المدقّقة.
+
+    `paren=False` (قائمة الدخل، 4.81): السالب بإشارة ناقص «-10»."""
     eps = 0.0005 if gold else 0.005
     if abs(v or 0.0) < eps:
         return "—"
     s = _gw(abs(v), 3) if gold else _w(abs(v), 2)
-    return f"({s})" if v < 0 else s
+    if v < 0:
+        return f"({s})" if paren else f"-{s}"
+    return s
 
 
 def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
@@ -2388,12 +2392,12 @@ def _tpl_income_statement(conn, _id=0, date_from=None, date_to=None,
             body += (f'<tr><td class="r" colspan="{ncol}"'
                      f' style="background-color:{_bg}">{_lb}</td></tr>')
             continue
-        vals = [_fp_money(r["cash"])]
+        vals = [_fp_money(r["cash"], paren=False)]
         if has_cmp:
-            vals.append("" if k == "acct" else _fp_money(r["cash_cmp"]))
-        vals.append(_fp_money(r["gold"], True))
+            vals.append("" if k == "acct" else _fp_money(r["cash_cmp"], paren=False))
+        vals.append(_fp_money(r["gold"], True, paren=False))
         if has_cmp:
-            vals.append("" if k == "acct" else _fp_money(r["gold_cmp"], True))
+            vals.append("" if k == "acct" else _fp_money(r["gold_cmp"], True, paren=False))
         if k == "memo":
             st_ = ' style="color:#555;font-style:italic"'
             lbl = (f'<td class="r" style="padding-right:18px;color:#555;'

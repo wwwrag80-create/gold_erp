@@ -10,6 +10,8 @@
 **تسريع الإدخال**: زر Enter ينقل المؤشر للخلية **أسفلها في نفس
 العمود** بدل الانتقال أفقياً — وهو ما يناسب إدخال عمود كامل دفعةً.
 """
+import functools
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ui import kit
@@ -65,6 +67,8 @@ SALARY_COLS = [
     # 4.78: لكل شخص قيدُ راتبه — فيظهر عند اسمه «مرحّل» أو «معلّق»،
     # وتعديلُ راتبٍ مرحّل يُعدّل قيدَه هو وحده عند الحفظ
     ("status", "الحالة", True),
+    # 4.81: زرٌّ صغير عند كل مرحّل يفتح نافذة تعديل راتبه وتاريخ قيده
+    ("edit", "تعديل", True),
 ]
 
 # أعمدةٌ يُترك فيها الصفر فراغاً لا «0.00»
@@ -73,7 +77,75 @@ BLANK_IF_ZERO = {"owed"}
 # أوزان أعمدة الجدولين — تُوزَّع على العرض المتاح بلا تمرير أفقي
 # ولا سحبٍ باليد. الاسم أعرضها لأنه نصٌّ، والباقي أرقام.
 TARGET_W = [20, 7, 7, 7, 7, 7, 9, 9, 8, 8, 7, 8]
-SALARY_W = [18, 8, 6, 5, 7, 6, 7, 7, 7, 7, 7, 8, 10, 8, 8]
+SALARY_W = [18, 8, 6, 5, 7, 6, 7, 7, 7, 7, 7, 8, 10, 8, 8, 7]
+
+
+class SalaryEditDialog(QtWidgets.QDialog):
+    """تعديل راتب عاملٍ مرحّل (4.81): بنوده وصافيه يُحسب أمامه، وتاريخ
+    قيده — ثم يُعاد قيده هو وحده (`mfg_costs.edit_posted_salary`)."""
+
+    FIELDS = (("basic_salary", "الأساسي"), ("overtime_rate", "معامل الإضافي"),
+              ("deduction_manual", "الخصم"), ("gold_loss", "الفاقد/ذهب"),
+              ("gold_deduction", "خصم/ذهب"), ("target_amount", "التارجت"),
+              ("bonus", "المكافأة"))
+
+    def __init__(self, parent, row, entry_date=None):
+        super().__init__(parent)
+        self.row = dict(row)
+        self.setWindowTitle(f"تعديل راتب {row.get('name', '')}")
+        self.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.setMinimumWidth(380)
+        form = QtWidgets.QFormLayout()
+        self.spins = {}
+        for k, label in self.FIELDS:
+            sp = kit.DoubleSpinBox()
+            sp.setDecimals(2)
+            sp.setRange(-10_000_000.0, 10_000_000.0)
+            v = row.get(k)
+            if k == "deduction_manual" and not v:
+                v = row.get("deduction")      # المحسوب من الغياب
+            sp.setValue(float(v or 0))
+            sp.valueChanged.connect(self._preview)
+            self.spins[k] = sp
+            form.addRow(f"{label}:", sp)
+        info_lbl = QtWidgets.QLabel(
+            f"ساعات الإضافي {float(row.get('overtime_hours') or 0):,.2f}"
+            f" · الغياب {float(row.get('absence') or 0):,.2f} (من التارجت)")
+        info_lbl.setObjectName("cardSub")
+        form.addRow(info_lbl)
+        self.d = kit.DateEdit()
+        self.d.setCalendarPopup(True)
+        self.d.setDisplayFormat("yyyy-MM-dd")
+        qd = QtCore.QDate.fromString(str(entry_date or ""), "yyyy-MM-dd")
+        self.d.setDate(qd if qd.isValid() else QtCore.QDate.currentDate())
+        form.addRow("تاريخ القيد:", self.d)
+        self.net = QtWidgets.QLabel("")
+        self.net.setObjectName("big")
+        form.addRow("الصافي:", self.net)
+        box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        box.button(QtWidgets.QDialogButtonBox.Ok).setText(
+            "حفظ وترحيل القيد الجديد")
+        box.button(QtWidgets.QDialogButtonBox.Cancel).setText("إلغاء")
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(box)
+        self._preview()
+
+    def values(self):
+        return {k: sp.value() for k, sp in self.spins.items()}
+
+    def date(self):
+        return dstr(self.d)
+
+    def _preview(self, *_):
+        r = dict(self.row)
+        r.update(self.values())
+        r["deduction"] = r["deduction_manual"]
+        net = mfg_costs.compute_salary_row(r)["net_salary"]
+        self.net.setText(f"{float(net):,.2f} ريال")
 
 
 class VerticalEnterTable(QtWidgets.QTableWidget):
@@ -190,7 +262,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self.s_date = kit.DateEdit()
         self.s_date.setCalendarPopup(True)
         self.s_date.setDisplayFormat("yyyy-MM-dd")
-        self.s_date.setDate(QtCore.QDate.currentDate())
+        # آخر يومٍ في الشهر المختار (4.81) — ويُعدَّل في نافذة الإنزال
+        self.s_date.setDate(self._month_end())
         self.s_date.setMaximumWidth(130)
 
         # لا زرّ «حفظ»: كل تعديلٍ يُحفظ تلقائياً عند الانتقال لتبويبٍ
@@ -455,6 +528,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
                         txt = v
                     elif key == "status":
                         txt = "✔ مرحّل" if r.get("is_posted") else "معلّق"
+                    elif key == "edit":
+                        txt = ""
                     elif key == "owed":
                         # الرصيد بإشارته: سالبٌ عليه · موجبٌ له — والصفر
                         # فراغ
@@ -493,6 +568,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 elif key == "status":
                     n = sum(1 for r in rows if r.get("is_posted"))
                     txt = f"مرحّل {n} من {len(rows)}"
+                elif key == "edit":
+                    txt = ""
                 else:
                     tot = sum(float(r.get(key) or 0) for r in rows)
                     txt = mfg_costs.bal_text(tot) if key == "owed" \
@@ -504,6 +581,18 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 f.setBold(True)
                 it.setFont(f)
                 table.setItem(last, j, it)
+            # زرّ «✎ تعديل» عند كل مرحّل (4.81)
+            keys = [c[0] for c in cols]
+            if "edit" in keys:
+                ce = keys.index("edit")
+                for i, r in enumerate(rows):
+                    if r.get("is_posted") and r.get("employee_id"):
+                        b = kit.CellButton(
+                            "✎ تعديل", "تعديل راتبه وتاريخ قيده — يُعاد"
+                            " قيده هو وحده")
+                        b.clicked.connect(functools.partial(
+                            self._edit_row, r["employee_id"]))
+                        table.setCellWidget(i, ce, b)
             # عددُ الأعمدة قد يتغيّر بين تبويبٍ وآخر، والمُحجِّم يعيد
             # التوزيع عند تغيّره — لكنه لا يسمع تغييراً لم يُصحبه
             # حدثُ حجم، فيُطلب منه صراحةً بعد كل تعبئة.
@@ -655,6 +744,11 @@ class MfgCostsScreen(QtWidgets.QWidget):
             self.reload()
 
     def _period_changed(self, *_):
+        # تاريخ القيد يتبع الشهر: آخر يومٍ فيه (يُعدَّل في نافذة الإنزال)
+        try:
+            self.s_date.setDate(self._month_end())
+        except Exception:
+            pass
         self.reload()
 
     def _reload_saving(self):
@@ -964,6 +1058,87 @@ class MfgCostsScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    def _month_end(self):
+        """آخر يوم في الشهر المختار — التاريخ المعتاد لقيد الرواتب."""
+        import calendar
+        y, m = int(self.year.value()), int(self.month.currentData())
+        return QtCore.QDate(y, m, calendar.monthrange(y, m)[1])
+
+    def _ask_post(self, pending):
+        """نافذة الإنزال (4.81): من يُنزَل راتبه وصافيه، وتاريخ القيد ظاهرٌ
+        يُعدَّل قبل الترحيل. تعيد التاريخ أو None عند الإلغاء."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"إنزال رواتب شهر {self.period()}")
+        dlg.setLayoutDirection(QtCore.Qt.RightToLeft)
+        dlg.resize(460, 480)
+        d = kit.DateEdit()
+        d.setCalendarPopup(True)
+        d.setDisplayFormat("yyyy-MM-dd")
+        d.setDate(self.s_date.date())
+        t = make_table()
+        t.setColumnCount(2)
+        t.setHorizontalHeaderLabels(["الاسم", "الصافي (ريال)"])
+        t.setRowCount(len(pending))
+        for i, r in enumerate(pending):
+            t.setItem(i, 0, QtWidgets.QTableWidgetItem(str(r["name"])))
+            it = QtWidgets.QTableWidgetItem(f"{float(r['net_salary']):,.2f}")
+            it.setTextAlignment(QtCore.Qt.AlignCenter)
+            t.setItem(i, 1, it)
+        tot = sum(float(r["net_salary"]) for r in pending)
+        note = QtWidgets.QLabel(
+            f"عدد العمال والموظفين: {len(pending)} · الإجمالي {tot:,.2f}"
+            " ريال\nلكل شخص قيدٌ مستقل باسمه: مدين مصروف الرواتب · دائن"
+            " حسابه.\nويبقى راتب كل مرحّل قابلاً للتعديل بزرّ «✎ تعديل»"
+            " عند اسمه.")
+        note.setWordWrap(True)
+        box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        box.button(QtWidgets.QDialogButtonBox.Ok).setText("📥 إنزال الرواتب")
+        box.button(QtWidgets.QDialogButtonBox.Cancel).setText("إلغاء")
+        box.accepted.connect(dlg.accept)
+        box.rejected.connect(dlg.reject)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("تاريخ القيد:"))
+        row.addWidget(d)
+        row.addStretch(1)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addLayout(row)
+        lay.addWidget(t, 1)
+        lay.addWidget(note)
+        lay.addWidget(box)
+        self._post_dlg = (dlg, d)          # للاختبار
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return None
+        return dstr(d)
+
+    def _edit_row(self, employee_id):
+        """نافذة تعديل راتب عاملٍ مرحّل وتاريخ قيده (4.81)."""
+        try:
+            if self._dirty["s"] and not self.autosave():
+                return
+            per = self.period()
+            r = next((x for x in self.salary_rows
+                      if x.get("employee_id") == employee_id), None)
+            if r is None:
+                raise ValueError("العامل ليس في الجدول")
+            with db(readonly=True) as conn:
+                cur_date = mfg_costs.entry_date_of(conn, per, employee_id)
+            dlg = SalaryEditDialog(self, r, cur_date)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            with db() as conn:
+                res = mfg_costs.edit_posted_salary(
+                    conn, per, employee_id, dlg.values(),
+                    self.user["username"], entry_date=dlg.date())
+            info(self, f"عُدّل راتب {r['name']}: الصافي {res['net']:,.2f}"
+                       " ريال\n" + ("وأُعيد قيده بالصافي والتاريخ الجديدين."
+                                    if res.get("entry_id") else
+                                    "لم يتغيّر الصافي ولا التاريخ — القيد"
+                                    " كما هو."))
+            self.reload()
+        except Exception as e:
+            err(self, e)
+
     def post_salaries(self):
         """يرحّل الرواتب بقيدٍ مستقل لكل عامل (سطران باسمه)."""
         try:
@@ -982,19 +1157,10 @@ class MfgCostsScreen(QtWidgets.QWidget):
             if not pending:
                 raise ValueError(
                     "لا توجد رواتب معلّقة — ربما رُحّلت مسبقاً")
-            tot = sum(float(r["net_salary"]) for r in pending)
-            date = dstr(self.s_date)
-            if not ask(self,
-                       f"إنزال رواتب شهر {self.period()}؟\n\n"
-                       f"عدد العمال والموظفين: {len(pending)}\n"
-                       f"إجمالي الصافي: {tot:,.2f} ريال\n"
-                       f"تاريخ القيد: {date}\n\n"
-                       f"سيُنشأ لكل شخص قيدٌ مستقل باسمه:\n"
-                       f"  مدين حـ/ مصروف الرواتب (عمال التصنيع أو الإدارة)\n"
-                       f"  دائن حـ/ حسابه الشخصي\n\n"
-                       f"ويبقى راتب كل مرحّل قابلاً للتعديل هنا،"
-                       f" فيتعدّل قيدُه وحده."):
+            date = self._ask_post(pending)
+            if not date:
                 return
+            self.s_date.setDate(QtCore.QDate.fromString(date, "yyyy-MM-dd"))
             with db() as conn:
                 mfg_costs.save_salaries(conn, self.period(),
                                         self.salary_rows,

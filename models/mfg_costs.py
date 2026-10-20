@@ -854,13 +854,16 @@ def _shared(conn, entry_id):
         (entry_id,)).fetchone()["n"] > 1
 
 
-def repost_salary(conn, period, employee_id, username):
+def repost_salary(conn, period, employee_id, username, entry_date=None):
     """راتبٌ مرحّل عُدّل: يتبعه قيدُه بالصافي الجديد.
 
     التعديل عندنا إلغاءٌ ثم ترحيل (`editing.repost`) لا تحريرُ أسطر —
     فسلسلة البصمات تبقى سليمة، والقيد الجديد يرث تاريخ القديم وموضعه
     في الكشوف، و«من عدّل ماذا» يحفظ القيمتين. وصافٍ صار صفراً يُلغي
-    القيد ويعيد الصف معلّقاً. يعيد None إن لم يتغيّر شيء."""
+    القيد ويعيد الصف معلّقاً. يعيد None إن لم يتغيّر شيء.
+
+    `entry_date` (4.81): تاريخٌ جديد للقيد من نافذة «تعديل» — يُعاد القيد
+    به ولو لم يتغيّر الصافي."""
     saved = conn.execute(
         "SELECT * FROM mfg_salaries WHERE period=? AND employee_id=?",
         (period, employee_id)).fetchone()
@@ -872,20 +875,71 @@ def repost_salary(conn, period, employee_id, username):
                              (saved["id"],)).fetchone()
     eid = saved["entry_id"]
     net = round(float(saved["net_salary"] or 0), 2)
-    if abs(_entry_amount(conn, eid) - net) < 0.005:
+    e = conn.execute("SELECT entry_date, user_note FROM journal_entries"
+                     " WHERE id=?", (eid,)).fetchone()
+    date = str(entry_date or e["entry_date"])[:10]
+    if abs(_entry_amount(conn, eid) - net) < 0.005 \
+            and date == str(e["entry_date"])[:10]:
         return None
     from services.audit import reverse_entry
     if not net:
         reverse_entry(conn, eid, username)
         return {"entry_id": None, "old_entry_id": eid, "net": 0.0}
     from models import editing
-    e = conn.execute("SELECT entry_date, user_note FROM journal_entries"
-                     " WHERE id=?", (eid,)).fetchone()
     res = editing.repost(conn, eid, username, _post_one, period,
-                         employee_id, net, e["entry_date"], username,
+                         employee_id, net, date, username,
                          e["user_note"] or "")
     res["old_entry_id"] = eid
     return res
+
+
+def entry_date_of(conn, period, employee_id):
+    """تاريخ قيد راتب العامل لهذا الشهر — أو None إن لم يُرحَّل."""
+    r = conn.execute(
+        "SELECT e.entry_date FROM mfg_salaries s JOIN journal_entries e"
+        " ON e.id=s.entry_id AND e.is_deleted=0"
+        " WHERE s.period=? AND s.employee_id=?",
+        (period, employee_id)).fetchone()
+    return r["entry_date"] if r else None
+
+
+EDIT_KEYS = ("basic_salary", "overtime_rate", "deduction_manual",
+             "gold_loss", "gold_deduction", "target_amount", "bonus")
+
+
+def edit_posted_salary(conn, period, employee_id, values, username,
+                       entry_date=None):
+    """تعديل راتب عاملٍ مرحّل من نافذته (4.81).
+
+    يُحفظ صفّه بالقيم الجديدة ثم يُعاد قيدُه هو وحده بالصافي الجديد
+    وبالتاريخ المختار (إلغاءٌ ثم ترحيل — `repost_salary`). يعيد
+    {net, entry_id, old_entry_id} أو None إن لم يتغيّر شيء."""
+    eid = int(employee_id)
+    rows = [r for r in list_salaries(conn, period)
+            if r["employee_id"] == eid]
+    if not rows:
+        raise ValueError("العامل ليس في جدول رواتب هذا الشهر")
+    r = rows[0]
+    if not r.get("is_posted"):
+        raise ValueError("راتب هذا العامل لم يُرحَّل بعد — عدّله في"
+                         " الجدول ثم أنزل الرواتب")
+    for k in EDIT_KEYS:
+        if k in values:
+            r[k] = float(values[k] or 0)
+    # الخصم اليدوي يحلّ محل المحسوب كما في الجدول
+    if "deduction_manual" in values:
+        r["deduction"] = r["deduction_manual"]
+    r.update(compute_salary_row(r))
+    save_salaries(conn, period, [r], username)
+    res = repost_salary(conn, period, eid, username, entry_date=entry_date)
+    log_action(conn, username, "update", "mfg_salaries", eid,
+               f"تعديل راتب مرحّل {period} — {r['name']}: صافي"
+               f" {r['net_salary']:,.2f}"
+               + (f" بتاريخ {entry_date}" if entry_date else ""))
+    out = {"net": round(float(r["net_salary"]), 2)}
+    if res:
+        out.update(res)
+    return out
 
 
 def split_combined(conn, username="system", only=None, strict=False):
