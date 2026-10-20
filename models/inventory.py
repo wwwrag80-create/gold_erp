@@ -873,6 +873,7 @@ def item_history(conn, wo_no):
     wo = get_wo_by_no(conn, wo_no)
     if not wo:
         raise ValueError(f"لا يوجد طقم برقم التشغيل {wo_no}")
+    from models import wo_moves
     rows = []
     # التوريد (إنشاء الطقم)
     src_entry = conn.execute(
@@ -881,16 +882,17 @@ def item_history(conn, wo_no):
     rows.append({
         "kind": "توريد", "date": (src_entry["entry_date"] if src_entry
                                   else (wo["created_at"] or "")[:10]),
-        "party": "المصنع (خزينة التصنيع)",
+        "party": ("أُدخل عبر مرتجع — بلا توريد"
+                  if wo_moves.birth(wo) == wo_moves.SOLD
+                  else "المصنع (خزينة التصنيع)"),
         "gold": wo["gold_weight"], "small": wo["small_stones"],
         "big": wo["big_stones"], "reg": wo["registered_weight"],
         "left": (wo["registered_weight"] if not wo["is_bulk"]
                  and wo["entry_id"] else ""),
         "type": wo["item_type"] or "—"})
-    _left = {}
+    _left, _bad = {}, set()
     # المبيعات والمرتجعات من بنود الفواتير — بترتيب السلسلة المنظّمة
     # (4.75): حركات اليوم الواحد بالتناوب بيع ← مرتجع، لا بمعرّف الفاتورة
-    from models import wo_moves
     _its = conn.execute(
             "SELECT i.id, i.kind, i.invoice_no, i.invoice_date,"
             " it.registered_weight rw,"
@@ -912,6 +914,10 @@ def item_history(conn, wo_no):
         _rank = {m["id"]: n for n, (m, _r, _o) in enumerate(_tr)}
         # 4.82: ما بقي في الخزنة بعد كل حركة — بيعُ جزءٍ يُرى باقيه
         _left = {m["id"]: r for m, r, _o in _tr}
+        # 4.85: الحركة التي لا تسمح بها حالتها تُعلَّم — رسالة الرفض تُحيل
+        # إليها هنا بأرقام فواتيرها
+        _bad = {m["id"] for m in wo_moves.violations(
+            list(_mv.values()), wo_moves.birth(wo), wo["registered_weight"])}
         _its = sorted(_its, key=lambda r: (r["invoice_date"] or "",
                                            _rank.get(r["id"], 10 ** 9),
                                            r["id"]))
@@ -920,7 +926,8 @@ def item_history(conn, wo_no):
             "kind": "مبيعات" if it["kind"] == "sale" else "مرتجع",
             "date": it["invoice_date"], "party": it["party"] or "—",
             "gold": "", "small": "", "big": "", "reg": it["rw"],
-            "left": _left.get(it["id"], ""),
+            "left": _left.get(it["id"], ""), "inv": it["invoice_no"],
+            "bad": it["id"] in _bad,
             "type": wo["item_type"] or "—"})
     # تسويات الوزن على هذا الطقم
     for a in conn.execute(
@@ -932,7 +939,9 @@ def item_history(conn, wo_no):
             "kind": "تسوية", "date": a["d"], "party": a["note"] or "—",
             "gold": "", "small": "", "big": "", "reg": "", "left": "",
             "type": wo["item_type"] or "—"})
-    rows.sort(key=lambda r: (r["date"] or "", 0 if r["kind"] == "توريد" else 1))
+    # أصل الطقم أولاً دائماً (4.85): المُدخَل بمرتجعٍ مؤرَّخٍ قبل إنشاء
+    # بطاقته كان يظهر أصله بعد حركاته
+    rows[1:] = sorted(rows[1:], key=lambda r: r["date"] or "")
     return wo, rows
 
 

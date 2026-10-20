@@ -202,13 +202,41 @@ def violations(moves, start=None, full=None):
 _NEW = 10 ** 15            # معرّف حركةٍ لم تُحفظ بعد — آخر يومها
 
 
+# علامة الطقم المُدخَل ليُرتجع (`inventory.create_return_stub`)
+STUB_NOTE = "أُدخل عبر مرتجع"
+
+
 def birth(wo):
-    """حالة الطقم يوم وُلد: المُورَّد (له قيد توريد) في الخزنة يقيناً؛ وما
-    سواه (مُدخَلٌ ليُرتجع · بياناتٌ قديمة) يُستدلّ عليه من حركته."""
+    """حالة الطقم يوم وُلد: المُورَّد (له قيد توريد) في الخزنة يقيناً،
+    والمُدخَل ليُرتجع خارجها يقيناً (4.85). وما سواهما (بياناتٌ قديمة)
+    يُستدلّ عليه من حركته."""
     try:
-        return IN_STOCK if wo["entry_id"] else None
+        if wo["entry_id"]:
+            return IN_STOCK
+        if STUB_NOTE in str(wo["notes"] or ""):
+            return SOLD
     except (KeyError, IndexError, TypeError):
-        return None
+        pass
+    return None
+
+
+def _born(wo, moves):
+    """حالة الميلاد **من الحركات القائمة** — تُثبَّت قبل فحص حركةٍ جديدة.
+
+    الخلل الذي تعالجه (4.85): كان الاستدلال يُعاد بعد إضافة الحركة
+    المفحوصة نفسها. فطقمٌ أُدخل بمرتجع (مرتجعاته أكثر ⇒ وُلد خارجها)
+    تُضاف له حركة بيع فيتساوى العددان وينقلب ميلاده «في الخزنة» —
+    فيصير مرتجعه الأول كاسراً ويُرفض بيعه وباقيه في الخزنة بوزنه كله:
+    «الباقي 37.200 جم فقط، والمكتوب 37.200 جم»."""
+    b = birth(wo)
+    if b:
+        return b
+    if moves:
+        return _start(_by_date(moves))
+    try:
+        return wo["status"] or IN_STOCK
+    except (KeyError, IndexError, TypeError):
+        return IN_STOCK
 
 
 def _full(wo):
@@ -250,27 +278,95 @@ def default_weight(conn, wo, kind):
 
 
 def can_add(conn, wo, kind, date, weight=None):
-    """هل تستقيم السلسلة إن أُضيفت هذه الحركة بهذا التاريخ وهذا الوزن؟
+    """هل تستقيم السلسلة إن أُضيفت هذه الحركة بهذا التاريخ وهذا الوزن؟"""
+    return refusal(conn, wo, kind, date, weight) is None
 
-    بلا حركاتٍ سابقة: الطقم المُورَّد يُولد في الخزنة، والمُدخَل ليُرتجع
-    (بلا قيد توريد) حالته كما سُجّلت. ومع حركات: تُدرج الجديدة في يومها
-    ويُنظر أتكسر السلسلة أم لا — فالبيع بتاريخٍ قديم قبل مرتجعٍ لاحق
-    يُرفض كما يُرفض بيع ما خرج بوزنه كله، وبيعُ جزءٍ أكبر مما بقي.
+
+def _pos(seq, init, mid):
+    """(في الخزنة، عند الجهات) قبل الحركة `mid` في السلسلة المنظّمة."""
+    state = init
+    for m in seq:
+        if m["id"] == mid:
+            return state
+        state = _apply(state, m)
+    return state
+
+
+def refusal(conn, wo, kind, date, weight=None):
+    """`None` إن استقامت السلسلة بالحركة الجديدة، وإلا سبب الرفض نصاً.
+
+    بلا حركاتٍ سابقة: الطقم يُحكم بحالة ميلاده. ومع حركات: تُدرج الجديدة
+    في يومها ويُنظر أتكسر السلسلة أم لا — فالبيع بتاريخٍ قديم قبل مرتجعٍ
+    لاحق يُرفض كما يُرفض بيع ما خرج بوزنه كله، وبيعُ جزءٍ أكبر مما بقي.
+
+    والسبب يُسمّى بعينه (4.85): وزنٌ أكبر من الباقي، أو تاريخٌ يسبق حركةً
+    قائمة (فيُدلّ على التاريخ الذي يصحّ منه) — لا «الباقي X والمكتوب X».
+    والطقم الذي لا شيء منه في الخزنة (أو خارجها للمرتجع) يُترك سببه
+    للمتصل (`invoices._where_is`)، فتُعاد كلمة "none-left".
     """
     import datetime as _dt
     full = _full(wo)
+    w = float(weight or 0.0)
     new = {"id": _NEW, "kind": kind,
-           "date": str(date or _dt.date.today().isoformat())[:10],
-           "w": float(weight or 0.0)}
+           "date": str(date or _dt.date.today().isoformat())[:10], "w": w}
     mv = moves_of(conn, wo["id"])
+    b = _born(wo, mv)
+    init = _init(mv, b, full)
     if not mv:
-        st = IN_STOCK if wo["entry_id"] else wo["status"]
-        return _valid(_init([], st, full), new)
-    b = birth(wo)
+        if _valid(init, new):
+            return None
+        return _weight_why(wo, kind, init, w)
     before = {m["id"] for m in violations(mv, b, full)}
     after = {m["id"] for m in violations(mv + [new], b, full)}
-    # لا هي تكسر السلسلة ولا تكسرها لحركةٍ بعدها كانت سليمة
-    return _NEW not in after and after <= before
+    if _NEW not in after and after <= before:
+        return None
+    rem, out, _bad = replay(mv, b, full)
+    now = rem if kind == SALE else out
+    if now <= EPS:
+        return "none-left"
+    last = max(m["date"] or "" for m in mv)
+    seq = order(mv + [new], b, full)
+    at = _pos(seq, init, _NEW)
+    at_part = at[0] if kind == SALE else at[1]
+    if _NEW in after and at_part > EPS:
+        # في تاريخه كان منه شيءٌ — فالمانع الوزن
+        return _weight_why(wo, kind, at, w)
+    if new["date"] < last:
+        later = sorted((m for m in mv if (m["date"] or "") > new["date"]),
+                       key=lambda m: (m["date"] or "", m["id"]))
+        m0 = later[0]
+        no = _inv_no(conn, m0["id"])
+        lbl = "بيع" if m0["kind"] == SALE else "مرتجع"
+        return (f"الطقم {wo['work_order_no']}: تاريخ الفاتورة {new['date']}"
+                f" يسبق حركةً له — {lbl} بالفاتورة {no} بتاريخ"
+                f" {m0['date']}.\nاجعل تاريخ الفاتورة {last} أو بعده.")
+    # سلسلةٌ مكسورةٌ أصلاً في يومها (حركتان متعارضتان قائمتان): ترتيب
+    # الجديدة بينها لا يُقطع به، وقبولها قد يُبقي الطقم «في الخزنة» بعد
+    # بيعه — فيُدلّ على الحركات المعارضة لتُصحَّح أولاً
+    broken = sorted(i for i in (before | after) if i != _NEW)
+    if broken:
+        nos = "، ".join(str(_inv_no(conn, i)) for i in broken)
+        return (f"الطقم {wo['work_order_no']}: حركته غير منتظمة أصلاً"
+                f" (الفواتير {nos}) — راجعها في «حركة الطقم» وصحّحها"
+                " أولاً، ثم أعد المحاولة.")
+    return _weight_why(wo, kind, (rem, out), w)
+
+
+def _weight_why(wo, kind, state, w):
+    rem, out = state
+    part = rem if kind == SALE else out
+    if part <= EPS:
+        return "none-left"
+    return (f"الطقم {wo['work_order_no']}: "
+            + ("الباقي منه في الخزنة" if kind == SALE
+               else "الخارج منه عند الجهات")
+            + f" {part:,.3f} جم فقط، والمكتوب {w:,.3f} جم")
+
+
+def _inv_no(conn, invoice_id):
+    r = conn.execute("SELECT invoice_no FROM invoices WHERE id=?",
+                     (int(invoice_id),)).fetchone()
+    return r[0] if r else invoice_id
 
 
 def _singles(conn, wo_ids):
@@ -397,6 +493,31 @@ def resync(conn, wo_ids=None, username="system"):
                        f"{LABEL[want]} — من تسلسل حركته")
             fixed.append((w["work_order_no"], w["status"], want))
     return fixed
+
+
+def irregular(conn, limit=200):
+    """[(طقم، [الفواتير الكاسرة])] لكل طقمٍ مفرد سلسلته غير منتظمة —
+    بيعٌ ولا شيء منه في الخزنة، أو مرتجعٌ ولا شيء منه خارجها، أو جزءٌ
+    أكبر مما بقي. بالوزن (4.85): بيعُ جزءين من طقمٍ واحد ليس تكراراً."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_orders)")}
+    svc = (" AND COALESCE(w.is_service,0)=0" if "is_service" in cols
+           else "")
+    wos = {r["id"]: r for r in conn.execute(
+        "SELECT w.* FROM work_orders w WHERE w.is_deleted=0"
+        " AND COALESCE(w.is_bulk,0)=0" + svc)}
+    by = {}
+    for r in conn.execute(_MOVES_SQL + _MOVES_GROUP):
+        if r["wid"] in wos:
+            by.setdefault(r["wid"], []).append(dict(r))
+    out = []
+    for wid, mv in by.items():
+        w = wos[wid]
+        bad = violations(mv, birth(w), _full(w))
+        if bad:
+            out.append((w, [m["id"] for m in bad]))
+            if len(out) >= limit:
+                break
+    return out
 
 
 def with_moves(conn, wo_ids):

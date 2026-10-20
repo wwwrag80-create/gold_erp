@@ -112,8 +112,8 @@ class DiagnosticsScreen(QtWidgets.QWidget):
         # ══ طقمٌ مفردٌ بِيع مرتين ══
         # خللٌ صريح لا مراجعةٌ: الذهب خرج مرة وحُوسب عليه عميلان.
         dbl = h.get("double_sold") or []
-        add(not dbl, "أطقم بِيعت أكثر من مرة",
-            "لا طقم مفرد مباعٌ مرتين" if not dbl
+        add(not dbl, "أطقم حركتها غير منتظمة",
+            "لا طقم مفرد مباعٌ مرتين ولا مرتجعٌ بلا بيع" if not dbl
             else f"{len(dbl)} طقماً — "
                  + " · ".join(f"{d['wo']} ({d['invoices']})"
                               for d in dbl[:3]))

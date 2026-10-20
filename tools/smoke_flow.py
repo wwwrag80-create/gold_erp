@@ -8683,6 +8683,71 @@ def main():
           and _clip["FullScreen"] is True
           and "ios.mobileconfig" in _mw113._INSTALL_JS, _clip.get("URL"))
 
+    # ══ 114) 4.85: طقمٌ أُدخل بمرتجع يُباع بوزنه · السبب بعينه · الفحص ══
+    # الخلل: حالة الميلاد كانت تُستدلّ من الحركات **مع** المفحوصة، فطقمٌ
+    # أُدخل بمرتجع (مرتجعاته أكثر ⇒ وُلد خارجها) يتساوى عدّه بالبيع الجديد
+    # فينقلب ميلاده — ويُرفض بيعه: «الباقي 37.200 فقط، والمكتوب 37.200»
+    from models import inventory as _in114
+    from models import wo_moves as _wm114
+    from services import health as _hh114
+    with db() as conn:
+        _A114 = add_entity(conn, "عميل 114", "customer", username="admin")
+        _B114 = add_entity(conn, "عميل 114ب", "customer", username="admin")
+        _w114 = _in114.create_return_stub(conn, "STUB-114", 37.2, 0, 0,
+                                          None, 5, "admin")["id"]
+        _iv103.create_sale_return(conn, _A114, [{"work_order_id": _w114}],
+                                  "2026-10-01", "admin", apply_vat=False)
+        _iv103.create_sale(conn, _B114, [{"work_order_id": _w114}],
+                           "2026-10-01", "admin", apply_vat=False)
+        _iv103.create_sale_return(conn, _B114, [
+            {"work_order_id": _w114, "weight": 37.2}], "2026-10-02",
+            "admin", apply_vat=False)
+        try:
+            _iv103.create_sale(conn, _A114, [
+                {"work_order_id": _w114, "weight": 37.2}], "2026-10-03",
+                "admin", apply_vat=False)
+            _e114 = ""
+        except ValueError as _e:
+            _e114 = str(_e)
+        _st114 = conn.execute("SELECT status FROM work_orders WHERE id=?",
+                              (_w114,)).fetchone()[0]
+        # بيعٌ بتاريخٍ يسبق عودته: يُسمّى التاريخ لا الوزن
+        create_work_orders_batch(
+            conn, [{"wo_no": "DATE-114", "gold": 10.0, "wage_per_gram": 5},
+                   {"wo_no": "HALF-114", "gold": 10.0, "wage_per_gram": 5}],
+            "2026-10-01", "admin")
+        _d114, _h114 = (conn.execute(
+            "SELECT id FROM work_orders WHERE work_order_no=?",
+            (n,)).fetchone()[0] for n in ("DATE-114", "HALF-114"))
+        _iv103.create_sale(conn, _A114, [{"work_order_id": _d114}],
+                           "2026-10-05", "admin", apply_vat=False)
+        _iv103.create_sale_return(conn, _A114, [{"work_order_id": _d114}],
+                                  "2026-10-10", "admin", apply_vat=False)
+        try:
+            _iv103.create_sale(conn, _B114, [{"work_order_id": _d114}],
+                               "2026-10-07", "admin", apply_vat=False)
+            _m114 = ""
+        except ValueError as _e:
+            _m114 = str(_e)
+        # بيعُ جزءين من طقمٍ واحد ليس «بيعاً مكرراً»
+        for _wt, _dt in ((4.0, "2026-10-02"), (6.0, "2026-10-03")):
+            _iv103.create_sale(conn, _A114, [
+                {"work_order_id": _h114, "weight": _wt}], _dt, "admin",
+                apply_vat=False)
+        _dbl114 = [d["wo"] for d in _hh114.check_double_sold(conn)]
+        _hist114 = _in114.item_history(conn, "STUB-114")[1]
+    check("طقمٌ أُدخل بمرتجع ثم بيع ثم عاد يُباع بوزنه كاملاً",
+          _e114 == "" and _st114 == "sold", _e114)
+    check("بيعٌ بتاريخٍ يسبق عودته يُرفض بسببه: التاريخ لا الوزن",
+          "يسبق حركةً له" in _m114 and "2026-10-10" in _m114
+          and "فقط، والمكتوب" not in _m114, _m114)
+    check("فحص الصحة: بيع جزءين من طقمٍ ليس بيعاً مكرراً",
+          "HALF-114" not in _dbl114 and "STUB-114" not in _dbl114, str(_dbl114))
+    check("حركة الطقم: أصله «أُدخل عبر مرتجع» وحركاته منتظمة وبأرقامها",
+          "مرتجع" in _hist114[0]["party"]
+          and not any(r.get("bad") for r in _hist114)
+          and all(r.get("inv") for r in _hist114[1:]), _hist114[0]["party"])
+
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
         check("الشاشة: زرّ «فرز» يختار لوحةً أو أكثر",

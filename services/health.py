@@ -265,40 +265,32 @@ def check_negative_stock(conn):
 
 
 def check_double_sold(conn):
-    """أطقمٌ مفردة بِيعت أكثر من مرة بلا مرتجعٍ بينها.
+    """أطقمٌ مفردة حركتها غير منتظمة — بيعٌ ولا شيء منها في الخزنة (بِيعت
+    مرتين بلا مرتجعٍ بينهما)، أو مرتجعٌ ولا شيء منها خارجها.
 
     الطقم المفرد قطعةٌ واحدة: تخرج مرة، فإن عادت فبمرتجع. فظهورُه في
     فاتورتَي بيعٍ ساريتين يعني أن الذهب خرج مرة وحُوسب عليه عميلان —
     كلاهما مدينٌ بأجرته، ومخزونُ المصنع يعارض الواقع.
 
-    كان يقع بثغرةٍ في تعديل الفواتير: إضافة طقمٍ إلى فاتورةٍ قديمة لم
-    تكن تفحص حالته، فيُقبل وهو مباعٌ في فاتورةٍ أخرى. أُغلقت الثغرة،
-    ويبقى هذا الفحص ليكشف ما وقع **قبلها** — فالإصلاح يمنع الجديد ولا
-    يُصلح القديم.
+    **بالوزن (4.85)**: كان الفحص يعدّ فواتير البيع والمرتجع، فطقمٌ بِيع
+    منه جزءٌ ثم باقيه (4.82) يُعدّ «مباعاً مرتين» وهو سليم. والحكم الآن
+    لسلسلة حركته بأوزانها (`models.wo_moves`) — كما في الحفظ نفسه.
 
     الرقم التجميعي مستثنى: هو رصيدٌ وزني يُباع منه مراراً بطبيعته.
     """
+    from models import wo_moves
     bad = []
-    for r in conn.execute(
-            "SELECT w.work_order_no wno, COUNT(*) n,"
-            "       GROUP_CONCAT(i.invoice_no, ' · ') invs"
-            "  FROM invoice_items it"
-            "  JOIN invoices i ON i.id=it.invoice_id"
-            "  JOIN work_orders w ON w.id=it.work_order_id"
-            " WHERE i.is_deleted=0 AND i.kind='sale'"
-            "   AND w.is_bulk=0 AND w.is_deleted=0"
-            " GROUP BY it.work_order_id HAVING COUNT(*) > 1"
-            " LIMIT 200"):
-        # مرتجعٌ بينهما يجعل تكرار البيع مشروعاً
-        rets = conn.execute(
-            "SELECT COUNT(*) c FROM invoice_items it"
-            "  JOIN invoices i ON i.id=it.invoice_id"
-            "  JOIN work_orders w ON w.id=it.work_order_id"
-            " WHERE i.is_deleted=0 AND i.kind='sale_return'"
-            "   AND w.work_order_no=?", (r["wno"],)).fetchone()["c"]
-        if r["n"] - rets > 1:
-            bad.append({"wo": r["wno"], "times": r["n"],
-                        "returns": rets, "invoices": r["invs"]})
+    for w, ids in wo_moves.irregular(conn):
+        mv = wo_moves.moves_of(conn, w["id"])
+        q = ",".join("?" * len(ids))
+        invs = " · ".join(r[0] for r in conn.execute(
+            f"SELECT invoice_no FROM invoices WHERE id IN ({q})"
+            " ORDER BY invoice_date, id", ids))
+        bad.append({"wo": w["work_order_no"],
+                    "times": sum(1 for m in mv if m["kind"] == "sale"),
+                    "returns": sum(1 for m in mv
+                                   if m["kind"] == "sale_return"),
+                    "invoices": invs})
     return bad
 
 

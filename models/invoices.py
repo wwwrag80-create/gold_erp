@@ -155,19 +155,14 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
             _w = c.get("weight")
             weight = (float(_w) if _w not in (None, "", 0)
                       else _wm.default_weight(conn, wo, kind))
-            if wo["id"] not in (skip_ids or ()) \
-                    and not _wm.can_add(conn, wo, kind, invoice_date,
-                                        weight):
+            why = (None if wo["id"] in (skip_ids or ())
+                   else _wm.refusal(conn, wo, kind, invoice_date, weight))
+            if why:
                 need = "بالمخزون" if need_status == "in_stock" else "مباعاً"
-                st = _wm.state(conn, wo)
-                part = st["rem"] if kind == "sale" else st["out"]
-                if part > _wm.EPS:
-                    # فيه وزنٌ لكنه أقل مما كُتب
-                    raise ValueError(
-                        f"الطقم {wo['work_order_no']}: "
-                        + ("الباقي منه في الخزنة" if kind == "sale"
-                           else "الخارج منه عند الجهات")
-                        + f" {part:,.3f} جم فقط، والمكتوب {weight:,.3f} جم")
+                if why != "none-left":
+                    # فيه وزنٌ لكن المكتوب أكبر منه، أو التاريخ يسبق
+                    # حركةً قائمة — السبب بعينه (4.85)
+                    raise ValueError(why)
                 # الرفض وحده لا يكفي: «ليس بالمخزون» تترك المستخدم
                 # يبحث. فيُدلّ على **أين ذهب** ليقرّر — يحذفه من تلك
                 # الفاتورة أو يرتجعه أو يتركه.

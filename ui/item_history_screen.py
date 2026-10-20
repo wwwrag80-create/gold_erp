@@ -206,7 +206,12 @@ class ItemHistoryScreen(QtWidgets.QWidget):
                 f"{kv.g(wo['registered_weight']):,.2f} {kv.unit()}"
                 f"  ·  الحالة: {'بالمخزون' if wo['status'] == 'in_stock' else 'خارج/مباع'}"
                 + where)
-            data = [(r["kind"], r["date"], r["party"], self._w(r["gold"]),
+            # 4.85: رقم الفاتورة بجانب الجهة، والحركة التي لا تسمح بها
+            # حالتها مُعلَّمة — رسالة الرفض تُحيل إليها بأرقام فواتيرها
+            data = [(r["kind"] + (" ⚠ غير منتظمة" if r.get("bad") else ""),
+                     r["date"],
+                     r["party"] + (f" · {r['inv']}" if r.get("inv") else ""),
+                     self._w(r["gold"]),
                      self._w(r["small"]), self._w(r["big"]), self._w(r["reg"]),
                      self._w(r.get("left", "")), r["type"]) for r in rows]
             fill(self.table, COLS, data)
