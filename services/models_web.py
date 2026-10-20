@@ -720,6 +720,12 @@ def _logo_file():
     return None
 
 
+def _icon_bytes(size=512):
+    """بايتات الأيقونة PNG بالمقاس المطلوب — أو None."""
+    r = _icon(size)
+    return r["body"] if r["code"] == 200 else None
+
+
 def _icon(size=512):
     """أيقونة التطبيق المثبّت بمقاسها الحقيقي — المتصفح يرفض التثبيت إن
     لم تطابق المقاس المعلن في ملف التثبيت."""
@@ -759,14 +765,57 @@ def _sw(base):
                   "Service-Worker-Allowed": base})
 
 
-def _shortcut(base, headers):
-    """ملف اختصارٍ لسطح المكتب (Windows .url) يفتح الرابط في المتصفح."""
+def _abs_url(base, headers):
+    """الرابط الكامل كما فتحه الجهاز: https لرابط Tailscale، وإلا http."""
     h = {str(k).lower(): v for k, v in (headers or {}).items()}
     host = (h.get("x-forwarded-host") or h.get("host") or "").strip()
     proto = (h.get("x-forwarded-proto") or "").strip()
     if not proto:
         proto = "https" if host.split(":")[0].endswith(".ts.net") else "http"
-    url = f"{proto}://{host}{base}"
+    return f"{proto}://{host}{base}"
+
+
+def _mobileconfig(base, headers):
+    """أيقونة الرابط للآيفون والآيباد بنقرة (4.85) — ملف تعريفٍ «Web Clip».
+
+    أبل لا تسمح لصفحةٍ بزرّ تثبيتٍ كما في كروم، لكنها تقبل ملف تعريفٍ
+    يُنزَّل من الصفحة ويُثبَّت من «الإعدادات» بنقرة: فتظهر أيقونة الرابط على
+    الشاشة الرئيسية وتفتحه بملء الشاشة كتطبيق. المعرّف ثابتٌ من الرابط
+    نفسه، فإعادة التنزيل تستبدل الأيقونة لا تكرّرها."""
+    import plistlib
+    import uuid
+    url = _abs_url(base, headers)
+    co = _company().strip() or "دليل الموديلات"
+    ident = ("local.jadeite.models."
+             + hashlib.sha1(url.encode("utf-8")).hexdigest()[:12])
+    clip = {"PayloadType": "com.apple.webClip.managed", "PayloadVersion": 1,
+            "PayloadIdentifier": ident + ".clip",
+            "PayloadUUID": str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                          url + "#clip")).upper(),
+            "PayloadDisplayName": f"{co} — دليل الموديلات",
+            "Label": co[:18], "URL": url, "IsRemovable": True,
+            "FullScreen": True, "IgnoreManifestScope": True,
+            "Precomposed": True}
+    icon = _icon_bytes(180)
+    if icon:
+        clip["Icon"] = icon
+    prof = {"PayloadContent": [clip], "PayloadType": "Configuration",
+            "PayloadVersion": 1, "PayloadIdentifier": ident,
+            "PayloadUUID": str(uuid.uuid5(uuid.NAMESPACE_URL, url)).upper(),
+            "PayloadDisplayName": f"{co} — رابط المدير",
+            "PayloadDescription": "أيقونة رابط المدير على الشاشة الرئيسية"
+                                  " — تفتحه بنقرة كتطبيق.",
+            "PayloadOrganization": co, "PayloadRemovalDisallowed": False}
+    body = plistlib.dumps(prof, fmt=plistlib.FMT_XML)
+    return _resp(200, body, "application/x-apple-aspen-config",
+                 {"Content-Disposition":
+                  'attachment; filename="models.mobileconfig"',
+                  "Cache-Control": "no-store"})
+
+
+def _shortcut(base, headers):
+    """ملف اختصارٍ لسطح المكتب (Windows .url) يفتح الرابط في المتصفح."""
+    url = _abs_url(base, headers)
     body = f"[InternetShortcut]\r\nURL={url}\r\n".encode("utf-8")
     name = quote("دليل الموديلات.url")
     return _resp(200, body, "application/internet-shortcut",
@@ -780,9 +829,11 @@ def _install_head(base):
     b = _e(base)
     return (f'<link rel="manifest" href="{b}/manifest.webmanifest">'
             f'<link rel="icon" href="{b}/icon.png">'
-            f'<link rel="apple-touch-icon" href="{b}/icon.png">'
+            f'<link rel="apple-touch-icon" sizes="180x180"'
+            f' href="{b}/icon-180.png">'
             '<meta name="mobile-web-app-capable" content="yes">'
             '<meta name="apple-mobile-web-app-capable" content="yes">'
+            '<meta name="apple-mobile-web-app-title" content="الدليل">'
             '<meta name="theme-color" content="#2b2723">')
 
 
@@ -811,6 +862,10 @@ def handle(method, parts, query, headers, body):
         return _icon(512)
     if rest == ["icon-192.png"]:
         return _icon(192)
+    if rest == ["icon-180.png"]:
+        return _icon(180)
+    if rest == ["ios.mobileconfig"]:
+        return _mobileconfig(base, headers)
     if rest == ["sw.js"]:
         return _sw(base)
     if rest == ["shortcut.url"]:
@@ -1586,6 +1641,10 @@ _INCOME_CSS = """
 font-size:14px}
 .board tr.imemo td{color:#666;font-style:italic}
 .board td.neg{color:#b3261e}
+.cashbox{margin:12px 2px 4px;padding:10px 14px;border:1px dashed #c9a24a;
+border-radius:10px;background:#fffaf0;font-size:13.5px;line-height:1.8}
+.cashbox .cb3{display:flex;gap:28px;flex-wrap:wrap;margin:4px 0}
+.cashbox small{color:#6b6255}
 """
 
 _MONTHS_AR = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
@@ -1633,6 +1692,31 @@ def _income(conn, today=None):
     body = (f'<table><thead><tr><th>البيان — شهر {_e(month)}</th>'
             f"<th>ريال</th><th>ذهب ({_e(kv.unit())})</th></tr></thead>"
             f"<tbody>{body}</tbody></table>")
+    # ══ النقد — للعلم، خارج القائمة (4.85) ══
+    # قائمة الدخل تقيس الربح والخسارة لا النقد: رصيدُ الصندوق أول الشهر
+    # لا يدخلها. لكن من يرى «عجزاً» يسأل: من أين غُطّي؟ فيُعرض النقد أول
+    # الشهر وحركته والآن في مربعٍ مستقل — كما في قائمة التدفقات النقدية
+    try:
+        from datetime import date as _date
+        now = min(_date.today(), d2)
+        cf = statements.cash_flow(conn, d1.isoformat(), now.isoformat(),
+                                  False)["cur"]["totals"]
+        o, n, c = (cf.get("opening", 0.0), cf.get("net", 0.0),
+                   cf.get("closing", 0.0))
+        def _m(v, plus=""):
+            return ("\u200e-" if v < 0 else plus) + f"{abs(v):,.2f}"
+        body += (
+            '<div class="cashbox"><b>النقد وما في حكمه (الصندوق والبنوك)'
+            ' — للعلم، لا يدخل قائمة الدخل</b><div class="cb3">'
+            f'<span>أول الشهر <b>{_m(o)}</b></span>'
+            f'<span>حركة الشهر <b>{_m(n, "+")}</b></span>'
+            f'<span>الآن <b>{_m(c)}</b> ريال</span></div>'
+            '<small>صافي الربح أو الخسارة أعلاه نتيجة الشهر من إيراداته'
+            ' ومصروفاته. أما النقد أول الشهر فرصيدٌ قائم يُدفع منه — يظهر'
+            ' هنا وفي قائمة التدفقات النقدية والمركز المالي، لا في قائمة'
+            ' الدخل.</small></div>')
+    except Exception:
+        pass
     net = st["cash"]["totals"].get("net", 0.0)
     gnet = st["gold"]["totals"].get("net", 0.0)
     n_txt, _c = num(net)
@@ -1684,9 +1768,14 @@ _INSTALL_JS = r"""
     ask=null;});return;}
   if(/iphone|ipad|ipod/i.test(ua)||(/macintosh/i.test(ua)&&
      navigator.maxTouchPoints>1)){
-   say('على الآيفون والآيباد: زرّ المشاركة <b>⬆</b> أسفل الصفحة ثم'+
-       ' <b>«إضافة إلى الشاشة الرئيسية»</b> — تظهر أيقونة الرابط على'+
-       ' الشاشة وتفتحه بنقرة.');return;}
+   say('<b>الآيفون والآيباد — طريقتان (افتح الرابط في سفاري):</b><br>'+
+       '① بنقرة: <a class="inst" href="'+base+'/ios.mobileconfig">⬇ أيقونة'+
+       ' الآيفون</a> ثم «سماح» ← افتح <b>الإعدادات</b> ← «تم تنزيل ملف'+
+       ' التعريف» أعلى القائمة ← <b>تثبيت</b>. تظهر أيقونة الرابط على'+
+       ' الشاشة الرئيسية وتفتحه كتطبيق.<br>'+
+       '② يدوياً: زرّ المشاركة <b>⬆</b> ← <b>«إضافة إلى الشاشة'+
+       ' الرئيسية»</b>.<br><small>أول فتحٍ من الأيقونة يطلب رمز الدخول'+
+       ' مرةً واحدة.</small>');return;}
   if(!window.isSecureContext){
    say('التثبيت يحتاج الرابط الآمن (يبدأ بـ https). هذا رابط شبكة المصنع'+
        ' — نُزّل لك ملف اختصار: انقله إلى سطح المكتب وافتحه بنقرة.');

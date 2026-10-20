@@ -8670,6 +8670,18 @@ def main():
           and "beforeinstallprompt" in _mw113._INSTALL_JS
           and _mw113._sw("/m/x")["headers"]["Service-Worker-Allowed"]
           == "/m/x")
+    # 4.85: النقد للعلم خارج القائمة · وأيقونة الآيفون بملف تعريف
+    check("قائمة الدخل في الرابط: النقد أول الشهر للعلم لا داخل القائمة",
+          'class="cashbox"' in _b113 and "لا يدخل قائمة الدخل" in _b113
+          and _b113.index("</table>") < _b113.index('class="cashbox"'))
+    import plistlib as _pl113
+    _ios = _mw113._mobileconfig("/m/x", {"Host": "pc.t.ts.net"})
+    _clip = _pl113.loads(_ios["body"])["PayloadContent"][0]
+    check("وللآيفون ملف تعريفٍ يضع أيقونة الرابط الآمن بملء الشاشة",
+          _ios["ctype"] == "application/x-apple-aspen-config"
+          and _clip["URL"] == "https://pc.t.ts.net/m/x"
+          and _clip["FullScreen"] is True
+          and "ios.mobileconfig" in _mw113._INSTALL_JS, _clip.get("URL"))
 
     try:
         from ui.sales_analytics_screen import SalesAnalyticsScreen as _S103
