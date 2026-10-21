@@ -8656,22 +8656,27 @@ def main():
     from models import dash_panels as _dp113
     _dp113.save_panels(_dp113.load_panels() + [
         {"key": "pl113", "title": "الأرباح والخسائر", "kind": "accounts",
-         "accounts": ["4120", "4110", "5111"], "period": "all"}])
+         "accounts": ["4120", "4110", "5111", "5000"], "period": "all"}])
     with db(readonly=True) as conn:
         _b113, _s113, _t113, _g113 = _mw113._pnl(conn)
-        _rows113 = _dp113.account_rows(conn, ["4120", "4110", "5111"])
+        _rows113 = _dp113.account_rows(conn, ["4120", "4110", "5111", "5000"])
         _pg113 = _mw113.page_html(conn, {"tab": "income"}, "/m/x")
         _cb113 = _mw113._board(conn, {"side": "over", "all": "1", "f": "1"},
                                "/m/x")
         _ag113 = _mw113._board(conn, {"side": "aging", "all": "1",
                                       "f": "1"}, "/m/x")
-    _neg113 = [r for r in _rows113 if r["cash_balance"] < -0.004]
+    # 4.90: بمنظور الربح — الدائن (إيراد) موجب والمدين (فاقد) سالب
+    _neg113 = [r for r in _rows113 if r["cash_balance"] > 0.004
+               or r["gold_balance"] > 0.0004]
+    _pos113 = [r for r in _rows113 if r["cash_balance"] < -0.004]
     check("رابط المدير: لوحة «الأرباح والخسائر» من لوحة التحكم بحساباتها",
           all(c in _b113 for c in ("4120", "4110", "5111"))
           and "الإجمالي" in _b113 and "الإجمالي نقداً" in _s113, _s113[:80])
-    check("والسالب أحمر بإشارة ناقص «-10» لا بين قوسين",
-          bool(_neg113) and f'class="neg">\u200e-'
-          f'{abs(_neg113[0]["cash_balance"]):,.2f}' in _b113
+    check("الإيراد موجب والفاقد سالبٌ أحمر بإشارة ناقص «-10» لا بين قوسين",
+          bool(_neg113) and bool(_pos113)
+          and 'class="neg">\u200e-' in _b113
+          and f'<td class="">{abs(_pos113[0]["cash_balance"]):,.2f}</td>'
+          in _b113
           and "(" not in _re113.sub(r"\([^)]*\)", "", _b113.split(
               "<tbody>")[1].split("</tbody>")[0]) , str(_neg113[:1]))
     check("وقائمة الدخل أُزيلت من الرابط (ورابطها القديم يفتح اللوحة)",

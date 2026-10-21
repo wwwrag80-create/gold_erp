@@ -1688,6 +1688,15 @@ def _pnl(conn):
     d1, d2 = p.get("date_from") or None, p.get("date_to") or None
     rows = dp.account_rows(conn, p["accounts"], d1, d2)
     bars = dp.ratio_bars(rows, p.get("ratios") or [])
+    # ══ الإشارة بمنظور الربح (4.90) ══
+    # الرصيد في لوحة التحكم مدينٌ ناقص دائن: فالمصروف والفاقد (مدينان)
+    # موجبان، والإيراد والمسترجع (دائنان) سالبان — فيُقرأ الربح خسارة.
+    # في الرابط يُعكس: الدائن (ربح) موجب، والمدين (خسارة) سالبٌ أحمر.
+    # والنسب لا تتأثر — تُحسب بالقيم المطلقة.
+    rows = [dict(r, gold_balance=-r["gold_balance"],
+                 cash_balance=-r["cash_balance"]) for r in rows]
+    bars = [dict(b, first_value=-b["first_value"],
+                 second_value=-b["second_value"]) for b in bars]
     t = dp.totals(rows)
 
     def num(v, gold=False):
@@ -1747,8 +1756,9 @@ def _pnl(conn):
                f"</b>{_e(span.split(' — ', 1)[-1] if ' — ' in span else '')}"
                "</div>"
                f'<div class="{gc}">الإجمالي ذهباً<b>{g}</b>'
-               f"{_e(kv.unit())}</div>"
-               f'<div class="{cc}">الإجمالي نقداً<b>{c}</b>ريال</div>')
+               f"{_e(kv.unit())} · الموجب ربح والسالب خسارة</div>"
+               f'<div class="{cc}">الإجمالي نقداً<b>{c}</b>'
+               "ريال · الموجب ربح والسالب خسارة</div>")
     return body, summary, "", ""
 
 
