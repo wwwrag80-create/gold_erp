@@ -1486,8 +1486,12 @@ def page_html(conn, query, base):
     from datetime import datetime
 
     from services import karat_view as kv
-    tab = query.get("tab") if query.get("tab") in (
-        "guide", "received", "orders", "customers", "income") else "guide"
+    tab = query.get("tab")
+    if tab == "income":
+        # روابط قائمة الدخل المحفوظة (قبل 4.89) تفتح اللوحة التي حلّت محلها
+        tab = "pnl"
+    if tab not in ("guide", "received", "orders", "customers", "pnl"):
+        tab = "guide"
     view = query.get("view") if query.get("view") in (
         "all", "in_stock", "sold") else "all"
     sort = query.get("sort") if query.get("sort") in (
@@ -1501,6 +1505,7 @@ def page_html(conn, query, base):
         n_orders = _mo.count_open(conn)
     except Exception:
         n_orders = 0
+    pnl_title = _e(_pnl_title())
     tabs = "".join(
         f'<a class="{"on" if tab == k else ""}"'
         f' href="{_e(_link(base, tab=k, view=view, sort=sort))}">{t}</a>'
@@ -1509,7 +1514,7 @@ def page_html(conn, query, base):
                      ("orders", "طلبات العملاء"
                       + (f" ({n_orders})" if n_orders else "")),
                      ("customers", "العملاء — المبيعات والسداد"),
-                     ("income", "قائمة الدخل")))
+                     ("pnl", pnl_title)))
     seg = "".join(
         f'<a class="{"on" if view == k else ""}" href="'
         f'{_e(_link(base, tab=tab, view=k, sort=sort, day=query.get("day")))}'
@@ -1531,8 +1536,8 @@ def page_html(conn, query, base):
 
     if tab == "customers":
         body, summary, tools, seg = _board(conn, query, base)
-    elif tab == "income":
-        body, summary, tools, seg = _income(conn)
+    elif tab == "pnl":
+        body, summary, tools, seg = _pnl(conn)
     elif tab == "received":
         body, summary, tools = _received(conn, query, base, view, sort,
                                          imgs, unit, sort_sel)
@@ -1543,23 +1548,23 @@ def page_html(conn, query, base):
                                       sort_sel)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     co = _company().strip()
-    board = tab in ("customers", "income")
-    title = (("قائمة الدخل" if tab == "income" else
+    board = tab in ("customers", "pnl")
+    title = ((pnl_title if tab == "pnl" else
               "العملاء — المبيعات والسداد" if board else "دليل الموديلات")
              + (f" — {_e(co)}" if co else ""))
     cols = "".join(f'<button type="button" data-c="{c}">{c}</button>'
                    for c in COLS)
     cols_bar = ("" if board else
                 f'<div class="cols">الصور في الصف: {cols}</div>')
-    hint = ("ابحث في بنود القائمة…" if tab == "income" else
+    hint = ("ابحث في حسابات اللوحة…" if tab == "pnl" else
             "ابحث باسم العميل أو رقم حسابه…" if board else
             "ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…")
     sect = ("board" if board else
             "orders" if tab == "orders" else "grid")
-    # قائمة الدخل تتجدّد وحدها كل ربع ساعة: مفتوحةً حتى أول الشهر
-    # تنتقل إليه بلا لمس، وأرقام اليوم تتبع ما يُرحَّل
+    # اللوحة تتجدّد وحدها كل ربع ساعة: فترتها باسمها («هذا الشهر»)
+    # تنتقل مع الأيام بلا لمس، وأرقام اليوم تتبع ما يُرحَّل
     refresh = ('<meta http-equiv="refresh" content="900">'
-               if tab == "income" else "")
+               if tab == "pnl" else "")
     again = (_link(base, tab=tab, side=query.get("side"),
                    **{k: query.get(k)
                       for k in ("from", "to", "all", "f", "dim")})
@@ -1572,7 +1577,7 @@ def page_html(conn, query, base):
 <meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">{_install_head(base)}{refresh}
 <title>{title}</title>
-<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_INCOME_CSS}</style></head><body>
+<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_PNL_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
 <div class="bar"><button type="button" id="inst" class="inst"
@@ -1626,108 +1631,124 @@ _GRADE_CSS = {"مسدَّد": "g-ok", "ممتاز": "g-ok", "جيد": "g-mid",
 
 
 # ══════════════════════════════════════════════════════════════════
-#  قائمة الدخل (4.83): الشهر الحالي وحده — بلا فترةٍ تُختار ولا مقارنة
+#  الأرباح والخسائر (4.89): لوحة لوحة التحكم نفسها في الرابط
 # ------------------------------------------------------------------
-#  الأرقام من `statements.income_statement` نفسها التي تقرأ منها شاشة
-#  القوائم المالية. والشهر يُحسب عند كل فتح: فإذا دخل شهرٌ جديد صارت
-#  القائمة له تلقائياً. والسالب بإشارة ناقص «-10» كما في البرنامج.
+#  حلّت محل قائمة الدخل. اللوحة يبنيها المستخدم في «لوحة التحكم»
+#  (`models.dash_panels`): حساباتها وفترتها باسمها («هذا الشهر» …)
+#  ونسبها — فيرى المدير في الرابط ما يراه على الجهاز رقماً برقم.
+#  والسالب أحمر بإشارة ناقص «-10» لا بين قوسين.
 # ══════════════════════════════════════════════════════════════════
 
-_INCOME_CSS = """
-.board tr.isec td{background:#efe9dc;text-align:right;font-weight:700}
+_PNL_CSS = """
 .board td.lbl{text-align:right;white-space:normal}
-.board tr.isub td{border-top:1.5px solid #333;font-weight:700}
-.board tr.igrand td{background:#2b2723;color:#fff;font-weight:700;
-font-size:14px}
-.board tr.imemo td{color:#666;font-style:italic}
-.board td.neg{color:#b3261e}
-.cashbox{margin:12px 2px 4px;padding:10px 14px;border:1px dashed #c9a24a;
-border-radius:10px;background:#fffaf0;font-size:13.5px;line-height:1.8}
-.cashbox .cb3{display:flex;gap:28px;flex-wrap:wrap;margin:4px 0}
-.cashbox small{color:#6b6255}
+.board td.neg,.sum .neg b{color:#b3261e}
+.board tr.tot td.neg{color:#ff9a8f}
+.ratios{margin:10px 2px 2px;display:grid;gap:6px}
+.ratios div{background:#fffaf0;border:1px solid #e6d8b8;border-radius:10px;
+padding:7px 12px;font-size:13.5px}
 """
 
-_MONTHS_AR = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر")
+
+def _norm_ar(t):
+    return (str(t or "").replace("أ", "ا").replace("إ", "ا")
+            .replace("آ", "ا"))
 
 
-def _month_range(today=None):
-    from datetime import date, timedelta
-    d = today or date.today()
-    start = d.replace(day=1)
-    nxt = (start + timedelta(days=32)).replace(day=1)
-    return start, nxt - timedelta(days=1)
+def _pnl_panel():
+    """لوحة «الأرباح والخسائر» من لوحات لوحة التحكم — بعنوانها."""
+    try:
+        from models import dash_panels as dp
+        panels = dp.load_panels()
+    except Exception:
+        return None
+    for keys in (("ارباح", "خسائر"), ("ربح", "خسار")):
+        for p in panels:
+            t = _norm_ar(p.get("title"))
+            if (p.get("kind") or "accounts") == "accounts" and any(
+                    k in t for k in keys):
+                return p
+    return None
 
 
-def _income(conn, today=None):
-    from models import statements
+def _pnl_title():
+    p = _pnl_panel()
+    return (p or {}).get("title") or "الأرباح والخسائر"
+
+
+def _pnl(conn):
+    from models import dash_panels as dp
     from services import karat_view as kv
-    d1, d2 = _month_range(today)
-    st = statements.income_statement(conn, d1.isoformat(), d2.isoformat(),
-                                      False)
-    rows = statements.is_layout(st, False)
+    p = _pnl_panel()
+    if p is None:
+        return ('<div class="empty">لا لوحة «الأرباح والخسائر» في لوحة'
+                ' التحكم — أنشئها هناك بحساباتها فتظهر هنا.</div>',
+                "", "", "")
+    p = dict(p)
+    k = dp.apply_period(p)
+    d1, d2 = p.get("date_from") or None, p.get("date_to") or None
+    rows = dp.account_rows(conn, p["accounts"], d1, d2)
+    bars = dp.ratio_bars(rows, p.get("ratios") or [])
+    t = dp.totals(rows)
 
     def num(v, gold=False):
         v = kv.g(v or 0.0) if gold else float(v or 0.0)
-        eps = 0.0005 if gold else 0.005
-        if abs(v) < eps:
-            return "—", ""
-        txt = f"{abs(v):,.3f}" if gold else f"{abs(v):,.2f}"
-        # علامة LRM قبل الناقص: في سطرٍ عربي يُعرض «-300» بلا قلب «300-»
-        return (f"\u200e-{txt}", "neg") if v < 0 else (txt, "")
+        txt = f"{abs(v):,.2f}"
+        # LRM قبل الناقص: في السطر العربي يُعرض «-300» لا «300-»
+        return (f"\u200e-{txt}", "neg") if v < -0.004 else (txt, "")
 
-    body = ""
+    def tds(r):
+        g, gc = num(r["gold_balance"], True)
+        c, cc = num(r["cash_balance"])
+        return f'<td class="{gc}">{g}</td><td class="{cc}">{c}</td>'
+
+    by_code = {}
+    for b in bars:
+        by_code.setdefault(b["second"], []).append(b)
+
+    def pct(v):
+        return "—" if v is None else f"{v:,.1f}%"
+    head = (["النسبة"] if bars else []) + [
+        "الحساب", f"رصيد الذهب ({kv.unit()})", "الرصيد النقدي (ريال)"]
+    trs = []
     for r in rows:
-        k = r["kind"]
-        if k in ("sec", "memohead"):
-            body += (f'<tr class="isec"><td colspan="3">{_e(r["label"])}'
-                     "</td></tr>")
-            continue
-        c, cc = num(r.get("cash"))
-        g, gc = num(r.get("gold"), True)
-        cls = {"sub": "isub", "grand": "igrand", "memo": "imemo"}.get(k, "")
-        body += (f'<tr class="{cls}"><td class="lbl">{_e(r["label"])}</td>'
-                 f'<td class="{cc}">{c}</td><td class="{gc}">{g}</td></tr>')
-    month = f"{_MONTHS_AR[d1.month - 1]} {d1.year}"
-    body = (f'<table><thead><tr><th>البيان — شهر {_e(month)}</th>'
-            f"<th>ريال</th><th>ذهب ({_e(kv.unit())})</th></tr></thead>"
-            f"<tbody>{body}</tbody></table>")
-    # ══ النقد — للعلم، خارج القائمة (4.85) ══
-    # قائمة الدخل تقيس الربح والخسارة لا النقد: رصيدُ الصندوق أول الشهر
-    # لا يدخلها. لكن من يرى «عجزاً» يسأل: من أين غُطّي؟ فيُعرض النقد أول
-    # الشهر وحركته والآن في مربعٍ مستقل — كما في قائمة التدفقات النقدية
-    try:
-        from datetime import date as _date
-        now = min(_date.today(), d2)
-        cf = statements.cash_flow(conn, d1.isoformat(), now.isoformat(),
-                                  False)["cur"]["totals"]
-        o, n, c = (cf.get("opening", 0.0), cf.get("net", 0.0),
-                   cf.get("closing", 0.0))
-        def _m(v, plus=""):
-            return ("\u200e-" if v < 0 else plus) + f"{abs(v):,.2f}"
-        body += (
-            '<div class="cashbox"><b>النقد وما في حكمه (الصندوق والبنوك)'
-            ' — للعلم، لا يدخل قائمة الدخل</b><div class="cb3">'
-            f'<span>أول الشهر <b>{_m(o)}</b></span>'
-            f'<span>حركة الشهر <b>{_m(n, "+")}</b></span>'
-            f'<span>الآن <b>{_m(c)}</b> ريال</span></div>'
-            '<small>صافي الربح أو الخسارة أعلاه نتيجة الشهر من إيراداته'
-            ' ومصروفاته. أما النقد أول الشهر فرصيدٌ قائم يُدفع منه — يظهر'
-            ' هنا وفي قائمة التدفقات النقدية والمركز المالي، لا في قائمة'
-            ' الدخل.</small></div>')
-    except Exception:
-        pass
-    net = st["cash"]["totals"].get("net", 0.0)
-    gnet = st["gold"]["totals"].get("net", 0.0)
-    n_txt, _c = num(net)
-    g_txt, _gc = num(gnet, True)
-    # صافي الشهر ريالاً **وذهباً** (4.84) — كالسطر الأخير في الجدول
-    summary = (f'<div class="chip">شهر {_e(month)} — من {d1.isoformat()}'
-               f' إلى {d2.isoformat()}</div>'
-               f'<div class="chip">صافي {"ربح" if net >= 0 else "خسارة"}'
-               f' الشهر نقداً: <b>{n_txt}</b> ريال</div>'
-               f'<div class="chip">صافي {"ربح" if gnet >= 0 else "خسارة"}'
-               f' الشهر ذهباً: <b>{g_txt}</b> {_e(kv.unit())}</div>')
+        ratio = ""
+        if bars:
+            ratio = "<td>" + _e("   ·   ".join(
+                f"{x['title']}: {pct(x['pct'])}"
+                for x in by_code.get(r["code"], [])) or "—") + "</td>"
+        s_ = _e(f"{r['code']} {r['name']}".lower())
+        trs.append(f'<tr class="crow" data-s="{s_}">{ratio}'
+                   f'<td class="lbl">{_e(r["code"])} — {_e(r["name"])}</td>'
+                   f"{tds(r)}</tr>")
+    tot_ratio = ""
+    if bars:
+        vals = [x["pct"] for x in bars if x["pct"] is not None]
+        tot_ratio = (f"<td>إجمالي النسب: "
+                     f"{f'{sum(vals):,.1f}%' if vals else '—'}</td>")
+    body = ("<table><thead><tr>"
+            + "".join(f"<th>{_e(h)}</th>" for h in head)
+            + "</tr></thead><tbody>" + "".join(trs) + "</tbody><tfoot>"
+            + f'<tr class="tot">{tot_ratio}<td class="lbl">الإجمالي</td>'
+            + f"{tds(t)}</tr></tfoot></table>")
+    if bars:
+        body += '<div class="ratios">' + "".join(
+            f"<div><b>{_e(b['title'])}: {pct(b['pct'])}</b> — "
+            f"{_e(b['second_name'])} {b['second_value']:,.2f} ÷ "
+            f"{_e(b['first_name'])} {b['first_value']:,.2f}"
+            f" {_e(b.get('unit', ''))}</div>" for b in bars) + "</div>"
+    if not rows:
+        body = '<div class="empty">لا حسابات في هذه اللوحة</div>'
+    span = dict(dp.PERIODS).get(k, "")
+    if d1 or d2:
+        span += f" — من {d1 or 'البداية'} إلى {d2 or 'الآن'}"
+    g, gc = num(t["gold_balance"], True)
+    c, cc = num(t["cash_balance"])
+    summary = (f"<div>الفترة<b>{_e(dict(dp.PERIODS).get(k, '') or '—')}"
+               f"</b>{_e(span.split(' — ', 1)[-1] if ' — ' in span else '')}"
+               "</div>"
+               f'<div class="{gc}">الإجمالي ذهباً<b>{g}</b>'
+               f"{_e(kv.unit())}</div>"
+               f'<div class="{cc}">الإجمالي نقداً<b>{c}</b>ريال</div>')
     return body, summary, "", ""
 
 
@@ -1808,8 +1829,9 @@ def _board_period(query):
 def _board(conn, query, base):
     from models import customer_board as cb
     from services import karat_view as kv
+    # «نظرة عامة» أُلغيت من الرابط (4.89) — ورابطها المحفوظ يفتح الذهب
     side = query.get("side") if query.get("side") in (
-        "gold", "cash", "over", "aging") else "gold"
+        "gold", "cash", "aging") else "gold"
     d_from, frm, to, all_ = _board_period(query)
     res = cb.board(conn, d_from, to)
     rows = res["rows"]
@@ -1832,7 +1854,7 @@ def _board(conn, query, base):
         f'<a class="{"on" if side == k else ""}" href="'
         f'{_e(_link(base, tab="customers", side=k, **keep))}">{t}</a>'
         for k, t in (("gold", "الذهب"), ("cash", "النقد"),
-                     ("over", "نظرة عامة"), ("aging", "أعمار الديون")))
+                     ("aging", "أعمار الديون")))
     tools = (
         f'<form class="tools" method="get" action="{_e(base)}">'
         '<input type="hidden" name="tab" value="customers">'
@@ -1864,84 +1886,55 @@ def _board(conn, query, base):
         f'<div>الباقي<b>{fmt(ps, s["remaining"])}</b>{u} · على '
         f'{owing:,} عميلاً</div>')
 
-    if side == "over":
-        rows = cb.by_paid(rows, "gold")
-        head = ["العميل", "الجوال", "عدد الفواتير", "آخر بيع", "آخر سداد",
-                "منذ آخر سداد", "الباقي ذهباً", "تقدير الذهب",
-                "الباقي نقداً", "تقدير النقد"]
-        trs = []
-        for r in rows:
-            d = r["days_since_paid"]
-            owes = (r["gold"]["remaining"] > 0.0005
-                    or r["cash"]["remaining"] > 0.005)
-            late = ' class="late"' if owes and (d is None or d > 60) else ""
-            trs.append(
-                f'<tr class="crow" data-s="{srch(r)}">'
-                f'<td class="n">{_e(r["name"])}</td>'
-                f'<td>{_e(r.get("phone") or "—")}</td>'
-                f'<td>{r["n_sales"]:,}</td>'
-                f'<td>{_e(r["last_sale"] or "—")}</td>'
-                f'<td>{_e(r["last_paid"] or "—")}</td>'
-                f'<td{late}>{"—" if d is None else f"{d:,} يوماً"}</td>'
-                f'<td class="rem">{fmt("gold", r["gold"]["remaining"])}</td>'
-                f'<td>{grade(r["gold"]["grade"])}</td>'
-                f'<td class="rem">{fmt("cash", r["cash"]["remaining"])}</td>'
-                f'<td>{grade(r["cash"]["grade"])}</td></tr>')
-        foot = (
-            f'<tr class="tot"><td class="n">الإجمالي ({len(rows)})</td><td></td>'
-            f'<td>{sum(r["n_sales"] for r in rows):,}</td><td></td><td></td>'
-            '<td></td>'
-            f'<td>{fmt("gold", sum(r["gold"]["remaining"] for r in rows))}</td>'
-            '<td></td>'
-            f'<td>{fmt("cash", sum(r["cash"]["remaining"] for r in rows))}</td>'
-            '<td></td></tr>')
-    else:
-        rows = cb.by_paid(rows, side)
-        # «رصيد سابق» و«حركات أخرى» يُخفيان إن خلَوا — كالشاشة
-        show_open = any(abs(r[side]["open"]) > 0.0005 for r in rows)
-        show_other = any(abs(r[side]["other"]) > 0.0005 for r in rows)
-        cols = [("العميل", None), ("رصيد سابق", "open"),
-                ("المبيعات", "sales"), ("المرتجع", "returns"),
-                ("صافي المبيعات", "net"), ("السداد", "paid"),
-                ("حركات أخرى", "other"), ("الباقي", "remaining"),
-                ("نسبة المرتجع", "ret_pct"), ("نسبة السداد", "paid_pct"),
-                ("آخر سداد", "last"), ("التقدير", "grade")]
-        cols = [c for c in cols
-                if (c[1] != "open" or show_open)
-                and (c[1] != "other" or show_other)]
-        head = [c[0] for c in cols]
+    # الأعلى مديونيةً أولاً (4.89): الباقي على العميل تنازلياً
+    other = "cash" if side == "gold" else "gold"
+    rows = sorted(rows, key=lambda r: (-r[side]["remaining"],
+                                       -r[other]["remaining"], r["name"]))
+    # «رصيد سابق» و«حركات أخرى» يُخفيان إن خلَوا — كالشاشة
+    show_open = any(abs(r[side]["open"]) > 0.0005 for r in rows)
+    show_other = any(abs(r[side]["other"]) > 0.0005 for r in rows)
+    cols = [("العميل", None), ("رصيد سابق", "open"),
+            ("المبيعات", "sales"), ("المرتجع", "returns"),
+            ("صافي المبيعات", "net"), ("السداد", "paid"),
+            ("حركات أخرى", "other"), ("الباقي", "remaining"),
+            ("نسبة المرتجع", "ret_pct"), ("نسبة السداد", "paid_pct"),
+            ("آخر سداد", "last"), ("التقدير", "grade")]
+    cols = [c for c in cols
+            if (c[1] != "open" or show_open)
+            and (c[1] != "other" or show_other)]
+    head = [c[0] for c in cols]
 
-        def cell(r, key, x):
-            if key is None:
-                return f'<td class="n">{_e(r["name"])}</td>'
-            if key in ("ret_pct", "paid_pct"):
-                warn = (key == "ret_pct" and x[key] is not None
-                        and x[key] >= 20)
-                return f'<td{" class=late" if warn else ""}>{pct(x[key])}</td>'
-            if key == "last":
-                return f'<td>{_e(r["last_paid"] or "—")}</td>'
-            if key == "grade":
-                return f'<td>{grade(x["grade"])}</td>'
-            if key == "remaining":
-                cr = " cr" if x[key] < -0.0005 else ""
-                return f'<td class="rem{cr}">{fmt(side, x[key])}</td>'
-            return f'<td>{fmt(side, x[key])}</td>'
-        trs = [f'<tr class="crow" data-s="{srch(r)}">'
-               + "".join(cell(r, k, r[side]) for _t, k in cols) + "</tr>"
-               for r in rows]
-        t2 = cb._side({k: sum(r[side][k] for r in rows) for k in cb.KINDS},
-                      side)
+    def cell(r, key, x):
+        if key is None:
+            return f'<td class="n">{_e(r["name"])}</td>'
+        if key in ("ret_pct", "paid_pct"):
+            warn = (key == "ret_pct" and x[key] is not None
+                    and x[key] >= 20)
+            return f'<td{" class=late" if warn else ""}>{pct(x[key])}</td>'
+        if key == "last":
+            return f'<td>{_e(r["last_paid"] or "—")}</td>'
+        if key == "grade":
+            return f'<td>{grade(x["grade"])}</td>'
+        if key == "remaining":
+            cr = " cr" if x[key] < -0.0005 else ""
+            return f'<td class="rem{cr}">{fmt(side, x[key])}</td>'
+        return f'<td>{fmt(side, x[key])}</td>'
+    trs = [f'<tr class="crow" data-s="{srch(r)}">'
+           + "".join(cell(r, k, r[side]) for _t, k in cols) + "</tr>"
+           for r in rows]
+    t2 = cb._side({k: sum(r[side][k] for r in rows) for k in cb.KINDS},
+                  side)
 
-        def tcell(key):
-            if key is None:
-                return f'<td class="n">الإجمالي ({len(rows)})</td>'
-            if key in ("ret_pct", "paid_pct"):
-                return f"<td>{pct(t2[key])}</td>"
-            if key in ("last", "grade"):
-                return "<td></td>"
-            return f"<td>{fmt(side, t2[key])}</td>"
-        foot = ('<tr class="tot">' + "".join(tcell(k) for _t, k in cols)
-                + "</tr>")
+    def tcell(key):
+        if key is None:
+            return f'<td class="n">الإجمالي ({len(rows)})</td>'
+        if key in ("ret_pct", "paid_pct"):
+            return f"<td>{pct(t2[key])}</td>"
+        if key in ("last", "grade"):
+            return "<td></td>"
+        return f"<td>{fmt(side, t2[key])}</td>"
+    foot = ('<tr class="tot">' + "".join(tcell(k) for _t, k in cols)
+            + "</tr>")
     if not rows:
         return ('<div class="empty">لا عملاء في هذه الفترة</div>', summary,
                 tools, seg)
@@ -1972,21 +1965,14 @@ def _aging(conn, query, base, to, keep, tools, seg):
                            f'<input type="hidden" name="dim" value="{dim}">')
              + f'<nav class="seg">{dims}</nav>')
     labels = aging.BUCKET_LABELS
-    late = t["cash_buckets"][1] + t["cash_buckets"][2]
-    summary = (
-        f'<div>عدد الجهات المدينة<b>{t["count"]:,}</b>لها رصيد قائم</div>'
-        f'<div class="in">جارٍ (أقل من 30)<b>{t["cash_buckets"][0]:,.2f}</b>'
-        f'أجور ريال · {t["cash_pct"][0]:.1f}%</div>'
-        f'<div>متأخر (أقل من 90)<b>{late:,.2f}</b>أجور ريال · '
-        f'{t["cash_pct"][1] + t["cash_pct"][2]:.1f}%</div>'
-        f'<div class="out">متعثّر (أكثر من 90)<b>{t["cash_buckets"][3]:,.2f}'
-        f'</b>أجور ريال · {t["cash_pct"][3]:.1f}%</div>'
-        f'<div>إجمالي الذهب<b>{kv.g(t["gold"]):,.3f}</b>{_e(kv.unit())}</div>')
-    if rows:
-        w = rows[0]
-        summary += (f'<div style="grid-column:1/-1">أقدم دين: '
-                    f'<b style="display:inline;font-size:15px">{_e(w["name"])}'
-                    f'</b> منذ {w["days"]:,} يوماً ({_e(w["oldest"])})</div>')
+    # الجدول وحده (4.89): بلا لوحات الملخّص — والأقدم ديناً أولاً بحسب
+    # البُعد المعروض (أقدم دين ذهبٍ في «الذهب فقط» وهكذا)
+    summary = ""
+
+    def _oldest(r):
+        od = aging.ages(r, dim)[1]
+        return (od is None, -(od or 0), -abs(r["cash"]), -abs(r["gold"]))
+    rows = sorted(rows, key=_oldest)
     both = dim == "both"
     head = ["العميل", "الجوال", "أحدث دين", "أقدم دين"]
     if dim in ("both", "gold"):

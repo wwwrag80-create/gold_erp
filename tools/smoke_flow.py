@@ -8223,16 +8223,17 @@ def main():
         _o104 = _mw104.page_html(conn, {"tab": "customers", "side": "over"},
                                  "/m/t")
         _h104 = _mw104.page_html(conn, {}, "/m/t")
-    check("الرابط فيه قسمٌ مستقل للعملاء بأقسامه الثلاثة (ذهب · نقد · نظرة)",
+    # 4.89: «نظرة عامة» أُلغيت من الرابط — ورابطها المحفوظ يفتح الذهب
+    check("الرابط فيه قسمٌ مستقل للعملاء بقسمَيه (ذهب · نقد)",
           "tab=customers" in _h104 and "عميل ١٠٣" in _g104
           and "الباقي" in _g104 and "نسبة السداد" in _c104
-          and "منذ آخر سداد" in _o104 and 'class="cols"' not in _g104
-          and 'class="cols"' in _h104)
+          and "منذ آخر سداد" not in _o104 and "الباقي" in _o104
+          and 'class="cols"' not in _g104 and 'class="cols"' in _h104)
     with db(readonly=True) as conn:
         _a104 = _mw104.page_html(conn, {"tab": "customers", "side": "aging"},
                                  "/m/t")
     check("ومعه «أعمار الديون» كالبرنامج: الفئات العمرية والإجمالي",
-          "أعمار الديون" in _g104 and "عدد الجهات المدينة" in _a104
+          "أعمار الديون" in _g104 and "عدد الجهات المدينة" not in _a104
           and "ذهب أكثر من 90" in _a104 and "أجور أقل من 30" in _a104
           and "له علينا" in _a104)
     step("105) 4.75: حركة الطقم المنظّمة — بيع ← مرتجع ← بيع")
@@ -8646,22 +8647,47 @@ def main():
     check("الرواتب: تاريخ قيود الشهر كلها يُعدَّل بنقرة",
           _n112 >= 1 and _pd112 == "2026-06-30", f"{_n112} · {_pd112}")
 
-    # ══ 113) 4.83: قائمة الدخل في رابط المدير — الشهر الحالي وحده ══
+    # ══ 113) رابط المدير — 4.89: لوحة «الأرباح والخسائر» بدل قائمة الدخل ══
+    # اللوحة نفسها التي في «لوحة التحكم» بحساباتها وفترتها، والسالب أحمر
+    # بإشارة ناقص. وفي العملاء: بلا «نظرة عامة»، والأعلى مديونيةً أولاً؛
+    # وأعمار الديون جدولٌ وحده بالأقدم ديناً أولاً.
+    import re as _re113
     from services import models_web as _mw113
-    from datetime import timedelta as _td113
+    from models import dash_panels as _dp113
+    _dp113.save_panels(_dp113.load_panels() + [
+        {"key": "pl113", "title": "الأرباح والخسائر", "kind": "accounts",
+         "accounts": ["4120", "4110", "5111"], "period": "all"}])
     with db(readonly=True) as conn:
-        _b113, _s113, _t113, _g113 = _mw113._income(conn)
-        _m1 = date.today().replace(day=1)
-        _nx = (_m1 + _td113(days=40)).replace(day=2)
-        _b113n, _s113n, _x, _y = _mw113._income(conn, _nx)
-    check("رابط المدير: قائمة الدخل للشهر الحالي بلا فترة ولا مقارنة",
-          _m1.isoformat() in _s113 and "المقارنة" not in _b113
-          and not _t113, _s113)
-    check("وتنتقل وحدها إلى الشهر الجديد",
-          _nx.replace(day=1).isoformat() in _s113n, _s113n)
-    # 4.84: صافي الشهر ذهباً أيضاً · وزرّ التثبيت على سطح المكتب
-    check("وصافي الشهر ريالاً وذهباً", "الشهر نقداً" in _s113
-          and "الشهر ذهباً" in _s113)
+        _b113, _s113, _t113, _g113 = _mw113._pnl(conn)
+        _rows113 = _dp113.account_rows(conn, ["4120", "4110", "5111"])
+        _pg113 = _mw113.page_html(conn, {"tab": "income"}, "/m/x")
+        _cb113 = _mw113._board(conn, {"side": "over", "all": "1", "f": "1"},
+                               "/m/x")
+        _ag113 = _mw113._board(conn, {"side": "aging", "all": "1",
+                                      "f": "1"}, "/m/x")
+    _neg113 = [r for r in _rows113 if r["cash_balance"] < -0.004]
+    check("رابط المدير: لوحة «الأرباح والخسائر» من لوحة التحكم بحساباتها",
+          all(c in _b113 for c in ("4120", "4110", "5111"))
+          and "الإجمالي" in _b113 and "الإجمالي نقداً" in _s113, _s113[:80])
+    check("والسالب أحمر بإشارة ناقص «-10» لا بين قوسين",
+          bool(_neg113) and f'class="neg">\u200e-'
+          f'{abs(_neg113[0]["cash_balance"]):,.2f}' in _b113
+          and "(" not in _re113.sub(r"\([^)]*\)", "", _b113.split(
+              "<tbody>")[1].split("</tbody>")[0]) , str(_neg113[:1]))
+    check("وقائمة الدخل أُزيلت من الرابط (ورابطها القديم يفتح اللوحة)",
+          "قائمة الدخل" not in _pg113 and "<title>الأرباح والخسائر"
+          in _pg113)
+    _rem113 = [float(x.replace(",", "")) for x in _re113.findall(
+        r'<td class="rem(?: cr)?">([-\d.,]+)</td>', _cb113[0])]
+    check("العملاء: بلا «نظرة عامة»، والأعلى مديونيةً أولاً",
+          "نظرة عامة" not in _cb113[3] and len(_rem113) >= 2
+          and _rem113 == sorted(_rem113, reverse=True), str(_rem113[:6]))
+    _old113 = [int(x.replace(",", "")) for x in _re113.findall(
+        r'<tr class="crow"[^>]*><td class="n">[^<]*</td><td>[^<]*</td>'
+        r'<td>[^<]*</td><td>(\d[\d,]*)</td>', _ag113[0])]
+    check("أعمار الديون: الجدول وحده بالأقدم ديناً أولاً",
+          _ag113[1] == "" and _old113 == sorted(_old113, reverse=True)
+          and "<table>" in _ag113[0], str(_old113[:6]))
     import json as _json113
     _man113 = _json113.loads(_mw113._manifest("/m/x"))
     check("رابط المدير قابلٌ للتثبيت: نطاقٌ يحوي الصفحة وأيقونتان وعامل",
@@ -8670,10 +8696,7 @@ def main():
           and "beforeinstallprompt" in _mw113._INSTALL_JS
           and _mw113._sw("/m/x")["headers"]["Service-Worker-Allowed"]
           == "/m/x")
-    # 4.85: النقد للعلم خارج القائمة · وأيقونة الآيفون بملف تعريف
-    check("قائمة الدخل في الرابط: النقد أول الشهر للعلم لا داخل القائمة",
-          'class="cashbox"' in _b113 and "لا يدخل قائمة الدخل" in _b113
-          and _b113.index("</table>") < _b113.index('class="cashbox"'))
+    # 4.85: أيقونة الآيفون بملف تعريف
     import plistlib as _pl113
     _ios = _mw113._mobileconfig("/m/x", {"Host": "pc.t.ts.net"})
     _clip = _pl113.loads(_ios["body"])["PayloadContent"][0]
