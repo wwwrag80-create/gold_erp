@@ -8659,7 +8659,12 @@ def main():
          "accounts": ["4120", "4110", "5111", "5000"], "period": "all"}])
     with db(readonly=True) as conn:
         _b113, _s113, _t113, _g113 = _mw113._pnl(conn)
-        _rows113 = _dp113.account_rows(conn, ["4120", "4110", "5111", "5000"])
+        # 4.91: الرابط يعرض «خلال السنة» افتراضاً
+        _rows113 = _dp113.account_rows(
+            conn, ["4120", "4110", "5111", "5000"],
+            f"{date.today().year}-01-01", date.today().isoformat())
+        _p1_113 = _mw113._pnl(conn, {"per": "month", "m": "1"}, "/m/x")
+        _p2_113 = _mw113._pnl(conn, {"per": "month", "m": "2"}, "/m/x")
         _pg113 = _mw113.page_html(conn, {"tab": "income"}, "/m/x")
         _cb113 = _mw113._board(conn, {"side": "over", "all": "1", "f": "1"},
                                "/m/x")
@@ -8679,6 +8684,20 @@ def main():
           in _b113
           and "(" not in _re113.sub(r"\([^)]*\)", "", _b113.split(
               "<tbody>")[1].split("</tbody>")[0]) , str(_neg113[:1]))
+    _mb113 = _mw113._pnl_period({"per": "month", "m": "1"})
+    check("الأرباح والخسائر: خلال السنة افتراضاً، و«الشهر السابق» يرجع"
+          " شهراً في كل نقرة",
+          "خلال السنة" in _s113 and "m=2" in _p1_113[3]
+          and "m=3" in _p2_113[3] and "الأحدث" in _p2_113[3]
+          and _mb113[0].isoformat() in _p1_113[1]
+          and _mb113[0].day == 1 and _mb113[0] < date.today().replace(day=1),
+          _p1_113[1][:90])
+    check("ولوحة التحكم تعكس إشارة «الأرباح والخسائر» وحدها",
+          _dp113.is_pnl({"title": "الأرباح والخسائر"})
+          and not _dp113.is_pnl({"title": "الصناديق"})
+          and _dp113.profit_view([{"gold_balance": 2.0,
+                                   "cash_balance": -5.0}])[0]
+          == {"gold_balance": -2.0, "cash_balance": 5.0})
     check("وقائمة الدخل أُزيلت من الرابط (ورابطها القديم يفتح اللوحة)",
           "قائمة الدخل" not in _pg113 and "<title>الأرباح والخسائر"
           in _pg113)

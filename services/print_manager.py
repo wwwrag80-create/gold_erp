@@ -3407,6 +3407,11 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
     # والدائن معه — فالورقة مستند مراجعة يُدقّق عليه، ورؤية حجم
     # الحركة فيه ضرورية لا مجرد محصّلتها.
     rows = dp.account_rows(conn, list(codes or []), date_from, date_to)
+    # 4.91: «الأرباح والخسائر» بمنظور الربح كالشاشة — الرصيد معكوس
+    # (الربح موجب والخسارة سالبة)؛ المدين والدائن كما هما
+    pnl = dp.is_pnl({"title": title, "kind": kind})
+    if pnl:
+        rows = dp.profit_view(rows)
     body = "".join(
         "<tr>" + cells(
             f'<td class="r">{r["code"]} — {r["name"]}</td>',
@@ -3459,7 +3464,11 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
     span = ""
     if date_from or date_to:
         span = (f'<div {WIDE}>الفترة: <b>{en(date_from or "البداية")}</b>'
-                f' إلى <b>{en(date_to or "الآن")}</b></div>')
+                f' إلى <b>{en(date_to or "الآن")}</b>'
+                + (" &nbsp;·&nbsp; الرصيد: الموجب ربح والسالب خسارة"
+                   if pnl else "") + '</div>')
+    elif pnl:
+        span = f'<div {WIDE}>الرصيد: الموجب ربح والسالب خسارة</div>'
     return (_header(f"لوحة التحكم — {title}", "—", today,
                     show_meta=False) + span + table + extra)
 

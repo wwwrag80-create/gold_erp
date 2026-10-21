@@ -317,6 +317,48 @@ def ratio_bars(rows, ratios):
     return out
 
 
+# ══ لوحة «الأرباح والخسائر» بمنظور الربح (4.91) ══
+# الرصيد في اللوحات مدينٌ ناقص دائن: فالمصروف والفاقد (مدينان) موجبان،
+# والإيراد والمسترجع (دائنان) سالبان — فيُقرأ الربح خسارة. لوحة
+# الأرباح والخسائر وحدها تُعكس إشارتها: الدائن (ربح) موجب والمدين
+# (خسارة) سالب. وبقية اللوحات (الصناديق …) على طبيعتها.
+
+def _norm_ar(t):
+    return (str(t or "").replace("أ", "ا").replace("إ", "ا")
+            .replace("آ", "ا"))
+
+
+def is_pnl(p):
+    """هل اللوحة «الأرباح والخسائر»؟ — بعنوانها، ولوحة حساباتٍ لا صندوق."""
+    if (p.get("kind") or "accounts") != "accounts":
+        return False
+    t = _norm_ar(p.get("title"))
+    return any(k in t for k in ("ارباح", "خسائر", "ربح", "خسار"))
+
+
+def pnl_panel(panels=None):
+    """أول لوحة «أرباح وخسائر» — «الأرباح والخسائر» نصّاً قبل «ربح»."""
+    panels = load_panels() if panels is None else panels
+    for keys in (("ارباح", "خسائر"), ("ربح", "خسار")):
+        for p in panels:
+            if is_pnl(p) and any(k in _norm_ar(p.get("title"))
+                                 for k in keys):
+                return p
+    return None
+
+
+def profit_view(rows):
+    """الصفوف نفسها برصيدٍ معكوس: الربح موجب والخسارة سالبة."""
+    return [dict(r, gold_balance=-r["gold_balance"],
+                 cash_balance=-r["cash_balance"]) for r in rows]
+
+
+def profit_bars(bars):
+    """قيم أشرطة النسب بالإشارة نفسها (النسبة لا تتغيّر — بالمطلق)."""
+    return [dict(b, first_value=-b["first_value"],
+                 second_value=-b["second_value"]) for b in bars]
+
+
 def totals(rows):
     return {
         "gold_debit": round(sum(r["gold_debit"] for r in rows), 3),

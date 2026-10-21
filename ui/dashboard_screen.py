@@ -38,6 +38,13 @@ def SCRAP_COLS_NOW():
 SCRAP_COLS = ["العيار", "الوزن الفعلي (جم)", "المكافئ بعيار 18 (جم)"]
 
 
+def _signed(v):
+    """رقمٌ بإشارة ناقصٍ في مكانها: LRM قبلها، فلا يُعرض «300-» في سطرٍ
+    عربي (لوحة الأرباح والخسائر — 4.91)."""
+    v = float(v or 0.0)
+    return (f"\u200e-{abs(v):,.2f}" if v < -0.004 else f"{abs(v):,.2f}")
+
+
 class PanelButton(QtWidgets.QPushButton):
     """لوحة رئيسية: عنوان وقيمة، بحجم مضغوط لا يمتد بعرض الشاشة."""
 
@@ -568,8 +575,8 @@ class DashboardScreen(QtWidgets.QWidget):
             pct = ("—" if b["pct"] is None else f"{b['pct']:,.2f}%")
             lbl = QtWidgets.QLabel(
                 f"{b['title']}:   {pct}      "
-                f"({b['second_name']} {b['second_value']:,.2f}  ÷  "
-                f"{b['first_name']} {b['first_value']:,.2f} "
+                f"({b['second_name']} {_signed(b['second_value'])}  ÷  "
+                f"{b['first_name']} {_signed(b['first_value'])} "
                 f"{b.get('unit', '')})")
             lbl.setWordWrap(True)
             x = kit.PushButton("✕")
@@ -680,7 +687,13 @@ class DashboardScreen(QtWidgets.QWidget):
         rows = dp.account_rows(conn, p["accounts"], d1, d2)
         self._rows = rows
         bars = dp.ratio_bars(rows, p.get("ratios") or [])
+        # 4.91: «الأرباح والخسائر» بمنظور الربح — الربح موجب والخسارة
+        # سالبةٌ حمراء (`dp.profit_view`)؛ وبقية اللوحات على طبيعتها
+        pnl = dp.is_pnl(p)
+        if pnl:
+            rows, bars = dp.profit_view(rows), dp.profit_bars(bars)
         t = dp.totals(rows)
+        money = _signed if pnl else (lambda v: f"{v:,.2f}")
 
         # ══ عمود النسبة ══
         # يظهر أول الأعمدة حين تُعرَّف نسبة واحدة على الأقل: النسبة
@@ -698,31 +711,32 @@ class DashboardScreen(QtWidgets.QWidget):
                     + ("—" if x["pct"] is None else f"{x['pct']:,.1f}%")
                     for x in bl) or "—"
                 data.append((txt, f"{r['code']} — {r['name']}",
-                             f"{kv.g(r['gold_balance']):,.2f}",
-                             f"{r['cash_balance']:,.2f}"))
+                             money(kv.g(r['gold_balance'])),
+                             money(r['cash_balance'])))
             vals = [x["pct"] for x in bars if x["pct"] is not None]
             tot = (f"{sum(vals):,.1f}%" if vals else "—")
             data.append((f"إجمالي النسب: {tot}", "الإجمالي",
-                         f"{kv.g(t['gold_balance']):,.2f}",
-                         f"{t['cash_balance']:,.2f}"))
+                         money(kv.g(t['gold_balance'])),
+                         money(t['cash_balance'])))
             self._fill(cols, data, bold_last=True,
-                       weights=[26, 34, 20, 20])
+                       weights=[26, 34, 20, 20], red_neg=pnl)
         else:
             data = [(f"{r['code']} — {r['name']}",
-                     f"{kv.g(r['gold_balance']):,.2f}",
-                     f"{r['cash_balance']:,.2f}") for r in rows]
-            data.append(("الإجمالي", f"{kv.g(t['gold_balance']):,.2f}",
-                         f"{t['cash_balance']:,.2f}"))
+                     money(kv.g(r['gold_balance'])),
+                     money(r['cash_balance'])) for r in rows]
+            data.append(("الإجمالي", money(kv.g(t['gold_balance'])),
+                         money(t['cash_balance'])))
             self._fill(ACC_COLS_NOW(), data, bold_last=True,
-                       weights=[46, 27, 27])
+                       weights=[46, 27, 27], red_neg=pnl)
         span = (f"   ({d1 or 'البداية'} → {d2 or 'الآن'})" if d1 or d2
                 else "")
         self.tbl_title.setText(f"◄ {p['title']}{span}")
         self.totals.setText(
-            f"الإجمالي — رصيد الذهب: {kv.g(t['gold_balance']):,.2f} "
+            f"الإجمالي — رصيد الذهب: {money(kv.g(t['gold_balance']))} "
             f"جم {kv.label()}"
-            f"   ·   الرصيد النقدي: {t['cash_balance']:,.2f} ريال")
-        self._render_ratios(rows, p)
+            f"   ·   الرصيد النقدي: {money(t['cash_balance'])} ريال"
+            + ("   ·   الموجب ربح والسالب خسارة" if pnl else ""))
+        self._render_ratios(rows, p)      # الصفوف بإشارتها المعروضة
 
     def _render_compare(self, conn, p, d1, d2):
         """يعرض اللوحة نفسها مقارنةً بالفترة السابقة المساوية طولاً."""
@@ -912,7 +926,8 @@ class DashboardScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
-    def _fill(self, cols, data, bold_last=False, weights=None):
+    def _fill(self, cols, data, bold_last=False, weights=None,
+              red_neg=False):
         self.table.setUpdatesEnabled(False)
         try:
             self.table.setColumnCount(len(cols))
@@ -932,6 +947,11 @@ class DashboardScreen(QtWidgets.QWidget):
                             __import__("ui.widgets.common", fromlist=["x"]).style_total_item(it)
                         except Exception:
                             pass
+                    # 4.91: السالب أحمر في لوحة الأرباح والخسائر
+                    if red_neg and c and str(v).lstrip("\u200e")[:1] == "-":
+                        last = bold_last and i == len(data) - 1
+                        it.setForeground(QtGui.QColor(
+                            "#ff9a8f" if last else "#b3261e"))
                     self.table.setItem(i, c, it)
         finally:
             try:
@@ -959,16 +979,19 @@ class DashboardScreen(QtWidgets.QWidget):
                     self.buttons[i].set_value(
                         f"{t['count']} طقم · {kv.g(t['reg']):,.0f} جم")
                     continue
-                t = dp.totals(dp.account_rows(
+                rows = dp.account_rows(
                     conn, p["accounts"],
                     p.get("date_from") or None,
-                    p.get("date_to") or None))
+                    p.get("date_to") or None)
+                pnl = dp.is_pnl(p)
+                t = dp.totals(dp.profit_view(rows) if pnl else rows)
+                money = _signed if pnl else (lambda v: f"{v:,.2f}")
                 if (p.get("unit") or "gold") == "cash":
                     self.buttons[i].set_value(
-                        f"{t['cash_balance']:,.2f} ريال")
+                        f"{money(t['cash_balance'])} ريال")
                 else:
                     self.buttons[i].set_value(
-                        f"{kv.g(t['gold_balance']):,.2f} جم")
+                        f"{money(kv.g(t['gold_balance']))} جم")
             except Exception:
                 self.buttons[i].set_value("—")
 

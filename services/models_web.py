@@ -1537,7 +1537,7 @@ def page_html(conn, query, base):
     if tab == "customers":
         body, summary, tools, seg = _board(conn, query, base)
     elif tab == "pnl":
-        body, summary, tools, seg = _pnl(conn)
+        body, summary, tools, seg = _pnl(conn, query, base)
     elif tab == "received":
         body, summary, tools = _received(conn, query, base, view, sort,
                                          imgs, unit, sort_sel)
@@ -1567,7 +1567,8 @@ def page_html(conn, query, base):
                if tab == "pnl" else "")
     again = (_link(base, tab=tab, side=query.get("side"),
                    **{k: query.get(k)
-                      for k in ("from", "to", "all", "f", "dim")})
+                      for k in ("from", "to", "all", "f", "dim", "per",
+                                "m")})
              if board else
              _link(base, tab=tab, view=view, sort=sort,
                    day=query.get('day'), st=query.get('st')))
@@ -1649,25 +1650,17 @@ padding:7px 12px;font-size:13.5px}
 """
 
 
-def _norm_ar(t):
-    return (str(t or "").replace("أ", "ا").replace("إ", "ا")
-            .replace("آ", "ا"))
+_MONTHS_AR = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر")
 
 
 def _pnl_panel():
     """لوحة «الأرباح والخسائر» من لوحات لوحة التحكم — بعنوانها."""
     try:
         from models import dash_panels as dp
-        panels = dp.load_panels()
+        return dp.pnl_panel()
     except Exception:
         return None
-    for keys in (("ارباح", "خسائر"), ("ربح", "خسار")):
-        for p in panels:
-            t = _norm_ar(p.get("title"))
-            if (p.get("kind") or "accounts") == "accounts" and any(
-                    k in t for k in keys):
-                return p
-    return None
 
 
 def _pnl_title():
@@ -1675,28 +1668,59 @@ def _pnl_title():
     return (p or {}).get("title") or "الأرباح والخسائر"
 
 
-def _pnl(conn):
+def _pnl_period(query, today=None):
+    """(من، إلى، الوصف، per، m) — «خلال السنة» افتراضاً (4.91).
+
+    `per=month&m=0` الشهر الحالي حتى اليوم، و`m=1` السابق كاملاً، و`m=2`
+    الذي قبله … فكل نقرةٍ على «الشهر السابق» ترجع شهراً."""
+    from datetime import date, timedelta
+    t = today or date.today()
+    per = "month" if query.get("per") == "month" else "year"
+    try:
+        m = max(0, min(int(query.get("m") or 0), 240))
+    except ValueError:
+        m = 0
+    if per == "year":
+        return (date(t.year, 1, 1), t, f"خلال السنة {t.year}", per, 0)
+    y, mo = t.year, t.month - m
+    while mo <= 0:
+        mo += 12
+        y -= 1
+    d1 = date(y, mo, 1)
+    d2 = (d1 + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    return (d1, min(d2, t), f"{_MONTHS_AR[mo - 1]} {y}", per, m)
+
+
+def _pnl(conn, query=None, base="", today=None):
     from models import dash_panels as dp
     from services import karat_view as kv
+    query = query or {}
     p = _pnl_panel()
     if p is None:
         return ('<div class="empty">لا لوحة «الأرباح والخسائر» في لوحة'
                 ' التحكم — أنشئها هناك بحساباتها فتظهر هنا.</div>',
                 "", "", "")
-    p = dict(p)
-    k = dp.apply_period(p)
-    d1, d2 = p.get("date_from") or None, p.get("date_to") or None
-    rows = dp.account_rows(conn, p["accounts"], d1, d2)
+    d1, d2, label, per, m = _pnl_period(query, today)
+    # ══ الفترة: خلال السنة · الشهر الحالي · الشهر السابق (4.91) ══
+    # «الشهر السابق» يرجع شهراً في كل نقرة: من السنة أو الحالي إلى
+    # السابق، ومن السابق إلى الذي قبله وهكذا. و«الأحدث» يتقدّم شهراً.
+    back = m + 1 if per == "month" and m >= 1 else 1
+    items = [("year", "خلال السنة", _link(base, tab="pnl")),
+             ("cur", "الشهر الحالي",
+              _link(base, tab="pnl", per="month", m=0)),
+             ("prev", "الشهر السابق",
+              _link(base, tab="pnl", per="month", m=back))]
+    on = ("year" if per == "year" else "cur" if m == 0 else "prev")
+    seg = "".join(f'<a class="{"on" if k == on else ""}"'
+                  f' href="{_e(u)}">{t}</a>' for k, t, u in items)
+    if per == "month" and m >= 2:
+        seg += (f'<a href="{_e(_link(base, tab="pnl", per="month", m=m - 1))}"'
+                '>الشهر الأحدث</a>')
+    rows = dp.account_rows(conn, p["accounts"], d1.isoformat(),
+                           d2.isoformat())
     bars = dp.ratio_bars(rows, p.get("ratios") or [])
-    # ══ الإشارة بمنظور الربح (4.90) ══
-    # الرصيد في لوحة التحكم مدينٌ ناقص دائن: فالمصروف والفاقد (مدينان)
-    # موجبان، والإيراد والمسترجع (دائنان) سالبان — فيُقرأ الربح خسارة.
-    # في الرابط يُعكس: الدائن (ربح) موجب، والمدين (خسارة) سالبٌ أحمر.
-    # والنسب لا تتأثر — تُحسب بالقيم المطلقة.
-    rows = [dict(r, gold_balance=-r["gold_balance"],
-                 cash_balance=-r["cash_balance"]) for r in rows]
-    bars = [dict(b, first_value=-b["first_value"],
-                 second_value=-b["second_value"]) for b in bars]
+    # بمنظور الربح (4.90): الدائن (ربح) موجب والمدين (خسارة) سالبٌ أحمر
+    rows, bars = dp.profit_view(rows), dp.profit_bars(bars)
     t = dp.totals(rows)
 
     def num(v, gold=False):
@@ -1717,7 +1741,8 @@ def _pnl(conn):
     def pct(v):
         return "—" if v is None else f"{v:,.1f}%"
     head = (["النسبة"] if bars else []) + [
-        "الحساب", f"رصيد الذهب ({kv.unit()})", "الرصيد النقدي (ريال)"]
+        f"الحساب — {label}", f"رصيد الذهب ({kv.unit()})",
+        "الرصيد النقدي (ريال)"]
     trs = []
     for r in rows:
         ratio = ""
@@ -1742,24 +1767,20 @@ def _pnl(conn):
     if bars:
         body += '<div class="ratios">' + "".join(
             f"<div><b>{_e(b['title'])}: {pct(b['pct'])}</b> — "
-            f"{_e(b['second_name'])} {b['second_value']:,.2f} ÷ "
-            f"{_e(b['first_name'])} {b['first_value']:,.2f}"
+            f"{_e(b['second_name'])} {num(b['second_value'])[0]} ÷ "
+            f"{_e(b['first_name'])} {num(b['first_value'])[0]}"
             f" {_e(b.get('unit', ''))}</div>" for b in bars) + "</div>"
     if not rows:
         body = '<div class="empty">لا حسابات في هذه اللوحة</div>'
-    span = dict(dp.PERIODS).get(k, "")
-    if d1 or d2:
-        span += f" — من {d1 or 'البداية'} إلى {d2 or 'الآن'}"
     g, gc = num(t["gold_balance"], True)
     c, cc = num(t["cash_balance"])
-    summary = (f"<div>الفترة<b>{_e(dict(dp.PERIODS).get(k, '') or '—')}"
-               f"</b>{_e(span.split(' — ', 1)[-1] if ' — ' in span else '')}"
-               "</div>"
+    summary = (f"<div>الفترة<b>{_e(label)}</b>من {d1.isoformat()} إلى"
+               f" {d2.isoformat()}</div>"
                f'<div class="{gc}">الإجمالي ذهباً<b>{g}</b>'
                f"{_e(kv.unit())} · الموجب ربح والسالب خسارة</div>"
                f'<div class="{cc}">الإجمالي نقداً<b>{c}</b>'
                "ريال · الموجب ربح والسالب خسارة</div>")
-    return body, summary, "", ""
+    return body, summary, "", seg
 
 
 # ══════════════════════════════════════════════════════════════════
