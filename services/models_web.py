@@ -1771,7 +1771,7 @@ def _pnl(conn, query=None, base="", today=None):
     g, gc = num(t["gold_balance"], True)
     c, cc = num(t["cash_balance"])
     summary = (f"<div>الفترة<b>{_e(label)}</b>من {d1.isoformat()} إلى"
-               f" {d2.isoformat()} · يُعتمد من {start}</div>"
+               f" {d2.isoformat()}</div>"
                f'<div class="{gc}">الإجمالي ذهباً<b>{g}</b>'
                f"{_e(kv.unit())} · الموجب ربح والسالب خسارة</div>"
                f'<div class="{cc}">الإجمالي نقداً<b>{c}</b>'

@@ -213,7 +213,8 @@ class DashboardScreen(QtWidgets.QWidget):
         per.addStretch(1)
         # ── فترات «الأرباح والخسائر» (4.92) — كرابط المدير ──
         # خلال السنة (افتراضاً) · الشهر الحالي · الشهر السابق نقرةً بعد
-        # نقرة · الأحدث. ولا شيء قبل «يُعتمد من» (`dp.pnl_range`).
+        # نقرة · الأحدث. والرجوع بالأشهر يقف عند «يُعتمد من»
+        # (`dp.pnl_range`)، و«خلال السنة» من أول السنة كاملةً.
         self._pnl_per, self._pnl_m = "year", 0
         self.pnl_year = kit.PushButton("خلال السنة")
         self.pnl_cur = kit.PushButton("الشهر الحالي")
@@ -229,8 +230,9 @@ class DashboardScreen(QtWidgets.QWidget):
         self.pnl_lbl = QtWidgets.QLabel("")
         lbl_start = QtWidgets.QLabel("يُعتمد من:")
         self.pnl_start = date_edit()
-        self.pnl_start.setToolTip("لا يظهر في «الأرباح والخسائر» شيءٌ قبل"
-                                  " هذا التاريخ — هنا وفي رابط المدير")
+        self.pnl_start.setToolTip("«الشهر السابق» يرجع حتى شهر هذا التاريخ"
+                                  " ويقف — هنا وفي رابط المدير. و«خلال"
+                                  " السنة» من أول السنة كاملةً")
         try:
             self.pnl_start.dateChanged.connect(self._pnl_start_changed)
         except Exception:
