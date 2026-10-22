@@ -21,12 +21,13 @@ from services import drafts
 from services import gold_math, karat_view as kv
 from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                big_label, date_edit, dstr, enter_chain, err,
-                               fill, has_model_image, info, load_pref,
+                               fill, info, load_pref,
                                make_table, mspin, reload_combo,
                                row_action_buttons, row_height, run_bg,
                                save_pref, search_combo, show_model_image,
                                TitledSections, wspin)
 from ui.widgets.table_fit import fit_columns
+from ui.widgets.model_pic import ModelPic, thumb
 
 DRAFT_KEY = "sales"
 
@@ -592,11 +593,14 @@ class SalesScreen(QtWidgets.QWidget):
     """
 
     # العمود الأول بلا عنوان: فيه زرّا تعديل السطر وحذفه.
-    COLS = ["", "الموديل", "رقم التشغيل", "العيار", "الحساب", "الوزن المقيد",
+    # 4.93: صورة الموديل بعد رقمه، و«الحساب» أُخفي من الجدول (يظهر في
+    # تلميح رقم التشغيل وفي نافذة تأكيد الترحيل)
+    COLS = ["", "الموديل", "الصورة", "رقم التشغيل", "العيار", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
             "الأحجار بعد الخصم", "الأجر/جم", "الأجرة (ريال)"]
     # أوزان العرض (مجموعها 100): عمود الأزرار يكفيه القليل
-    COL_W = [5, 9, 9, 6, 10, 8, 8, 7, 7, 7, 8, 7, 9]
+    COL_W = [5, 9, 8, 10, 7, 9, 8, 7, 7, 7, 8, 7, 8]
+    C_PIC, PIC = 2, 46            # عمود الصورة ومقاس مصغّرتها
     # خانتا الأجر — تُكتبان في مكانهما (4.59)
     C_WAGE, C_AMOUNT = 11, 12
     WAGE_COLS = (C_WAGE, C_AMOUNT)
@@ -870,13 +874,30 @@ class SalesScreen(QtWidgets.QWidget):
             ("العيار", self.line_karat, 2),
             ("الأجر/جم", self.line_wage, 2),
         ]
+        # 4.93: صورة الموديل بجانب رقمه — كشاشة الوارد من التصنيع
+        self.model_pic = ModelPic()
+        self.model_pic.clicked.connect(self._open_model_pic)
+        self._pic_timer = QtCore.QTimer(self)
+        self._pic_timer.setSingleShot(True)
+        self._pic_timer.setInterval(250)
+        self._pic_timer.timeout.connect(self._update_model_pic)
+        self.model_no.currentTextChanged.connect(
+            lambda *_: self._pic_timer.start())
+        model_box = QtWidgets.QWidget()
+        mb = QtWidgets.QHBoxLayout(model_box)
+        mb.setContentsMargins(0, 0, 0, 0)
+        mb.setSpacing(3)
+        mb.addWidget(self.model_no, 1)
+        mb.addWidget(self.model_pic)
         g = QtWidgets.QGridLayout(box)
         g.setHorizontalSpacing(6)
         for c, (label, widget, stretch) in enumerate(fields):
             widget.setMinimumWidth(86)
             g.addWidget(_sub(label), 0, c)
-            g.addWidget(widget, 1, c)
-            g.setColumnStretch(c, stretch)
+            g.addWidget(model_box if widget is self.model_no else widget,
+                        1, c)
+            g.setColumnStretch(c, stretch + (2 if widget is self.model_no
+                                             else 0))
         g.addWidget(self.btn_add_line, 1, len(fields))
         g.addWidget(self.btn_wage_only, 1, len(fields) + 1)
         # Enter على زرّ الإضافة يضغطه (الزر خارج سلسلة الخانات، ومن
@@ -1727,6 +1748,16 @@ class SalesScreen(QtWidgets.QWidget):
         self._reg_manual = False
         self._snap_w18()
 
+    # ══ صورة الموديل (4.93) ══
+    def _update_model_pic(self):
+        self.model_pic.show_model(self.model_no.currentText())
+
+    def _open_model_pic(self):
+        try:
+            show_model_image(self, self.model_no.currentText())
+        except Exception as e:
+            info(self, str(e), "صورة الموديل")
+
     def _wo_lookup(self):
         """يستدعي بطاقة الطقم من رقم التشغيل ويملأ السطر بها."""
         no = self.barcode.text().strip()
@@ -2533,7 +2564,7 @@ class SalesScreen(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(
                 0, lambda: self.start_wage_edit(row, col))
             return
-        if col != 1:          # العمود الأول للأزرار، والموديل يليه
+        if col not in (1, self.C_PIC):    # الموديل وصورته بعد عمود الأزرار
             return
         try:
             show_model_image(self, cell(self.items_table, row, 1))
@@ -2716,9 +2747,9 @@ class SalesScreen(QtWidgets.QWidget):
             wo = it["wo"]
             if it.get("wage_only"):
                 amt = 0.0 if internal else float(it.get("amount") or 0)
-                rows.append(("", "—", "أجر فقط" + (
+                rows.append(("", "—", "", "أجر فقط" + (
                     f" — {it['note']}" if it.get("note") else ""),
-                    "—", "أجور العميل", "", "", "", "", "", "", "—", amt))
+                    "—", "", "", "", "", "", "", "—", amt))
                 t["wages"] += amt
                 continue
             n_sets += 1
@@ -2727,12 +2758,9 @@ class SalesScreen(QtWidgets.QWidget):
             weight = float(it.get("weight") or 0)
             p = self._parts_of(it)
             mn = (wo["model_no"] if "model_no" in wo.keys() else "") or "—"
-            # 🖼 يسبق الموديل الذي له صورة محفوظة — فيُعرف القابل للنقر
-            if mn != "—" and has_model_image(mn):
-                mn = f"🖼 {mn}"
             wages = gold_math.total_wages(wage, weight)
-            rows.append(("", mn, wo["work_order_no"], f"عيار {k}",
-                         self._line_acc_name(it), weight,
+            rows.append(("", mn, "", wo["work_order_no"], f"عيار {k}",
+                         weight,
                          p["standing"], p["gold"], p["small"], p["big"],
                          p["after"], wage, wages))
             # الإجماليات تُجمع بمكافئ 18 لا بأرقام الشاشة: أسطرٌ
@@ -2744,9 +2772,9 @@ class SalesScreen(QtWidgets.QWidget):
         if rows:
             u = kv.active()
             n_w = len(self.items) - n_sets
-            rows.append(("", "الإجمالي", f"{n_sets} طقم"
+            rows.append(("", "الإجمالي", "", f"{n_sets} طقم"
                          + (f" + {n_w} أجر" if n_w else ""),
-                         f"عيار {u}", "", round(kv.g(t['reg']), 3),
+                         f"عيار {u}", round(kv.g(t['reg']), 3),
                          round(kv.g(t["standing"]), 3),
                          round(kv.g(t["gold"]), 3),
                          round(kv.g(t["small"]), 3),
@@ -2755,9 +2783,11 @@ class SalesScreen(QtWidgets.QWidget):
                          round(t["wages"], 2)))
         fill(self.items_table, self.COLS, rows)
         # صفوفٌ أعلى من جداول العرض: البنود تُراجَع رقماً رقماً قبل الترحيل
+        # — وبارتفاع صورة الموديل (4.93)
         self.items_table.verticalHeader().setDefaultSectionSize(
-            row_height(self.items_table) + 12)
+            max(row_height(self.items_table) + 12, self.PIC + 6))
         fit_columns(self.items_table, self.COL_W)
+        self._fill_pics()
         if rows:
             self._bold_row(len(rows) - 1)
             # الأزرار لأسطر البنود وحدها — وصفُّ الإجمالي لا يُعدَّل
@@ -2768,6 +2798,30 @@ class SalesScreen(QtWidgets.QWidget):
                                del_tip="حذف هذا السطر من الفاتورة")
         self._mark_wage_cells()
         self.recalc()
+
+    def _fill_pics(self):
+        """صورة موديل كل سطرٍ في عمودها (4.93) — مصغّرةٌ من ذاكرة الصور،
+        و«الحساب» الذي أُخفي عموده في تلميح رقم التشغيل."""
+        t = self.items_table
+        t.setIconSize(QtCore.QSize(self.PIC, self.PIC))
+        for r, it in enumerate(self.items):
+            if it.get("wage_only"):
+                continue
+            wo = it["wo"]
+            mn = (wo["model_no"] if "model_no" in wo.keys() else "") or ""
+            pm = thumb(mn, self.PIC) if mn else None
+            x = t.item(r, self.C_PIC)
+            if x is None:
+                x = QtWidgets.QTableWidgetItem("")
+                t.setItem(r, self.C_PIC, x)
+            if pm is not None:
+                x.setIcon(QtGui.QIcon(pm))
+                x.setToolTip(f"الموديل {mn} — انقر لتكبير الصورة")
+            else:
+                x.setText("—")
+            w = t.item(r, 3)
+            if w is not None:
+                w.setToolTip(f"الحساب: {self._line_acc_name(it)}")
 
     def _bold_row(self, r):
         """صفُّ الإجمالي يُعلَّم فلا يُقرأ سطراً من البنود."""

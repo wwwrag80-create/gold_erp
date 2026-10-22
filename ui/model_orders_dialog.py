@@ -11,8 +11,6 @@
 
 الطلب بلا أثرٍ محاسبي: لا قيد ولا مخزون (`models.model_orders`).
 """
-import os
-
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ui import kit
@@ -22,40 +20,7 @@ from models import model_orders as mo
 from models import models_catalog as mc
 from ui.widgets.common import ask, date_edit, dstr, err, info, make_table
 
-# ══ مصغّرات الصور — تُقرأ مصغّرةً من القرص مرةً وتُحفظ في الذاكرة ══
-_THUMBS = {}
-_MAX_THUMBS = 800
-
-
-def thumb(model, size=110):
-    """صورة الموديل مصغّرة (QPixmap) — أو None إن لم تكن له صورة."""
-    p = mc.image_path(model)
-    if p is None:
-        return None
-    try:
-        st = os.stat(p)
-        key = (str(p), mc.file_stamp(st), st.st_size, int(size))
-    except OSError:
-        return None
-    pm = _THUMBS.get(key)
-    if pm is not None:
-        return pm
-    r = QtGui.QImageReader(str(p))
-    r.setAutoTransform(True)
-    sz = r.size()
-    if sz.isValid() and sz.width() > 0:
-        # تُفكّ الصورة بمقاسها المصغّر مباشرةً — أسرع بكثير من فكّها
-        # كاملةً ثم تصغيرها، والدليل قد يحوي مئات الصور
-        r.setScaledSize(sz.scaled(size * 2, size * 2,
-                                  QtCore.Qt.KeepAspectRatio))
-    img = r.read()
-    if img.isNull():
-        return None
-    pm = QtGui.QPixmap.fromImage(img)
-    _THUMBS[key] = pm
-    if len(_THUMBS) > _MAX_THUMBS:
-        _THUMBS.pop(next(iter(_THUMBS)))
-    return pm
+from ui.widgets.model_pic import thumb  # noqa: E402 (4.93: مشتركة)
 
 
 def _placeholder(size, text="لا صورة"):
