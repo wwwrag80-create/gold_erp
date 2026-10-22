@@ -1221,6 +1221,8 @@ border:1px solid var(--line);color:var(--ink);text-decoration:none;
 font-size:13.5px;white-space:nowrap}
 .tabs a.on,.seg a.on{background:var(--gold);border-color:var(--gold);
 color:#fff;font-weight:600}
+.seg span.off{padding:7px 14px;border-radius:20px;border:1px dashed
+var(--line);color:#a99f90;font-size:13.5px;white-space:nowrap;cursor:help}
 .sep{width:1px;height:26px;background:var(--line)}
 form.tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0}
 form.tools select,form.tools input,form.tools button{padding:6px 9px;
@@ -1650,10 +1652,6 @@ padding:7px 12px;font-size:13.5px}
 """
 
 
-_MONTHS_AR = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر")
-
-
 def _pnl_panel():
     """لوحة «الأرباح والخسائر» من لوحات لوحة التحكم — بعنوانها."""
     try:
@@ -1668,27 +1666,15 @@ def _pnl_title():
     return (p or {}).get("title") or "الأرباح والخسائر"
 
 
-def _pnl_period(query, today=None):
-    """(من، إلى، الوصف، per، m) — «خلال السنة» افتراضاً (4.91).
-
-    `per=month&m=0` الشهر الحالي حتى اليوم، و`m=1` السابق كاملاً، و`m=2`
-    الذي قبله … فكل نقرةٍ على «الشهر السابق» ترجع شهراً."""
-    from datetime import date, timedelta
-    t = today or date.today()
+def _pnl_period(query, start=None, today=None):
+    """فترة الرابط من الاستعلام — «خلال السنة» افتراضاً (`dp.pnl_range`)."""
+    from models import dash_panels as dp
     per = "month" if query.get("per") == "month" else "year"
     try:
-        m = max(0, min(int(query.get("m") or 0), 240))
+        m = int(query.get("m") or 0)
     except ValueError:
         m = 0
-    if per == "year":
-        return (date(t.year, 1, 1), t, f"خلال السنة {t.year}", per, 0)
-    y, mo = t.year, t.month - m
-    while mo <= 0:
-        mo += 12
-        y -= 1
-    d1 = date(y, mo, 1)
-    d2 = (d1 + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-    return (d1, min(d2, t), f"{_MONTHS_AR[mo - 1]} {y}", per, m)
+    return dp.pnl_range(per, m, start, today)
 
 
 def _pnl(conn, query=None, base="", today=None):
@@ -1700,19 +1686,29 @@ def _pnl(conn, query=None, base="", today=None):
         return ('<div class="empty">لا لوحة «الأرباح والخسائر» في لوحة'
                 ' التحكم — أنشئها هناك بحساباتها فتظهر هنا.</div>',
                 "", "", "")
-    d1, d2, label, per, m = _pnl_period(query, today)
+    start = dp.pnl_start(p)
+    rg = _pnl_period(query, start, today)
+    d1, d2, label, per, m = (rg["from"], rg["to"], rg["label"], rg["per"],
+                             rg["m"])
     # ══ الفترة: خلال السنة · الشهر الحالي · الشهر السابق (4.91) ══
     # «الشهر السابق» يرجع شهراً في كل نقرة: من السنة أو الحالي إلى
-    # السابق، ومن السابق إلى الذي قبله وهكذا. و«الأحدث» يتقدّم شهراً.
+    # السابق، ومن السابق إلى الذي قبله وهكذا — ويقف عند شهر بداية
+    # الاعتماد (4.92). و«الشهر الأحدث» يتقدّم شهراً.
     back = m + 1 if per == "month" and m >= 1 else 1
-    items = [("year", "خلال السنة", _link(base, tab="pnl")),
-             ("cur", "الشهر الحالي",
-              _link(base, tab="pnl", per="month", m=0)),
-             ("prev", "الشهر السابق",
-              _link(base, tab="pnl", per="month", m=back))]
     on = ("year" if per == "year" else "cur" if m == 0 else "prev")
-    seg = "".join(f'<a class="{"on" if k == on else ""}"'
-                  f' href="{_e(u)}">{t}</a>' for k, t, u in items)
+    seg = "".join(
+        f'<a class="{"on" if k == on else ""}" href="{_e(u)}">{t}</a>'
+        for k, t, u in (
+            ("year", "خلال السنة", _link(base, tab="pnl")),
+            ("cur", "الشهر الحالي",
+             _link(base, tab="pnl", per="month", m=0))))
+    if back <= rg["max"]:
+        seg += (f'<a class="{"on" if on == "prev" else ""}" href="'
+                f'{_e(_link(base, tab="pnl", per="month", m=back))}">'
+                "الشهر السابق</a>")
+    else:
+        seg += (f'<span class="off{" on" if on == "prev" else ""}"'
+                f' title="يبدأ الاعتماد من {start}">الشهر السابق</span>')
     if per == "month" and m >= 2:
         seg += (f'<a href="{_e(_link(base, tab="pnl", per="month", m=m - 1))}"'
                 '>الشهر الأحدث</a>')
@@ -1775,7 +1771,7 @@ def _pnl(conn, query=None, base="", today=None):
     g, gc = num(t["gold_balance"], True)
     c, cc = num(t["cash_balance"])
     summary = (f"<div>الفترة<b>{_e(label)}</b>من {d1.isoformat()} إلى"
-               f" {d2.isoformat()}</div>"
+               f" {d2.isoformat()} · يُعتمد من {start}</div>"
                f'<div class="{gc}">الإجمالي ذهباً<b>{g}</b>'
                f"{_e(kv.unit())} · الموجب ربح والسالب خسارة</div>"
                f'<div class="{cc}">الإجمالي نقداً<b>{c}</b>'

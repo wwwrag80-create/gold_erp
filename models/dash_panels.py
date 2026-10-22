@@ -198,6 +198,8 @@ def load_panels():
                         "period": d.get("period") or "",
                         # وحدة الرقم المعروض على واجهة اللوحة
                         "unit": d.get("unit") or "gold",
+                        # بداية اعتماد «الأرباح والخسائر» (4.92)
+                        "start": d.get("start") or "",
                     })
                 if out:
                     return _seed_new(out)
@@ -357,6 +359,55 @@ def profit_bars(bars):
     """قيم أشرطة النسب بالإشارة نفسها (النسبة لا تتغيّر — بالمطلق)."""
     return [dict(b, first_value=-b["first_value"],
                  second_value=-b["second_value"]) for b in bars]
+
+
+# ══ فترات «الأرباح والخسائر» وبداية اعتمادها (4.92) ══
+# خلال السنة (افتراضاً) · الشهر الحالي · الشهر السابق نقرةً بعد نقرة —
+# في الرابط ولوحة التحكم معاً. ولا يُعرض شيءٌ قبل «بداية الاعتماد»:
+# السنة تبدأ منها إن كانت فيها، والرجوع بالأشهر يقف عند شهرها.
+PNL_START = "2026-10-01"
+MONTHS_AR = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+             "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر")
+
+
+def pnl_start(p=None):
+    """تاريخ بداية الاعتماد للوحة — المحفوظ معها، وإلا `PNL_START`."""
+    import datetime as _dt
+    for v in (str((p or {}).get("start") or "")[:10], PNL_START):
+        try:
+            return _dt.date.fromisoformat(v)
+        except ValueError:
+            continue
+    return None
+
+
+def pnl_range(per="year", m=0, start=None, today=None):
+    """{"from", "to", "label", "m", "max"} لفترةٍ باسمها.
+
+    `per="month"`: `m=0` الشهر الحالي حتى اليوم، `m=1` السابق كاملاً …
+    و`max` أبعد رجوعٍ مسموح (شهر بداية الاعتماد) — `m` لا يتجاوزه."""
+    import datetime as _dt
+    t = today or _dt.date.today()
+    mx = 0
+    if start and start <= t:
+        mx = (t.year - start.year) * 12 + t.month - start.month
+    if per != "month":
+        d1 = _dt.date(t.year, 1, 1)
+        if start and d1 < start <= t:
+            d1 = start
+        return {"from": d1, "to": t, "label": f"خلال السنة {t.year}",
+                "m": 0, "max": mx, "per": "year"}
+    m = max(0, min(int(m or 0), mx))
+    y, mo = t.year, t.month - m
+    while mo <= 0:
+        mo += 12
+        y -= 1
+    d1 = _dt.date(y, mo, 1)
+    d2 = (d1 + _dt.timedelta(days=32)).replace(day=1) - _dt.timedelta(days=1)
+    if start and d1 < start <= d2:
+        d1 = start
+    return {"from": d1, "to": min(d2, t), "label": f"{MONTHS_AR[mo - 1]} {y}",
+            "m": m, "max": mx, "per": "month"}
 
 
 def totals(rows):

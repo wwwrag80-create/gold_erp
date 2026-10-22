@@ -8656,7 +8656,8 @@ def main():
     from models import dash_panels as _dp113
     _dp113.save_panels(_dp113.load_panels() + [
         {"key": "pl113", "title": "الأرباح والخسائر", "kind": "accounts",
-         "accounts": ["4120", "4110", "5111", "5000"], "period": "all"}])
+         "accounts": ["4120", "4110", "5111", "5000"], "period": "all",
+         "start": "2020-01-01"}])
     with db(readonly=True) as conn:
         _b113, _s113, _t113, _g113 = _mw113._pnl(conn)
         # 4.91: الرابط يعرض «خلال السنة» افتراضاً
@@ -8684,14 +8685,28 @@ def main():
           in _b113
           and "(" not in _re113.sub(r"\([^)]*\)", "", _b113.split(
               "<tbody>")[1].split("</tbody>")[0]) , str(_neg113[:1]))
-    _mb113 = _mw113._pnl_period({"per": "month", "m": "1"})
+    _st113 = _dp113.pnl_start({"start": "2020-01-01"})
+    _mb113 = _mw113._pnl_period({"per": "month", "m": "1"}, _st113)
     check("الأرباح والخسائر: خلال السنة افتراضاً، و«الشهر السابق» يرجع"
           " شهراً في كل نقرة",
           "خلال السنة" in _s113 and "m=2" in _p1_113[3]
           and "m=3" in _p2_113[3] and "الأحدث" in _p2_113[3]
-          and _mb113[0].isoformat() in _p1_113[1]
-          and _mb113[0].day == 1 and _mb113[0] < date.today().replace(day=1),
+          and _mb113["from"].isoformat() in _p1_113[1]
+          and _mb113["from"].day == 1
+          and _mb113["from"] < date.today().replace(day=1),
           _p1_113[1][:90])
+    # 4.92: لا شيء قبل «يُعتمد من» — السنة تبدأ منه، والرجوع يقف عند شهره
+    _t92 = date(2026, 10, 22)
+    _s92 = date(2026, 10, 1)
+    _y92 = _dp113.pnl_range("year", 0, _s92, _t92)
+    _m92 = _dp113.pnl_range("month", 5, _s92, _t92)
+    _n92 = _dp113.pnl_range("month", 5, _s92, date(2027, 1, 15))
+    check("«يُعتمد من»: لا يظهر ما قبله، والرجوع يقف عند شهره",
+          _y92["from"] == _s92 and _y92["max"] == 0 and _m92["m"] == 0
+          and _m92["from"] == _s92 and _n92["max"] == 3
+          and _n92["m"] == 3 and _n92["from"] == _s92
+          and _dp113.PNL_START == "2026-10-01",
+          f"{_y92} · {_m92} · {_n92}")
     check("ولوحة التحكم تعكس إشارة «الأرباح والخسائر» وحدها",
           _dp113.is_pnl({"title": "الأرباح والخسائر"})
           and not _dp113.is_pnl({"title": "الصناديق"})

@@ -202,7 +202,8 @@ class DashboardScreen(QtWidgets.QWidget):
         lbl_to = QtWidgets.QLabel("إلى:")
         per = QtWidgets.QHBoxLayout()
         per.setSpacing(6)
-        per.addWidget(QtWidgets.QLabel("المدة:"))
+        lbl_per = QtWidgets.QLabel("المدة:")
+        per.addWidget(lbl_per)
         per.addWidget(self.period)
         per.addWidget(lbl_from)
         per.addWidget(self.d_from)
@@ -210,9 +211,39 @@ class DashboardScreen(QtWidgets.QWidget):
         per.addWidget(self.d_to)
         per.addWidget(self.compare)
         per.addStretch(1)
+        # ── فترات «الأرباح والخسائر» (4.92) — كرابط المدير ──
+        # خلال السنة (افتراضاً) · الشهر الحالي · الشهر السابق نقرةً بعد
+        # نقرة · الأحدث. ولا شيء قبل «يُعتمد من» (`dp.pnl_range`).
+        self._pnl_per, self._pnl_m = "year", 0
+        self.pnl_year = kit.PushButton("خلال السنة")
+        self.pnl_cur = kit.PushButton("الشهر الحالي")
+        self.pnl_prev = kit.PushButton("الشهر السابق")
+        self.pnl_next = kit.PushButton("الشهر الأحدث")
+        self.pnl_year.clicked.connect(lambda *_: self._pnl_go("year", 0))
+        self.pnl_cur.clicked.connect(lambda *_: self._pnl_go("month", 0))
+        self.pnl_prev.clicked.connect(lambda *_: self._pnl_go(
+            "month", self._pnl_m + 1
+            if self._pnl_per == "month" and self._pnl_m >= 1 else 1))
+        self.pnl_next.clicked.connect(lambda *_: self._pnl_go(
+            "month", max(self._pnl_m - 1, 0)))
+        self.pnl_lbl = QtWidgets.QLabel("")
+        lbl_start = QtWidgets.QLabel("يُعتمد من:")
+        self.pnl_start = date_edit()
+        self.pnl_start.setToolTip("لا يظهر في «الأرباح والخسائر» شيءٌ قبل"
+                                  " هذا التاريخ — هنا وفي رابط المدير")
+        try:
+            self.pnl_start.dateChanged.connect(self._pnl_start_changed)
+        except Exception:
+            pass
+        for w in (self.pnl_year, self.pnl_cur, self.pnl_prev,
+                  self.pnl_next, self.pnl_lbl, lbl_start, self.pnl_start):
+            per.insertWidget(per.count() - 1, w)
+        self._pnl_tools = [self.pnl_year, self.pnl_cur, self.pnl_prev,
+                           self.pnl_next, self.pnl_lbl, lbl_start,
+                           self.pnl_start]
         self._period_row = per
         # صفُّ الفترة كلُّه — ليُخفى مع عناوينه، لا حقولُه وحدها
-        self._period_tools = [self.period, lbl_from, self.d_from,
+        self._period_tools = [lbl_per, self.period, lbl_from, self.d_from,
                               lbl_to, self.d_to, self.compare]
         self._date_tools = [lbl_from, self.d_from, lbl_to, self.d_to]
 
@@ -267,6 +298,9 @@ class DashboardScreen(QtWidgets.QWidget):
 
     def select(self, idx):
         if 0 <= idx < len(self.panels):
+            if idx != self.current:
+                # «الأرباح والخسائر» تُفتح دائماً على «خلال السنة»
+                self._pnl_per, self._pnl_m = "year", 0
             self.current = idx
             self._sync_checked()
             self.refresh()
@@ -543,6 +577,51 @@ class DashboardScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    def _pnl_go(self, per, m):
+        self._pnl_per, self._pnl_m = per, m
+        self.refresh()
+
+    def _pnl_start_changed(self, *_):
+        """«يُعتمد من» يُحفظ مع اللوحة — والرابط يقرؤه منها."""
+        if getattr(self, "_loading", False):
+            return
+        try:
+            p = self.panels[self.current]
+            p["start"] = dstr(self.pnl_start)
+            dp.save_panels(self.panels)
+            self.refresh()
+        except Exception:
+            pass
+
+    def _pnl_apply(self, p):
+        """يكتب تواريخ لوحة الأرباح والخسائر من فترتها المختارة هنا."""
+        rg = dp.pnl_range(self._pnl_per, self._pnl_m, dp.pnl_start(p))
+        self._pnl_per, self._pnl_m = rg["per"], rg["m"]
+        p["date_from"] = rg["from"].isoformat()
+        p["date_to"] = rg["to"].isoformat()
+        return rg
+
+    def _pnl_sync(self, p, rg):
+        """أزرار الفترة على حالها: المختار مؤشَّر، والسابق يقف عند شهر
+        بداية الاعتماد، والأحدث يظهر بعد الرجوع شهرين فأكثر."""
+        per, m = rg["per"], rg["m"]
+        # المختار بعلامة ✔ — أزرار Fluent لا تُظهر حالة «مضغوط»
+        for b, t, on in ((self.pnl_year, "خلال السنة", per == "year"),
+                         (self.pnl_cur, "الشهر الحالي",
+                          per == "month" and m == 0),
+                         (self.pnl_prev, "الشهر السابق",
+                          per == "month" and m >= 1)):
+            b.setText(("✔ " if on else "") + t)
+        back = m + 1 if per == "month" and m >= 1 else 1
+        self.pnl_prev.setEnabled(back <= rg["max"])
+        st = dp.pnl_start(p)
+        self.pnl_prev.setToolTip("" if back <= rg["max"] else
+                                 f"يبدأ الاعتماد من {st}")
+        self.pnl_next.setVisible(per == "month" and m >= 2)
+        self.pnl_lbl.setText(f"{rg['label']}: {rg['from']} → {rg['to']}")
+        if st:
+            self.pnl_start.setDate(QtCore.QDate(st.year, st.month, st.day))
+
     def _period_changed(self, *_):
         """يحفظ نطاق التاريخ مع اللوحة ويعيد العرض."""
         try:
@@ -652,7 +731,12 @@ class DashboardScreen(QtWidgets.QWidget):
             try:
                 # الفترة باسمها تُحسب من جديد في كل فتح («هذا الشهر»
                 # يبقى الشهرَ الجاري)
-                k = dp.apply_period(p)
+                pnl = dp.is_pnl(p)
+                if pnl:
+                    self._pnl_sync(p, self._pnl_apply(p))
+                    k = dp.panel_period(p)
+                else:
+                    k = dp.apply_period(p)
                 self.period.setCurrentIndex(
                     max(self.period.findData(k), 0))
                 if p.get("date_from"):
@@ -681,7 +765,7 @@ class DashboardScreen(QtWidgets.QWidget):
     def _render_accounts(self, conn, p):
         d1 = p.get("date_from") or None
         d2 = p.get("date_to") or None
-        if (self.compare.isChecked() and d1 and d2
+        if (self.compare.isChecked() and d1 and d2 and not dp.is_pnl(p)
                 and p.get("kind") != "scrap"):
             return self._render_compare(conn, p, d1, d2)
         rows = dp.account_rows(conn, p["accounts"], d1, d2)
@@ -815,18 +899,27 @@ class DashboardScreen(QtWidgets.QWidget):
     def _sync_tools(self):
         """كل لوحةٍ وأدواتُها: لا زرَّ لا معنى له في اللوحة المفتوحة."""
         on = self._is_stock()
+        try:
+            pnl = dp.is_pnl(self.panels[self.current])
+        except (IndexError, AttributeError):
+            pnl = False
         for w in getattr(self, "_stock_tools", []):
             w.setVisible(on)
         for w in getattr(self, "_acc_tools", []):
             w.setVisible(not on)
+        # «الأرباح والخسائر» بفتراتها هي (4.92) بدل «المدة» والمقارنة
         for w in getattr(self, "_period_tools", []):
-            w.setVisible(not on)
+            w.setVisible(not on and not pnl)
+        for w in getattr(self, "_pnl_tools", []):
+            w.setVisible(pnl)
+        if pnl and not (self._pnl_per == "month" and self._pnl_m >= 2):
+            self.pnl_next.setVisible(False)
         # «من/إلى» تظهر للفترة المخصّصة وحدها — وغيرها تقول تواريخها
         # في عنوان الجدول
         custom = (getattr(self, "period", None) is not None
                   and self.period.currentData() == "custom")
         for w in getattr(self, "_date_tools", []):
-            w.setVisible(not on and custom)
+            w.setVisible(not on and custom and not pnl)
 
     def _render_stock(self, conn, p):
         """كل ما يُباع اليوم: رقم التشغيل وموديله وأوزانه."""
@@ -979,11 +1072,16 @@ class DashboardScreen(QtWidgets.QWidget):
                     self.buttons[i].set_value(
                         f"{t['count']} طقم · {kv.g(t['reg']):,.0f} جم")
                     continue
+                pnl = dp.is_pnl(p)
+                if pnl:
+                    rg = dp.pnl_range(self._pnl_per, self._pnl_m,
+                                      dp.pnl_start(p))
+                    p["date_from"] = rg["from"].isoformat()
+                    p["date_to"] = rg["to"].isoformat()
                 rows = dp.account_rows(
                     conn, p["accounts"],
                     p.get("date_from") or None,
                     p.get("date_to") or None)
-                pnl = dp.is_pnl(p)
                 t = dp.totals(dp.profit_view(rows) if pnl else rows)
                 money = _signed if pnl else (lambda v: f"{v:,.2f}")
                 if (p.get("unit") or "gold") == "cash":
