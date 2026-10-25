@@ -25,7 +25,7 @@ from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                make_table, mspin, reload_combo,
                                row_action_buttons, row_height, run_bg,
                                save_pref, search_combo, show_model_image,
-                               TitledSections, wspin)
+                               TitledSections, wspin, zspin)
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.model_pic import ModelPic, thumb
 
@@ -806,7 +806,12 @@ class SalesScreen(QtWidgets.QWidget):
         self.line_standing.setToolTip(
             "الذهب القائم = الذهب + الفصوص + الأحجار قبل الخصم — "
             "للمعرفة والإحصاء، بلا أثرٍ محاسبي.")
-        self.line_wage = mspin()
+        # 4.95: الأجر يقبل الصفر المكتوب صراحةً (يظهر «0.00» ويُعتمد)،
+        # ويُقترح له أجر الطقم المسجّل في آخر فاتورة (`invoices.last_wage`)
+        self.line_wage = zspin()
+        self._wage_manual = False     # كتب المستخدم الأجر بيده لهذا السطر
+        self.line_wage.lineEdit().textEdited.connect(
+            lambda *_: setattr(self, "_wage_manual", True))
         self.line_karat = kit.ComboBox()
         for k in config.KARATS:
             self.line_karat.addItem(f"عيار {k}", k)
@@ -1673,14 +1678,17 @@ class SalesScreen(QtWidgets.QWidget):
         try:
             self.barcode.clear()
             self.model_no.setCurrentText("")
-            for w in (self.line_reg, self.line_standing, self.line_wage,
+            for w in (self.line_reg, self.line_standing,
                       self.line_gold, self.line_small, self.line_big,
                       self.line_after):
                 w.setValue(0)
+            self.line_wage.set_zero(False)
+            self.line_wage.setToolTip("")
         finally:
             self._calc = False
         self._snap_w18()
         self._wage18 = 0.0
+        self._wage_manual = False
         self._reg_manual = False
         self._rate = config.STONE_DISCOUNT_RATE
         self._wo = None
@@ -1734,15 +1742,35 @@ class SalesScreen(QtWidgets.QWidget):
             self._rate = float(wo["discount_rate"]
                                if "discount_rate" in wo.keys()
                                else config.STONE_DISCOUNT_RATE)
-            # الأجر: أولويةُ **اتفاق العميل** على أجر بطاقة الطقم —
-            # الأول اتفاقٌ مع من يشتري، والثاني تقديرُ المصنع وقت
-            # الإنتاج. وكلاهما يُحوَّل لعيار السطر.
-            if self.line_wage.value() <= 0:
-                base = (kv.rate_store(self._agreed_wage)
-                        if self._agreed_wage > 0
-                        else (wo["wage_per_gram"] or 0))
+            # الأجر (4.95): **أجره المسجّل** أولاً — آخر ما بِيع به أو
+            # رُدّ في فاتورة (مقترحٌ يُعدَّل، لا قيد) — ثم اتفاق العميل،
+            # ثم أجر بطاقة الطقم. وما كتبه المستخدم بيده لا يُمسّ، والصفر
+            # المسجّل يظهر صفراً. وكلّها تُحوَّل لعيار السطر.
+            if not self._wage_manual:
+                last = None
+                if not wo["is_bulk"]:
+                    try:
+                        with db(readonly=True) as conn:
+                            last = invoices.last_wage(conn, wo["id"])
+                    except Exception:
+                        last = None
+                if last is not None:
+                    base = float(last["wage"] or 0)
+                    tip = (f"أجره المسجّل: {kv.rate(base, k):,.2f} — "
+                           + ("مبيعات" if last["kind"] == "sale"
+                              else "مرتجع")
+                           + f" {last['invoice_no']} بتاريخ "
+                           f"{last['invoice_date']} · يُعدَّل هنا")
+                elif self._agreed_wage > 0:
+                    base = kv.rate_store(self._agreed_wage)
+                    tip = "الأجر المتفق عليه مع هذا العميل"
+                else:
+                    base = float(wo["wage_per_gram"] or 0)
+                    tip = "أجر بطاقة الطقم"
                 self._wage18 = float(base or 0)
+                self.line_wage.set_zero(last is not None and base == 0)
                 self.line_wage.setValue(kv.rate(base, k))
+                self.line_wage.setToolTip(tip)
         finally:
             self._calc = False
         self._reg_manual = False
@@ -1817,6 +1845,14 @@ class SalesScreen(QtWidgets.QWidget):
         # LRM حول التاريخ: بدونه يُقلب في السطر العربي (05-10-2026)
         txt = (f"الطقم {wo['work_order_no']}: {span} — بِيع بالفاتورة"
                f" {h['invoice_no']} بتاريخ \u200e{h['date']}\u200e")
+        # 4.95: وبأيّ أجرٍ بِيع — يُقترح في خانة الأجر للمرتجع
+        try:
+            with db(readonly=True) as conn:
+                lw = invoices.last_wage(conn, wo["id"])
+            if lw and lw["invoice_no"] == h["invoice_no"]:
+                txt += f" بأجر {kv.rate(float(lw['wage'] or 0)):,.2f}"
+        except Exception:
+            pass
         cust = self.customer.currentData()
         other = bool(cust and h["party_id"]
                      and int(cust) != int(h["party_id"]))
@@ -2209,7 +2245,8 @@ class SalesScreen(QtWidgets.QWidget):
             # الأجر: قيمة الحقل إن أُدخلت، وإلا أجر الطقم الافتراضي.
             # كلاهما بعيار السطر — والتحويل عند الحفظ وحده.
             wage = self.line_wage.value()
-            if wage <= 0:
+            # 4.95: الصفر المكتوب (أو المسجّل) أجرٌ صفر — لا فراغ يُقترح له
+            if wage <= 0 and not self.line_wage.explicit_zero:
                 wage = kv.rate(
                     kv.rate_store(self._agreed_wage) if self._agreed_wage > 0
                     else (wo["wage_per_gram"] or 0.0), k)

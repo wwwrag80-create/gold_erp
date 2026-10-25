@@ -460,6 +460,28 @@ def _krate(v):
 
 
 # ══════════════════════ قوالب المستندات ══════════════════════
+def _model_thumb(model_no, h=46):
+    """صورة الموديل مصغّرةً لخانته في الفاتورة (4.95) — "" إن لم تكن له.
+
+    مصغّرةٌ مضغوطة (`models_web.thumb`) لا الصورة الأصلية: صورة الهاتف
+    ملايين النقاط، وعشرات الأسطر بها تُثقل المعاينة والطباعة."""
+    try:
+        import base64
+        from models import models_catalog as mc
+        from services import models_web as mw
+        p = mc.image_path(model_no) if model_no else None
+        if p is None:
+            return ""
+        data, mime = mw.thumb(p, 220)
+        if not data:
+            return ""
+        uri = (f"data:{mime or 'image/jpeg'};base64,"
+               + base64.b64encode(data).decode("ascii"))
+        return f'<img src="{uri}" height="{int(h)}">'
+    except Exception:
+        return ""
+
+
 def _tpl_invoice(conn, invoice_id):
     """فاتورة المبيعات/المرتجعات — الأعمدة تطابق شاشة إدخال الطقم حرفياً:
     م · رقم التشغيل · الوزن القائم · وزن الفصوص · وزن الأحجار ·
@@ -533,8 +555,11 @@ def _tpl_invoice(conn, invoice_id):
         t_after += after
         _mn = ((wo["model_no"] if wo and "model_no" in wo.keys() else "")
                or "—")
+        # 4.95: صورة الموديل بدل رقمه — والرقم لمن لا صورة له
+        _pic = _model_thumb(_mn) if _mn != "—" else ""
         body_rows += "<tr>" + cells(
-            tdw(en(_mn)),
+            (f'<td align="center" style="padding:1px;">{_pic}</td>'
+             if _pic else tdw(en(_mn))),
             tdw(en(wo["work_order_no"] if wo else "—")),
             tdw(_gw(reg)), tdw(_gw(standing)), tdw(_gw(gold)),
             tdw(_gw(small)), tdw(_gw(big)), tdw(_gw(after)),

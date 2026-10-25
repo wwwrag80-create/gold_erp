@@ -8834,6 +8834,84 @@ def main():
           _back115 is None
           and _wm114.days_ar(47) == "47 يوماً (شهر و17 يوماً تقريباً)"
           and _wm114.days_ar(2) == "يومان", str(_back115))
+    # ══ 116) 4.95: دمج الفواتير · أجر الطقم المسجّل · الأجر صفر · الصورة ══
+    from models import operations as _op116
+    with db() as conn:
+        _A116 = add_entity(conn, "عميل 116", "customer", username="admin")
+        create_work_orders_batch(
+            conn, [{"wo_no": f"MG-{i}", "gold": 10.0, "wage_per_gram": 10}
+                   for i in range(4)], "2026-10-01", "admin")
+        _w116 = {r[1]: r[0] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'MG-%'")}
+        _s1 = _iv103.create_sale(conn, _A116, [
+            {"work_order_id": _w116["MG-0"]},
+            {"work_order_id": _w116["MG-1"]}], "2026-10-05", "admin",
+            apply_vat=False)
+        _s2 = _iv103.create_sale(conn, _A116, [
+            {"work_order_id": _w116["MG-2"], "wage_override": 0}],
+            "2026-10-07", "admin", apply_vat=False)
+        _acc116 = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                               (_A116,)).fetchone()[0]
+
+        def _bal116():
+            return tuple(conn.execute(
+                "SELECT ROUND(SUM(l.gold_debit-l.gold_credit),3),"
+                " ROUND(SUM(l.cash_debit-l.cash_credit),2)"
+                " FROM journal_lines l JOIN journal_entries e"
+                " ON e.id=l.entry_id WHERE e.is_deleted=0"
+                " AND l.account_id=?", (_acc116,)).fetchone())
+        _b0 = _bal116()
+        _m116 = _op116.merge_invoices(conn, [_s1["id"], _s2["id"]], "admin")
+        _b1 = _bal116()
+        _live116 = conn.execute(
+            "SELECT COUNT(*) FROM invoices WHERE is_deleted=0"
+            " AND customer_id=?", (_A116,)).fetchone()[0]
+        _lw116 = _iv103.last_wage(conn, _w116["MG-2"])
+        # بيعٌ ثانٍ بعد مرتجع يُدمج في فاتورةٍ أقدم من مرتجعه ⇒ يُرفض
+        _iv103.create_sale_return(conn, _A116, [
+            {"work_order_id": _w116["MG-2"]}], "2026-10-10", "admin",
+            apply_vat=False)
+        _s3 = _iv103.create_sale(conn, _A116, [
+            {"work_order_id": _w116["MG-2"]}], "2026-10-12", "admin",
+            apply_vat=False)
+        _s4 = _iv103.create_sale(conn, _A116, [
+            {"work_order_id": _w116["MG-3"]}], "2026-10-06", "admin",
+            apply_vat=False)
+    try:
+        with db() as conn:
+            _op116.merge_invoices(conn, [_s3["id"], _s4["id"]], "admin",
+                                  keep_id=_s4["id"])
+        _e116 = ""
+    except ValueError as _e:
+        _e116 = str(_e)
+    check("دمج فاتورتي مبيعات لجهة في فاتورةٍ واحدة برقم الأقدم وتاريخه",
+          _m116["invoice_no"] == _s1["invoice_no"] and _m116["items"] == 3
+          and _live116 == 1 and _b0 == _b1, f"{_m116} · {_b0} · {_b1}")
+    check("ودمجٌ يجعل حركة طقمٍ غير منتظمة يُرفض بأسمائه",
+          "غير منتظمة" in _e116 and "MG-2" in _e116, _e116)
+    check("أجر الطقم المسجّل يُقترح (ولو صفراً)",
+          _lw116 is not None and _lw116["wage"] == 0
+          and _lw116["invoice_no"] == _s1["invoice_no"], str(_lw116))
+    from services import print_manager as _pm116
+    check("قالب الفاتورة: صورة الموديل بدل رقمه (والرقم لمن لا صورة له)",
+          "_model_thumb" in _pm116._tpl_invoice.__code__.co_names
+          and _pm116._model_thumb("لا-يوجد-116") == "")
+    try:
+        from ui.widgets.common import zspin as _zs116
+        from PyQt5 import QtWidgets as _QW116
+        _app116 = _QW116.QApplication.instance() or _QW116.QApplication([])
+        _z = _zs116()
+        _z.lineEdit().setText("0")
+        _z.interpretText()
+        _ok_zero = _z.explicit_zero and _z.value() == 0
+        _z.set_zero(False)
+        check("خانة الأجر: الصفر المكتوب يبقى صفراً ظاهراً، والفارغ فارغ",
+              _ok_zero and not _z.explicit_zero
+              and _z.lineEdit().text() == "")
+    except ImportError:
+        print("  … تُخطّى فحص الخانة (PyQt5 غير متاح)")
+
     try:
         from ui.sales_screen import SalesScreen as _S115
         check("شاشة المبيعات: إشعار المدة عند رقم التشغيل في المرتجع",

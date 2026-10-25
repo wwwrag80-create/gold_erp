@@ -591,6 +591,24 @@ def create_sale_return(conn, entity_id, cart, invoice_date, username,
 # محاسبي يجعل تصحيح عملية يبدو عمليتين. بديلها `update_invoice`
 # التي تعدّل في المكان مع الحفاظ على الرقم والتاريخ.
 
+def last_wage(conn, wo_id):
+    """آخر أجرٍ سُجّل للطقم في فاتورة بيعٍ أو مرتجع (4.95) — اقتراحٌ لسطر
+    الإدخال لا قيد: الطقم يُرتجع بالأجر الذي بِيع به، ويُعاد بيعه بآخر
+    أجرٍ عُرف له، والمستخدم يعدّله. والتحويل الداخلي بلا أجر فلا يُعتدّ به.
+
+    {"wage" (بمكافئ 18), "kind", "invoice_no", "invoice_date"} أو None."""
+    r = conn.execute(
+        "SELECT it.wage_per_gram wage, i.kind, i.invoice_no, i.invoice_date"
+        " FROM invoice_items it JOIN invoices i ON i.id=it.invoice_id"
+        " JOIN entities e ON e.id=i.customer_id"
+        " WHERE it.work_order_id=? AND i.is_deleted=0"
+        " AND i.kind IN ('sale','sale_return')"
+        " AND COALESCE(e.entity_type,'')<>'internal'"
+        " ORDER BY i.invoice_date DESC, i.id DESC, it.id DESC LIMIT 1",
+        (int(wo_id),)).fetchone()
+    return dict(r) if r else None
+
+
 def get_invoice_full(conn, invoice_id):
     """الفاتورة مع كل أطقمها — لتعبئة الشاشة عند التعديل. تُستخدم
     القيم المخزَّنة تاريخياً بجدول invoice_items (وزن السطر وأجره) لا

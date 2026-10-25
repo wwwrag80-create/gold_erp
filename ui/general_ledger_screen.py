@@ -87,6 +87,9 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.summary = big_label()
         self.summary.setVisible(False)
         self.table = make_table()
+        # تحديد أكثر من صف (Ctrl/Shift) — لدمج الفواتير (4.95)
+        self.table.setSelectionMode(
+            QtWidgets.QAbstractItemView.ExtendedSelection)
         # المعاينة بالنقر المزدوج بدل زر في كل صف (أسرع بكثير)
         self.table.doubleClicked.connect(lambda *_: self.preview_selected())
 
@@ -121,6 +124,13 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         btn_move.setToolTip(
             "ينقل العملية لجهة أخرى بنفس التاريخ والرقم والمبالغ")
         btn_move.clicked.connect(self.transfer_doc)
+        # 4.95: دمج فواتير الجهة — حدّد صفوفها بـCtrl ثم «دمج»
+        btn_merge = kit.PushButton("⧉ دمج فواتير")
+        btn_merge.setToolTip(
+            "يدمج فاتورتي مبيعات أو أكثر (أو مرتجع) لهذه الجهة في فاتورةٍ"
+            " واحدة تحمل أطقمها كلها — حدّد صفوفها بـCtrl أولاً أو اخترها"
+            " من النافذة")
+        btn_merge.clicked.connect(self.merge_docs)
         btn_del = kit.PushButton("🗑 حذف وعكس")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_doc)
@@ -133,6 +143,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         btn_direct.clicked.connect(self.print_statement_direct)
         actions.addWidget(btn_edit)
         actions.addWidget(btn_move)
+        actions.addWidget(btn_merge)
         actions.addWidget(btn_del)
         actions.addStretch(1)
         actions.addWidget(btn_print)
@@ -580,6 +591,39 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             from ui.widgets.common import info as _info
             _info(self, info2)
             self.refresh()
+        except Exception as e:
+            err(self, e)
+
+    def merge_docs(self):
+        """يدمج فواتير مبيعات (أو مرتجع) من هذا الكشف في فاتورةٍ واحدة."""
+        try:
+            from ui.merge_invoices_dialog import (MergeInvoicesDialog,
+                                                  candidates)
+            sids = {r.get("sid") for r in self.rows
+                    if r.get("src") == "invoices" and r.get("sid")}
+            pre = set()
+            for idx in self.table.selectionModel().selectedRows():
+                i = idx.row()
+                if 0 <= i < len(self.rows) \
+                        and self.rows[i].get("src") == "invoices":
+                    pre.add(self.rows[i]["sid"])
+            with db(readonly=True) as conn:
+                rows = candidates(conn, sids)
+            # الدمج لفواتير جهةٍ واحدة: كشف حسابٍ عام (المبيعات مثلاً)
+            # يجمع جهاتٍ كثيرة — فيُقصر على جهة الصف المحدد
+            if len({r["customer_id"] for r in rows}) > 1:
+                cust = {r["customer_id"] for r in rows if r["id"] in pre}
+                if len(cust) != 1:
+                    raise ValueError(
+                        "هذا الكشف يجمع فواتير جهاتٍ مختلفة — حدّد فاتورةً"
+                        " من الجهة المطلوبة أولاً، أو افتح كشف حسابها.")
+                rows = [r for r in rows if r["customer_id"] in cust]
+            if len(rows) < 2:
+                raise ValueError("لا فاتورتان على الأقل في هذا الكشف للدمج"
+                                 " — وسّع الفترة إن كانت خارجها.")
+            dlg = MergeInvoicesDialog(self, self.user, rows, pre)
+            if dlg.exec_() == QtWidgets.QDialog.Accepted:
+                self.load()
         except Exception as e:
             err(self, e)
 

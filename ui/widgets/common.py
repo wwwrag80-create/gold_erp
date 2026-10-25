@@ -189,6 +189,43 @@ def _smart(s):
     return s
 
 
+class _ZeroOkSpin(_BlankZeroSpin):
+    """كالحقل الذي يُظهر الصفر فارغاً — لكن **الصفر المكتوب صراحةً**
+    يبقى ظاهراً «0.00» ويُعدّ قيمةً لا فراغاً (4.95: أجرٌ صفر).
+
+    `explicit_zero` يُعرف من النص نفسه: «0» مكتوبةً ⇒ صفرٌ مقصود،
+    والخانة الفارغة ⇒ لا قيمة (فيُقترح لها). ويُضبط برمجياً بـ
+    `set_zero(True)` لصفرٍ مقترحٍ مقصود (أجرٌ سُجّل صفراً قبل)."""
+
+    explicit_zero = False
+
+    def textFromValue(self, value):
+        if value == 0 and self.explicit_zero:
+            return super(_BlankZeroSpin, self).textFromValue(value)
+        return super().textFromValue(value)
+
+    def valueFromText(self, text):
+        v = super().valueFromText(text)
+        self.explicit_zero = bool(str(text).strip()) and v == 0
+        return v
+
+    def set_zero(self, on=True):
+        """صفرٌ ظاهرٌ مقصود (`on`) — أو تفريغ الخانة (`False`)."""
+        self.explicit_zero = bool(on)
+        self.setValue(0)
+        self.lineEdit().setText(self.textFromValue(0))
+
+
+def zspin(maximum=1_000_000_000.0, minimum=0.0):
+    """حقل مبلغٍ يقبل الصفر قيمةً مكتوبة (الأجر) — انظر `_ZeroOkSpin`."""
+    s = _smart(_ZeroOkSpin())
+    s.setDecimals(2)
+    s.setRange(minimum, maximum)
+    s.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+    s.setGroupSeparatorShown(True)
+    return s
+
+
 def wspin(maximum=10_000_000.0):
     s = _smart(_BlankZeroSpin())
     s.setDecimals(2)

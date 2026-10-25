@@ -230,6 +230,180 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
 
 
 # ══════════════════════════════════════════════════════════════════
+# 2ب) دمج فواتير الجهة الواحدة في فاتورةٍ واحدة (4.95)
+# ══════════════════════════════════════════════════════════════════
+
+def merge_check(conn, invoice_ids):
+    """يفحص قابلية الدمج ويعيد الفواتير مرتّبةً (الأقدم أولاً) — أو يرفع
+    ValueError بالسبب. يُستدعى قبل السؤال وفي الدمج نفسه."""
+    ids = sorted({int(i) for i in invoice_ids if i})
+    if len(ids) < 2:
+        raise ValueError("اختر فاتورتين أو أكثر للدمج")
+    q = ",".join("?" * len(ids))
+    invs = conn.execute(
+        f"SELECT * FROM invoices WHERE id IN ({q}) AND is_deleted=0"
+        " ORDER BY invoice_date, id", ids).fetchall()
+    if len(invs) != len(ids):
+        raise ValueError("إحدى الفواتير المختارة محذوفة أو غير موجودة")
+    kinds = {i["kind"] for i in invs}
+    if len(kinds) != 1 or not kinds <= {"sale", "sale_return"}:
+        raise ValueError("الدمج لفواتير من نوعٍ واحد: مبيعات مع مبيعات، أو"
+                         " مرتجع مع مرتجع")
+    if len({i["customer_id"] for i in invs}) != 1:
+        raise ValueError("الفواتير لجهاتٍ مختلفة — الدمج لفواتير الجهة"
+                         " الواحدة")
+    if len({int(i["vat_applied"] or 0) for i in invs}) != 1:
+        raise ValueError("بعض الفواتير ضريبية وبعضها لا — لا تُدمج"
+                         " فيتغيّر حساب الضريبة")
+    if len({(i["source_account_id"] or 0, int(i["scrap_karat"] or 0))
+            for i in invs}) != 1:
+        raise ValueError("الفواتير من حسابات مصدرٍ مختلفة (المشغول / صندوق"
+                         " الكسر) — لا تُدمج")
+    from services.fatoora import ledger as _fatoora
+    from models import fiscal
+    for i in invs:
+        _fatoora.guard_change(conn, "invoices", i["id"], "دمج")
+        fiscal.assert_open(conn, i["invoice_date"])
+        dep = conn.execute(
+            "SELECT note_no FROM tax_debit_notes WHERE invoice_id=?"
+            " AND COALESCE(is_deleted,0)=0", (i["id"],)).fetchone()
+        if dep:
+            raise ValueError(f"على الفاتورة {i['invoice_no']} إشعار مدين"
+                             f" ({dep['note_no']}) — لا تُدمج")
+    # الطقم المفرد سطرٌ واحد في الفاتورة: بيعُ جزءين منه في فاتورتين
+    # يصير سطرين له في فاتورةٍ واحدة — فيُرفض بأسمائه
+    seen, dup = {}, set()
+    for r in conn.execute(
+            "SELECT it.invoice_id, w.work_order_no no, w.id wid"
+            " FROM invoice_items it JOIN work_orders w"
+            " ON w.id=it.work_order_id WHERE it.invoice_id IN"
+            f" ({q}) AND COALESCE(w.is_bulk,0)=0"
+            " AND COALESCE(w.is_service,0)=0", ids):
+        if seen.setdefault(r["wid"], r["invoice_id"]) != r["invoice_id"]:
+            dup.add(r["no"])
+    if dup:
+        raise ValueError("الطقم في أكثر من فاتورة من المختارة: "
+                         + "، ".join(sorted(dup))
+                         + "\nالطقم المفرد سطرٌ واحد في الفاتورة — فلا تُدمج"
+                         " فاتورتان فيهما الطقم نفسه (بيعُ جزءين منه، أو"
+                         " بيعٌ ثم مرتجعٌ ثم بيع).")
+    return invs
+
+
+def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
+    """يدمج فاتورتين أو أكثر من نوعٍ واحد (مبيعات أو مرتجع) لجهةٍ واحدة في
+    **فاتورةٍ واحدة** تحمل أطقمها كلها — برقم «الباقية» وتاريخها (الأقدم
+    افتراضاً، أو `keep_id`).
+
+    البنود **تنتقل** إليها كما هي (أوزانها وأجورها وعيارها وحسابها)
+    وقيدها يُعاد بناؤه منها، والمدموجة تُحذف منطقياً بقيودها. فلا يتحرّك
+    المخزون ولا رصيد الرقم التجميعي: ما خرج خرج، وإنما يتوحّد مستنده.
+
+    **حركة الطقم**: البنود تنتقل إلى تاريخ الباقية — فإن جعل ذلك سلسلة
+    طقمٍ غير منتظمة (بيعٌ يسبق مرتجعاً كان قبله) رُفض الدمج كله بأسماء
+    الأطقم ولم يُحفظ شيء. وتُضبط حالة كل طقمٍ من سلسلته بعده (`resync`).
+    """
+    from models import wo_moves
+    from services import gold_math, zatca
+    import config
+    invs = merge_check(conn, invoice_ids)
+    keep = next((i for i in invs if keep_id and i["id"] == int(keep_id)),
+                invs[0])
+    others = [i for i in invs if i["id"] != keep["id"]]
+    ids = [i["id"] for i in invs]
+    q = ",".join("?" * len(ids))
+    wos = sorted({r[0] for r in conn.execute(
+        f"SELECT work_order_id FROM invoice_items WHERE invoice_id IN ({q})",
+        ids)})
+    singles = wo_moves._singles(conn, wos)
+
+    def _broken():
+        out = set()
+        for wid in singles:
+            wo = wo_moves._wo(conn, wid)
+            if wo_moves.violations(wo_moves.moves_of(conn, wid),
+                                   wo_moves.birth(wo), wo_moves._full(wo)):
+                out.add(wid)
+        return out
+    bad_before = _broken()
+
+    for o in others:
+        conn.execute("UPDATE invoice_items SET invoice_id=? WHERE"
+                     " invoice_id=?", (keep["id"], o["id"]))
+        conn.execute("INSERT OR IGNORE INTO invoice_assets(invoice_id, sha)"
+                     " SELECT ?, sha FROM invoice_assets WHERE invoice_id=?",
+                     (keep["id"], o["id"]))
+        conn.execute("UPDATE scrap_moves SET is_deleted=1"
+                     " WHERE ref_table='invoices' AND ref_id=?", (o["id"],))
+        if o["entry_id"]:
+            conn.execute(
+                "UPDATE journal_entries SET is_deleted=1, deleted_by=?,"
+                " deleted_at=datetime('now','localtime') WHERE id=?",
+                (username, o["entry_id"]))
+        conn.execute("UPDATE invoices SET is_deleted=1 WHERE id=?",
+                     (o["id"],))
+        log_action(conn, username, "merge", "invoices", o["id"],
+                   f"{o['invoice_no']} دُمجت في {keep['invoice_no']}")
+
+    # إجماليات الباقية من بنودها كلها — كما يحسبها الترحيل نفسه
+    from models.entities import get_entity
+    internal = get_entity(conn, keep["customer_id"])["entity_type"] \
+        == "internal"
+    t = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN COALESCE(w.is_service,0)=0"
+        " THEN it.registered_weight END),0) tw,"
+        " COALESCE(SUM(it.wages),0) tg FROM invoice_items it"
+        " JOIN work_orders w ON w.id=it.work_order_id"
+        " WHERE it.invoice_id=?", (keep["id"],)).fetchone()
+    tw = round(float(t["tw"] or 0), 3)
+    tg = 0.0 if internal else round(float(t["tg"] or 0), 2)
+    vat_on = bool(keep["vat_applied"]) and not internal
+    vat = gold_math.wages_vat(tg) if vat_on else 0.0
+    grand = round(tg + vat, 2)
+    qr = keep["qr_base64"] or ""
+    if vat_on:
+        ts = f"{keep['invoice_date']}T{(keep['created_at'] or '')[11:19] or '00:00:00'}"
+        qr = zatca.build_tlv_base64(config.COMPANY_NAME,
+                                    config.COMPANY_VAT_NUMBER, ts, grand, vat)
+    nos = "، ".join(o["invoice_no"] for o in others)
+    desc = ((keep["description"] or "").strip()
+            + f" [دُمجت فيها: {nos}]").strip()
+    conn.execute(
+        "UPDATE invoices SET total_weight=?, total_wages=?, vat_amount=?,"
+        " grand_total=?, qr_base64=?, description=? WHERE id=?",
+        (tw, tg, vat, grand, qr, desc, keep["id"]))
+    _aw = invoices._rebuild_invoice_entry(conn, keep["id"])
+    _src = keep["source_account_id"]
+    invoices._sync_scrap_moves(
+        conn, keep["id"], invoices._scrap_acc(conn, _aw, _src),
+        int(keep["scrap_karat"] or 0), invoices._scrap_weight(conn, _aw),
+        keep["kind"])
+
+    # حركة الطقم: لا دمج يكسر سلسلةً كانت منتظمة
+    newly = _broken() - bad_before
+    if newly:
+        names = [r[0] for r in conn.execute(
+            "SELECT work_order_no FROM work_orders WHERE id IN"
+            f" ({','.join('?' * len(newly))})", sorted(newly))]
+        raise ValueError(
+            "الدمج ينقل الأطقم إلى تاريخ الفاتورة "
+            f"{keep['invoice_no']} ({keep['invoice_date']}) فتصير حركتها"
+            " غير منتظمة: " + "، ".join(names)
+            + "\nاختر فاتورةً أحدث تبقى، أو ادمج غيرها.")
+    wo_moves.resync(conn, wos, username)
+    n = conn.execute("SELECT COUNT(*) FROM invoice_items WHERE invoice_id=?",
+                     (keep["id"],)).fetchone()[0]
+    log_action(conn, username, "merge", "invoices", keep["id"],
+               f"{keep['invoice_no']} ← {nos} | {n} بنداً"
+               + (f" | {notes}" if notes else ""))
+    return {"id": keep["id"], "invoice_no": keep["invoice_no"],
+            "invoice_date": keep["invoice_date"],
+            "merged": [o["invoice_no"] for o in others], "items": n,
+            "total_weight": tw, "total_wages": tg, "vat": vat,
+            "grand_total": grand}
+
+
+# ══════════════════════════════════════════════════════════════════
 # 3) تحويل سند قبض/صرف من حساب إلى آخر
 # ══════════════════════════════════════════════════════════════════
 
