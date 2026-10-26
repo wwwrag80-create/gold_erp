@@ -525,54 +525,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ══════════ دخولُ الواجهة ══════════
     def play_entrance(self):
-        """حركةُ وصولٍ قصيرة بعد البوابة — لا زينةَ دائمة.
+        """بعد البوابة: لا حركة على الواجهة نفسها (4.97).
 
-        القائمة الجانبية تنزلق من اليمين وشاشةُ الترحيب تصعد قليلاً
-        وهي تظهر، في أقل من ثلثَي ثانية. **ثم تُرفع المؤثّرات
-        كلُّها**: مؤثّرُ شفافيةٍ باقٍ على شجرةٍ أو جدول يُعيد رسمه في
-        كل تمريرة تمرير، فيصير الجمالُ بطئاً — والحركة تُفتتح بها
-        الجلسة لا تُلازمها.
-        """
-        try:
-            from ui.widgets.gold_stage import animations_on
-            if not animations_on():
-                return
-        except Exception:
-            return
-        self._entrance = []
-        for w, dx, dy, delay, ms in ((self.side_panel, 34, 0, 0, 480),
-                                     (self.stack, 0, 22, 110, 520)):
-            eff = QtWidgets.QGraphicsOpacityEffect(w)
-            eff.setOpacity(0.0)
-            w.setGraphicsEffect(eff)
-            base = w.pos()
-            anim = QtCore.QVariantAnimation(self)
-            anim.setStartValue(0.0)
-            anim.setEndValue(1.0)
-            anim.setDuration(ms)
-            anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
-
-            def _step(v, _w=w, _e=eff, _b=base, _dx=dx, _dy=dy):
-                f = float(v)
-                _e.setOpacity(f)
-                _w.move(_b.x() + int(_dx * (1 - f)),
-                        _b.y() + int(_dy * (1 - f)))
-
-            def _end(_w=w, _b=base):
-                try:
-                    _w.setGraphicsEffect(None)
-                    _w.move(_b)
-                except Exception:
-                    pass
-
-            anim.valueChanged.connect(_step)
-            anim.finished.connect(_end)
-            QtCore.QTimer.singleShot(delay, anim.start)
-            self._entrance.append(anim)
-        try:
-            self.welcome.play_entrance()
-        except Exception:
-            pass
+        كانت القائمة الجانبية تنزلق والشاشة تصعد بمؤثّر شفافيةٍ على كلٍّ
+        منهما — ومؤثّر الشفافية يرسم الواجهة كلها صورةً في كل إطار، فيأتي
+        الوصول متقطّعاً على أجهزة المصانع. والتمازج بين البوابة والنظام
+        (شفافية النافذة نفسها، يرسمها ويندوز) يكفي ويبقى سلساً. وبعدها
+        يبدأ تجهيز الشاشات الأكثر استعمالاً في أوقات الفراغ."""
+        self._start_prebuild()
 
     # ══════════ تخصيص القائمة الجانبية ══════════
     def _nav_layout_path(self):
@@ -800,6 +760,14 @@ class MainWindow(QtWidgets.QMainWindow):
     # عدد الشاشات التي تبقى حيّةً خلف الحالية — حدٌّ صغير: «شاشة واحدة
     # حيّة» هي ما يمنع التجمّد، والرجوع يحتاج سلسلةً قصيرة لا القائمة كلها
     HISTORY_MAX = 4
+    # ══ شاشاتٌ تبقى جاهزة (4.97) ══
+    # كانت كل شاشةٍ تُهدم عند الرجوع للرئيسية وتُبنى من جديد عند كل فتح —
+    # وهو أكثر ما يؤخّر الدخول للشاشات. الآن تبقى آخر الشاشات المفتوحة
+    # مبنيّةً خلف الرئيسية (الأقدم استعمالاً يُهدم إن زادت)، فيُعاد فتحها
+    # فوراً ثم تُحدَّث بياناتها. والأكثر استعمالاً تُجهَّز مسبقاً في أوقات
+    # الفراغ بعد الدخول (`_start_prebuild`).
+    KEEP_ALIVE = 14
+    PREBUILD = 8
 
     def _close_screen(self):
         """«رجوع»: إلى الشاشة السابقة كما تُركت، وإلا إلى الرئيسية."""
@@ -823,6 +791,150 @@ class MainWindow(QtWidgets.QMainWindow):
             rel = getattr(self.screens[row], "release", None)
             if callable(rel):
                 rel()
+        except Exception:
+            pass
+
+    def _alive_touch(self, row):
+        """آخر استعمالٍ للشاشة — وتُهدم الأقدم إن زادت عن `KEEP_ALIVE`."""
+        alive = self.__dict__.setdefault("_alive", [])
+        if row in alive:
+            alive.remove(row)
+        alive.append(row)
+        cur = getattr(self, "_current_row", 0)
+        while len(alive) > self.KEEP_ALIVE:
+            old = next((r for r in alive if r != cur), None)
+            if old is None:
+                break
+            alive.remove(old)
+            self._release(old)
+
+    def _screen_key(self, row):
+        try:
+            node = self._items.get(self.screens[row])
+            return node.text(0) if node is not None else ""
+        except Exception:
+            return ""
+
+    def _count_use(self, row):
+        """عدد مرات فتح كل شاشة — به تُعرف الأكثر استعمالاً فتُجهَّز
+        مسبقاً. يُحفظ بعد لحظاتٍ لا مع النقرة (لا كتابة تؤخّر الفتح)."""
+        key = self._screen_key(row)
+        if not key:
+            return
+        use = self.__dict__.get("_use")
+        if use is None:
+            use = self._load_use()
+        use[key] = int(use.get(key, 0)) + 1
+        self._use = use
+        t = self.__dict__.get("_use_timer")
+        if t is None:
+            t = QtCore.QTimer(self)
+            t.setSingleShot(True)
+            t.setInterval(4000)
+            t.timeout.connect(self._save_use)
+            self._use_timer = t
+        t.start()
+
+    def _load_use(self):
+        try:
+            from ui.widgets.common import load_pref
+            d = json.loads(load_pref("ui.screen_use", "{}") or "{}")
+            self._use = d if isinstance(d, dict) else {}
+        except Exception:
+            self._use = {}
+        return self._use
+
+    def _save_use(self):
+        try:
+            from ui.widgets.common import save_pref
+            save_pref("ui.screen_use",
+                      json.dumps(self.__dict__.get("_use") or {},
+                                 ensure_ascii=False))
+        except Exception:
+            pass
+
+    # الافتراضي قبل أن يُعرف استعمال المستخدم: دورة اليوم نفسها
+    _PREBUILD_DEFAULT = ("مبيعات/مرتجعات", "كشف حساب", "سندات قبض/صرف",
+                         "الوارد من التصنيع", "دليل الموديلات", "حركة الطقم",
+                         "العملاء — المبيعات والسداد", "لوحة التحكم")
+
+    def _prebuild_order(self):
+        use = self.__dict__.get("_use")
+        if use is None:
+            use = self._load_use()
+        rows = {}
+        for i in range(1, len(self.screens)):
+            k = self._screen_key(i)
+            scr = self.screens[i]
+            if (k and isinstance(scr, Lazy) and not scr.built
+                    and "إيقاف المصانع" not in k):
+                rows[k] = i
+        ranked = sorted(rows, key=lambda k: -int(use.get(k, 0)))
+        ranked = [k for k in ranked if int(use.get(k, 0)) > 0]
+        for k in self._PREBUILD_DEFAULT:
+            if k in rows and k not in ranked:
+                ranked.append(k)
+        return [rows[k] for k in ranked[:self.PREBUILD]]
+
+    def _start_prebuild(self, delay=2500):
+        """تجهيز الشاشات الأكثر استعمالاً في أوقات الفراغ (4.97).
+
+        شاشةٌ واحدة في كل نبضة، ولا تُبنى إلا بعد ثانيةٍ ونصف بلا نقرٍ
+        ولا كتابة — فلا يُزاحم التجهيزُ يدَ المستخدم. فإذا فتح الشاشة
+        وجدها جاهزةً فتظهر فوراً وتُحدَّث بياناتها خلفها."""
+        if getattr(self, "_pre_timer", None) is not None:
+            return
+        self._pre_q = self._prebuild_order()
+        self._last_input = 0.0
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+        t = QtCore.QTimer(self)
+        t.setInterval(500)
+        t.timeout.connect(self._prebuild_step)
+        self._pre_timer = t
+        QtCore.QTimer.singleShot(int(delay), t.start)
+
+    def eventFilter(self, obj, ev):
+        if ev.type() in (QtCore.QEvent.MouseButtonPress,
+                         QtCore.QEvent.KeyPress, QtCore.QEvent.Wheel):
+            import time as _t
+            self._last_input = _t.monotonic()
+        return super().eventFilter(obj, ev)
+
+    def _prebuild_step(self):
+        import time as _t
+        q = getattr(self, "_pre_q", [])
+        if not q:
+            try:
+                self._pre_timer.stop()
+                QtWidgets.QApplication.instance().removeEventFilter(self)
+            except Exception:
+                pass
+            return
+        if _t.monotonic() - getattr(self, "_last_input", 0.0) < 1.5:
+            return                  # المستخدم يعمل — يُنتظر فراغه
+        row = q.pop(0)
+        scr = self.screens[row]
+        if not isinstance(scr, Lazy) or scr.built \
+                or row == getattr(self, "_current_row", 0):
+            return
+        t0 = _t.monotonic()
+        try:
+            scr.ensure()
+            fn = getattr(scr.real, "refresh", None)
+            if callable(fn):
+                fn()
+            alive = self.__dict__.setdefault("_alive", [])
+            if row not in alive:
+                alive.insert(0, row)      # الأقدم: يُهدم أولاً إن زادت
+        except Exception:
+            pass
+        try:
+            from services import health
+            dt = _t.monotonic() - t0
+            if dt > 1.0:
+                health.log_slow("prebuild", dt, self._screen_key(row))
         except Exception:
             pass
 
@@ -909,23 +1021,19 @@ class MainWindow(QtWidgets.QMainWindow):
         # والرئيسية تُغلق السلسلة كلها. وما زاد عن الحدّ يُغلق أقدمه.
         hist = self.__dict__.setdefault("_history", [])
         if row == 0:
-            dropped = hist[:]
             hist.clear()
-            for r in dropped + [prev]:
-                if r != row:
-                    self._release(r)
         else:
             if row in hist:
                 hist.remove(row)
-            if prev != row and prev > 0:
-                if _back:
-                    self._release(prev)
-                else:
-                    if prev in hist:
-                        hist.remove(prev)
-                    hist.append(prev)
-                    while len(hist) > self.HISTORY_MAX:
-                        self._release_old(hist.pop(0))
+            if prev != row and prev > 0 and not _back:
+                if prev in hist:
+                    hist.remove(prev)
+                hist.append(prev)
+                while len(hist) > self.HISTORY_MAX:
+                    hist.pop(0)
+            # تبقى مبنيّةً (4.97) — والأقدم استعمالاً يُهدم إن زادت
+            self._alive_touch(row)
+            self._count_use(row)
         screen = self.screens[row]
         node = self._items.get(screen)
         self.crumb.setText(

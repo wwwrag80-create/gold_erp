@@ -32,7 +32,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 import config
 from services import login_flow
 from ui.widgets.cinema_stage import CinemaStage
-from ui.widgets.gold_frame import GlassCard, screen_overlay
+from ui.widgets.gold_frame import screen_overlay
 from ui.widgets.gold_stage import ShineLabel, animations_on
 
 # 4.68: لوحة الدخول في الجهة اليمنى (بداية القراءة) والذهب في يسار
@@ -47,17 +47,25 @@ ASK_LOGIN = "يرجى تسجيل الدخول"
 # توقيتُ المشهد بالمللي ثانية — الترحيب يُقرأ قبل أن تُدعى اليد
 # للكتابة. أقلُّ من هذا يجعل اللوحة تزاحم الجملة، وأكثرُ منه يجعل
 # من يفتح النظام عشرين مرةً في اليوم ينتظر بلا طائل.
-HERO_DELAY = 420            # متى يبدأ الترحيب — بعد أن يكتمل ظهور المشهد
-CARD_DELAY = 1650           # متى تُبنى لوحة الدخول وتصعد
-FADE_IN = 380               # ظهور البوابة نفسها من الشفافية
+# 4.97: لا تتابعَ مؤجَّلاً — المشهد كاملاً (الترحيب وحقول الدخول) يُبنى قبل
+# الظهور، والبوابة كلها تظهر من الشفافية **مرةً واحدة**. شفافية النافذة
+# يرسمها ويندوز نفسه فتبقى سلسةً على أي جهاز؛ وكان التتابع (ترحيبٌ ثم لوحةٌ
+# تصعد بموجة) يلوّن النصوص ويرسم اللوحة صورةً في كل إطار فيتقطّع.
+HERO_DELAY = 0
+CARD_DELAY = 0
+FADE_IN = 320               # ظهور البوابة نفسها من الشفافية
 
 GATE_QSS = """
 /* أولُ إطارٍ يُرسم قبل أن يبدأ المسرح: لو بقي على لون النظام
    الفاتح لرأى المستخدم ومضةً بيضاء قبل الليل. فيُصبغ هنا بلون
    المسرح نفسه — فما يُرى أولاً هو ما يبقى. */
 QDialog#gateWindow { background: #17120C; }
-/* اللوحة تُرسم بيدها (GlassCard): زجاجٌ داكن في إطارٍ مزدوج رفيع */
+/* 4.97: لا لوحةَ ولا إطار — الحقول على المشهد نفسه بخطٍّ ذهبيٍّ تحتها */
 QWidget#gateCard { background: transparent; border: none; }
+QLabel#gateIcon { color: #C9A227; font-size: 18px; min-width: 26px; }
+QFrame#gateRule { background: rgba(201, 162, 39, 110); max-height: 1px;
+                  min-height: 1px; border: none; }
+QLabel#gateGem { color: #E6CF98; font-size: 13px; }
 QWidget#gateHero { background: transparent; }
 QLabel#gateWelcome { color: #F6E7B6; font-size: 30px; font-weight: bold; }
 QLabel#gateFarewell { color: #F6E7B6; font-size: 38px; font-weight: bold; }
@@ -66,31 +74,22 @@ QLabel#gateAsk     { color: #E8D9A8; font-size: 16px; }
 QLabel#gateNote    { color: #A2916A; font-size: 12px; }
 QLabel#gateState   { color: #E3C96B; font-size: 13px; }
 QLabel#gateField   { color: #D9C68E; font-size: 13px; font-weight: bold; }
-/* الحقول غائرة: ظلٌّ في أعلاها وضوءٌ خفيف في أسفلها */
+/* الحقل خطٌّ واحد تحته — لا صندوق: يتّقد ذهباً حين يُكتب فيه */
 QLineEdit#gateInput {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 rgba(0, 0, 0, 95), stop:0.35 rgba(12, 9, 5, 70),
-                stop:1 rgba(255, 246, 220, 16));
-    border: 1px solid rgba(214, 192, 140, 70);
-    border-top: 1px solid rgba(0, 0, 0, 150);
-    border-bottom: 1px solid rgba(255, 240, 205, 50);
-    border-radius: 10px; padding: 11px 13px;
-    color: #FFF6DC; font-size: 15px;
+    background: transparent; border: none;
+    border-bottom: 1px solid rgba(214, 192, 140, 95);
+    border-radius: 0; padding: 9px 4px 8px 4px;
+    color: #FFF6DC; font-size: 18px;
     selection-background-color: #C9A227; selection-color: #17120C;
 }
-QLineEdit#gateInput:focus {
-    border: 1px solid rgba(230, 208, 150, 200);
-    border-top: 1px solid rgba(90, 64, 14, 220);
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 rgba(0, 0, 0, 80), stop:1 rgba(255, 240, 200, 28));
-}
+QLineEdit#gateInput:focus { border-bottom: 2px solid #E6CF98; }
 /* زرٌّ شمبانيّ مطفأ: تدرّجٌ هادئ وحافةٌ رفيعة — بلا بريقٍ معدني */
 QPushButton#gateEnter {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                 stop:0 #E6CF98, stop:1 #C4A25C);
     color: #241A0A; border: 1px solid rgba(255, 244, 214, 120);
-    border-radius: 12px;
-    padding: 13px 34px; font-size: 17px; font-weight: bold;
+    border-radius: 23px;
+    padding: 12px 34px; font-size: 17px; font-weight: bold;
 }
 QPushButton#gateEnter:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -336,7 +335,9 @@ class GateWindow(QtWidgets.QDialog):
             pass
 
         # ── المسرح: مشهدٌ مصوَّر يملأ الشاشة، وكل شيءٍ بعده فوقه (4.68) ──
-        self.stage = CinemaStage(self)
+        # 4.97: صورةٌ ساكنة من المشهد — بلا مقطعٍ يُفكّ ويُرسم ٣٠ مرةً في
+        # الثانية: فالبوابة خفيفةٌ على أي جهاز، والكتابة لا تتقطّع
+        self.stage = CinemaStage(self, animate=False)
         self.stage.lower()
         self.stage.first_paint.connect(self._announce_painted)
 
@@ -374,6 +375,12 @@ class GateWindow(QtWidgets.QDialog):
                 self.setGeometry(scr.geometry())
         except Exception:
             pass
+        # شفّافةٌ قبل أول رسم: تظهر من الشفافية مرةً واحدة فلا يُلمح شيء
+        if animations_on():
+            try:
+                self.setWindowOpacity(0.0)
+            except Exception:
+                pass
 
         # حركةُ الدخول: الشعار ثم الترحيب ثم البطاقة — بتتابعٍ لطيف
         self._anims = []
@@ -458,14 +465,28 @@ class GateWindow(QtWidgets.QDialog):
 
     def _build_card(self):
         """لوحة الدخول — تُبنى عند أوانها لا قبله."""
-        # زجاجٌ داكن في إطارٍ مزدوج رفيع — هادئٌ ساكن، يُرسم بيده
-        self.card = GlassCard(self)
+        # 4.97: لا لوحةَ داخل إطار — الحقول على المشهد نفسه: فاصلٌ ذهبيٌّ
+        # بجوهرة، ثم خطّان يُكتب عليهما بأيقونتيهما، ثم زرٌّ كالكبسولة
+        self.card = QtWidgets.QWidget(self)
         self.card.setObjectName("gateCard")
-        m = GlassCard.MARGIN
-        self.card.setFixedWidth(540 + 2 * m)
+        self.card.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        self.card.setFixedWidth(500)
         lay = QtWidgets.QVBoxLayout(self.card)
-        lay.setContentsMargins(46 + m, 32 + m, 46 + m, 26 + m)
-        lay.setSpacing(8)
+        lay.setContentsMargins(36, 6, 36, 10)
+        lay.setSpacing(10)
+        rule = QtWidgets.QHBoxLayout()
+        rule.setSpacing(10)
+        for i in range(3):
+            if i == 1:
+                gem = QtWidgets.QLabel("◆")
+                gem.setObjectName("gateGem")
+                rule.addWidget(gem)
+                continue
+            ln = QtWidgets.QFrame()
+            ln.setObjectName("gateRule")
+            rule.addWidget(ln, 1)
+        lay.addLayout(rule)
+        lay.addSpacing(6)
 
         self.username = QtWidgets.QLineEdit()
         self.username.setObjectName("gateInput")
@@ -477,21 +498,21 @@ class GateWindow(QtWidgets.QDialog):
         self.password.returnPressed.connect(self.try_login)
         self.username.returnPressed.connect(
             lambda: self.password.setFocus())
-        for w, label in ((self.username, "اسم المستخدم"),
-                         (self.password, "كلمة المرور")):
-            cap = QtWidgets.QLabel(label)
-            cap.setObjectName("gateField")
-            lay.addWidget(cap)
+        for w, icon in ((self.username, "👤"), (self.password, "🔒")):
+            row = QtWidgets.QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(8)
+            ic = QtWidgets.QLabel(icon)
+            ic.setObjectName("gateIcon")
+            row.addWidget(ic, 0, QtCore.Qt.AlignBottom)
+            row.addWidget(w, 1)
             if w is not self.password:
-                lay.addWidget(w)
+                lay.addLayout(row)
+                lay.addSpacing(4)
                 continue
             # عينٌ صغيرة تكشف كلمة المرور ما دامت مضغوطة: الخطأ
             # المطبعي في حقلٍ مُقنَّع يُكتشف بعد الرفض لا قبله،
             # ولوحةُ المفاتيح العربية تجعله أكثر وقوعاً.
-            row = QtWidgets.QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(4)
-            row.addWidget(w, 1)
             self.eye = QtWidgets.QPushButton("👁")
             self.eye.setObjectName("gateEye")
             self.eye.setCursor(QtCore.Qt.PointingHandCursor)
@@ -503,7 +524,7 @@ class GateWindow(QtWidgets.QDialog):
             self.eye.released.connect(
                 lambda: self.password.setEchoMode(
                     QtWidgets.QLineEdit.Password))
-            row.addWidget(self.eye, 0)
+            row.addWidget(self.eye, 0, QtCore.Qt.AlignBottom)
             lay.addLayout(row)
 
         self.remember = QtWidgets.QCheckBox("تذكّر اسمي على هذا الجهاز")
@@ -575,23 +596,24 @@ class GateWindow(QtWidgets.QDialog):
         super().showEvent(e)
         self.stage.setGeometry(self.rect())
         self._build_overlay()
+        # 4.97: المشهد كاملاً قبل أول إطار — والنافذة كلها تظهر من
+        # الشفافية مرةً واحدة (يرسمها ويندوز فتبقى سلسة)
+        self.hero.show()
+        self._ensure_card()
+        self.card.show()
+        self._card_shown = True
+        self.stage.intro = 1.0
+        self._apply_hero(1.0)
+        self._clear_effects()
+        self._apply_card(1.0)
+        self._card_done()
+        self._layout_scene()
+        self.stage.start()
+        self._start_prepare()
         if not animations_on():
-            self.hero.show()
-            self._ensure_card()
-            self.card.show()
-            self.stage.intro = 1.0
-            self._apply_hero(1.0)
-            self._apply_card(1.0)
-            self._layout_scene()
-            self._start_prepare()
             QtCore.QTimer.singleShot(0, self.revealed.emit)
             return
-        self.hero.hide()
-        self.stage.intro = 0.0
-        self.stage.start()
         self._fade_in()
-        QtCore.QTimer.singleShot(HERO_DELAY, self._begin_hero)
-        QtCore.QTimer.singleShot(CARD_DELAY, self._begin_card)
 
     def _fade_in(self):
         """البوابة تظهر من الشفافية مرةً واحدة — لا تنبثق دفعةً.
@@ -604,7 +626,6 @@ class GateWindow(QtWidgets.QDialog):
             return
         self._faded = True
         try:
-            self.setWindowOpacity(0.0)
             anim = QtCore.QPropertyAnimation(self, b"windowOpacity", self)
             anim.setStartValue(0.0)
             anim.setEndValue(1.0)
@@ -1143,6 +1164,9 @@ class GateWindow(QtWidgets.QDialog):
         if not animations_on():
             self._exit_done()
             return
+        # 4.97: لا موجةَ ولا اقترابَ قبل البناء (كانا يؤخّران الفتح ثانيةً
+        # ويُعيدان تحجيم المشهد في كل إطار): تحيّةٌ ساكنة تُرسم مرةً، ثم
+        # يُبنى النظام خلفها ويتمازجان
         for w in (self.card, self.hero):
             if w is not None:
                 w.hide()
@@ -1155,10 +1179,11 @@ class GateWindow(QtWidgets.QDialog):
         self.farewell.move(int(self._block_x() - self.farewell.width() / 2),
                            int(self.height() * 0.44
                                - self.farewell.height() / 2))
-        self._fade_text(self.farewell, "#F6E7B6", 0.0)
+        self._fade_text(self.farewell, "#F6E7B6", 1.0)
         self.farewell.show()
         self.farewell.raise_()
-        self._exit.start()
+        self.farewell.repaint()
+        QtCore.QTimer.singleShot(40, self._exit_done)
 
     def _on_exit(self, v):
         if hasattr(self.stage, "set_exit"):

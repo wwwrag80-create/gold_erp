@@ -3466,12 +3466,17 @@ def main():
           and "قاعدة البيانات" in _steps9[0][0],
           f"{len(_steps9)} خطوات")
     _init9 = _insp9.getsource(_gw9.GateWindow.__init__)
-    check("لوحة الدخول لا تُبنى أصلاً قبل أوانها فلا تومض",
+    # 4.97: المشهد يُبنى كاملاً قبل أول إطار والنافذة شفّافةٌ حتى تظهر
+    # مرةً واحدة — فلا يومض شيءٌ ولا تتابعَ يتقطّع
+    _show9 = _insp9.getsource(_gw9.GateWindow.showEvent)
+    check("البوابة تظهر من الشفافية مرةً واحدة بمشهدها كاملاً فلا تومض",
           "self.card = None" in _init9
           and "self.hero.hide()" in _init9
+          and "setWindowOpacity(0.0)" in _init9
           and "QDialog#gateWindow { background:" in _gw9.GATE_QSS
-          and _gw9.CARD_DELAY > _gw9.HERO_DELAY + 800,
-          f"الترحيب {_gw9.HERO_DELAY}مث · اللوحة {_gw9.CARD_DELAY}مث")
+          and "self._ensure_card()" in _show9 and "_fade_in" in _show9
+          and _gw9.FADE_IN <= 400,
+          f"الظهور {_gw9.FADE_IN}مث")
 
     step("43) تعديل تاريخ العملية ينقلها وقيدَها معاً")
     # كشف الحساب يرتّب بالتاريخ. فلو عُدّل تاريخ مستندٍ ولم ينتقل
@@ -7376,16 +7381,39 @@ def main():
         _txt = _w88.btn_close.text()
         _w88._close_screen()
         _QW88.QApplication.processEvents()
+        # 4.97: الشاشة المغادَرة تبقى مبنيّةً (فتحٌ فوري لاحقاً)
         check("«رجوع» يعود إلى الشاشة السابقة حيّةً كما تُركت",
               _w88._current_row == _gl and _alive
               and _w88._items[_w88.gl_screen].text(0)[:20] in _txt
-              and not _w88.sales_screen.built,
+              and _w88.sales_screen.built,
               f"{_w88._current_row}/{_gl} · {_txt}")
         _w88._close_screen()
         _QW88.QApplication.processEvents()
-        check("ومن شاشةٍ فُتحت من القائمة يعود إلى الرئيسية",
+        check("ومن شاشةٍ فُتحت من القائمة يعود إلى الرئيسية — والشاشتان"
+              " باقيتان جاهزتين لفتحٍ فوري",
               _w88._current_row == 0 and not _w88._history
-              and not _w88.gl_screen.built)
+              and _w88.gl_screen.built and _w88.sales_screen.built)
+        # الأقدم استعمالاً يُهدم إن زادت المبنيّة عن الحدّ
+        _cap88 = _w88.KEEP_ALIVE
+        _w88.KEEP_ALIVE = 1
+        _w88.switch(_gl)
+        _QW88.QApplication.processEvents()
+        check("والأقدم استعمالاً يُهدم إن زادت الشاشات المبنيّة عن الحدّ",
+              _w88.gl_screen.built and not _w88.sales_screen.built,
+              str(_w88._alive))
+        _w88.KEEP_ALIVE = _cap88
+        # والتجهيز المسبق: الأكثر استعمالاً أولاً، ثم دورة اليوم
+        _w88._use = {_w88._screen_key(_sa): 5}
+        _ord88 = _w88._prebuild_order()
+        check("التجهيز المسبق: الأكثر فتحاً أولاً ثم شاشات دورة اليوم",
+              _ord88 and _ord88[0] == _sa
+              and len(_ord88) <= _w88.PREBUILD, str(_ord88))
+        _w88._last_input = 0.0
+        _w88._pre_q = [_sa]
+        _w88._pre_timer = None
+        _w88._prebuild_step()
+        check("وخطوة التجهيز تبني الشاشة وتحمّل بياناتها في الخلفية",
+              _w88.sales_screen.built)
         _w88.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
@@ -8013,9 +8041,14 @@ def main():
         else:
             os.environ["GOLD_ERP_REDUCE_MOTION"] = _old100
         _src100 = _in100.getsource(_gw100.GateWindow.__init__)
-        check("والبوابة تعرض المشهد خلفيةً، واللوحة يمين الشاشة العريضة",
-              "CinemaStage(self)" in _src100 and _gw100.BLOCK_X > 0.6
-              and _cs100.CinemaStage.uses_overlay is False)
+        # 4.97: صورته الساكنة خلفيةً (خفيفةٌ على أي جهاز) — والحقول بلا لوحة
+        check("والبوابة تعرض المشهد خلفيةً ساكنة، والحقول يمين الشاشة العريضة"
+              " بلا لوحةٍ داخل إطار",
+              "CinemaStage(self, animate=False)" in _src100
+              and _gw100.BLOCK_X > 0.6
+              and _cs100.CinemaStage.uses_overlay is False
+              and "GlassCard" not in _in100.getsource(
+                  _gw100.GateWindow._build_card))
         _em100 = _gw100._emblem(96)
         check("وشعار المصنع الجديد خاتمٌ مصوَّر لا رسمٌ",
               _cs100.asset("emblem.png") is not None and not _em100.isNull())
@@ -8923,6 +8956,11 @@ def main():
           and "jvOrient" in _hv117 and "jvZoom" in _hv117
           and "translate='no'" in _hv117 and "jv-bar" not in _hp117
           and callable(_pv117.launch) and _pv117.VIEWER_CSS in _hv117)
+    # 4.97: تظليلٌ ونصٌّ في أي مكان من الورقة — يُطبعان معها
+    check("عارض الطباعة: تظليلٌ بالسحب ونصٌّ بالنقر وتراجعٌ ومسح",
+          all(k in _hv117 for k in ("jvMode('hl')", "jvMode('tx')",
+                                    "jv-box", "jv-note", "jvUndo",
+                                    "jvClear", "contentEditable")))
     import re as _re117
     _w117 = [int(x) for x in _re117.findall(
         r'<th width="(\d+)%"', _hv117)]

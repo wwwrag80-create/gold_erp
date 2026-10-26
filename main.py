@@ -140,16 +140,20 @@ def wire_gate(app, gate, main_window_factory=None):
             win.raise_()
             win.activateWindow()
             gate.close()
+            try:
+                win.play_entrance()        # يبدأ تجهيز الشاشات (4.97)
+            except Exception:
+                pass
             return
         up = QtCore.QPropertyAnimation(win, b"windowOpacity", win)
         up.setStartValue(0.0)
         up.setEndValue(1.0)
-        up.setDuration(700)
+        up.setDuration(380)        # 4.97: تمازجٌ أقصر وأسلس
         up.setEasingCurve(QtCore.QEasingCurve.OutCubic)
         down = QtCore.QPropertyAnimation(gate, b"windowOpacity", gate)
         down.setStartValue(1.0)
         down.setEndValue(0.0)
-        down.setDuration(520)
+        down.setDuration(300)
         down.setEasingCurve(QtCore.QEasingCurve.InCubic)
         down.finished.connect(gate.close)
         up.start()
