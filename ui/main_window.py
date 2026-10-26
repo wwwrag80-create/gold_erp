@@ -525,14 +525,46 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ══════════ دخولُ الواجهة ══════════
     def play_entrance(self):
-        """بعد البوابة: لا حركة على الواجهة نفسها (4.97).
+        """حركةُ وصولٍ قصيرة بعد البوابة — انزلاقٌ لا مؤثّر (4.98).
 
-        كانت القائمة الجانبية تنزلق والشاشة تصعد بمؤثّر شفافيةٍ على كلٍّ
-        منهما — ومؤثّر الشفافية يرسم الواجهة كلها صورةً في كل إطار، فيأتي
-        الوصول متقطّعاً على أجهزة المصانع. والتمازج بين البوابة والنظام
-        (شفافية النافذة نفسها، يرسمها ويندوز) يكفي ويبقى سلساً. وبعدها
-        يبدأ تجهيز الشاشات الأكثر استعمالاً في أوقات الفراغ."""
+        القائمة الجانبية تنزلق من اليمين والشاشة تصعد قليلاً، في أثناء
+        تمازج النافذة مع البوابة. **تحريكُ موضعٍ فقط**: كان مع كلٍّ منهما
+        مؤثّرُ شفافيةٍ يرسم الواجهة كلها صورةً في كل إطار فيتقطّع الوصول —
+        والشفافية تأتي من تمازج النافذة نفسها (يرسمه ويندوز). ثم يبدأ تجهيز
+        الشاشات الأكثر استعمالاً في أوقات الفراغ."""
         self._start_prebuild()
+        try:
+            from ui.widgets.gold_stage import animations_on
+            if not animations_on():
+                return
+        except Exception:
+            return
+        self._entrance = []
+        for w, dx, dy, delay, ms in ((self.side_panel, 34, 0, 0, 520),
+                                     (self.stack, 0, 20, 90, 560)):
+            if w is None or not w.isVisible():
+                continue
+            base = w.pos()
+            anim = QtCore.QVariantAnimation(self)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setDuration(ms)
+            anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+
+            def _step(v, _w=w, _b=base, _dx=dx, _dy=dy):
+                f = 1.0 - float(v)
+                _w.move(int(_b.x() + _dx * f), int(_b.y() + _dy * f))
+
+            def _end(_w=w, _b=base):
+                try:
+                    _w.move(_b)
+                except Exception:
+                    pass
+            anim.valueChanged.connect(_step)
+            anim.finished.connect(_end)
+            _step(0.0)
+            QtCore.QTimer.singleShot(delay, anim.start)
+            self._entrance.append(anim)
 
     # ══════════ تخصيص القائمة الجانبية ══════════
     def _nav_layout_path(self):

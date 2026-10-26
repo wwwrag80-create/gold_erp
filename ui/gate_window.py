@@ -47,13 +47,17 @@ ASK_LOGIN = "يرجى تسجيل الدخول"
 # توقيتُ المشهد بالمللي ثانية — الترحيب يُقرأ قبل أن تُدعى اليد
 # للكتابة. أقلُّ من هذا يجعل اللوحة تزاحم الجملة، وأكثرُ منه يجعل
 # من يفتح النظام عشرين مرةً في اليوم ينتظر بلا طائل.
-# 4.97: لا تتابعَ مؤجَّلاً — المشهد كاملاً (الترحيب وحقول الدخول) يُبنى قبل
-# الظهور، والبوابة كلها تظهر من الشفافية **مرةً واحدة**. شفافية النافذة
-# يرسمها ويندوز نفسه فتبقى سلسةً على أي جهاز؛ وكان التتابع (ترحيبٌ ثم لوحةٌ
-# تصعد بموجة) يلوّن النصوص ويرسم اللوحة صورةً في كل إطار فيتقطّع.
+# 4.98: الحركة باقية — لكن بما يرسمه الجهاز بلا كلفة:
+#  · المشهد الذهبي المتحرّك يُفكّ ويُجهَّز في خيطٍ خلفي (`CinemaStage`).
+#  · البوابة تظهر من الشفافية (يرسمها ويندوز نفسه).
+#  · الترحيب ثم حقول الدخول **ينزلقان** إلى مكانهما — تحريكُ موضعٍ لا
+#    إعادةُ تلوينٍ ولا رسمٌ للّوحة صورةً في كل إطار (وهما ما كان يقطّعها).
+#  · وأثناء التحقق خطٌّ ذهبيٌّ يسري تحت الزر، وبعده المشهد يعتم ويقترب
+#    والتحية تظهر، ثم يُبنى النظام ويتمازجان.
 HERO_DELAY = 0
-CARD_DELAY = 0
-FADE_IN = 320               # ظهور البوابة نفسها من الشفافية
+CARD_DELAY = 140            # الحقول تلحق الترحيب بلحظة
+FADE_IN = 450               # ظهور البوابة نفسها من الشفافية
+SLIDE = 26                  # مسافة الانزلاق بالبكسل
 
 GATE_QSS = """
 /* أولُ إطارٍ يُرسم قبل أن يبدأ المسرح: لو بقي على لون النظام
@@ -296,6 +300,45 @@ class _CardKeys(QtCore.QObject):
         return False
 
 
+class _GoldRun(QtWidgets.QWidget):
+    """خطٌّ ذهبيٌّ رفيع يسري فيه ضوءٌ ما دام الدخول جارياً (4.98).
+
+    رسمٌ صغير (٣ بكسلات) بمؤقّتٍ لا يعمل إلا وهو ظاهر — حركةٌ تقول
+    «يجري التحقق» بلا كلفة، بدل زرٍّ ساكنٍ يُظنّ معه البرنامج متوقّفاً."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(3)
+        self._t = QtCore.QElapsedTimer()
+        self._timer = QtCore.QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self.update)
+        self.setVisible(False)
+
+    def run(self, on):
+        if on:
+            self._t.start()
+            self.setVisible(True)
+            self._timer.start()
+        else:
+            self._timer.stop()
+            self.setVisible(False)
+
+    def paintEvent(self, _e):
+        w, h = self.width(), self.height()
+        p = QtGui.QPainter(self)
+        p.fillRect(0, 0, w, h, QtGui.QColor(201, 162, 39, 45))
+        ms = self._t.elapsed() if self._t.isValid() else 0
+        seg = w * 0.32
+        x = (ms % 1300) / 1300.0 * (w + seg) - seg
+        g = QtGui.QLinearGradient(x, 0, x + seg, 0)
+        g.setColorAt(0.0, QtGui.QColor(230, 207, 152, 0))
+        g.setColorAt(0.5, QtGui.QColor(246, 231, 182, 235))
+        g.setColorAt(1.0, QtGui.QColor(230, 207, 152, 0))
+        p.fillRect(QtCore.QRectF(x, 0, seg, h), QtGui.QBrush(g))
+        p.end()
+
+
 class GateWindow(QtWidgets.QDialog):
     """شاشة الترحيب والدخول — تُعاد منها الجلسة في `self.user`."""
 
@@ -335,9 +378,9 @@ class GateWindow(QtWidgets.QDialog):
             pass
 
         # ── المسرح: مشهدٌ مصوَّر يملأ الشاشة، وكل شيءٍ بعده فوقه (4.68) ──
-        # 4.97: صورةٌ ساكنة من المشهد — بلا مقطعٍ يُفكّ ويُرسم ٣٠ مرةً في
-        # الثانية: فالبوابة خفيفةٌ على أي جهاز، والكتابة لا تتقطّع
-        self.stage = CinemaStage(self, animate=False)
+        # المقطع الذهبي يدور خلف كل شيء — يُفكّ ويُجهَّز بمقاس الشاشة في خيطٍ
+        # خلفي ويُعرض بالساعة، فلا يزاحم الكتابة (و«تقليل الحركة» يُحترم)
+        self.stage = CinemaStage(self)
         self.stage.lower()
         self.stage.first_paint.connect(self._announce_painted)
 
@@ -387,12 +430,12 @@ class GateWindow(QtWidgets.QDialog):
         self._intro = QtCore.QVariantAnimation(self)
         self._intro.setStartValue(0.0)
         self._intro.setEndValue(1.0)
-        self._intro.setDuration(1400)
+        self._intro.setDuration(900)
         self._intro.setEasingCurve(QtCore.QEasingCurve.OutCubic)
         self._intro.valueChanged.connect(self._on_intro)
         # المؤثّرات تُرفع عند اكتمال الظهور: مؤثّرُ شفافيةٍ باقٍ على
         # حقلٍ نشط يعيد رسمَه في كل نبضة مؤشّر بلا داعٍ.
-        self._intro.finished.connect(self._clear_effects)
+        self._intro.finished.connect(self._layout_scene)
 
         # الموجة: حلقاتٌ تتّسع من موضع البطاقة لحظةَ ظهورها
         self._ripple = QtCore.QVariantAnimation(self)
@@ -408,7 +451,7 @@ class GateWindow(QtWidgets.QDialog):
         self._card_in = QtCore.QVariantAnimation(self)
         self._card_in.setStartValue(0.0)
         self._card_in.setEndValue(1.0)
-        self._card_in.setDuration(760)
+        self._card_in.setDuration(820)
         self._card_in.setEasingCurve(QtCore.QEasingCurve.OutCubic)
         self._card_in.valueChanged.connect(self._apply_card)
         self._card_in.finished.connect(self._card_done)
@@ -416,7 +459,7 @@ class GateWindow(QtWidgets.QDialog):
         self._exit = QtCore.QVariantAnimation(self)
         self._exit.setStartValue(0.0)
         self._exit.setEndValue(1.0)
-        self._exit.setDuration(820)
+        self._exit.setDuration(560)
         self._exit.setEasingCurve(QtCore.QEasingCurve.InCubic)
         self._exit.valueChanged.connect(self._on_exit)
         self._exit.finished.connect(self._exit_done)
@@ -549,6 +592,9 @@ class GateWindow(QtWidgets.QDialog):
         self.btn.setEnabled(self._ready)
         self.btn.clicked.connect(self.try_login)
         lay.addWidget(self.btn)
+        # خطٌّ ذهبيٌّ يسري تحت الزر ما دام التحقق جارياً (4.98)
+        self.busy_line = _GoldRun(self.card)
+        lay.addWidget(self.busy_line)
 
         quit_ = QtWidgets.QPushButton("إغلاق البرنامج")
         quit_.setObjectName("gateQuit")
@@ -596,24 +642,33 @@ class GateWindow(QtWidgets.QDialog):
         super().showEvent(e)
         self.stage.setGeometry(self.rect())
         self._build_overlay()
-        # 4.97: المشهد كاملاً قبل أول إطار — والنافذة كلها تظهر من
-        # الشفافية مرةً واحدة (يرسمها ويندوز فتبقى سلسة)
+        # المشهد كاملاً قبل أول إطار (فلا يومض شيء) — ثم الحركة: النافذة
+        # تظهر من الشفافية، والمقطع يخرج من العتمة، والترحيب ثم الحقول
+        # ينزلقان إلى مكانهما
         self.hero.show()
         self._ensure_card()
         self.card.show()
         self._card_shown = True
-        self.stage.intro = 1.0
         self._apply_hero(1.0)
         self._clear_effects()
-        self._apply_card(1.0)
-        self._card_done()
-        self._layout_scene()
-        self.stage.start()
-        self._start_prepare()
         if not animations_on():
+            self._hero_k = 1.0
+            self._apply_card(1.0)
+            self._card_done()
+            self.stage.intro = 1.0
+            self.stage.start()
+            self._start_prepare()
             QtCore.QTimer.singleShot(0, self.revealed.emit)
             return
+        self._hero_k = 0.0
+        self._card_k = 0.0
+        self._layout_scene()
+        self.stage.intro = 0.0
+        self.stage.start()
         self._fade_in()
+        self._intro.start()
+        QtCore.QTimer.singleShot(CARD_DELAY, self._card_in.start)
+        self._start_prepare()
 
     def _fade_in(self):
         """البوابة تظهر من الشفافية مرةً واحدة — لا تنبثق دفعةً.
@@ -738,14 +793,16 @@ class GateWindow(QtWidgets.QDialog):
             card_h = self.card.height()
         # نسبة ظهور اللوحة: 0 = الترحيب وحده، 1 = الكتلة كاملة
         k = getattr(self, "_card_k", 0.0)
-        total = hero_h + (gap + card_h) * k
+        # الكتلة كاملةً مكانُها ثابت (4.98) — والانزلاق إزاحةٌ تتلاشى
+        total = hero_h + gap + card_h
         top = (h - total) / 2.0 - h * 0.015
         cx = self._block_x()
+        hk = getattr(self, "_hero_k", 1.0)
         self.hero.move(int(cx - self.hero.width() / 2),
-                       int(max(0.0, top)))
+                       int(max(0.0, top + (1.0 - hk) * SLIDE)))
         self.hero.raise_()
         if self.card is not None:
-            cy = top + hero_h + gap + (1.0 - k) * 26
+            cy = top + hero_h + gap + (1.0 - k) * SLIDE * 1.3
             self.card.move(int(cx - self.card.width() / 2),
                            int(max(0.0, cy)))
             self.card.raise_()
@@ -790,8 +847,9 @@ class GateWindow(QtWidgets.QDialog):
             pass
 
     def _on_intro(self, v):
-        self.stage.intro = float(v)
-        self._apply_hero(float(v))
+        """الترحيب ينزلق صاعداً إلى مكانه — موضعٌ يتغيّر لا لونٌ يُعاد."""
+        self._hero_k = float(v)
+        self._layout_scene()
 
     def _apply_hero(self, v):
         """ظهور الترحيب: الشعار أولاً، فالتحية، فالعنوان، فالدعوة.
@@ -813,10 +871,9 @@ class GateWindow(QtWidgets.QDialog):
         self.stage.update()
 
     def _apply_card(self, v):
-        """صعودُ اللوحة: تنزاح الكتلة وتظهر اللوحة معها."""
+        """حقول الدخول تنزلق صاعدةً تحت الترحيب — بلا مؤثّر شفافية (كان
+        يرسم الحقول صورةً في كل إطار فيتقطّع الصعود)."""
         self._card_k = max(0.0, min(1.0, float(v)))
-        if self.card is not None:
-            self._set_opacity(self.card, self._card_k)
         self._layout_scene()
 
     def _card_done(self):
@@ -1027,6 +1084,7 @@ class GateWindow(QtWidgets.QDialog):
             return
         self._busy = True
         self.btn.setEnabled(False)
+        self.busy_line.run(True)
         self._btn_text = self.btn.text()
         self.btn.setText("جارٍ الدخول…")
         for w in (self.username, self.password, self.remember):
@@ -1056,6 +1114,10 @@ class GateWindow(QtWidgets.QDialog):
                          name="GateSignIn").start()
 
     def _unlock_card(self):
+        try:
+            self.busy_line.run(False)
+        except Exception:
+            pass
         for w in (self.username, self.password, self.remember):
             w.setEnabled(True)
         self.btn.setText(getattr(self, "_btn_text", "دخول"))
@@ -1164,9 +1226,8 @@ class GateWindow(QtWidgets.QDialog):
         if not animations_on():
             self._exit_done()
             return
-        # 4.97: لا موجةَ ولا اقترابَ قبل البناء (كانا يؤخّران الفتح ثانيةً
-        # ويُعيدان تحجيم المشهد في كل إطار): تحيّةٌ ساكنة تُرسم مرةً، ثم
-        # يُبنى النظام خلفها ويتمازجان
+        # 4.98: المشهد يعتم ويقترب (يُجهَّز في الخيط الخلفي) والتحيّة تتّضح
+        # بمؤثّر شفافيةٍ على سطرها وحده — ثم يُبنى النظام خلفها ويتمازجان
         for w in (self.card, self.hero):
             if w is not None:
                 w.hide()
@@ -1179,20 +1240,24 @@ class GateWindow(QtWidgets.QDialog):
         self.farewell.move(int(self._block_x() - self.farewell.width() / 2),
                            int(self.height() * 0.44
                                - self.farewell.height() / 2))
-        self._fade_text(self.farewell, "#F6E7B6", 1.0)
+        self._set_opacity(self.farewell, 0.0)
         self.farewell.show()
         self.farewell.raise_()
-        self.farewell.repaint()
-        QtCore.QTimer.singleShot(40, self._exit_done)
+        if getattr(self.stage, "mode", "movie") != "movie":
+            # صورةٌ ساكنة: اقترابها يُعيد تحجيمها كل إطار — فلا اقتراب
+            self._set_opacity(self.farewell, 1.0)
+            QtCore.QTimer.singleShot(60, self._exit_done)
+            return
+        self._exit.start()
 
     def _on_exit(self, v):
         if hasattr(self.stage, "set_exit"):
             self.stage.set_exit(float(v))   # تعتيمٌ واقترابٌ خفيف
         else:
             self.stage.exit = float(v)
-        # التحيّة تتّضح في النصف الثاني من الموجة، حين يهدأ المشهد
-        self._fade_text(self.farewell, "#F6E7B6",
-                        max(0.0, min(1.0, (float(v) - 0.45) / 0.45)))
+        # التحيّة تتّضح في النصف الثاني، حين يهدأ المشهد
+        self._set_opacity(self.farewell,
+                          max(0.0, min(1.0, (float(v) - 0.35) / 0.5)))
         self.stage.update()
 
     def _exit_done(self):

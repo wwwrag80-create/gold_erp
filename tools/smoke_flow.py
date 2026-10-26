@@ -3475,7 +3475,7 @@ def main():
           and "setWindowOpacity(0.0)" in _init9
           and "QDialog#gateWindow { background:" in _gw9.GATE_QSS
           and "self._ensure_card()" in _show9 and "_fade_in" in _show9
-          and _gw9.FADE_IN <= 400,
+          and "_intro.start" in _show9 and _gw9.FADE_IN <= 500,
           f"الظهور {_gw9.FADE_IN}مث")
 
     step("43) تعديل تاريخ العملية ينقلها وقيدَها معاً")
@@ -8041,10 +8041,13 @@ def main():
         else:
             os.environ["GOLD_ERP_REDUCE_MOTION"] = _old100
         _src100 = _in100.getsource(_gw100.GateWindow.__init__)
-        # 4.97: صورته الساكنة خلفيةً (خفيفةٌ على أي جهاز) — والحقول بلا لوحة
-        check("والبوابة تعرض المشهد خلفيةً ساكنة، والحقول يمين الشاشة العريضة"
-              " بلا لوحةٍ داخل إطار",
-              "CinemaStage(self, animate=False)" in _src100
+        # 4.98: المقطع المتحرّك خلفيةً (يُجهَّز في خيطٍ خلفي) — والحقول بلا
+        # لوحة، والحركة انزلاقٌ لا مؤثّر شفافيةٍ على الحقول
+        check("والبوابة تعرض المشهد المتحرّك خلفيةً، والحقول يمين الشاشة"
+              " العريضة بلا لوحةٍ داخل إطار",
+              "CinemaStage(self)" in _src100
+              and "_set_opacity" not in _in100.getsource(
+                  _gw100.GateWindow._apply_card)
               and _gw100.BLOCK_X > 0.6
               and _cs100.CinemaStage.uses_overlay is False
               and "GlassCard" not in _in100.getsource(
