@@ -211,8 +211,25 @@ if(window.matchMedia){var m=window.matchMedia('print');
 })();</script>"""
 
 
-def build_page(doc_type, doc_id, auto_print=True, **kw):
-    """يبني صفحة HTML كاملة جاهزة للطباعة من المتصفح."""
+_TITLES = {"invoice": "فاتورة", "invoices": "فاتورة", "voucher": "سند",
+           "vouchers": "سند", "statement": "كشف حساب",
+           "income_statement": "قائمة الدخل", "customer_board":
+           "العملاء — المبيعات والسداد", "aging": "أعمار الديون",
+           "dash_panel": "لوحة التحكم", "invoice_models": "موديلات الفاتورة"}
+
+
+def _title(doc_type):
+    co = str(getattr(config, "COMPANY_NAME", "") or "").strip()
+    t = _TITLES.get(doc_type, "معاينة الطباعة")
+    return f"{t} — {co}" if co else t
+
+
+def build_page(doc_type, doc_id, auto_print=True, viewer=False, **kw):
+    """يبني صفحة HTML كاملة جاهزة للطباعة من المتصفح.
+
+    `viewer` (4.96): صفحة «عارض الطباعة» — شريط أدواتٍ عربي ثابت أعلاها
+    (طباعة · PDF · عمودي/أفقي · تكبير · إغلاق) والورقة على خلفيةٍ رمادية.
+    و`auto_print` يفتح نافذة الطباعة عند التحميل (الطباعة المباشرة)."""
     from services import print_manager
     # المتصفح يطبّق RTL صحيحاً، فتُكتب الأعمدة بترتيبها الطبيعي
     prev = print_manager.RTL_ORDER_OVERRIDE
@@ -226,7 +243,17 @@ def build_page(doc_type, doc_id, auto_print=True, **kw):
     setup["family"] = print_fonts.family_css()
     toolbar = ""
     script = ""
-    if auto_print:
+    extra_css = ""
+    if viewer:
+        from services import print_viewer
+        extra_css = print_viewer.VIEWER_CSS
+        toolbar = print_viewer.toolbar(
+            _title(doc_type), landscape="landscape" in setup["size"])
+        if auto_print:
+            script = ("<script>window.addEventListener('load',function(){"
+                      "setTimeout(function(){window.print();},450);});"
+                      "</script>")
+    elif auto_print:
         toolbar = (
             '<div class="toolbar noprint">'
             '<button onclick="window.print()">🖨 طباعة</button>'
@@ -235,25 +262,34 @@ def build_page(doc_type, doc_id, auto_print=True, **kw):
             '</div>')
         script = ("<script>window.addEventListener('load',function(){"
                   "setTimeout(function(){window.print();},350);});</script>")
+    title = _title(doc_type) if viewer else config.COMPANY_NAME
     return (
         "<!DOCTYPE html>\n"
-        "<html dir='rtl' lang='ar'><head><meta charset='utf-8'>"
-        f"<title>{config.COMPANY_NAME}</title>"
+        "<html dir='rtl' lang='ar' translate='no'><head><meta charset='utf-8'>"
+        "<meta name='google' content='notranslate'>"
+        f"<title>{title}</title>"
         + print_fonts.style_block()
-        + (PRINT_CSS % setup) +
+        + (PRINT_CSS % setup) + extra_css +
         f"</head><body dir='rtl'>{toolbar}"
         f"<div class='sheet'><div class='sheet-body'>{inner}</div></div>"
         f"{FIT_SCRIPT}{script}</body></html>")
 
 
-def open_document(doc_type, doc_id, auto_print=True, **kw):
-    """يحفظ المستند صفحةً مؤقتة ويفتحها في المتصفح الافتراضي للطباعة."""
-    html = build_page(doc_type, doc_id, auto_print=auto_print, **kw)
+def open_document(doc_type, doc_id, auto_print=False, **kw):
+    """يحفظ المستند صفحةً مؤقتة ويفتحها في **عارض الطباعة** (4.96) — نافذة
+    النظام الخاصة بلا شريط متصفح (`print_viewer`). والمتصفح الافتراضي
+    احتياطٌ أخير إن لم يوجد محرّك العارض."""
+    from services import print_viewer
+    use_viewer = print_viewer.available()
+    html = build_page(doc_type, doc_id, auto_print=auto_print,
+                      viewer=use_viewer, **kw)
     out_dir = Path(tempfile.gettempdir()) / "jadeite_print"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{doc_type}_{doc_id}.html"
     path.write_text(html, encoding="utf-8")
     url = path.resolve().as_uri()
+    if use_viewer and print_viewer.launch(path):
+        return str(path)
 
     # ══ فتح المتصفح في خيط منفصل ══
     # `webbrowser.open_new_tab` **محجوب**: ينتظر إقلاع المتصفح كاملاً
@@ -405,6 +441,9 @@ def open_compare(edit_id):
     path = out_dir / f"doc_edit_{int(edit_id)}.html"
     path.write_text(html, encoding="utf-8")
     url = path.resolve().as_uri()
+    from services import print_viewer
+    if print_viewer.launch(path):            # عارض الطباعة (4.96)
+        return str(path)
 
     def _launch():
         try:

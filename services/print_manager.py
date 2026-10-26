@@ -460,24 +460,52 @@ def _krate(v):
 
 
 # ══════════════════════ قوالب المستندات ══════════════════════
-def _model_thumb(model_no, h=46):
-    """صورة الموديل مصغّرةً لخانته في الفاتورة (4.95) — "" إن لم تكن له.
+_PTHUMB = {}
 
-    مصغّرةٌ مضغوطة (`models_web.thumb`) لا الصورة الأصلية: صورة الهاتف
-    ملايين النقاط، وعشرات الأسطر بها تُثقل المعاينة والطباعة."""
+
+def _model_thumb(model_no, h=44):
+    """صورة الموديل لخانته في الفاتورة (4.95) — **بخلفيةٍ شفافة** (4.96).
+
+    كانت مصغّرةً JPEG: والصورة المفرّغة الخلفية (PNG شفاف) تُملأ بالأبيض،
+    فتظهر مربعاً أبيض في سطرٍ مظلَّل. الآن PNG يحفظ الشفافية، والخلفية
+    البيضاء المتصلة بحواف الصورة (صورة على ورقٍ أبيض) تصير شفافةً كذلك،
+    وتُقصّ الحواف الفارغة — فتأخذ الصورة لون خانتها كأنها مرسومةٌ فيها.
+    "" إن لم تكن له صورة."""
     try:
         import base64
+        import io
+        import os
+        from PIL import Image, ImageDraw, ImageOps
         from models import models_catalog as mc
-        from services import models_web as mw
         p = mc.image_path(model_no) if model_no else None
         if p is None:
             return ""
-        data, mime = mw.thumb(p, 220)
-        if not data:
-            return ""
-        uri = (f"data:{mime or 'image/jpeg'};base64,"
-               + base64.b64encode(data).decode("ascii"))
-        return f'<img src="{uri}" height="{int(h)}">'
+        st = os.stat(p)
+        key = (str(p), st.st_mtime_ns, st.st_size, int(h))
+        uri = _PTHUMB.get(key)
+        if uri is None:
+            im = ImageOps.exif_transpose(Image.open(p)).convert("RGBA")
+            # بضعفَي المقاس المطبوع: حادّةٌ على الورق، خفيفةٌ في الملف
+            im.thumbnail((int(h) * 4, int(h) * 3))
+            w, hh = im.size
+            if im.getchannel("A").getextrema()[0] == 255:
+                for xy in ((0, 0), (w - 1, 0), (0, hh - 1), (w - 1, hh - 1)):
+                    px = im.getpixel(xy)
+                    if px[3] and min(px[:3]) >= 222:
+                        ImageDraw.floodfill(im, xy, (255, 255, 255, 0),
+                                            thresh=42)
+            box = im.getchannel("A").getbbox()
+            if box:
+                im = im.crop(box)
+            buf = io.BytesIO()
+            im.save(buf, "PNG", optimize=True)
+            uri = ("data:image/png;base64,"
+                   + base64.b64encode(buf.getvalue()).decode("ascii"))
+            if len(_PTHUMB) > 300:
+                _PTHUMB.clear()
+            _PTHUMB[key] = uri
+        return (f'<img src="{uri}" height="{int(h)}" style="height:{int(h)}px;'
+                ' max-width:100%; background:transparent; border:0;">')
     except Exception:
         return ""
 
@@ -558,7 +586,8 @@ def _tpl_invoice(conn, invoice_id):
         # 4.95: صورة الموديل بدل رقمه — والرقم لمن لا صورة له
         _pic = _model_thumb(_mn) if _mn != "—" else ""
         body_rows += "<tr>" + cells(
-            (f'<td align="center" style="padding:1px;">{_pic}</td>'
+            (f'<td align="center" style="padding:1px 2px;'
+             f' background-clip:padding-box;">{_pic}</td>'
              if _pic else tdw(en(_mn))),
             tdw(en(wo["work_order_no"] if wo else "—")),
             tdw(_gw(reg)), tdw(_gw(standing)), tdw(_gw(gold)),
@@ -572,15 +601,19 @@ def _tpl_invoice(conn, invoice_id):
     if cust:
         gold_bal, cash_bal = account_balance(conn, cust["account_id"])
 
-    # نسب الأعمدة (المجموع 100%) تُجبر الجدول على ملء عرض الورقة
-    W = (11, 12, 11, 11, 12, 10, 10, 10, 13)
+    # نسب الأعمدة (المجموع 100%) — صريحةٌ لكل عمود (4.96): بالصورة في
+    # خانة الموديل كان الجدول يتمدّد بعرضها فيُقصّ آخر أعمدته (الأجور)
+    # عند الطباعة. والعناوين الطويلة على سطرين فلا تفرض عرضاً
     _u = _kunit()
+
+    def _th(label, pct):
+        return f'<th width="{pct}%" style="width:{pct}%;">{label}</th>'
     head_cells = cells(
-        thw("الموديل"),
-        thw("رقم التشغيل"), thw(f"الوزن المقيد<br/>{_u}"),
-        thw(f"الوزن القائم<br/>{_u}"),
-        thw("الذهب"), thw("الفصوص"), thw("الأحجار"),
-        thw("الأحجار بعد الخصم"), thw("الأجر"), thw("الأجور"))
+        _th("الموديل", 10), _th("رقم<br/>التشغيل", 11),
+        _th(f"الوزن المقيد<br/>{_u}", 10), _th(f"الوزن القائم<br/>{_u}", 10),
+        _th("الذهب", 9), _th("الفصوص", 8), _th("الأحجار", 8),
+        _th("الأحجار<br/>بعد الخصم", 10), _th("الأجر", 9),
+        _th("الأجور", 15))
     total_cells = cells(
         thw(""),
         thw("الإجمالي"), thw(_gw(t_reg)), thw(_gw(t_standing)),
@@ -4854,12 +4887,20 @@ def preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     إن تعذّر فتح المتصفح لأي سبب، يُرجع النظام تلقائياً إلى معاينة Qt
     حتى لا تتعطّل الطباعة.
     """
+    # 4.96: عارض الطباعة (نافذة النظام بمحرّك ويندوز) — وبدونه المعاينة
+    # الاحتياطية داخل النظام (Qt) لا المتصفح الافتراضي
+    from services import browser_print, print_viewer
+    if print_viewer.available():
+        try:
+            browser_print.open_document(doc_type, doc_id, **kw)
+            return True
+        except Exception:
+            pass
     try:
-        from services import browser_print
+        return qt_preview_document(parent, doc_type, doc_id, landscape, **kw)
+    except Exception:
         browser_print.open_document(doc_type, doc_id, **kw)
         return True
-    except Exception:
-        return qt_preview_document(parent, doc_type, doc_id, landscape, **kw)
 
 
 def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
@@ -4890,6 +4931,17 @@ def print_document(parent, doc_type, doc_id, **kw):
     يتجاوز مشاكل `QPrintPreviewDialog` تماماً: تُبنى الوثيقة وتُلاءم
     مع أبعاد الطابعة **بعد** أن يؤكد المستخدم اختيار الطابعة.
     """
+    # 4.96: في عارض الطباعة — نافذة الطباعة الكاملة تُفتح مع الورقة
+    # (الطابعة · النسخ · الصفحات · الهوامش · PDF) بمحرّكٍ يرسم القالب كما
+    # صُمّم؛ ومحرّك Qt احتياطٌ لجهازٍ بلا عارض
+    from services import browser_print, print_viewer
+    if print_viewer.available():
+        try:
+            browser_print.open_document(doc_type, doc_id, auto_print=True,
+                                        **kw)
+            return True
+        except Exception:
+            pass
     html = build_html(doc_type, doc_id, **kw)
     printer = _printer(doc_type in ("statement", "journal", "manual",
                                     "balances", "scrap_karat"))

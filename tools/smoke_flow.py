@@ -8912,6 +8912,51 @@ def main():
     except ImportError:
         print("  … تُخطّى فحص الخانة (PyQt5 غير متاح)")
 
+    # ══ 117) 4.96: عارض الطباعة · صورة شفافة · عرض الأعمدة · مبيعات من مرتجع ══
+    from services import browser_print as _bp117, print_viewer as _pv117
+    _hv117 = _bp117.build_page("invoice", _m116["id"], auto_print=False,
+                               viewer=True)
+    _hp117 = _bp117.build_page("invoice", _m116["id"], auto_print=False)
+    check("عارض الطباعة: شريط عربي (طباعة · PDF · اتجاه · تكبير · إغلاق)"
+          " لا يُطبع، والصفحة العادية بلا شريط",
+          'class="jv-bar noprint"' in _hv117 and "window.print()" in _hv117
+          and "jvOrient" in _hv117 and "jvZoom" in _hv117
+          and "translate='no'" in _hv117 and "jv-bar" not in _hp117
+          and callable(_pv117.launch) and _pv117.VIEWER_CSS in _hv117)
+    import re as _re117
+    _w117 = [int(x) for x in _re117.findall(
+        r'<th width="(\d+)%"', _hv117)]
+    check("فاتورة الطباعة: عرضٌ صريح لكل عمود (مجموعه 100) فلا يُقصّ الأخير",
+          len(_w117) == 10 and sum(_w117) == 100, str(_w117))
+    try:
+        from PIL import Image as _Im117
+        import base64 as _b64
+        import io as _io117
+        from models import models_catalog as _mc117
+        _src117 = Path(_TMP) / "white117.png"
+        _im = _Im117.new("RGB", (300, 200), (255, 255, 255))
+        for _x in range(120, 180):
+            for _y in range(70, 130):
+                _im.putpixel((_x, _y), (180, 140, 40))
+        _im.save(_src117)
+        _mc117.set_image("MG-W117", str(_src117))
+        _tag = _pm116._model_thumb("MG-W117")
+        _png = _Im117.open(_io117.BytesIO(_b64.b64decode(
+            _tag.split("base64,", 1)[1].split('"', 1)[0])))
+        check("صورة الموديل في الفاتورة PNG: الخلفية البيضاء شفافة والحواف"
+              " مقصوصة",
+              _tag.startswith('<img src="data:image/png;base64,')
+              and _png.mode == "RGBA" and _png.size[0] <= 70)
+    except ImportError:
+        print("  … تُخطّى فحص الصورة (Pillow غير متاح)")
+    try:
+        from ui.general_ledger_screen import GeneralLedgerScreen as _GL117
+        check("كشف الحساب: «مبيعات من المرتجع» و«دمج فواتير»",
+              hasattr(_GL117, "resell_doc") and hasattr(_GL117,
+                                                        "merge_docs"))
+    except ImportError:
+        pass
+
     try:
         from ui.sales_screen import SalesScreen as _S115
         check("شاشة المبيعات: إشعار المدة عند رقم التشغيل في المرتجع",

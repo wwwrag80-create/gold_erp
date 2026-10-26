@@ -7,7 +7,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from ui import kit
 
 from database.database import db
-from models import entities, journal
+from models import entities, journal, operations
 from models.accounts import list_postable
 from services.audit import soft_delete_entry
 
@@ -131,6 +131,12 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             " واحدة تحمل أطقمها كلها — حدّد صفوفها بـCtrl أولاً أو اخترها"
             " من النافذة")
         btn_merge.clicked.connect(self.merge_docs)
+        # 4.96: مرتجعٌ من جهة يُباع لجهةٍ أخرى بالبنود نفسها
+        btn_resell = kit.PushButton("↗ مبيعات من المرتجع")
+        btn_resell.setToolTip(
+            "يُصدر فاتورة مبيعات جديدة لجهةٍ تختارها بنفس أطقم فاتورة المرتجع"
+            " المحددة وأوزانها وأجورها — والمرتجع يبقى كما هو")
+        btn_resell.clicked.connect(self.resell_doc)
         btn_del = kit.PushButton("🗑 حذف وعكس")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_doc)
@@ -144,6 +150,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         actions.addWidget(btn_edit)
         actions.addWidget(btn_move)
         actions.addWidget(btn_merge)
+        actions.addWidget(btn_resell)
         actions.addWidget(btn_del)
         actions.addStretch(1)
         actions.addWidget(btn_print)
@@ -624,6 +631,86 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             dlg = MergeInvoicesDialog(self, self.user, rows, pre)
             if dlg.exec_() == QtWidgets.QDialog.Accepted:
                 self.load()
+        except Exception as e:
+            err(self, e)
+
+    def resell_doc(self):
+        """فاتورة مبيعات جديدة لجهةٍ أخرى بنفس بنود المرتجع المحدد (4.96).
+
+        مثال: خالد أرجع فاتورة مرتجع ثم بيعت أطقمها لمحمد ⇒ تُحدَّد فاتورة
+        المرتجع في الكشف وتُختار «محمد»، فتصدر له مبيعاتٌ بأطقمها وأوزانها
+        وأجورها (`operations.resell_return`). المرتجع يبقى كما هو، وحركة
+        كل طقمٍ تستقيم: مرتجعٌ من خالد ثم بيعٌ لمحمد — كأنه خرج طبيعياً.
+        """
+        try:
+            r = self._selected()
+            sid = r.get("sid") if r else None
+            inv = None
+            if r and r.get("src") == "invoices" and sid:
+                with db(readonly=True) as conn:
+                    inv = conn.execute(
+                        "SELECT i.*, e.name party,"
+                        " (SELECT COUNT(*) FROM invoice_items it"
+                        "  WHERE it.invoice_id=i.id) n FROM invoices i"
+                        " JOIN entities e ON e.id=i.customer_id"
+                        " WHERE i.id=? AND i.is_deleted=0", (sid,)).fetchone()
+            if inv is None or inv["kind"] != "sale_return":
+                raise ValueError("حدّد فاتورة مرتجع من الكشف أولاً")
+            with db(readonly=True) as conn:
+                ents = conn.execute(
+                    "SELECT id, name, entity_type FROM entities"
+                    " WHERE is_deleted=0 AND entity_type<>'internal'"
+                    " AND id<>? ORDER BY name",
+                    (inv["customer_id"],)).fetchall()
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle("مبيعات من فاتورة مرتجع")
+            dlg.setMinimumWidth(460)
+            cb = search_combo("اكتب اسم الجهة…")
+            for e in ents:
+                cb.addItem(
+                    f"[{entities.TYPE_LABELS.get(e['entity_type'], '')}] "
+                    f"{e['name']}", e["id"])
+            cb.setCurrentIndex(-1)
+            day = date_edit()
+            reason = kit.LineEdit()
+            reason.setPlaceholderText("ملاحظة تُضاف لبيان الفاتورة (اختياري)")
+            note = QtWidgets.QLabel(
+                f"المرتجع: {inv['invoice_no']} بتاريخ {inv['invoice_date']}"
+                f"\nمن: {inv['party']} · {inv['n']} بنداً\n\n"
+                "تصدر فاتورة مبيعات جديدة للجهة المختارة بالأطقم نفسها"
+                " وأوزانها وأجورها، وبيانها «مرتجع من … — فاتورة المرتجع"
+                " رقم …». المرتجع يبقى كما هو، والأطقم تخرج بالبيع كأي"
+                " بيعٍ طبيعي (تاريخه لا يسبق تاريخ المرتجع).")
+            note.setWordWrap(True)
+            box = QtWidgets.QDialogButtonBox(
+                QtWidgets.QDialogButtonBox.Ok
+                | QtWidgets.QDialogButtonBox.Cancel)
+            box.accepted.connect(dlg.accept)
+            box.rejected.connect(dlg.reject)
+            f = QtWidgets.QFormLayout()
+            f.addRow(note)
+            f.addRow("إلى الجهة:", cb)
+            f.addRow("تاريخ المبيعات:", day)
+            f.addRow("ملاحظة:", reason)
+            lay = QtWidgets.QVBoxLayout(dlg)
+            lay.addLayout(f)
+            lay.addWidget(box)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            new_id = cb.currentData()
+            if new_id is None:
+                raise ValueError("اختر الجهة التي تُصدَر لها المبيعات")
+            with db() as conn:
+                res = operations.resell_return(
+                    conn, inv["id"], new_id, self.user["username"],
+                    dstr(day), reason.text().strip())
+            self.load()
+            if ask(self, f"صدرت فاتورة المبيعات {res['new_no']} لـ"
+                         f"«{res['to']}» ({res['items']} بنداً).\n\n"
+                         "معاينتها وطباعتها؟"):
+                from services import print_manager
+                print_manager.preview_document(self, "invoice",
+                                               res["new_id"])
         except Exception as e:
             err(self, e)
 
