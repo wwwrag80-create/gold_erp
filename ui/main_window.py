@@ -60,6 +60,7 @@ from services import karat_view as kv
 from ui import theme
 from ui.widgets.common import (ElidedLabel, ask, busy, err, info, run_bg,
                                save_pref, search_combo, warn)
+from services import numfmt as _nf
 
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
 NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
@@ -1874,10 +1875,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 u = invoice_share.usage(conn)
             txt = (
                 f"صور الموديلات المرفوعة: {u['images']:,} صورة — "
-                f"{u['image_mb']:,.2f} ميجابايت\n"
+                f"{_nf.f2(u['image_mb'])} ميجابايت\n"
                 f"صفحات الفواتير المنشورة: {u['pages']:,} صفحة — "
-                f"{u['page_mb']:,.2f} ميجابايت\n"
-                f"الإجمالي: {u['total_mb']:,.2f} ميجابايت\n\n"
+                f"{_nf.f2(u['page_mb'])} ميجابايت\n"
+                f"الإجمالي: {_nf.f2(u['total_mb'])} ميجابايت\n\n"
                 "الصورة تُصغَّر وتُضغط قبل رفعها، وتُرفع **مرة واحدة** "
                 "مهما تكرّر موديلها في الفواتير — فلا تتضاعف المساحة "
                 "مع كل فاتورة.")
@@ -1887,7 +1888,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             if ask(self,
                    txt + f"\n\n♻ صورٌ لم تعد تستعملها أي فاتورة منشورة: "
-                         f"{orph:,} صورة — {omb:,.2f} ميجابايت.\n\n"
+                         f"{orph:,} صورة — {_nf.f2(omb)} ميجابايت.\n\n"
                          "حذفها الآن؟ (مساحة محجوزة بلا مقابل — ولا يُحذف "
                          "رقمٌ محاسبي ولا صفحةٌ ما زالت مستعملة)",
                    "المساحة السحابية"):
@@ -1897,7 +1898,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         n, mb = invoice_share.purge_orphan_images(
                             conn, self.user.get("username"))
                 info(self, f"حُذفت {n:,} صورة — استُرجع "
-                           f"{mb:,.2f} ميجابايت.")
+                           f"{_nf.f2(mb)} ميجابايت.")
         except Exception as e:
             err(self, e)
 

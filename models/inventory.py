@@ -6,6 +6,7 @@ from services import gold_math
 from services.accounting_engine import account_balance, post_entry
 from services.audit import log_action
 from services.barcode_service import generate_work_order_barcode
+from services import numfmt as _nf
 
 # ══ صناديق الكسر ══
 # الأعيرة 18/21/22 تُرحَّل كلها إلى **حساب واحد** (1310 صندوق الكسر)
@@ -694,7 +695,7 @@ def opening_stock_batch(conn, rows, entry_date, username):
                 " WHERE id=?",
                 (p["reg"], p["standing"], p["gold"], bulk["id"]))
             log_action(conn, username, "update", "work_orders", bulk["id"],
-                       f"رصيد افتتاحي تجميعي +{p['reg']:.2f}")
+                       f"رصيد افتتاحي تجميعي +{_nf.f2(p['reg'], sep=False)}")
             created.append({"id": bulk["id"], "work_order_no": p["wo_no"],
                             "registered_weight": p["reg"]})
             continue
@@ -1100,7 +1101,7 @@ def create_return_stub(conn, wo_no, gold, small_stones, big_stones,
          classify_item(wo_no, gold, small, big),
          "طقم غير مسجّل أُدخل عبر مرتجع", username))
     log_action(conn, username, "create", "work_orders", None,
-               f"طقم مرتجع غير مسجّل: {wo_no} بوزن مقيد {reg:.2f}")
+               f"طقم مرتجع غير مسجّل: {wo_no} بوزن مقيد {_nf.f2(reg, sep=False)}")
     return get_wo_by_no(conn, wo_no)
 
 
@@ -1208,7 +1209,7 @@ def adjust_or_delete_wo(conn, wo_id, username, new_gold=None,
              new_reg, classify_item(wo_no, g, sm, bg), wo_id))
 
     log_action(conn, username, "adjust", "work_orders", wo_id,
-               f"{label} | فرق {diff:+.3f} جم")
+               f"{label} | فرق {_nf.f2(diff, sep=False, sign=True)} جم")
     from models import wo_moves as _wm
     _wm.resync(conn, [wo_id], username)
     return {"wo_no": wo_no, "old_reg": old_reg,
@@ -1703,7 +1704,7 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     log_action(conn, username, "update", "work_orders", entry_id,
                f"تعديل دفعة توريد: +{len(added)} · ~{len(updated)} · "
                f"-{len(removed)} · مباع محفوظ {len(set(kept_sold))} · "
-               f"صافي الوزن {delta:+.3f} جم")
+               f"صافي الوزن {_nf.f2(delta, sep=False, sign=True)} جم")
     _de.record(conn, "work_orders", entry_id, username, _before,
                doc_no=entry["doc_no"] or "", entry_id=entry_id,
                kind="inplace", before_html=_before_html,

@@ -23,6 +23,7 @@ from database.database import db
 from services.fatoora import api, ledger, onboard, readiness
 from services.fatoora import profile as pf
 from ui.widgets.common import err, info
+from services import numfmt as _nf
 
 ICONS = {"ok": "✔", "warn": "⚠", "fail": "✘", "info": "ℹ"}
 COLORS = {"ok": "#0F5A24", "warn": "#8A5A00", "fail": "#9A1414",
@@ -559,8 +560,8 @@ class FatooraDialog(QtWidgets.QDialog):
             vals = (str(d["icv"]), d["doc_no"],
                     f"{ledger.KIND_LABELS.get(d['kind'], d['kind'])} "
                     f"{ledger.SUB_LABELS.get(d['subtype'], '')}",
-                    d["issue_date"], f"{d['net']:,.2f}", f"{d['vat']:,.2f}",
-                    f"{d['gross']:,.2f}", dict(pf.ENVS).get(d["env"],
+                    d["issue_date"], f"{_nf.f2(d['net'])}", f"{_nf.f2(d['vat'])}",
+                    f"{_nf.f2(d['gross'])}", dict(pf.ENVS).get(d["env"],
                                                            d["env"])[:14],
                     ledger.STATUS_LABELS.get(d["status"], d["status"]),
                     d["last_error"] or "")

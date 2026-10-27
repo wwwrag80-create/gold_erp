@@ -17,6 +17,7 @@ from models.accounts import list_postable
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, mspin, reload_combo,
                                search_combo, title_label, wspin)
+from services import numfmt as _nf
 
 COLS = ["الحساب", "الرصيد النقدي (ريال)", "رصيد الذهب (جم 18)", "البيان"]
 
@@ -163,12 +164,12 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
     def render_wo(self):
         # صفوف الشاشة بعيار المصنع، والتحويل عند الترحيل وحده
         fill(self.wo_table, ["رقم التشغيل", f"الوزن المقيد ({kv.unit()})"],
-             [(r["wo_no"], f"{r['reg']:,.2f}") for r in self.wo_rows])
+             [(r["wo_no"], f"{_nf.f2(r['reg'])}") for r in self.wo_rows])
         tot = round(sum(r["reg"] for r in self.wo_rows), 2)
         self.wo_total.setText(
             f"عدد الأطقم: {len(self.wo_rows)}   |   "
             f"إجمالي الوزن المقيد (الرصيد الافتتاحي): "
-            f"{tot:,.2f} {kv.unit()}")
+            f"{_nf.f2(tot)} {kv.unit()}")
 
     def save_wo(self):
         """يرحّل الأطقم إلى مخزون الذهب المشغول بقيد افتتاحي واحد."""
@@ -177,7 +178,7 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
                 raise ValueError("أضف طقماً واحداً على الأقل")
             tot = round(sum(r["reg"] for r in self.wo_rows), 2)
             if not ask(self, f"ترحيل {len(self.wo_rows)} طقماً بإجمالي "
-                             f"{tot:,.2f} {kv.unit()} إلى الذهب المشغول "
+                             f"{_nf.f2(tot)} {kv.unit()} إلى الذهب المشغول "
                              f"بتاريخ "
                              f"{dstr(self.date)}؟"):
                 return
@@ -191,7 +192,7 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
                 res = inventory.opening_stock_batch(
                     conn, rows, dstr(self.date), self.user["username"])
             info(self, f"تم ترحيل {len(res)} طقماً بإجمالي "
-                       f"{tot:,.2f} {kv.unit()}.\n"
+                       f"{_nf.f2(tot)} {kv.unit()}.\n"
                        f"الأطقم متاحة الآن للبيع في مخزون الذهب المشغول.")
             self.wo_rows = []
             self.render_wo()
@@ -225,14 +226,14 @@ class OpeningBalancesScreen(QtWidgets.QWidget):
 
     def render(self):
         # الصفوف مخزَّنة بمكافئ 18 منذ إضافتها — تُعرض بعيار المصنع
-        data = [(r["name"], f"{r['cash']:,.2f}", f"{kv.g(r['gold']):,.2f}",
+        data = [(r["name"], f"{_nf.f2(r['cash'])}", f"{_nf.f2(kv.g(r['gold']))}",
                  r["desc"] or "—") for r in self.rows]
         fill(self.table, _cols(), data)
         tc = round(sum(r["cash"] for r in self.rows), 2)
         tg = round(sum(r["gold"] for r in self.rows), 3)
         self.totals.setText(
-            f"مجموع المُدخل — نقد: {tc:,.2f} ريال   |   ذهب: "
-            f"{kv.g(tg):,.2f} {kv.unit()}"
+            f"مجموع المُدخل — نقد: {_nf.f2(tc)} ريال   |   ذهب: "
+            f"{_nf.f2(kv.g(tg))} {kv.unit()}"
             + ("   (سيُرحَّل الفرق لحساب التسوية تلقائياً)"
                if abs(tc) > 0.01 or abs(tg) > 0.001 else "   (متوازن)"))
 

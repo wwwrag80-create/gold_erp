@@ -7,6 +7,7 @@
 قالبٌ يراجعه المحاسب القانوني ويعدّله عند الحاجة.
 """
 from models import statements as st
+from services import numfmt as _nf
 
 NOTES = [
     (1, "التكوين والنشاط"),
@@ -268,7 +269,7 @@ def build(conn, date_from, date_to, compare=True):
         notes[11]["paras"] = [
             f"النسبة المطبّقة {z['rate'] * 100:.4f}% (2.5% للسنة الهجرية"
             " معدّلةً بعدد أيام الفترة ÷ 354)؛ والزكاة المحتسبة"
-            f" {z['zakat']:,.2f} ريال."
+            f" {_nf.f2(z['zakat'])} ريال."
             + (" رُفع الوعاء إلى صافي الربح المعدّل لأنه أقل منه."
                if z.get("base_floor") else "")]
     except Exception:
@@ -286,7 +287,7 @@ def build(conn, date_from, date_to, compare=True):
         eos = pe.eos_compute(conn, date_to)
         notes[12]["paras"] = [
             f"عدد الموظفين المشمولين {sum(1 for r in eos['rows'] if r['counted'])}،"
-            f" والالتزام المحسوب في {date_to}: {eos['required']:,.2f} ريال."]
+            f" والالتزام المحسوب في {date_to}: {_nf.f2(eos['required'])} ريال."]
     except Exception:
         pass
     notes[13]["tables"] = [{"title": "", "rows": [

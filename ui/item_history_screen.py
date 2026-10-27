@@ -15,6 +15,7 @@ from models import inventory
 
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
                                make_table, title_label)
+from services import numfmt as _nf
 
 COLS = ["نوع الحركة", "التاريخ", "الجهة المقابلة", "الذهب", "الفصوص",
         "الأحجار", "الوزن المقيد", "في الخزنة بعدها", "نوع الطقم"]
@@ -67,7 +68,7 @@ class TurnoverPanel(QtWidgets.QFrame):
     def fill_panel(self, data):
         self.value.setText(
             f"{data['count']} طقم  ·  "
-            f"{kv.g(data['total_reg']):,.2f} {kv.unit()}")
+            f"{_nf.f2(kv.g(data['total_reg']))} {kv.unit()}")
         # لوحات الصادر تعرض «البائع» (من أخذ الطقم)، ولوحات الوارد
         # تعرض «المُرجِع» (من أعاده) — كلٌّ بما يناسب طبيعته.
         ret = "مرتجعة" in (self.title_text or "")
@@ -76,7 +77,7 @@ class TurnoverPanel(QtWidgets.QFrame):
              ["رقم التشغيل", "المُرجِع" if ret else "البائع",
               "الوزن المقيد", "الوزن القائم"],
              [(i["wo"], i.get(key) or "—",
-               f"{kv.g(i['reg']):,.2f}", f"{kv.g(i['standing']):,.2f}")
+               f"{_nf.f2(kv.g(i['reg']))}", f"{_nf.f2(kv.g(i['standing']))}")
               for i in data["items"]])
 
 
@@ -175,7 +176,7 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         if v == "" or v is None:
             return ""
         try:
-            return f"{kv.g(float(v)):,.2f}"
+            return _nf.f2(kv.g(float(v)))
         except (TypeError, ValueError):
             return str(v)
 
@@ -198,12 +199,12 @@ class ItemHistoryScreen(QtWidgets.QWidget):
             where = ""
             if st is not None:
                 # 4.82: كم منه في الخزنة وكم عند الجهات — بيعُ جزءٍ يُرى
-                where = (f"  ·  في الخزنة {kv.g(st['rem']):,.2f} · عند الجهات"
-                         f" {kv.g(st['out']):,.2f} {kv.unit()}")
+                where = (f"  ·  في الخزنة {_nf.f2(kv.g(st['rem']))} · عند الجهات"
+                         f" {_nf.f2(kv.g(st['out']))} {kv.unit()}")
             self.info.setText(
                 f"الطقم {wo['work_order_no']}  ·  النوع: {wo['item_type'] or '—'}"
                 f"  ·  الوزن المقيد: "
-                f"{kv.g(wo['registered_weight']):,.2f} {kv.unit()}"
+                f"{_nf.f2(kv.g(wo['registered_weight']))} {kv.unit()}"
                 f"  ·  الحالة: {'بالمخزون' if wo['status'] == 'in_stock' else 'خارج/مباع'}"
                 + where)
             # 4.85: رقم الفاتورة بجانب الجهة، والحركة التي لا تسمح بها

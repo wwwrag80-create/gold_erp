@@ -14,6 +14,7 @@ from services import karat_view as kv
 from models import closing, fiscal
 from ui.widgets.common import (ask, big_label, dstr, err, fill, info, make_table, title_label)
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 COLS = ["الكود", "الحساب", "النوع", "الرصيد النقدي", "رصيد الذهب"]
 
@@ -109,14 +110,14 @@ class YearEndScreen(QtWidgets.QWidget):
             p = self.preview
             data = [(i["code"], i["name"],
                      "إيراد" if i["type"] == "revenue" else "مصروف",
-                     f"{i['cash']:,.2f}", f"{kv.g(i['gold']):,.2f}")
+                     f"{_nf.f2(i['cash'])}", f"{_nf.f2(kv.g(i['gold']))}")
                     for i in p["items"]]
             fill(self.table, COLS, data)
             kind = "ربح" if p["net_cash"] >= 0 else "خسارة"
             self.summary.setText(
                 f"سنة {p['year']}: {len(p['items'])} حساب نتيجة   |   "
-                f"صافي ال{kind}: {p['net_cash']:,.2f} ريال · "
-                f"{kv.g(p['net_gold']):,.2f} {kv.unit()}")
+                f"صافي ال{kind}: {_nf.f2(p['net_cash'])} ريال · "
+                f"{_nf.f2(kv.g(p['net_gold']))} {kv.unit()}")
         except Exception as e:
             err(self, e)
 
@@ -133,8 +134,8 @@ class YearEndScreen(QtWidgets.QWidget):
                        f"سيتم إقفال سنة {year} نهائياً:\n"
                        f"• تصفير {len(self.preview['items'])} حساب نتيجة\n"
                        f"• ترحيل صافي "
-                       f"{self.preview['net_cash']:,.2f} ريال و"
-                       f"{kv.g(self.preview['net_gold']):,.2f} "
+                       f"{_nf.f2(self.preview['net_cash'])} ريال و"
+                       f"{_nf.f2(kv.g(self.preview['net_gold']))} "
                        f"{kv.unit()} إلى {target}\n\n"
                        f"هل تريد المتابعة؟"):
                 return
@@ -146,8 +147,8 @@ class YearEndScreen(QtWidgets.QWidget):
             msg = (f"تم إقفال سنة {res['year']}.\n"
                    f"قيد الإقفال: #{res['close_entry']}\n"
                    f"الحسابات المُقفلة: {res['closed_accounts']}\n"
-                   f"صافي النتيجة: {res['net_cash']:,.2f} ريال · "
-                   f"{kv.g(res['net_gold']):,.2f} {kv.unit()} → {target}")
+                   f"صافي النتيجة: {_nf.f2(res['net_cash'])} ريال · "
+                   f"{_nf.f2(kv.g(res['net_gold']))} {kv.unit()} → {target}")
             if res["opening_entry"]:
                 msg += f"\nقيد افتتاحي لسنة {year + 1}: #{res['opening_entry']}"
             info(self, msg)

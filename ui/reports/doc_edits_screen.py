@@ -25,11 +25,12 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
                                title_label)
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 def snum(v, d=2):
     """السالب بين قوسين — لا بإشارةٍ تزيغ في نصٍّ عربي."""
-    return f"({abs(v):,.{d}f})" if v < 0 else f"{v:,.{d}f}"
+    return f"({_nf.f2(abs(v))})" if v < 0 else _nf.f2(v)
 
 
 # أعمدة جدول التعديلات — والأخير زرُّ القالب قبل/بعد
@@ -220,10 +221,10 @@ class DocEditsScreen(QtWidgets.QWidget):
             return f"{fmt(a)} ← {fmt(b)}"
 
         def _wt(v):
-            return f"{kv.g(v):,.3f}"
+            return _nf.f2(kv.g(v))
 
         def _ms(v):
-            return f"{v:,.2f}"
+            return _nf.f2(v)
 
         cols = list(ROW_COLS)
         cols[8] = f"فرق الوزن ({u})"
@@ -235,7 +236,7 @@ class DocEditsScreen(QtWidgets.QWidget):
                r.get("change") or "—",
                _pair(r["old_gold"], r["new_gold"], _wt)
                if (r["old_gold"] or r["new_gold"]) else "—",
-               w(r["d_gold"]) if abs(r["d_gold"]) > 0.0005 else "—",
+               w(r["d_gold"]) if abs(r["d_gold"]) > 0.005 else "—",
                _pair(r["old_cash"], r["new_cash"], _ms)
                if (r["old_cash"] or r["new_cash"]) else "—",
                m(r["d_cash"]) if abs(r["d_cash"]) > 0.005 else "—",
@@ -281,7 +282,7 @@ class DocEditsScreen(QtWidgets.QWidget):
         for i, r in enumerate(rows):
             for c, v in ((8, r["d_gold"]), (10, r["d_cash"])):
                 it = self.t_rows.item(i, c)
-                if it is not None and abs(v) > 0.0005:
+                if it is not None and abs(v) > 0.005:
                     it.setForeground(up if v > 0 else dn)
                     f = it.font()
                     f.setBold(True)

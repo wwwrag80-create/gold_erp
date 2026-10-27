@@ -26,6 +26,7 @@ import datetime as _dt
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ui import kit
+from services import numfmt as _nf
 
 TEXT, MONEY, WEIGHT, NUMBER = "text", "money", "weight", "number"
 SUMMED = (MONEY, WEIGHT)
@@ -84,8 +85,8 @@ def fmt(v, kind):
     if kind == NUMBER:
         return str(int(n)) if n == int(n) else str(n)
     if kind == WEIGHT:
-        return f"{n:,.{_WD}f}"
-    return f"{n:,.2f}"
+        return _nf.f2(n)
+    return _nf.f2(n)
 
 
 class LedgerModel(QtCore.QAbstractTableModel):

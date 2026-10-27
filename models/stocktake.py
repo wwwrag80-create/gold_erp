@@ -8,6 +8,7 @@ from models import numbering as _numbering
 from models.accounts import acc_id
 from services.accounting_engine import account_balance, post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 BULK_ACCOUNTS = {"1100": "5110", "1310": "5120"}
 GAIN_ACC = "4300"   # أرباح فروقات الجرد والتسويات (إيراد)
@@ -31,11 +32,11 @@ def create_bulk_stocktake(conn, account_code, actual_weight, stocktake_date,
     if diff != 0:
         if diff < 0:  # عجز: الفعلي أقل من الدفتري
             lines = [{"account_id": loss_id, "gold_debit": abs(diff),
-                      "line_desc": f"عجز جرد — دفتري {ledger:.2f} فعلي {actual_weight:.2f}"},
+                      "line_desc": f"عجز جرد — دفتري {_nf.f2(ledger, sep=False)} فعلي {_nf.f2(actual_weight, sep=False)}"},
                      {"account_id": account_id, "gold_credit": abs(diff)}]
         else:  # زيادة: الفعلي أكبر من الدفتري → إيراد أرباح فروقات الجرد
             lines = [{"account_id": account_id, "gold_debit": diff,
-                      "line_desc": f"زيادة جرد — دفتري {ledger:.2f} فعلي {actual_weight:.2f}"},
+                      "line_desc": f"زيادة جرد — دفتري {_nf.f2(ledger, sep=False)} فعلي {_nf.f2(actual_weight, sep=False)}"},
                      {"account_id": acc_id(conn, GAIN_ACC), "gold_credit": diff}]
         entry_id = post_entry(
             conn, stocktake_date,

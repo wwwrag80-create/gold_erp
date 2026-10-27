@@ -23,6 +23,7 @@ from models import bank_recon as br
 from ui.widgets.common import (Card, big_label, bulk_rows, busy, date_edit,
                                dstr, err, info, make_table, mspin,
                                reload_combo, title_label, warn)
+from services import numfmt as _nf
 
 COLS = ["✓", "التاريخ", "المستند", "البيان", "وارد (مدين)",
         "صادر (دائن)", "مرجع الكشف", "طُوبق بواسطة"]
@@ -171,11 +172,11 @@ class BankReconScreen(QtWidgets.QWidget):
                                       else QtCore.Qt.Unchecked)
                     self.table.setItem(i, 0, chk)
                     vals = [r["date"], r["doc_no"], r["desc"],
-                            f"{r['debit']:,.2f}" if r["debit"] else "",
-                            f"{r['credit']:,.2f}" if r["credit"] else "",
+                            f"{_nf.f2(r['debit'])}" if r["debit"] else "",
+                            f"{_nf.f2(r['credit'])}" if r["credit"] else "",
                             r["ref"], r["matched_by"] or ""]
                     for c, v in enumerate(vals, start=1):
-                        it = QtWidgets.QTableWidgetItem(str(v))
+                        it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                         it.setTextAlignment(QtCore.Qt.AlignCenter)
                         if c == 6:          # مرجع الكشف وحده يُكتب فيه
                             it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
@@ -205,10 +206,10 @@ class BankReconScreen(QtWidgets.QWidget):
         expected = book - un_in + un_out
         n_un = sum(1 for r in self.rows if not r["matched"])
 
-        self.c_book.set_value(f"{book:,.2f}", f"الافتتاحي {opening:,.2f}")
+        self.c_book.set_value(_nf.f2(book), f"الافتتاحي {_nf.f2(opening)}")
         self.c_unmatched.set_value(
-            f"{n_un:,}", f"وارد {un_in:,.2f} · صادر {un_out:,.2f}")
-        self.c_expected.set_value(f"{expected:,.2f}")
+            f"{n_un:,}", f"وارد {_nf.f2(un_in)} · صادر {_nf.f2(un_out)}")
+        self.c_expected.set_value(_nf.f2(expected))
 
         stmt = float(self.stmt.value() or 0)
         if not stmt:
@@ -218,12 +219,12 @@ class BankReconScreen(QtWidgets.QWidget):
                 f"{len(self.rows) - n_un:,} · بقي {n_un:,}")
             return
         diff = round(stmt - expected, 2)
-        self.c_diff.set_value(f"{diff:,.2f}",
+        self.c_diff.set_value(_nf.f2(diff),
                               "مطابقة تامّة" if diff == 0 else "يحتاج بحثاً")
         self.state.setText(
             ("✔ مطابقةٌ تامّة — رصيد الكشف يساوي المتوقَّع بالضبط."
              if diff == 0 else
-             f"⚠ فرقٌ قدره {diff:,.2f} ريال — ابحث عن قيدٍ ناقص أو مبلغٍ "
+             f"⚠ فرقٌ قدره {_nf.f2(diff)} ريال — ابحث عن قيدٍ ناقص أو مبلغٍ "
              f"مقلوب أو رسمٍ مصرفيٍّ لم يُقيَّد.")
             + f"   |   {len(self.rows):,} حركة · بقي {n_un:,} بلا مطابقة")
 
@@ -292,17 +293,17 @@ class BankReconScreen(QtWidgets.QWidget):
             f"كشف مطابقة البنك — {self.acc.currentText()}",
             f"الفترة: {dstr(self.d_from)} إلى {dstr(self.d_to)}",
             "",
-            f"الرصيد الافتتاحي          {s['opening']:>16,.2f}",
-            f"رصيد الدفتر آخر الفترة    {s['book']:>16,.2f}",
-            f"− إيداعات لم تظهر بالكشف  {s['unmatched_in']:>16,.2f}",
-            f"+ شيكات لم تُصرَف بعد      {s['unmatched_out']:>16,.2f}",
+            f"الرصيد الافتتاحي          {_nf.f2(s['opening']):>16}",
+            f"رصيد الدفتر آخر الفترة    {_nf.f2(s['book']):>16}",
+            f"− إيداعات لم تظهر بالكشف  {_nf.f2(s['unmatched_in']):>16}",
+            f"+ شيكات لم تُصرَف بعد      {_nf.f2(s['unmatched_out']):>16}",
             "─" * 46,
-            f"= الرصيد المتوقَّع بالكشف  {s['expected']:>16,.2f}",
+            f"= الرصيد المتوقَّع بالكشف  {_nf.f2(s['expected']):>16}",
         ]
         if s["statement"] is not None:
             lines += [
-                f"  الرصيد المُعلَن بالكشف   {s['statement']:>16,.2f}",
-                f"  الفــــــــرق            {s['difference']:>16,.2f}",
+                f"  الرصيد المُعلَن بالكشف   {_nf.f2(s['statement']):>16}",
+                f"  الفــــــــرق            {_nf.f2(s['difference']):>16}",
                 "",
                 ("✔ مطابقة تامّة." if s["difference"] == 0
                  else "⚠ الفرق غير صفر — راجع الحركات غير المطابَقة أدناه، "
@@ -313,7 +314,7 @@ class BankReconScreen(QtWidgets.QWidget):
             for r in un[:80]:
                 amt = r["debit"] or -r["credit"]
                 lines.append(f"  {r['date']}  {r['doc_no']:<12} "
-                             f"{amt:>14,.2f}  {r['desc'][:40]}")
+                             f"{_nf.f2(amt):>14}  {r['desc'][:40]}")
             if len(un) > 80:
                 lines.append(f"  … و{len(un) - 80:,} حركة أخرى")
         text = "\n".join(lines)

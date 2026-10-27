@@ -26,6 +26,7 @@ from ui.widgets.common import (Card, ask, big_label, busy, date_edit, dstr,
                                err, fill, info, make_table, mspin,
                                reload_combo, title_label, warn)
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 COLS = ["الأصل", "الحساب", "بدء الإهلاك", "التكلفة", "التخريدية",
         "العمر (شهر)", "القسط الشهري", "المُهلَك حتى الآن",
@@ -171,29 +172,29 @@ class AssetsScreen(QtWidgets.QWidget):
                 st = "يُهلَك"
             data.append((
                 r["name"], f"{r['acc_code']} — {r['acc_name']}",
-                r["begins"], f"{float(r['cost']):,.2f}",
-                f"{float(r['salvage']):,.2f}",
+                r["begins"], f"{_nf.f2(float(r['cost']))}",
+                f"{_nf.f2(float(r['salvage']))}",
                 r["life_months"] or "—",
-                f"{r['monthly']:,.2f}" if r["monthly"] else "—",
-                f"{r['accumulated']:,.2f}", f"{r['net_book']:,.2f}", st))
+                f"{_nf.f2(r['monthly'])}" if r["monthly"] else "—",
+                f"{_nf.f2(r['accumulated'])}", f"{_nf.f2(r['net_book'])}", st))
         fill(self.table, COLS, data)
         self._paint()
 
         self.c_count.set_value(f"{t['count']:,}")
-        self.c_cost.set_value(f"{t['cost']:,.2f}")
-        self.c_acc.set_value(f"{t['accumulated']:,.2f}")
-        self.c_net.set_value(f"{t['net_book']:,.2f}",
-                             f"قسط الشهر {t['monthly']:,.2f}")
+        self.c_cost.set_value(f"{_nf.f2(t['cost'])}")
+        self.c_acc.set_value(f"{_nf.f2(t['accumulated'])}")
+        self.c_net.set_value(f"{_nf.f2(t['net_book'])}",
+                             f"قسط الشهر {_nf.f2(t['monthly'])}")
 
-        bits = [f"قسط الشهر القادم: {t['monthly']:,.2f} ريال"]
+        bits = [f"قسط الشهر القادم: {_nf.f2(t['monthly'])} ريال"]
         if t.get("unset"):
             bits.append(f"⚠ {t['unset']} أصلاً بلا عمرٍ إنتاجي — "
                         f"لا تُهلَك حتى يُحدَّد عمرها")
         if abs(cmp_["difference"]) > 0.01:
             bits.append(
-                f"⚠ فرقٌ بين السجل والدفتر: السجل {cmp_['register']:,.2f} · "
-                f"الدفتر {cmp_['ledger']:,.2f} · الفرق "
-                f"{cmp_['difference']:,.2f}")
+                f"⚠ فرقٌ بين السجل والدفتر: السجل {_nf.f2(cmp_['register'])} · "
+                f"الدفتر {_nf.f2(cmp_['ledger'])} · الفرق "
+                f"{_nf.f2(cmp_['difference'])}")
         self.state.setText("   |   ".join(bits))
 
     def _paint(self):
@@ -242,16 +243,16 @@ class AssetsScreen(QtWidgets.QWidget):
             return
         if done:
             info(self, f"شهر {p} مُهلَكٌ من قبل بقيد رقم "
-                       f"{done['entry_id']} — {float(done['total']):,.2f} "
+                       f"{done['entry_id']} — {_nf.f2(float(done['total']))} "
                        f"ريال.\n\nلا يُهلَك الشهر مرتين.")
             return
         if not rows:
             warn(self, f"لا يوجد ما يُهلَك في {p}.")
             return
         total = sum(r["amount"] for r in rows)
-        txt = "\n".join(f"  {r['name']}: {r['amount']:,.2f}" for r in rows)
+        txt = "\n".join(f"  {r['name']}: {_nf.f2(r['amount'])}" for r in rows)
         info(self, f"سيُهلَك في {p}:\n\n{txt}\n\nالإجمالي: "
-                   f"{total:,.2f} ريال", "معاينة إهلاك الشهر")
+                   f"{_nf.f2(total)} ريال", "معاينة إهلاك الشهر")
 
     def run_month(self):
         p = self.period.text().strip()
@@ -266,7 +267,7 @@ class AssetsScreen(QtWidgets.QWidget):
                 return
             total = sum(r["amount"] for r in rows)
             if not ask(self, f"ترحيل إهلاك {p}؟\n\n{len(rows)} أصلاً · "
-                             f"{total:,.2f} ريال\n\nمن حـ/ مصروف الإهلاك "
+                             f"{_nf.f2(total)} ريال\n\nمن حـ/ مصروف الإهلاك "
                              f"إلى حـ/ مجمّع الإهلاك."):
                 return
             with busy(self, "جارٍ ترحيل الإهلاك…", stage="إهلاك"):
@@ -278,7 +279,7 @@ class AssetsScreen(QtWidgets.QWidget):
             return
         info(self, f"رُحّل إهلاك {res['period']} بقيد رقم "
                    f"{res['entry_id']}.\n\n{res['lines']} أصلاً · "
-                   f"{res['total']:,.2f} ريال")
+                   f"{_nf.f2(res['total'])} ريال")
         self.refresh()
 
     def dispose(self):
@@ -291,7 +292,7 @@ class AssetsScreen(QtWidgets.QWidget):
             warn(self, "هذا الأصل خارج الخدمة أصلاً.")
             return
         if not ask(self, f"إخراج «{r['name']}» من الخدمة؟\n\nيتوقّف قسطه "
-                         f"من الآن. صافيه الدفتري {r['net_book']:,.2f} "
+                         f"من الآن. صافيه الدفتري {_nf.f2(r['net_book'])} "
                          f"ريال — وبيعه أو شطبه قيدٌ تكتبه بنفسك في "
                          f"«القيود اليومية»."):
             return

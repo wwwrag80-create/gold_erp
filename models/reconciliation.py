@@ -14,6 +14,7 @@
 كل اختلال يُصنَّف بخطورته (حرج/تحذير) ويُوصف بموقعه ليعالجه المحاسب.
 """
 from services.accounting_engine import CASH_TOL, GOLD_TOL
+from services import numfmt as _nf
 
 
 def _entry_imbalances(conn):
@@ -59,13 +60,13 @@ def _global_balance(conn):
         out.append({
             "severity": "critical", "kind": "اختلال ميزان الذهب الكلي",
             "ref": "دفتر الأستاذ العام",
-            "detail": f"مدين {r['gd']:,.2f} مقابل دائن {r['gc']:,.2f}",
+            "detail": f"مدين {_nf.f2(r['gd'])} مقابل دائن {_nf.f2(r['gc'])}",
             "gold_diff": gd_diff, "cash_diff": 0.0, "entry_id": None})
     if abs(cd_diff) > CASH_TOL:
         out.append({
             "severity": "critical", "kind": "اختلال ميزان النقد الكلي",
             "ref": "دفتر الأستاذ العام",
-            "detail": f"مدين {r['cd']:,.2f} مقابل دائن {r['cc']:,.2f}",
+            "detail": f"مدين {_nf.f2(r['cd'])} مقابل دائن {_nf.f2(r['cc'])}",
             "gold_diff": 0.0, "cash_diff": cd_diff, "entry_id": None})
     return out
 
@@ -105,13 +106,13 @@ def _account_side_check(conn):
         out.append({
             "severity": "critical", "kind": "مجموع أرصدة الذهب ≠ صفر",
             "ref": "كل الحسابات",
-            "detail": f"صافي أرصدة الذهب = {tot_g:,.2f} (يجب أن يكون صفراً)",
+            "detail": f"صافي أرصدة الذهب = {_nf.f2(tot_g)} (يجب أن يكون صفراً)",
             "gold_diff": tot_g, "cash_diff": 0.0, "entry_id": None})
     if abs(tot_c) > CASH_TOL:
         out.append({
             "severity": "critical", "kind": "مجموع الأرصدة النقدية ≠ صفر",
             "ref": "كل الحسابات",
-            "detail": f"صافي الأرصدة النقدية = {tot_c:,.2f} (يجب أن يكون صفراً)",
+            "detail": f"صافي الأرصدة النقدية = {_nf.f2(tot_c)} (يجب أن يكون صفراً)",
             "gold_diff": 0.0, "cash_diff": tot_c, "entry_id": None})
     return out
 

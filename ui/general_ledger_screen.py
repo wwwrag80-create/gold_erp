@@ -19,6 +19,7 @@ from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err,
                                title_label)
 
 from models.editing import EDITABLE
+from services import numfmt as _nf
 
 
 def _doc_target(r, builders):
@@ -425,8 +426,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                         text_item("", _C), text_item(""), text_item(""),
                         num_item(self._g(tgd_)), num_item(self._g(tgc_)),
                         num_item(self._g(last_g)),
-                        num_item(f"{tcd_:,.2f}"), num_item(f"{tcc_:,.2f}"),
-                        num_item(f"{last_c:,.2f}"), text_item("", _C),
+                        num_item(_nf.f2(tcd_)), num_item(_nf.f2(tcc_)),
+                        num_item(_nf.f2(last_c)), text_item("", _C),
                     ]
                     self._sum_row(len(rows), tot)
             finally:
@@ -450,15 +451,15 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                       if r["op"] != "رصيد سابق")
             tcc = sum(float(r.get("cc") or 0) for r in rows
                       if r["op"] != "رصيد سابق")
-            self.g_debit.set_value(f"{self._g(tgd):,.2f}", f"جم عيار {k}")
-            self.g_credit.set_value(f"{self._g(tgc):,.2f}", f"جم عيار {k}")
+            self.g_debit.set_value(_nf.f2(self._g(tgd)), f"جم عيار {k}")
+            self.g_credit.set_value(_nf.f2(self._g(tgc)), f"جم عيار {k}")
             self.g_bal.set_value(
-                f"{abs(self._g(g)):,.2f}",
+                _nf.f2(abs(self._g(g))),
                 f"{'مدين/عليه' if g >= 0 else 'دائن/له'} — عيار {k}")
-            self.c_debit.set_value(f"{tcd:,.2f}")
-            self.c_credit.set_value(f"{tcc:,.2f}")
+            self.c_debit.set_value(_nf.f2(tcd))
+            self.c_credit.set_value(_nf.f2(tcc))
             self.c_bal.set_value(
-                f"{abs(c):,.2f}",
+                _nf.f2(abs(c)),
                 "مدين/عليه" if c >= 0 else "دائن/له")
             # الجهة/الحساب المقابل (3) والبيان (4): يُلفّان على أسطر
             self._show_latest()
@@ -781,8 +782,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                     text_item(r["date"], _C), text_item(r["op"], _C),
                     text_item(r["doc_no"], _C), text_item(r["accounts"]),
                     text_item(r["desc"]),
-                    num_item(f"{self._g(r['gold']):,.3f}" if r["gold"] else ""),
-                    num_item(f"{r['cash']:,.2f}" if r["cash"] else ""),
+                    num_item(f"{_nf.f2(self._g(r['gold']))}" if r["gold"] else ""),
+                    num_item(f"{_nf.f2(r['cash'])}" if r["cash"] else ""),
                     text_item(r["who"], _C),
                     text_item("👁" if (r.get("src") and r.get("sid")) else "",
                               _C),
@@ -794,8 +795,8 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 self._sum_row(len(rows), [
                     text_item("الإجمالي", _C), text_item("", _C),
                     text_item("", _C), text_item(""), text_item(""),
-                    num_item(f"{self._g(sum(r['gold'] for r in rows)):,.3f}"),
-                    num_item(f"{sum(r['cash'] for r in rows):,.2f}"),
+                    num_item(f"{_nf.f2(self._g(sum(r['gold'] for r in rows)))}"),
+                    num_item(f"{_nf.f2(sum(r['cash'] for r in rows))}"),
                     text_item("", _C), text_item("", _C),
                 ])
         finally:
@@ -806,10 +807,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
 
         tg = sum(r["gold"] for r in rows)
         tc = sum(r["cash"] for r in rows)
-        self.g_debit.set_value(f"{self._g(tg):,.2f}", f"جم عيار {k}")
+        self.g_debit.set_value(_nf.f2(self._g(tg)), f"جم عيار {k}")
         self.g_credit.set_value("—")
         self.g_bal.set_value(f"{len(rows):,}", "عدد المستندات")
-        self.c_debit.set_value(f"{tc:,.2f}")
+        self.c_debit.set_value(_nf.f2(tc))
         self.c_credit.set_value("—")
         self.c_bal.set_value(f"{len(rows):,}", "عدد المستندات")
         # الحسابات المتأثرة (3) والبيان (4)

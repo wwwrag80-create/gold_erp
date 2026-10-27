@@ -22,6 +22,7 @@ from ui.widgets.common import (Card, date_edit, dstr, enter_chain, err,
                                search_combo, tab_widget, text_item,
                                title_label)
 from ui.widgets.table_fit import fit_columns
+from services import numfmt as _nf
 
 REG_COLS = ["", "الرقم", "التاريخ", "المورد", "الرقم الضريبي للمورد",
             "فاتورة المورد", "نوعها", "الدفع", "المعالجة", "الخصم",
@@ -34,7 +35,7 @@ TREAT_SHORT = {"standard": "خاضعة 15%", "blocked": "لا تُسترد",
 
 
 def _m(v):
-    return f"{float(v or 0):,.2f}"
+    return _nf.f2(float(v or 0))
 
 
 def _shrink(cb, chars=10):
@@ -543,8 +544,8 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                    "bank": "بتحويل بنكي —"}[res["pay_mode"]]
             posted(self, f"تم ترحيل الفاتورة {res['purchase_no']} {how} "
                        f"المورد {res['supplier_name']} — الإجمالي "
-                       f"{res['total']:,.2f} ريال"
-                       + (f" (ضريبة مدخلات {res['claimed_vat']:,.2f})"
+                       f"{_nf.f2(res['total'])} ريال"
+                       + (f" (ضريبة مدخلات {_nf.f2(res['claimed_vat'])})"
                           if res["claimed_vat"] else ""),
                    "purchases", res["id"], editing=was_edit)
         except Exception as e:

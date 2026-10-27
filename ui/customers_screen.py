@@ -28,6 +28,7 @@ from ui.widgets.common import (StatChip as Card, ask, big_label, date_edit, dstr
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import (TOTAL_ROLE, enhance, export_csv,
                                     total_row)
+from services import numfmt as _nf
 
 ACC_ROLE = QtCore.Qt.UserRole + 11          # معرّف الحساب في خلية الاسم
 
@@ -360,7 +361,7 @@ class CustomersScreen(QtWidgets.QWidget):
 
     @staticmethod
     def _fmt(side, v):
-        return (f"{kv.g(v):,.3f}" if side == "gold" else f"{v:,.2f}")
+        return (_nf.f2(kv.g(v)) if side == "gold" else _nf.f2(v))
 
     @staticmethod
     def _pct(v):
@@ -409,7 +410,7 @@ class CustomersScreen(QtWidgets.QWidget):
                 t.item(i, c).setTextAlignment(QtCore.Qt.AlignCenter)
             rem = t.item(i, 7)
             rem.setFont(bold)
-            if x["remaining"] < -0.0005:
+            if x["remaining"] < -0.005:
                 rem.setForeground(QtGui.QBrush(QtGui.QColor(p["green"])))
                 rem.setToolTip("دائن: للعميل على المصنع")
             if x["ret_pct"] is not None and x["ret_pct"] >= 20:
@@ -437,10 +438,10 @@ class CustomersScreen(QtWidgets.QWidget):
         self._paint_total(t, fr)
         # عمودا «رصيد سابق» و«حركات أخرى» يُخفيان إن خلَوا — فلا يزاحم
         # صفرٌ متكرّرٌ الأرقامَ التي فُتحت الشاشة لأجلها.
-        t.setColumnHidden(C_OPEN, abs(s["open"]) < 0.0005 and not any(
-            abs(r[side]["open"]) > 0.0005 for r in rows))
+        t.setColumnHidden(C_OPEN, abs(s["open"]) < 0.005 and not any(
+            abs(r[side]["open"]) > 0.005 for r in rows))
         t.setColumnHidden(C_OTHER, not any(
-            abs(r[side]["other"]) > 0.0005 for r in rows))
+            abs(r[side]["other"]) > 0.005 for r in rows))
         self._fit(t)
         self._mark_sorted(t, 5)
 
@@ -466,7 +467,7 @@ class CustomersScreen(QtWidgets.QWidget):
             self._paint_grade(t.item(i, 7), r["gold"]["grade"])
             self._paint_grade(t.item(i, 9), r["cash"]["grade"])
             d = r["days_since_paid"]
-            owes = (r["gold"]["remaining"] > 0.0005
+            owes = (r["gold"]["remaining"] > 0.005
                     or r["cash"]["remaining"] > 0.005)
             if owes and (d is None or d > 60):
                 t.item(i, 5).setForeground(
@@ -524,7 +525,7 @@ class CustomersScreen(QtWidgets.QWidget):
                              f"{u} · {self._pct(s['ret_pct'])} من السابق والمبيعات")
         self.c_paid.set_value(self._fmt(side, s["paid"]),
                               f"{u} · {self._pct(s['paid_pct'])} من الصافي")
-        owing = sum(1 for r in rows if r[side]["remaining"] > 0.0005)
+        owing = sum(1 for r in rows if r[side]["remaining"] > 0.005)
         self.c_rem.set_value(self._fmt(side, s["remaining"]),
                              f"{u} {tag} · على {owing:,} عميلاً")
 
@@ -555,8 +556,8 @@ class CustomersScreen(QtWidgets.QWidget):
         if r["n_sales"]:
             parts.append(
                 f"{r['n_sales']:,} فاتورة · متوسطها "
-                f"{kv.g(r['avg_sale_gold']):,.3f} {kv.unit()} و"
-                f"{r['avg_sale_cash']:,.2f} ريال")
+                f"{_nf.f2(kv.g(r['avg_sale_gold']))} {kv.unit()} و"
+                f"{_nf.f2(r['avg_sale_cash'])} ريال")
         if r["last_sale"]:
             parts.append(f"آخر بيع {r['last_sale']}")
         d = r["days_since_paid"]
@@ -762,8 +763,8 @@ class MovementDetailDialog(QtWidgets.QDialog):
         fill(self.table, self.COLS, [
             (r["date"], r["op"], r["doc_no"] or "—", r["name"],
              r["cat_label"],
-             f"{kv.g(r['gold'] * _s(r)):,.3f}" if r["gold"] else "",
-             f"{r['cash'] * _s(r):,.2f}" if r["cash"] else "",
+             f"{_nf.f2(kv.g(r['gold'] * _s(r)))}" if r["gold"] else "",
+             f"{_nf.f2(r['cash'] * _s(r))}" if r["cash"] else "",
              r["why"], r["desc"]) for r in rows])
         p = _pal()
         colors = {"sales": p["goldDim"], "returns": p["redText"],
@@ -777,9 +778,9 @@ class MovementDetailDialog(QtWidgets.QDialog):
         t = self.res["totals"]
         u = kv.unit()
         self.totals.setText("   ·   ".join(
-            f"{_ek_label(c)}: {kv.g(t[c]['gold']):,.3f} {u}"
-            f" / {t[c]['cash']:,.2f} ريال"
-            for c in cb.KINDS if abs(t[c]["gold"]) > 0.0005
+            f"{_ek_label(c)}: {_nf.f2(kv.g(t[c]['gold']))} {u}"
+            f" / {_nf.f2(t[c]['cash'])} ريال"
+            for c in cb.KINDS if abs(t[c]["gold"]) > 0.005
             or abs(t[c]["cash"]) > 0.005))
 
 

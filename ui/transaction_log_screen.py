@@ -17,6 +17,7 @@ from models import purchases, shrinkage, stocktake, tax_sales, vouchers
 from services.audit import soft_delete_entry
 from ui.widgets.common import ask, date_edit, dstr, err, info, title_label
 from ui.widgets.ledger_view import LedgerView
+from services import numfmt as _nf
 
 
 def _inv_kind(r):
@@ -44,7 +45,7 @@ DOC_TYPES = [
       "فرق الصافي", "رقم القيد"],
      lambda conn, q, f, t: vouchers.search_vouchers(conn, "receipt", q, f, t),
      lambda r: (r["voucher_no"], r["customer_name"], r["voucher_date"],
-               f"{r['gold_weight']:.2f} ع{r['gold_karat']}"
+               f"{_nf.f2(r['gold_weight'], sep=False)} ع{r['gold_karat']}"
                if r["gold_weight"] else "—",
                kv.g(r["gold_equiv18"]), r["cash_amount"], r["net_diff"],
                r["entry_id"])),
@@ -54,7 +55,7 @@ DOC_TYPES = [
       "فرق الصافي", "رقم القيد"],
      lambda conn, q, f, t: vouchers.search_vouchers(conn, "payment", q, f, t),
      lambda r: (r["voucher_no"], r["customer_name"], r["voucher_date"],
-               f"{r['gold_weight']:.2f} ع{r['gold_karat']}"
+               f"{_nf.f2(r['gold_weight'], sep=False)} ع{r['gold_karat']}"
                if r["gold_weight"] else "—",
                kv.g(r["gold_equiv18"]), r["cash_amount"], r["net_diff"],
                r["entry_id"])),
@@ -81,7 +82,7 @@ DOC_TYPES = [
      lambda conn, q, f, t: melting.search_melting(conn, q, f, t),
      lambda r: (r["op_no"], r["op_date"], r["w18"], r["w21"], r["expected24"],
                r["actual24"], r["loss24"],
-               f"{r['loss_ratio']*100:.2f}%" + (" ⚠" if r["exceeded"] else ""),
+               f"{_nf.f2(r['loss_ratio']*100, sep=False)}%" + (" ⚠" if r["exceeded"] else ""),
                r["entry_id"])),
 
     ("fixing", "عمليات التسكير",

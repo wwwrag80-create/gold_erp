@@ -12,6 +12,7 @@ from services import karat_view as kv
 from models import inventory
 from services import gold_math
 from ui.widgets.common import ask, err, info, wspin
+from services import numfmt as _nf
 
 
 class WorkOrderAdjustDialog(QtWidgets.QDialog):
@@ -96,21 +97,21 @@ class WorkOrderAdjustDialog(QtWidgets.QDialog):
         self.contra_label.setVisible(is_decrease)
         contra = self.contra.currentData() or "—"
         if diff > 0:
-            entry = (f"القيد: مدين الذهب المشغول (1200) {diff:.2f} "
+            entry = (f"القيد: مدين الذهب المشغول (1200) {_nf.f2(diff, sep=False)} "
                      f"{kv.unit()} / دائن تسوية الزيادة في الطقوم "
-                     f"({inventory.WO_INCREASE_ACCOUNT}) {diff:.2f} "
+                     f"({inventory.WO_INCREASE_ACCOUNT}) {_nf.f2(diff, sep=False)} "
                      f"{kv.unit()}")
         elif diff < 0:
-            entry = (f"القيد: مدين {contra} {-diff:.2f} {kv.unit()} / "
-                     f"دائن الذهب المشغول (1200) {-diff:.2f} "
+            entry = (f"القيد: مدين {contra} {_nf.f2(-diff, sep=False)} {kv.unit()} / "
+                     f"دائن الذهب المشغول (1200) {_nf.f2(-diff, sep=False)} "
                      f"{kv.unit()}")
         else:
             entry = "لا فرق وزني — لن يُرحَّل قيد"
         self.preview.setText(
             f"الوزن المقيد الحالي: "
-            f"{kv.g(self.wo['registered_weight']):.2f} {kv.unit()}  →  "
-            f"الجديد: {new_reg:.2f} {kv.unit()}\n"
-            f"الفرق: {diff:+.2f} {kv.unit()} ({sign})  ·  النوع بعد التعديل: {item_type}\n"
+            f"{_nf.f2(kv.g(self.wo['registered_weight']), sep=False)} {kv.unit()}  →  "
+            f"الجديد: {_nf.f2(new_reg, sep=False)} {kv.unit()}\n"
+            f"الفرق: {_nf.f2(diff, sep=False, sign=True)} {kv.unit()} ({sign})  ·  النوع بعد التعديل: {item_type}\n"
             f"{entry}")
 
     def delete_wo(self):
@@ -124,7 +125,7 @@ class WorkOrderAdjustDialog(QtWidgets.QDialog):
                 raise ValueError("الطقم غير موجود")
             if not ask(self,
                        f"حذف الطقم {wo['work_order_no']} نهائياً؟\n\n"
-                       f"سيخرج {kv.g(wo['registered_weight']):,.2f} "
+                       f"سيخرج {_nf.f2(kv.g(wo['registered_weight']))} "
                        f"{kv.unit()} من "
                        f"الذهب المشغول\nمقابل حساب «تسويات أوزان "
                        f"الطقوم».\n\nالبيان: حذف رقم التشغيل "
@@ -136,7 +137,7 @@ class WorkOrderAdjustDialog(QtWidgets.QDialog):
                     notes=self.notes.text().strip()
                     if hasattr(self, "notes") else "")
             info(self, f"{r['label']}\nخرج "
-                       f"{kv.g(abs(r['diff'])):,.2f} {kv.unit()} من "
+                       f"{_nf.f2(kv.g(abs(r['diff'])))} {kv.unit()} من "
                        f"الذهب المشغول إلى حساب التسويات.")
             self.accept()
         except Exception as e:
@@ -158,9 +159,9 @@ class WorkOrderAdjustDialog(QtWidgets.QDialog):
                     new_big=kv.store(self.big.value()),
                     notes=self.notes.text().strip())
             info(self, f"{r['label']}\n"
-                       f"الوزن المقيد: {kv.g(r['old_reg']):,.2f} → "
-                       f"{kv.g(r['new_reg']):,.2f} {kv.unit()} "
-                       f"(فرق {kv.g(r['diff']):+,.2f})\n\n"
+                       f"الوزن المقيد: {_nf.f2(kv.g(r['old_reg']))} → "
+                       f"{_nf.f2(kv.g(r['new_reg']))} {kv.unit()} "
+                       f"(فرق {_nf.f2(kv.g(r['diff']), sign=True)})\n\n"
                        f"رُحّل الفرق مقابل حساب «تسويات أوزان الطقوم».")
             self.accept()
         except Exception as e:

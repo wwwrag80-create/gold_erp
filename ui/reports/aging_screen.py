@@ -16,6 +16,7 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err,
                                make_table, title_label)
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 TYPES = [("العملاء", "customer"), ("الموردون", "supplier"),
          ("جهات أخرى", "other")]
@@ -252,17 +253,17 @@ class AgingScreen(QtWidgets.QWidget):
                "—" if nd is None else str(nd),
                "—" if not od else str(od)]
         if dim in ("both", "gold"):
-            out += [f"{kv.g(x):,.3f}" if x else ""
+            out += [_nf.f2(kv.g(x)) if x else ""
                     for x in r["gold_buckets"]]
-            out += [f"{kv.g(r['gold']):,.3f}" if r["gold"] else ""]
+            out += [f"{_nf.f2(kv.g(r['gold']))}" if r["gold"] else ""]
         if dim in ("both", "cash"):
-            out += [f"{x:,.2f}" if x else "" for x in r["cash_buckets"]]
-            out += [f"{r['cash']:,.2f}" if r["cash"] else ""]
+            out += [_nf.f2(x) if x else "" for x in r["cash_buckets"]]
+            out += [f"{_nf.f2(r['cash'])}" if r["cash"] else ""]
         cr = []
         if r["cash_credit"]:
-            cr.append(f"نقد {abs(r['cash_credit']):,.2f}")
+            cr.append(f"نقد {_nf.f2(abs(r['cash_credit']))}")
         if r["gold_credit"]:
-            cr.append(f"ذهب {kv.g(abs(r['gold_credit'])):,.3f}")
+            cr.append(f"ذهب {_nf.f2(kv.g(abs(r['gold_credit'])))}")
         out.append(" · ".join(cr) or "—")
         return out
 
@@ -287,7 +288,7 @@ class AgingScreen(QtWidgets.QWidget):
             self.table.setRowCount(len(rows) + (1 if rows else 0))
             for i, r in enumerate(rows):
                 for c, v in enumerate(self._row_cells(r, dim)):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     # المتعثّر يُلوَّن: العين تلتقطه قبل أن تقرأ الأرقام
                     if r["days"] >= 91:
@@ -301,16 +302,16 @@ class AgingScreen(QtWidgets.QWidget):
                 # ليس له، وهو خطأٌ لا يُرى لأن الأرقام تبدو معقولة.
                 tot = ["الإجمالي", "—", "—", "—"]
                 if dim in ("both", "gold"):
-                    tot += [f"{kv.g(x):,.3f}" for x in t["gold_buckets"]]
-                    tot += [f"{kv.g(t['gold']):,.3f}"]
+                    tot += [_nf.f2(kv.g(x)) for x in t["gold_buckets"]]
+                    tot += [f"{_nf.f2(kv.g(t['gold']))}"]
                 if dim in ("both", "cash"):
-                    tot += [f"{x:,.2f}" for x in t["cash_buckets"]]
-                    tot += [f"{t['cash']:,.2f}"]
-                tot.append(f"نقد {abs(t['cash_credit']):,.2f}"
+                    tot += [_nf.f2(x) for x in t["cash_buckets"]]
+                    tot += [f"{_nf.f2(t['cash'])}"]
+                tot.append(f"نقد {_nf.f2(abs(t['cash_credit']))}"
                            if t["cash_credit"] else "—")
                 last = len(rows)
                 for c, v in enumerate(tot):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     f = it.font()
                     f.setBold(True)
@@ -327,13 +328,13 @@ class AgingScreen(QtWidgets.QWidget):
         fit_columns(self.table, w)
 
         self.c_count.set_value(f"{t['count']:,}")
-        self.c_cur.set_value(f"{t['cash_buckets'][0]:,.2f}",
+        self.c_cur.set_value(f"{_nf.f2(t['cash_buckets'][0])}",
                              f"{t['cash_pct'][0]:.1f}% من الإجمالي")
         late = t["cash_buckets"][1] + t["cash_buckets"][2]
         self.c_late.set_value(
-            f"{late:,.2f}",
+            _nf.f2(late),
             f"{(t['cash_pct'][1] + t['cash_pct'][2]):.1f}% من الإجمالي")
-        self.c_bad.set_value(f"{t['cash_buckets'][3]:,.2f}",
+        self.c_bad.set_value(f"{_nf.f2(t['cash_buckets'][3])}",
                              f"{t['cash_pct'][3]:.1f}% من الإجمالي")
         worst = rows[0] if rows else None
         self.note.setText(

@@ -20,6 +20,7 @@ import webbrowser
 from pathlib import Path
 
 import config
+from services import numfmt as _nf
 
 # ══════════════════════════════════════════════════════════════════
 # أنماط الطباعة الكاملة — يدعمها المتصفح بالكامل خلاف محرك Qt
@@ -374,7 +375,7 @@ def build_compare_page(edit_id, auto_print=False):
 
     def _signed(v, d):
         cls = "up" if v > 0 else "dn" if v < 0 else ""
-        txt = f"({abs(v):,.{d}f})" if v < 0 else f"{v:,.{d}f}"
+        txt = f"({_nf.f2(abs(v))})" if v < 0 else _nf.f2(v)
         return f"<span class='{cls}'>{txt}</span>" if cls else txt
 
     u = kv.unit()
@@ -394,10 +395,10 @@ def build_compare_page(edit_id, auto_print=False):
         f"{_h.escape(doc_edits.KINDS.get(raw['kind'], raw['kind']))}</td>"
         f"<th>ما الذي تغيّر</th><td>"
         f"{_h.escape((r or {}).get('change') or '—')}</td></tr>"
-        f"<tr><th>الوزن ({u})</th><td>{og:,.3f} ← {ng:,.3f} "
+        f"<tr><th>الوزن ({u})</th><td>{_nf.f2(og)} ← {_nf.f2(ng)} "
         f"(الفرق {_signed(ng - og, 3)})</td>"
-        f"<th>النقد (ريال)</th><td>{raw['old_cash']:,.2f} ← "
-        f"{raw['new_cash']:,.2f} (الفرق "
+        f"<th>النقد (ريال)</th><td>{_nf.f2(raw['old_cash'])} ← "
+        f"{_nf.f2(raw['new_cash'])} (الفرق "
         f"{_signed(raw['new_cash'] - raw['old_cash'], 2)})</td></tr>"
         "</table></div>")
 

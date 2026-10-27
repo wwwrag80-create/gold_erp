@@ -12,6 +12,7 @@ from database.database import db
 from models.reports import vat_return
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -105,38 +106,38 @@ class VatReturnScreen(QtWidgets.QWidget):
                 r = vat_return(conn, dstr(self.d_from),
                               dstr(self.d_to))
             self.last = r
-            self.c_out.set_value(f"{r['output_vat']:,.2f}",
+            self.c_out.set_value(f"{_nf.f2(r['output_vat'])}",
                                 f"وعاء خاضع: "
-                                f"{r['sales_base'] + r['tax_sales_base']:,.2f}"
+                                f"{_nf.f2(r['sales_base'] + r['tax_sales_base'])}"
                                 f" ريال ({r['sales_count'] + r['tax_sales_count']}"
                                 " فاتورة ضريبية)")
-            self.c_in.set_value(f"{r['input_vat']:,.2f}",
-                               f"وعاء خاضع: {r['purchases_base']:,.2f} ريال "
+            self.c_in.set_value(f"{_nf.f2(r['input_vat'])}",
+                               f"وعاء خاضع: {_nf.f2(r['purchases_base'])} ريال "
                                f"({r['purchases_count']} فاتورة مشتريات)")
-            self.c_net.set_value(f"{abs(r['net']):,.2f}", r["status"])
+            self.c_net.set_value(f"{_nf.f2(abs(r['net']))}", r["status"])
             rows = [
                 ("— ضريبة المخرجات —", "", ""),
-                ("إجمالي مبيعات الأجور الخاضعة للضريبة", f"{r['sales_base']:,.2f}", ""),
+                ("إجمالي مبيعات الأجور الخاضعة للضريبة", f"{_nf.f2(r['sales_base'])}", ""),
                 ("الضريبة المحصلة من العملاء (من الفواتير)",
-                 "", f"{r['sales_vat']:,.2f}"),
+                 "", f"{_nf.f2(r['sales_vat'])}"),
                 ("المبيعات الضريبية خارج المخزون (بعد الإشعارات الدائنة)",
-                 f"{r['tax_sales_base']:,.2f}", f"{r['tax_sales_vat']:,.2f}"),
+                 f"{_nf.f2(r['tax_sales_base'])}", f"{_nf.f2(r['tax_sales_vat'])}"),
                 ("رصيد حساب 2100 — ضريبة المخرجات (دفتر الأستاذ)",
-                 "", f"{r['output_vat']:,.2f}"),
+                 "", f"{_nf.f2(r['output_vat'])}"),
                 ("— ضريبة المدخلات —", "", ""),
                 ("إجمالي المشتريات الخاضعة للضريبة",
-                 f"{r['purchases_base']:,.2f}", ""),
+                 f"{_nf.f2(r['purchases_base'])}", ""),
                 ("الضريبة المدفوعة للموردين (من الفواتير)",
-                 "", f"{r['purchases_vat']:,.2f}"),
+                 "", f"{_nf.f2(r['purchases_vat'])}"),
                 ("رصيد حساب 1900 — ضريبة المدخلات (دفتر الأستاذ)",
-                 "", f"{r['input_vat']:,.2f}"),
+                 "", f"{_nf.f2(r['input_vat'])}"),
                 ("— التسوية —", "", ""),
-                ("صافي الضريبة (مخرجات − مدخلات)", "", f"{r['net']:,.2f}"),
+                ("صافي الضريبة (مخرجات − مدخلات)", "", f"{_nf.f2(r['net'])}"),
             ]
             fill(self.table, ["البند", "الوعاء الخاضع (ريال)", "الضريبة (ريال)"], rows)
             self.status.setText(
                 f"الفترة {r['date_from']} إلى {r['date_to']} — {r['status']}: "
-                f"{abs(r['net']):,.2f} ريال")
+                f"{_nf.f2(abs(r['net']))} ريال")
         except Exception as e:
             err(self, e)
 

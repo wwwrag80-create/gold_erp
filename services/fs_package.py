@@ -19,6 +19,7 @@ import json
 import zipfile
 
 from models import statements as st
+from services import numfmt as _nf
 
 # بند ← مسمّى IFRS. البنود المحلية (الزكاة) بامتدادٍ مصرَّحٍ به.
 FP_CONCEPTS = [
@@ -270,18 +271,18 @@ def readiness(conn, date_from, date_to):
     out.append(("قائمة المركز المالي متوازنة", fp["balanced_cash"], ""))
     z = pe.zakat_compute(conn, date_from, date_to)
     out.append(("مخصص الزكاة مقيَّد للفترة", abs(z["due"]) < 0.01,
-                f"المطلوب قيده {z['due']:,.2f}" if abs(z["due"]) >= 0.01
-                else f"{z['zakat']:,.2f}"))
+                f"المطلوب قيده {_nf.f2(z['due'])}" if abs(z["due"]) >= 0.01
+                else f"{_nf.f2(z['zakat'])}"))
     e = pe.eos_compute(conn, date_to)
     ok = abs(e["due"]) < 0.01 and not e["missing_hire"]
     out.append(("مخصص مكافأة نهاية الخدمة محدَّث", ok,
                 (f"ينقص تاريخ تعيين: {len(e['missing_hire'])} موظف · "
                  if e["missing_hire"] else "")
-                + (f"المطلوب قيده {e['due']:,.2f}"
+                + (f"المطلوب قيده {_nf.f2(e['due'])}"
                    if abs(e["due"]) >= 0.01 else "")))
     c = pe.ecl_compute(conn, date_to)
     out.append(("مخصص الخسائر الائتمانية محدَّث", abs(c["due"]) < 0.01,
-                f"المطلوب قيده {c['due']:,.2f}" if abs(c["due"]) >= 0.01
+                f"المطلوب قيده {_nf.f2(c['due'])}" if abs(c["due"]) >= 0.01
                 else ""))
     pend = [p for p in pe.prepaid_list(conn, date_to) if abs(p["due"]) >= 0.01]
     out.append(("المصروفات المقدمة مُطفأة حتى نهاية الفترة", not pend,

@@ -22,6 +22,7 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err,
                                fill, make_table, run_bg, tab_widget,
                                title_label)
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 def _cols():
@@ -138,36 +139,36 @@ class ModelProfitScreen(QtWidgets.QWidget):
         self.rows, unsold = out
         t = mp.totals(self.rows)
         data = [(r["model"], r["sold"], r["returned"], r["net_count"],
-                 f"{kv.g(r['net_weight']):,.3f}",
-                 f"{kv.g(r['small_stones']):,.2f}",
-                 f"{kv.g(r['big_stones']):,.2f}") for r in self.rows]
+                 f"{_nf.f2(kv.g(r['net_weight']))}",
+                 f"{_nf.f2(kv.g(r['small_stones']))}",
+                 f"{_nf.f2(kv.g(r['big_stones']))}") for r in self.rows]
         if data:
             data.append(("الإجمالي", "", "", t["net_count"],
-                         f"{kv.g(t['net_weight']):,.3f}",
-                         f"{kv.g(t['small_stones']):,.2f}",
-                         f"{kv.g(t['big_stones']):,.2f}"))
+                         f"{_nf.f2(kv.g(t['net_weight']))}",
+                         f"{_nf.f2(kv.g(t['small_stones']))}",
+                         f"{_nf.f2(kv.g(t['big_stones']))}"))
         fill(self.table, _cols(), data)
         self._bold_last(self.table, len(data))
 
         fill(self.table_unsold, _cols_unsold(),
-             [(u["model"], u["count"], f"{kv.g(u['weight']):,.3f}",
-               f"{u['wage_per_gram']:,.2f}", f"{u['potential']:,.2f}")
+             [(u["model"], u["count"], f"{_nf.f2(kv.g(u['weight']))}",
+               f"{_nf.f2(u['wage_per_gram'])}", f"{_nf.f2(u['potential'])}")
               for u in unsold])
 
         self.c_models.set_value(f"{t['models']:,}",
                                 f"{t['net_count']:,} طقماً صافياً")
-        self.c_wages.set_value(f"{t['wages']:,.2f}", "ريال")
-        self.c_avg.set_value(f"{t['avg_wage']:,.2f}",
+        self.c_wages.set_value(f"{_nf.f2(t['wages'])}", "ريال")
+        self.c_avg.set_value(f"{_nf.f2(t['avg_wage'])}",
                              f"ريال لكل {kv.unit()}")
         best = self.rows[0] if self.rows else None
         self.c_top.set_value(best["model"] if best else "—",
-                             f"{best['wages']:,.2f} ريال · "
+                             f"{_nf.f2(best['wages'])} ريال · "
                              f"{best['share']:,.1f}%" if best else "")
         idle = sum(u["potential"] for u in unsold)
         self.state.setText(
             f"{t['models']:,} موديلاً بِيع منه خلال الفترة · صافي أجوره "
-            f"{t['wages']:,.2f} ريال"
-            + (f"   |   وفي المخزن أجرةٌ لم تُحصَّل بعد: {idle:,.2f} ريال"
+            f"{_nf.f2(t['wages'])} ريال"
+            + (f"   |   وفي المخزن أجرةٌ لم تُحصَّل بعد: {_nf.f2(idle)} ريال"
                if idle else ""))
 
     def _bold_last(self, table, n):

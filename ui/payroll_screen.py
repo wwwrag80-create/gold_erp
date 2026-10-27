@@ -11,6 +11,7 @@ from models import payroll
 from ui.widgets.common import (big_label, date_edit, dstr, enter_chain, err,
                                fill, info, make_table, mspin, reload_combo,
                                search_combo, title_label)
+from services import numfmt as _nf
 
 
 class PayrollScreen(QtWidgets.QWidget):
@@ -98,7 +99,7 @@ class PayrollScreen(QtWidgets.QWidget):
                                            self.adv_notes.text())
             info(self, f"تم صرف السلفة (قيد {res['entry_id']})\n"
                        f"إجمالي السلف القائمة على الموظف: "
-                       f"{res['outstanding']:,.2f} ريال")
+                       f"{_nf.f2(res['outstanding'])} ريال")
             self.adv_amount.setValue(0)
             self.adv_notes.clear()
             self.refresh()
@@ -154,7 +155,7 @@ class PayrollScreen(QtWidgets.QWidget):
                 info(self, "لا يوجد استحقاق جديد لهذه الفترة "
                            "(مُقفلة مسبقاً أو لا موظفون نشطون)")
             else:
-                lines = "\n".join(f"• {n}: {a:,.2f} ريال" for n, a in res)
+                lines = "\n".join(f"• {n}: {_nf.f2(a)} ريال" for n, a in res)
                 info(self, f"تم إقفال رواتب {self.period.text()} "
                            f"لعدد {len(res)} موظف:\n{lines}")
             self.refresh()
@@ -169,7 +170,7 @@ class PayrollScreen(QtWidgets.QWidget):
                                            dstr(self.pay_date),
                                            self.user["username"])
             lines = "\n".join(
-                f"• {n}: إجمالي {g:,.2f} − سلفة {d:,.2f} = صافي {net:,.2f}"
+                f"• {n}: إجمالي {_nf.f2(g)} − سلفة {_nf.f2(d)} = صافي {_nf.f2(net)}"
                 for n, g, d, net in res["rows"])
             info(self, f"تم صرف الرواتب (قيد {res['entry_id']}):\n{lines}")
             self.refresh()
@@ -188,6 +189,6 @@ class PayrollScreen(QtWidgets.QWidget):
         fill(self.emp_table, ["الموظف", "الراتب الأساسي", "سلف قائمة",
                               "مستحق له (دائن)", "الحالة"], erows)
         self.balances.setText(
-            f"مصروف الرواتب المتراكم: {b['expense']:,.2f} | "
-            f"مستحقات الموظفين غير المصروفة (التزام): {b['accrued']:,.2f} | "
-            f"سلف الموظفين القائمة: {b['advances']:,.2f} ريال")
+            f"مصروف الرواتب المتراكم: {_nf.f2(b['expense'])} | "
+            f"مستحقات الموظفين غير المصروفة (التزام): {_nf.f2(b['accrued'])} | "
+            f"سلف الموظفين القائمة: {_nf.f2(b['advances'])} ريال")

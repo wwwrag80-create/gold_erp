@@ -25,6 +25,7 @@
 ويُعرض ويُدخَل بعيار المصنع المختار.
 """
 import threading
+from services import numfmt as _nf
 
 SETTING_KEY = "credit_guard_mode"
 MODES = ("off", "warn", "block")
@@ -191,13 +192,13 @@ def message(hits, blocked=False):
         bits = []
         if r["over_cash"]:
             bits.append(
-                f"نقداً {r['cash']:,.2f} من سقف {r['limit_cash']:,.2f} ريال "
-                f"(تجاوز {r['over_cash']:,.2f})")
+                f"نقداً {_nf.f2(r['cash'])} من سقف {_nf.f2(r['limit_cash'])} ريال "
+                f"(تجاوز {_nf.f2(r['over_cash'])})")
         if r["over_gold"]:
             bits.append(
-                f"وزناً {kv.g(r['gold']):,.3f} من سقف "
-                f"{kv.g(r['limit_gold']):,.3f} {kv.unit()} "
-                f"(تجاوز {kv.g(r['over_gold']):,.3f})")
+                f"وزناً {_nf.f2(kv.g(r['gold']))} من سقف "
+                f"{_nf.f2(kv.g(r['limit_gold']))} {kv.unit()} "
+                f"(تجاوز {_nf.f2(kv.g(r['over_gold']))})")
         parts.append(f"• {r['name']}: " + " · ".join(bits))
     body = "\n".join(parts)
     if blocked:

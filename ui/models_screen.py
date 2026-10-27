@@ -22,6 +22,7 @@ from services import karat_view as kv
 from models import models_catalog as mc
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, info,
                                title_label)
+from services import numfmt as _nf
 
 HEADERS = ["الموديل / رقم التشغيل", "العدد", "الوزن المقيد",
            "الجهة / التاريخ"]
@@ -293,7 +294,7 @@ class ModelsScreen(QtWidgets.QWidget):
             for d in days:
                 self.day.addItem(
                     f"{d['date']}   —   {d['count']} طقم · "
-                    f"{d['models']} موديل · {kv.g(d['weight']):,.2f}"
+                    f"{d['models']} موديل · {_nf.f2(kv.g(d['weight']))}"
                     f" {kv.unit()}", d["date"])
             qd = QtCore.QDate.fromString(str(days[0]["date"]), "yyyy-MM-dd")
             if qd.isValid():
@@ -400,7 +401,7 @@ class ModelsScreen(QtWidgets.QWidget):
                     where.append(f"عند الجهات {m['out_count']}")
                 node = self._cells(
                     [f"◄  {_img}الموديل {m['model']}", m["count"],
-                     f"{kv.g(m['weight']):,.2f}", "  ·  ".join(where)],
+                     f"{_nf.f2(kv.g(m['weight']))}", "  ·  ".join(where)],
                     bold=True, brush=st["model"], data=("model", m["model"]))
                 for it in node:
                     try:
@@ -414,7 +415,7 @@ class ModelsScreen(QtWidgets.QWidget):
                     if i["bulk"]:
                         tail += "  ·  رصيد مجمّع"
                     row = self._cells(
-                        [i["wo"], "", f"{kv.g(i['reg']):,.2f}", tail],
+                        [i["wo"], "", f"{_nf.f2(kv.g(i['reg']))}", tail],
                         brush=st["stock"] if i["safe"] else st["sold"],
                         data=("wo", i["id"]))
                     node[0].appendRow(row)
@@ -441,7 +442,7 @@ class ModelsScreen(QtWidgets.QWidget):
             return
         self.summary.setText(
             f"{len(models)} موديل   |   الوارد في {span}: "
-            f"{n_in + n_out} طقم · {kv.g(w_tot):,.2f} {kv.unit()}"
+            f"{n_in + n_out} طقم · {_nf.f2(kv.g(w_tot))} {kv.unit()}"
             f"   |   بالخزنة: {n_in} · عند الجهات: {n_out}")
         self._sum_base = self.summary.text()
         if self.search.text().strip():
@@ -552,7 +553,7 @@ class ModelsScreen(QtWidgets.QWidget):
                 _img = "🖼 " if mc.image_path(m["model"]) else ""
                 node = self._cells(
                     [f"◄  {_img}الموديل {m['model']}", head_n,
-                     f"{kv.g(head_w):,.2f}", ""],
+                     _nf.f2(kv.g(head_w)), ""],
                     bold=True, brush=st["model"],
                     data=("model", m["model"]))
                 # إبراز صف الموديل: خط أكبر وخلفية مميّزة
@@ -567,27 +568,27 @@ class ModelsScreen(QtWidgets.QWidget):
                 if mode in ("all", "sold"):
                     sold = self._cells(
                         ["طرف المناديب", m["out_count"],
-                         f"{kv.g(m['out_weight']):,.2f}", "عند المناديب"],
+                         f"{_nf.f2(kv.g(m['out_weight']))}", "عند المناديب"],
                         bold=True, brush=st["sold"],
                         data=("branch", m["model"]))
                     node[0].appendRow(sold)
                     for i in data[m["model"]]["sold"]:
                         sold[0].appendRow(self._cells(
-                            [i["wo"], "", f"{kv.g(i['reg']):,.2f}",
+                            [i["wo"], "", f"{_nf.f2(kv.g(i['reg']))}",
                              f"{i['holder']}  ·  {i['date']}"],
                             data=("wo", i["id"])))
 
                 if mode in ("all", "in_stock"):
                     stock = self._cells(
                         ["الموجود (متاح للبيع)", m["in_count"],
-                         f"{kv.g(m['in_weight']):,.2f}",
+                         f"{_nf.f2(kv.g(m['in_weight']))}",
                          "في الذهب المشغول"],
                         bold=True, brush=st["stock"],
                         data=("branch", m["model"]))
                     node[0].appendRow(stock)
                     for i in data[m["model"]]["in_stock"]:
                         stock[0].appendRow(self._cells(
-                            [i["wo"], "", f"{kv.g(i['reg']):,.2f}",
+                            [i["wo"], "", f"{_nf.f2(kv.g(i['reg']))}",
                              f"أُدخل: {i['date']}"],
                             data=("wo", i["id"])))
             # مطوية عند الفتح: القائمة قد تطول، والمستخدم يفتح ما
@@ -608,14 +609,14 @@ class ModelsScreen(QtWidgets.QWidget):
         n_out = sum(m["out_count"] for m in models)
         if mode == "in_stock":
             txt = (f"{len(models)} موديل   |   المتاح للبيع: "
-                   f"{n_in} طقم · {kv.g(tot_in):,.2f} {kv.unit()}")
+                   f"{n_in} طقم · {_nf.f2(kv.g(tot_in))} {kv.unit()}")
         elif mode == "sold":
             txt = (f"{len(models)} موديل   |   المباع بالخارج: "
-                   f"{n_out} طقم · {kv.g(tot_out):,.2f} {kv.unit()}")
+                   f"{n_out} طقم · {_nf.f2(kv.g(tot_out))} {kv.unit()}")
         else:
             txt = (f"{len(models)} موديل   |   المتاح: {n_in} طقم · "
-                   f"{kv.g(tot_in):,.2f} {kv.unit()}   |   المباع: "
-                   f"{n_out} طقم · {kv.g(tot_out):,.2f} {kv.unit()}")
+                   f"{_nf.f2(kv.g(tot_in))} {kv.unit()}   |   المباع: "
+                   f"{n_out} طقم · {_nf.f2(kv.g(tot_out))} {kv.unit()}")
         self.summary.setText(txt)
         self._sum_base = txt
         if self.search.text().strip():
@@ -654,7 +655,7 @@ class ModelsScreen(QtWidgets.QWidget):
             if text and hits:
                 self.summary.setText(
                     f"البحث «{text}»: {hits} موديل · {n_all} طقم · "
-                    f"{w_all:,.2f} {kv.unit()}")
+                    f"{_nf.f2(w_all)} {kv.unit()}")
             else:
                 self.summary.setText(base)
 
@@ -669,7 +670,7 @@ class ModelsScreen(QtWidgets.QWidget):
 
     def _set_counts(self, parent, row, n, w):
         """عدد ووزن ما طابق البحث في رأس الموديل أو الفرع (والأصل محفوظ)."""
-        for col, val in ((1, n), (2, f"{w:,.2f}")):
+        for col, val in ((1, n), (2, _nf.f2(w))):
             it = (parent.child(row, col) if parent is not None
                   else self.model.item(row, col))
             if it is None:

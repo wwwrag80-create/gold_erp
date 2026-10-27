@@ -13,6 +13,7 @@ from database.database import db
 from models import reconciliation
 from ui.widgets.common import (big_label, bulk_rows, err, make_table,
                                title_label)
+from services import numfmt as _nf
 
 COLS = ["الخطورة", "نوع الاختلال", "الموقع", "الوصف", "فرق النقد",
         "فرق الذهب", "تعمّق"]
@@ -77,12 +78,12 @@ class ReconciliationScreen(QtWidgets.QWidget):
             for i, issue in enumerate(self.issues):
                 sev = ("🔴 حرج" if issue["severity"] == "critical"
                        else "🟡 تحذير")
-                cd = f"{issue['cash_diff']:,.2f}" if issue["cash_diff"] else "—"
-                gd = f"{issue['gold_diff']:,.2f}" if issue["gold_diff"] else "—"
+                cd = f"{_nf.f2(issue['cash_diff'])}" if issue["cash_diff"] else "—"
+                gd = f"{_nf.f2(issue['gold_diff'])}" if issue["gold_diff"] else "—"
                 vals = [sev, issue["kind"], issue["ref"], issue["detail"],
                         cd, gd]
                 for c, v in enumerate(vals):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     self.table.setItem(i, c, it)
                 if issue.get("entry_id") and self.on_open_entry:

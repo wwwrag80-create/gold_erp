@@ -15,6 +15,7 @@ import datetime as _dt
 from models.accounts import acc_id
 from services.accounting_engine import post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 LOSSES_PARENT = "5110"           # فواقد الورشة (حساب أب)
 MFG_TREASURY = "1100"            # خزينة التصنيع
@@ -124,7 +125,7 @@ def create_loss(conn, account_id, weight, loss_date, username,
         raise ValueError("الطرف الآخر لا يكون خزينة التصنيع نفسها")
     date = loss_date or _dt.date.today().isoformat()
     no = doc_no or next_doc_no(conn)
-    desc = f"{KINDS[kind]} خزينة التصنيع — {acc['name']} — {w:,.2f} جم"
+    desc = f"{KINDS[kind]} خزينة التصنيع — {acc['name']} — {_nf.f2(w)} جم"
     if description.strip():
         desc += f" — {description.strip()}"
 
@@ -146,7 +147,7 @@ def create_loss(conn, account_id, weight, loss_date, username,
     conn.execute("UPDATE workshop_losses SET entry_id=? WHERE id=?",
                  (entry_id, loss_id))
     log_action(conn, username, "create", "workshop_losses", loss_id,
-               f"{KINDS[kind]} خزينة التصنيع — {acc['name']}: {w:,.3f} جم")
+               f"{KINDS[kind]} خزينة التصنيع — {acc['name']}: {_nf.f2(w)} جم")
     return {"id": loss_id, "doc_no": no, "entry_id": entry_id,
             "weight": w, "account": acc["name"], "kind": kind}
 
@@ -216,7 +217,7 @@ def delete_loss(conn, loss_id, username, reason=""):
     log_action(conn, username, "delete", "workshop_losses", loss_id,
                f"حذف سند {KINDS.get(row['kind'], 'صرف')} {row['doc_no']}"
                f" — {row['acc_name']} "
-               f"{row['weight']:,.3f} جم"
+               f"{_nf.f2(row['weight'])} جم"
                + (f" | {reason}" if reason else ""))
     return {"doc_no": row["doc_no"], "weight": row["weight"],
             "account": row["acc_name"], "kind": row["kind"]}

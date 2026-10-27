@@ -28,6 +28,7 @@ import json
 from models.accounts import acc_id
 from services.accounting_engine import post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 ZAKAT_RATE_HIJRI = 0.025
 HIJRI_DAYS = 354
@@ -108,7 +109,7 @@ def _post_diff(conn, date, desc, dr_code, cr_code, amount, source,
          "line_desc": desc}], source_table=source, username=username,
         note=note)
     log_action(conn, username, "create", "journal_entries", eid,
-               f"{source}: {desc} = {amount:,.2f}")
+               f"{source}: {desc} = {_nf.f2(amount)}")
     return eid
 
 
@@ -362,7 +363,7 @@ def prepaid_add(conn, name, expense_code, amount, start_date, months,
         username=username, note=desc)
     conn.execute("UPDATE prepaid_items SET entry_id=? WHERE id=?", (eid, pid))
     log_action(conn, username, "create", "prepaid_items", pid,
-               f"{name} {amount:,.2f} / {months}m")
+               f"{name} {_nf.f2(amount)} / {months}m")
     return pid
 
 
@@ -447,5 +448,5 @@ def accrue_expense(conn, expense_code, amount, date, username, note="",
              "line_desc": rdesc}], source_table="accrual_rev",
             source_id=eid, username=username, note=rdesc)
     log_action(conn, username, "create", "journal_entries", eid,
-               f"accrual {expense_code} {amount:,.2f}")
+               f"accrual {expense_code} {_nf.f2(amount)}")
     return eid, rev

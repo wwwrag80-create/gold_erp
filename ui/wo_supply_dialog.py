@@ -15,6 +15,7 @@ from services import karat_view as kv
 from models import operations
 from services import gold_math
 from ui.widgets.common import ask, big_label, err, fill, info, make_table, wspin
+from services import numfmt as _nf
 
 
 class SupplyEditDialog(QtWidgets.QDialog):
@@ -56,7 +57,7 @@ class SupplyEditDialog(QtWidgets.QDialog):
         # ── القيد الحالي ──
         self.jt = make_table()
         fill(self.jt, ["الحساب", "مدين (ذهب)", "دائن (ذهب)"],
-             [(l["name"], f"{kv.g(l['gd']):,.2f}", f"{kv.g(l['gc']):,.2f}")
+             [(l["name"], f"{_nf.f2(kv.g(l['gd']))}", f"{_nf.f2(kv.g(l['gc']))}")
               for l in self.lines])
         self.jt.setMaximumHeight(150)
 
@@ -115,11 +116,11 @@ class SupplyEditDialog(QtWidgets.QDialog):
         diff = round(new_reg - old, 2)
         u = kv.unit()
         self.preview.setText(
-            f"الوزن المقيد: {old:,.2f} → {new_reg:,.2f} {u} "
-            f"(فرق {diff:+,.2f})\n\n"
+            f"الوزن المقيد: {_nf.f2(old)} → {_nf.f2(new_reg)} {u} "
+            f"(فرق {_nf.f2(diff, sign=True)})\n\n"
             f"الأثر المحاسبي:\n"
-            f"   خزينة التصنيع  {-diff:+,.2f} {u}\n"
-            f"   الذهب المشغول  {diff:+,.2f} {u}\n"
+            f"   خزينة التصنيع  {_nf.f2(-diff, sign=True)} {u}\n"
+            f"   الذهب المشغول  {_nf.f2(diff, sign=True)} {u}\n"
             f"يُعكس القيد القديم ويُرحَّل الجديد داخل معاملة واحدة.")
 
     def save(self):
@@ -136,8 +137,8 @@ class SupplyEditDialog(QtWidgets.QDialog):
                     wage_per_gram=kv.rate_store(self.wage.value()),
                     notes=self.notes.text().strip())
             info(self, f"عُدِّل توريد {r['wo_no']}.\n"
-                       f"الوزن المقيد: {r['old_reg']:,.2f} → "
-                       f"{r['new_reg']:,.2f} جم\n\n"
+                       f"الوزن المقيد: {_nf.f2(r['old_reg'])} → "
+                       f"{_nf.f2(r['new_reg'])} جم\n\n"
                        f"تحدّثت خزينة التصنيع والذهب المشغول معاً.")
             self.accept()
         except Exception as e:
@@ -150,7 +151,7 @@ class SupplyEditDialog(QtWidgets.QDialog):
                 raise ValueError("الطقم مباع — أعد فاتورته أولاً")
             if not ask(self,
                        f"حذف توريد {self.wo['work_order_no']} نهائياً؟\n\n"
-                       f"سيُعكس القيد فتعود {self.wo['registered_weight']:,.2f}"
+                       f"سيُعكس القيد فتعود {_nf.f2(self.wo['registered_weight'])}"
                        f" جم لخزينة التصنيع\n"
                        f"وتُخصم من الذهب المشغول.\n\n"
                        f"لا يمكن التراجع."):

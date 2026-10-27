@@ -22,6 +22,7 @@ from ui.widgets.common import (confirm_post, posted, ask, big_label, date_edit, 
                                err, fill, info, make_table, title_label,
                                wspin)
 from ui.widgets.edit_mode import EditModeMixin
+from services import numfmt as _nf
 
 # الوزن الفعلي وزنٌ حقيقي بعياره المُدخل — لا يُحوَّل أبداً.
 # المعادل وحده هو الذي يُقرأ بوحدة المصنع.
@@ -171,7 +172,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
     def recalc_line(self):
         k = self.karat.currentData() or 18
         self.equiv_label.setText(
-            f"{kv.g(gold_math.to_base_karat(self.weight.value(), k)):.2f}")
+            _nf.f2(kv.g(gold_math.to_base_karat(self.weight.value(), k)), sep=False))
 
     def add_line(self):
         try:
@@ -207,7 +208,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
         side = "مدين حساب الصب والتصفية" if self.mode == "disbursement" \
             else "دائن حساب الصب والتصفية"
         self.totals.setText(
-            f"إجمالي المعادل بـ{kv.label()}: {kv.g(total):.2f} جم"
+            f"إجمالي المعادل بـ{kv.label()}: {_nf.f2(kv.g(total), sep=False)} جم"
             f"  →  {side}")
         self.recalc_line()
 
@@ -232,9 +233,9 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
                 else:
                     res = fn(conn, *args)
             posted(self, f"تم ترحيل {res['op_no']} بمعادل "
-                       f"{kv.active()} = {kv.g(res['equiv18']):.2f} جم\n"
+                       f"{kv.active()} = {_nf.f2(kv.g(res['equiv18']), sep=False)} جم\n"
                        f"رصيد حساب الصب والتصفية الآن: "
-                       f"{kv.g(res['refining_balance']):.2f} جم",
+                       f"{_nf.f2(kv.g(res['refining_balance']), sep=False)} جم",
                    "melting_ops", res["id"])
             self.end_edit()
             self.lines = []
@@ -249,7 +250,7 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
             with db() as conn:
                 s = melting.cycle_summary(conn)
             if not ask(self, f"إقفال حساب الصب والتصفية وترحيل الفرق "
-                             f"({kv.g(s['outstanding']):.2f} جم معادل "
+                             f"({_nf.f2(kv.g(s['outstanding']), sep=False)} جم معادل "
                              f"{kv.active()}) إلى "
                              "حساب الفاقد الفني للصب؟"):
                 return
@@ -257,9 +258,9 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
                 res = melting.close_cycle(conn, dstr(self.close_date),
                                           self.user["username"])
             msg = (f"تم ترحيل قيد الإقفال {res['op_no']}\n"
-                   f"الفاقد الفني للصب: {kv.g(res['loss18']):.2f} جم "
+                   f"الفاقد الفني للصب: {_nf.f2(kv.g(res['loss18']), sep=False)} جم "
                    f"معادل {kv.active()} "
-                   f"({res['loss_ratio']*100:.2f}%)")
+                   f"({_nf.f2(res['loss_ratio']*100, sep=False)}%)")
             if res["exceeded"]:
                 msg += (f"\n\n⚠ تنبيه: النسبة تجاوزت الحد المسموح "
                         f"({config.MELTING_LOSS_LIMIT*100:.1f}%)")
@@ -313,20 +314,20 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
                     for o in melting.recent_melting(conn)]
         self.boxes_label.setText(
             "أرصدة صناديق الكسر الفعلية — "
-            + " | ".join(f"عيار {k}: {actuals.get(k, 0.0):.2f} جم"
+            + " | ".join(f"عيار {k}: {_nf.f2(actuals.get(k, 0.0), sep=False)} جم"
                          for k in melting.KARATS))
         self.cycle_label.setText(
-            f"المصروف للصب: {kv.g(s['disbursed']):.2f} جم معادل "
+            f"المصروف للصب: {_nf.f2(kv.g(s['disbursed']), sep=False)} جم معادل "
             f"{kv.active()}   |   "
-            f"المقبوض مصفى: {kv.g(s['received']):.2f} جم   |   "
+            f"المقبوض مصفى: {_nf.f2(kv.g(s['received']), sep=False)} جم   |   "
             f"الرصيد القائم (الفاقد المرشح): "
-            f"{kv.g(s['outstanding']):.2f} جم")
+            f"{_nf.f2(kv.g(s['outstanding']), sep=False)} جم")
         if abs(s["outstanding"]) < 0.001:
             self.cycle_note.setText(
                 "حساب الصب والتصفية متزن — لا يوجد فاقد بانتظار الإقفال.")
         else:
             self.cycle_note.setText(
-                f"نسبة الفاقد الحالية {s['loss_ratio']*100:.2f}% "
+                f"نسبة الفاقد الحالية {_nf.f2(s['loss_ratio']*100, sep=False)}% "
                 f"(الحد المسموح {config.MELTING_LOSS_LIMIT*100:.1f}%)"
                 + ("  ⚠ تجاوز الحد" if s["exceeded"] else ""))
         fill(self.log, _log_cols(), rows)

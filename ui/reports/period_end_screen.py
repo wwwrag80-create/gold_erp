@@ -25,13 +25,14 @@ from models import period_end as pe
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, tab_widget, title_label)
 from ui.widgets.flow_layout import FlowLayout
+from services import numfmt as _nf
 
 
 def _m(v):
     v = v or 0.0
     if abs(v) < 0.005:
         return "—"
-    s = f"{abs(v):,.2f}"
+    s = _nf.f2(abs(v))
     return f"({s})" if v < 0 else s
 
 
@@ -221,12 +222,12 @@ class PeriodEndScreen(QtWidgets.QWidget):
         except Exception:
             pass
         self.z_sum.setText(
-            f"الوعاء الزكوي: {z['base']:,.2f}"
+            f"الوعاء الزكوي: {_nf.f2(z['base'])}"
             + (" (رُفع إلى صافي الربح المعدّل)" if z["base_floor"] else "")
             + f"   ·   النسبة {z['rate'] * 100:.4f}%"
-            f"   ·   الزكاة: {z['zakat']:,.2f}"
-            f"   ·   المقيَّد: {z['booked']:,.2f}"
-            f"   ·   المطلوب قيده: {z['due']:,.2f} ريال")
+            f"   ·   الزكاة: {_nf.f2(z['zakat'])}"
+            f"   ·   المقيَّد: {_nf.f2(z['booked'])}"
+            f"   ·   المطلوب قيده: {_nf.f2(z['due'])} ريال")
         self._z = z
 
     def post_zakat(self):
@@ -237,7 +238,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
                 info(self, "مخصص الزكاة مقيَّدٌ بالكامل لهذه الفترة.")
                 return
             d1, d2 = self._period()
-            if not ask(self, f"قيد مخصص الزكاة بمبلغ {z['due']:,.2f} ريال"
+            if not ask(self, f"قيد مخصص الزكاة بمبلغ {_nf.f2(z['due'])} ريال"
                              f" بتاريخ {d2}؟\n(مدين الزكاة / دائن مخصص"
                              " الزكاة)"):
                 return
@@ -306,8 +307,8 @@ class PeriodEndScreen(QtWidgets.QWidget):
         kinds = {"employee": "موظف", "worker": "عامل"}
         for i, r in enumerate(c["rows"]):
             vals = [r["name"], kinds.get(r["kind"], r["kind"]),
-                    r["hire_date"], f"{r['wage']:.2f}", r["end_date"],
-                    f"{r['years']:.2f}" if r["counted"] else "—",
+                    r["hire_date"], f"{_nf.f2(r['wage'], sep=False)}", r["end_date"],
+                    f"{_nf.f2(r['years'], sep=False)}" if r["counted"] else "—",
                     _m(r["award"])]
             for col, v in enumerate(vals):
                 it = QtWidgets.QTableWidgetItem(v)
@@ -321,9 +322,9 @@ class PeriodEndScreen(QtWidgets.QWidget):
         miss = (f"   ·   ✘ بلا تاريخ تعيين: {len(c['missing_hire'])}"
                 if c["missing_hire"] else "")
         self.e_sum.setText(
-            f"الالتزام المطلوب في {d2}: {c['required']:,.2f}   ·   الرصيد"
-            f" المقيَّد: {c['current']:,.2f}   ·   المطلوب قيده:"
-            f" {c['due']:,.2f} ريال{miss}   ·   المادة 84: نصف أجر شهر عن"
+            f"الالتزام المطلوب في {d2}: {_nf.f2(c['required'])}   ·   الرصيد"
+            f" المقيَّد: {_nf.f2(c['current'])}   ·   المطلوب قيده:"
+            f" {_nf.f2(c['due'])} ريال{miss}   ·   المادة 84: نصف أجر شهر عن"
             " كل سنة من الخمس الأولى، وأجر شهر عمّا بعدها")
 
     def save_eos(self):
@@ -355,7 +356,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
                 info(self, "المخصص مطابقٌ للالتزام المحسوب — لا قيد.")
                 return
             if not ask(self, f"قيد تسوية مخصص نهاية الخدمة بمبلغ"
-                             f" {c['due']:,.2f} ريال بتاريخ {d2}؟"):
+                             f" {_nf.f2(c['due'])} ريال بتاريخ {d2}؟"):
                 return
             with db() as conn:
                 pe.eos_post(conn, d2, self._user())
@@ -414,9 +415,9 @@ class PeriodEndScreen(QtWidgets.QWidget):
              [(x["label"], _m(x["balance"]), f"{x['rate']:g}%",
                _m(x["allowance"])) for x in c["lines"]])
         self.c_sum.setText(
-            f"المخصص المطلوب في {d2}: {c['required']:,.2f}   ·   الرصيد"
-            f" المقيَّد: {c['current']:,.2f}   ·   المطلوب قيده:"
-            f" {c['due']:,.2f} ريال   ·   المنهج المبسّط (IFRS 9) بمصفوفة"
+            f"المخصص المطلوب في {d2}: {_nf.f2(c['required'])}   ·   الرصيد"
+            f" المقيَّد: {_nf.f2(c['current'])}   ·   المطلوب قيده:"
+            f" {_nf.f2(c['due'])} ريال   ·   المنهج المبسّط (IFRS 9) بمصفوفة"
             " المخصص على أعمار ذمم العملاء النقدية")
 
     def save_rates(self):
@@ -436,7 +437,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
                 info(self, "المخصص مطابقٌ للمحسوب — لا قيد.")
                 return
             if not ask(self, f"قيد تسوية مخصص الخسائر الائتمانية بمبلغ"
-                             f" {c['due']:,.2f} ريال بتاريخ {d2}؟"):
+                             f" {_nf.f2(c['due'])} ريال بتاريخ {d2}؟"):
                 return
             with db() as conn:
                 pe.ecl_post(conn, d2, self._user(), self._rates())
@@ -578,7 +579,7 @@ class PeriodEndScreen(QtWidgets.QWidget):
             with db() as conn:
                 done = pe.prepaid_amortize(conn, d2, self._user())
             info(self, ("أُطفئ:\n" + "\n".join(
-                f"• {n}: {a:,.2f}" for n, a, _e in done)) if done
+                f"• {n}: {_nf.f2(a)}" for n, a, _e in done)) if done
                  else "لا شيء مستحق الإطفاء حتى نهاية الفترة.")
             self.load_prepaid()
         except Exception as e:

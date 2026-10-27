@@ -15,6 +15,7 @@ from database.database import db
 from models import operations
 from services import karat_view as kv
 from ui.widgets.common import ask, err, info, make_table
+from services import numfmt as _nf
 
 KINDS = (("sale", "المبيعات"), ("sale_return", "المرتجع"))
 
@@ -120,11 +121,11 @@ class MergeInvoicesDialog(QtWidgets.QDialog):
                 chk.setData(QtCore.Qt.UserRole, r["id"])
                 self.table.setItem(i, 0, chk)
                 vals = (r["invoice_no"], r["invoice_date"], r["n"],
-                        f"{kv.g(r['total_weight'] or 0):,.2f}",
-                        f"{float(r['total_wages'] or 0):,.2f}",
+                        f"{_nf.f2(kv.g(r['total_weight'] or 0))}",
+                        f"{_nf.f2(float(r['total_wages'] or 0))}",
                         r["wos"] or "")
                 for c, v in enumerate(vals, start=1):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setFlags(QtCore.Qt.ItemIsEnabled
                                 | QtCore.Qt.ItemIsSelectable)
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
@@ -162,7 +163,7 @@ class MergeInvoicesDialog(QtWidgets.QDialog):
         g = sum(float(r["total_wages"] or 0) for r in sel)
         self.summary.setText(
             f"المختار: {len(sel)} فاتورة · {n} بنداً · الوزن "
-            f"{kv.g(w):,.2f} {kv.unit()} · الأجور {g:,.2f} ريال"
+            f"{_nf.f2(kv.g(w))} {kv.unit()} · الأجور {_nf.f2(g)} ريال"
             if sel else "لم تُختر فواتير بعد")
 
     def _merge(self):

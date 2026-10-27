@@ -21,6 +21,7 @@ from services import karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err,
                                info, make_table, search_combo,
                                title_label)
+from services import numfmt as _nf
 
 def ACC_COLS_NOW():
     """عناوين أعمدة الأرصدة بعيار المصنع الفعّال."""
@@ -42,7 +43,7 @@ def _signed(v):
     """رقمٌ بإشارة ناقصٍ في مكانها: LRM قبلها، فلا يُعرض «300-» في سطرٍ
     عربي (لوحة الأرباح والخسائر — 4.91)."""
     v = float(v or 0.0)
-    return (f"\u200e-{abs(v):,.2f}" if v < -0.004 else f"{abs(v):,.2f}")
+    return (f"\u200e-{_nf.f2(abs(v))}" if v < -0.004 else _nf.f2(abs(v)))
 
 
 class PanelButton(QtWidgets.QPushButton):
@@ -653,7 +654,7 @@ class DashboardScreen(QtWidgets.QWidget):
         for i, b in enumerate(bars):
             frame = QtWidgets.QFrame()
             frame.setObjectName("ratioBar")
-            pct = ("—" if b["pct"] is None else f"{b['pct']:,.2f}%")
+            pct = ("—" if b["pct"] is None else f"{_nf.f2(b['pct'])}%")
             lbl = QtWidgets.QLabel(
                 f"{b['title']}:   {pct}      "
                 f"({b['second_name']} {_signed(b['second_value'])}  ÷  "
@@ -779,7 +780,7 @@ class DashboardScreen(QtWidgets.QWidget):
         if pnl:
             rows, bars = dp.profit_view(rows), dp.profit_bars(bars)
         t = dp.totals(rows)
-        money = _signed if pnl else (lambda v: f"{v:,.2f}")
+        money = _signed if pnl else (lambda v: _nf.f2(v))
 
         # ══ عمود النسبة ══
         # يظهر أول الأعمدة حين تُعرَّف نسبة واحدة على الأقل: النسبة
@@ -841,25 +842,25 @@ class DashboardScreen(QtWidgets.QWidget):
         for r in rows:
             data.append((
                 f"{r['code']} — {r['name']}",
-                f"{kv.g(r['gold']):,.2f}", f"{kv.g(r['gold_prev']):,.2f}",
-                f"{kv.g(r['gold_diff']):+,.2f}", _pct(r["gold_pct"]),
-                f"{r['cash']:,.2f}", f"{r['cash_prev']:,.2f}",
-                f"{r['cash_diff']:+,.2f}", _pct(r["cash_pct"])))
+                f"{_nf.f2(kv.g(r['gold']))}", f"{_nf.f2(kv.g(r['gold_prev']))}",
+                f"{_nf.f2(kv.g(r['gold_diff']), sign=True)}", _pct(r["gold_pct"]),
+                f"{_nf.f2(r['cash'])}", f"{_nf.f2(r['cash_prev'])}",
+                f"{_nf.f2(r['cash_diff'], sign=True)}", _pct(r["cash_pct"])))
         data.append(("الإجمالي",
-                     f"{kv.g(t['gold']):,.2f}",
-                     f"{kv.g(t['gold_prev']):,.2f}",
-                     f"{kv.g(t['gold_diff']):+,.2f}", _pct(t["gold_pct"]),
-                     f"{t['cash']:,.2f}", f"{t['cash_prev']:,.2f}",
-                     f"{t['cash_diff']:+,.2f}", _pct(t["cash_pct"])))
+                     f"{_nf.f2(kv.g(t['gold']))}",
+                     f"{_nf.f2(kv.g(t['gold_prev']))}",
+                     f"{_nf.f2(kv.g(t['gold_diff']), sign=True)}", _pct(t["gold_pct"]),
+                     f"{_nf.f2(t['cash'])}", f"{_nf.f2(t['cash_prev'])}",
+                     f"{_nf.f2(t['cash_diff'], sign=True)}", _pct(t["cash_pct"])))
         self._fill(cols, data, bold_last=True,
                    weights=[22, 11, 10, 10, 8, 11, 10, 10, 8])
         self.tbl_title.setText(
             f"◄ {p['title']}   ({d1} → {d2})  مقابل  "
             f"({cmp_['from']} → {cmp_['to']})")
         self.totals.setText(
-            f"الفترة الحالية — ذهب: {kv.g(t['gold']):,.2f} {kv.unit()} "
+            f"الفترة الحالية — ذهب: {_nf.f2(kv.g(t['gold']))} {kv.unit()} "
             f"({_pct(t['gold_pct'])})   ·   "
-            f"نقد: {t['cash']:,.2f} ريال ({_pct(t['cash_pct'])})"
+            f"نقد: {_nf.f2(t['cash'])} ريال ({_pct(t['cash_pct'])})"
             f"   |   المقارنة على حجم الحركة لا على الرصيد")
         self._render_ratios([], p)
 
@@ -868,19 +869,19 @@ class DashboardScreen(QtWidgets.QWidget):
         # كل عيار يفتح كشفه وحده؛ وصفّ الإجمالي كشفَ الصندوق كاملاً
         self._rows = [{"code": "1310", "karat": r["karat"]} for r in rows]
         self._rows.append({"code": "1310"})
-        data = [(f"عيار {r['karat']}", f"{r['actual']:,.2f}",
-                 f"{kv.g(r['eq18']):,.2f}") for r in rows]
+        data = [(f"عيار {r['karat']}", f"{_nf.f2(r['actual'])}",
+                 f"{_nf.f2(kv.g(r['eq18']))}") for r in rows]
         tot_a = round(sum(r["actual"] for r in rows), 3)
         tot_e = round(sum(r["eq18"] for r in rows), 3)
-        data.append(("الإجمالي", f"{tot_a:,.2f}", f"{kv.g(tot_e):,.2f}"))
+        data.append(("الإجمالي", _nf.f2(tot_a), _nf.f2(kv.g(tot_e))))
         self._fill(SCRAP_COLS_NOW(), data, bold_last=True,
                    weights=[34, 33, 33])
         self.tbl_title.setText(f"◄ {p['title']} — حساب 1310   ·   انقر على"
                                " العيار لعرض كشفه وحده")
         self.totals.setText(
-            f"مجموع الأوزان الفعلية: {tot_a:,.2f} جم   ·   "
+            f"مجموع الأوزان الفعلية: {_nf.f2(tot_a)} جم   ·   "
             f"الرصيد المحاسبي بمكافئ {kv.active()}: "
-            f"{kv.g(tot_e):,.2f} جم")
+            f"{_nf.f2(kv.g(tot_e))} جم")
         self._render_ratios([], p)
 
     # ══════════ لوحة أرقام التشغيل المتاحة ══════════
@@ -930,23 +931,23 @@ class DashboardScreen(QtWidgets.QWidget):
         self._rows = rows
         t = dp.stock_totals(rows)
         data = [(r["wo"] + ("  (مجمّع)" if r["bulk"] else ""),
-                 r["model"], f"{kv.g(r['gold']):,.2f}",
-                 f"{kv.g(r['small']):,.2f}", f"{kv.g(r['big']):,.2f}",
-                 f"{kv.g(r['after']):,.2f}", f"{kv.g(r['reg']):,.2f}",
-                 f"{kv.g(r['standing']):,.2f}") for r in rows]
+                 r["model"], f"{_nf.f2(kv.g(r['gold']))}",
+                 f"{_nf.f2(kv.g(r['small']))}", f"{_nf.f2(kv.g(r['big']))}",
+                 f"{_nf.f2(kv.g(r['after']))}", f"{_nf.f2(kv.g(r['reg']))}",
+                 f"{_nf.f2(kv.g(r['standing']))}") for r in rows]
         data.append(("الإجمالي", f"{t['models']} موديل",
-                     f"{kv.g(t['gold']):,.2f}", f"{kv.g(t['small']):,.2f}",
-                     f"{kv.g(t['big']):,.2f}", f"{kv.g(t['after']):,.2f}",
-                     f"{kv.g(t['reg']):,.2f}",
-                     f"{kv.g(t['standing']):,.2f}"))
+                     f"{_nf.f2(kv.g(t['gold']))}", f"{_nf.f2(kv.g(t['small']))}",
+                     f"{_nf.f2(kv.g(t['big']))}", f"{_nf.f2(kv.g(t['after']))}",
+                     f"{_nf.f2(kv.g(t['reg']))}",
+                     f"{_nf.f2(kv.g(t['standing']))}"))
         self._fill(self.STOCK_COLS(), data, bold_last=True,
                    weights=[16, 18, 11, 10, 10, 11, 12, 12])
         self.tbl_title.setText(
             f"◄ {p['title']} — {t['count']} رقم تشغيل متاح للبيع")
         self.totals.setText(
             f"المتاح للبيع: {t['count']} طقم في {t['models']} موديل"
-            f"   ·   الوزن المقيد: {kv.g(t['reg']):,.2f} {kv.unit()}"
-            f"   ·   الذهب القائم: {kv.g(t['standing']):,.2f} {kv.unit()}")
+            f"   ·   الوزن المقيد: {_nf.f2(kv.g(t['reg']))} {kv.unit()}"
+            f"   ·   الذهب القائم: {_nf.f2(kv.g(t['standing']))} {kv.unit()}")
         self._render_ratios([], p)
 
     def _stock_row(self):
@@ -1030,7 +1031,7 @@ class DashboardScreen(QtWidgets.QWidget):
             self.table.setRowCount(len(data))
             for i, row in enumerate(data):
                 for c, v in enumerate(row):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(
                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
                         if c == 0 else QtCore.Qt.AlignCenter)
@@ -1067,7 +1068,7 @@ class DashboardScreen(QtWidgets.QWidget):
             try:
                 if p.get("kind") == "scrap":
                     v = round(sum(x["eq18"] for x in dp.scrap_rows(conn)), 2)
-                    self.buttons[i].set_value(f"{kv.g(v):,.2f} جم")
+                    self.buttons[i].set_value(f"{_nf.f2(kv.g(v))} جم")
                     continue
                 if p.get("kind") == "stock":
                     t = dp.stock_totals(dp.stock_rows(conn))
@@ -1085,7 +1086,7 @@ class DashboardScreen(QtWidgets.QWidget):
                     p.get("date_from") or None,
                     p.get("date_to") or None)
                 t = dp.totals(dp.profit_view(rows) if pnl else rows)
-                money = _signed if pnl else (lambda v: f"{v:,.2f}")
+                money = _signed if pnl else (lambda v: _nf.f2(v))
                 if (p.get("unit") or "gold") == "cash":
                     self.buttons[i].set_value(
                         f"{money(t['cash_balance'])} ريال")

@@ -12,6 +12,7 @@
 كل لوحة لها تفاصيل قابلة للعرض (رقم التشغيل والوزن المقيد).
 """
 import re
+from services import numfmt as _nf
 
 # اللوحات التي تفاصيلها أرقام تشغيل — فتقبل «الفرز» بلا تكرار
 MERGEABLE = ("sales", "returns", "net_sold")
@@ -242,7 +243,7 @@ def _panel_rows(conn, panel, customer_id, date_from=None, date_to=None):
         # عمودان مستقلان: التحصيل ذهباً والتحصيل نقداً
         return [{"wo": r["vn"], "weight": round(r["gold"], 2),
                  "cash": round(r["cash"], 2),
-                 "ref": f"{r['cash']:,.2f}"} for r in rows]
+                 "ref": f"{_nf.f2(r['cash'])}"} for r in rows]
     return []
 
 

@@ -16,10 +16,11 @@ from ui import kit
 from database.database import db
 from services import karat_view as kv
 from ui.widgets.common import err, make_table, title_label
+from services import numfmt as _nf
 
 
 def _w(v):
-    return f"{v:,.3f}" if abs(v) >= 0.0005 else ""
+    return _nf.f2(v) if abs(v) >= 0.005 else ""
 
 
 class ScrapKaratDialog(QtWidgets.QDialog):
@@ -111,7 +112,7 @@ class ScrapKaratDialog(QtWidgets.QDialog):
             for i, r in enumerate(self.rows):
                 vals = [r["date"] or "", r["op"], str(r["doc_no"] or ""),
                         r["name"], r["desc"], _w(r["inw"]), _w(r["outw"]),
-                        f"{r['bal']:,.3f}", f"{kv.g(r['bal18']):,.3f}"]
+                        f"{_nf.f2(r['bal'])}", f"{_nf.f2(kv.g(r['bal18']))}"]
                 for c, s in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(s)
                     it.setTextAlignment(
@@ -133,9 +134,9 @@ class ScrapKaratDialog(QtWidgets.QDialog):
         n = sum(1 for r in self.rows if r["op"] != "رصيد سابق")
         self.summary.setText(
             f"عدد الحركات: {n}\n"
-            f"عيار {k}: أول الفترة {st['opening']:,.3f} · وارد"
-            f" {st['total_in']:,.3f} · صادر {st['total_out']:,.3f} ·"
-            f" الرصيد {st['closing']:,.3f} جم")
+            f"عيار {k}: أول الفترة {_nf.f2(st['opening'])} · وارد"
+            f" {_nf.f2(st['total_in'])} · صادر {_nf.f2(st['total_out'])} ·"
+            f" الرصيد {_nf.f2(st['closing'])} جم")
 
     # ══ البحث ══
     def focus_search(self):

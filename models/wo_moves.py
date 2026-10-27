@@ -25,6 +25,7 @@
 from itertools import groupby
 
 from services.audit import log_action
+from services import numfmt as _nf
 
 SALE, RETURN = "sale", "sale_return"
 IN_STOCK, SOLD = "in_stock", "sold"
@@ -360,7 +361,7 @@ def _weight_why(wo, kind, state, w):
     return (f"الطقم {wo['work_order_no']}: "
             + ("الباقي منه في الخزنة" if kind == SALE
                else "الخارج منه عند الجهات")
-            + f" {part:,.3f} جم فقط، والمكتوب {w:,.3f} جم")
+            + f" {_nf.f2(part)} جم فقط، والمكتوب {_nf.f2(w)} جم")
 
 
 def _inv_no(conn, invoice_id):

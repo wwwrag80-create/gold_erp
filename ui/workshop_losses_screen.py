@@ -21,6 +21,7 @@ from services.accounting_engine import balance_by_code
 from ui.widgets.common import (ask, big_label, confirm_post, date_edit, dstr,
                                err, fill, info, make_table, posted,
                                reload_combo, search_combo, title_label, wspin)
+from services import numfmt as _nf
 
 KIND_ITEMS = (("payment", "صرف — يخرج الذهب من خزينة التصنيع"),
               ("receipt", "قبض — يعود الذهب إلى خزينة التصنيع"))
@@ -131,7 +132,7 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
         self.btn_post.setText("📤 ترحيل الصرف" if pay else "📥 ترحيل القبض")
         acc = self.account.currentText().split("—")[-1].strip() or "الحساب"
         w = float(self.weight.value() or 0)
-        amt = f"{w:,.3f} {kv.unit()}" if w else "بالوزن"
+        amt = f"{_nf.f2(w)} {kv.unit()}" if w else "بالوزن"
         if pay:
             self.effect.setText(
                 f"القيد:  مدين حـ/ {acc}  ·  دائن حـ/ خزينة التصنيع  — {amt}"
@@ -153,14 +154,14 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
             reload_combo(self.account, self.types,
                          lambda t: f"{t['code']} — {t['name']}")
             self.treasury.setText(
-                f"رصيد خزينة التصنيع: {kv.g(g):,.2f} جم {kv.label()}")
+                f"رصيد خزينة التصنيع: {_nf.f2(kv.g(g))} جم {kv.label()}")
             self.rows = rows
             fill(self.table,
                  ["رقم السند", "التاريخ", "العملية", "الحساب",
                   f"الوزن ({kv.unit()})", "البيان"],
                  [(r["doc_no"] or "—", r["loss_date"],
                    wl.KINDS.get(r.get("kind") or "payment", "صرف"),
-                   r["acc_name"], f"{kv.g(r['weight']):,.3f}",
+                   r["acc_name"], f"{_nf.f2(kv.g(r['weight']))}",
                    r["description"] or "")
                   for r in rows])
             red, green = QtGui.QColor("#9A1414"), QtGui.QColor("#1E6B33")
@@ -175,9 +176,9 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
                       if r.get("kind") == "receipt")
             u = kv.unit()
             self.totals.setText(
-                f"{len(rows)} عملية   |   صرف {kv.g(pay):,.3f} {u}   ·   "
-                f"قبض {kv.g(rec):,.3f} {u}   ·   صافي الفاقد "
-                f"{kv.g(pay - rec):,.3f} {u}")
+                f"{len(rows)} عملية   |   صرف {_nf.f2(kv.g(pay))} {u}   ·   "
+                f"قبض {_nf.f2(kv.g(rec))} {u}   ·   صافي الفاقد "
+                f"{_nf.f2(kv.g(pay - rec))} {u}")
             self._preview()
         except Exception as e:
             err(self, e)
@@ -226,7 +227,7 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
                     self, f"{'سند صرف' if pay else 'سند قبض'} — "
                           f"خزينة التصنيع\n\n"
                           f"الحساب: {acc}\n"
-                          f"الوزن: {w:,.3f} {kv.unit()}\n"
+                          f"الوزن: {_nf.f2(w)} {kv.unit()}\n"
                           f"التاريخ: {dstr(self.date)}\n\n"
                           + (f"مدين  حـ/ {acc}\nدائن  حـ/ خزينة التصنيع"
                              if pay else
@@ -239,7 +240,7 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
                     doc_no=self.doc_no.text().strip() or None, kind=kind)
             posted(self, f"رُحّل {'الصرف' if pay else 'القبض'} {r['doc_no']}"
                          f" — {r['account']} بوزن "
-                         f"{kv.g(r['weight']):,.3f} {kv.unit()}",
+                         f"{_nf.f2(kv.g(r['weight']))} {kv.unit()}",
                    "workshop_losses", r["id"])
             self.weight.setValue(0)
             self.desc.clear()
@@ -257,7 +258,7 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
                        f"حذف {'سند الصرف' if pay else 'سند القبض'} "
                        f"{r['doc_no']}؟\n\n"
                        f"الحساب: {r['acc_name']}\n"
-                       f"الوزن: {kv.g(r['weight']):,.3f} {kv.unit()}\n\n"
+                       f"الوزن: {_nf.f2(kv.g(r['weight']))} {kv.unit()}\n\n"
                        + ("سيُعكس القيد فيعود الوزن لخزينة التصنيع.\n"
                           if pay else
                           "سيُعكس القيد فيخرج الوزن من خزينة التصنيع.\n")

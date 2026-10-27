@@ -9,6 +9,7 @@ import json
 import urllib.request
 
 from PyQt5 import QtCore, QtWidgets
+from services import numfmt as _nf
 
 OUNCE_GRAMS = 31.1034768          # الأونصة الترويّة بالجرام
 REFRESH_MS = 300_000              # التحديث كل 5 دقائق
@@ -164,7 +165,7 @@ class GoldPriceBar(QtWidgets.QFrame):
         self._last = usd
         sar = usd * self.usd_to_sar
         g24 = sar / OUNCE_GRAMS
-        self.ounce.setText(f"الأونصة {usd:,.2f} $ · {sar:,.2f} ر.س")
+        self.ounce.setText(f"الأونصة {_nf.f2(usd)} $ · {_nf.f2(sar)} ر.س")
         prices = {
             24: g24,
             22: g24 * 22 / 24,
@@ -174,7 +175,7 @@ class GoldPriceBar(QtWidgets.QFrame):
             18: usd * K18_FACTOR / K18_DIVISOR,
         }
         for k, lbl in self.karat_labels.items():
-            lbl.setText(f"ع{k}  {prices[k]:,.2f}")
+            lbl.setText(f"ع{k}  {_nf.f2(prices[k])}")
         self.stamp.setText(
             "آخر تحديث: "
             + QtCore.QTime.currentTime().toString("HH:mm:ss"))

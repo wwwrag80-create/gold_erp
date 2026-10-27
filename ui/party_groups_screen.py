@@ -20,6 +20,7 @@ from models import party_groups as pg
 from services import karat_view as kv
 from ui.widgets.common import (ask, date_edit, dstr, err, info, make_table,
                                title_label)
+from services import numfmt as _nf
 
 NO_GROUP = -1      # صفّ «بلا مجموعة» — من حساباتهم تحت الأصل مباشرة
 
@@ -29,7 +30,7 @@ def _bal(v, gold):
     v = kv.g(v) if gold else float(v or 0.0)
     d = 3 if gold else 2
     st = pg.state(v, gold)
-    return (f"{abs(v):,.{d}f}" if st != "—" else "—"), st
+    return (_nf.f2(abs(v)) if st != "—" else "—"), st
 
 
 _RED, _GREEN = QtGui.QColor("#a4262c"), QtGui.QColor("#107c10")
@@ -290,7 +291,7 @@ class PartyGroupsScreen(QtWidgets.QWidget):
                 vals = [r["code"], r["name"], r["phone"], r["sub"],
                         gv, gs, cv, cs]
                 for c, v in enumerate(vals):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(
                         (QtCore.Qt.AlignRight if c in (1, 3)
                          else QtCore.Qt.AlignCenter) | QtCore.Qt.AlignVCenter)

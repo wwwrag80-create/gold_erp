@@ -13,6 +13,7 @@ from services.audit import soft_delete_entry
 from ui.widgets.common import (confirm_post, posted, ask, big_label, cell, date_edit, dstr,
                                enter_chain, err, fill, info, make_table,
                                mspin, search_combo, title_label, wspin)
+from services import numfmt as _nf
 
 COLS = ["الحساب", "مدين ذهب", "دائن ذهب", "مدين نقد", "دائن نقد"]
 
@@ -247,8 +248,8 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         ok = abs(gd - gc) < 0.011 and abs(cd - cc) < 0.011 and lines
         state = "متوازن ✔" if ok else "غير متوازن ✘"
         self.totals.setText(
-            f"ذهب {kv.active()}: {kv.g(gd):.2f} / {kv.g(gc):.2f} | "
-            f"نقد: {cd:,.2f} / {cc:,.2f} — {state}")
+            f"ذهب {kv.active()}: {_nf.f2(kv.g(gd), sep=False)} / {_nf.f2(kv.g(gc), sep=False)} | "
+            f"نقد: {_nf.f2(cd)} / {_nf.f2(cc)} — {state}")
         self.totals.setStyleSheet(
             "color:#0F5A24;font-weight:bold" if ok
             else "color:#9A1414;font-weight:bold")

@@ -33,6 +33,7 @@ import datetime as _dt
 
 from models import aging, entities, movement
 from services.accounting_engine import account_balance
+from services import numfmt as _nf
 
 EPS_G = 0.0005
 EPS_C = 0.005
@@ -305,8 +306,8 @@ def _limit_state(lim_c, lim_g, cash, gold):
 
 def verdict(d, fmt=None, money=None):
     """جملٌ تُقرأ قبل الأرقام — والمنسِّق من الواجهة."""
-    fmt = fmt or (lambda v: f"{v:,.3f}")
-    money = money or (lambda v: f"{v:,.2f}")
+    fmt = fmt or (lambda v: _nf.f2(v))
+    money = money or (lambda v: _nf.f2(v))
     out = []
     b = d["balance"]
     if abs(b["gold"]) < EPS_G and abs(b["cash"]) < EPS_C:

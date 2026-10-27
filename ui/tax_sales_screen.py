@@ -28,6 +28,7 @@ from ui.widgets.common import (StatChip as Card, confirm_post, date_edit,
                                search_combo, tab_widget, text_item,
                                title_label)
 from ui.widgets.table_fit import fit_columns
+from services import numfmt as _nf
 
 PAY_SHORT = {"credit": "آجل", "cash": "نقداً", "bank": "بنك / شبكة"}
 KIND_LABEL = {"invoice": "فاتورة ضريبية", "credit": "إشعار دائن",
@@ -39,16 +40,16 @@ DEBIT_REASONS = ("فرق أجر لم يُحتسب", "خطأ بالنقص في ا
 
 
 def _m(v):
-    return f"{float(v or 0):,.2f}"
+    return _nf.f2(float(v or 0))
 
 
 def _w(v18):
-    return f"{kv.g(v18):,.3f}"
+    return _nf.f2(kv.g(v18))
 
 
 def _wk(v18, karat):
     """الوزن بعيار السطر (لا بعيار المصنع)."""
-    return f"{kv.g(v18, karat):,.3f}"
+    return _nf.f2(kv.g(v18, karat))
 
 
 def _vat(net):
@@ -705,7 +706,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
                 t.setItem(r, c, text_item(val) if c == 1 else num_item(val))
             left_view = kv.g(v["qty_left"]) if wmode else v["qty_left"]
             sp = mspin(maximum=max(left_view, 0))
-            sp.setDecimals(3 if wmode else 2)
+            sp.setDecimals(2)            # 4.99: منزلتان كسائر النظام
             sp.setEnabled(v["qty_left"] > 1e-9)
             sp.valueChanged.connect(self._cn_recalc)
             t.setCellWidget(r, 4, sp)
@@ -725,8 +726,9 @@ class TaxSalesScreen(QtWidgets.QWidget):
                 q = sp.value()
                 if wmode:
                     # كامل المتبقي يُؤخذ بقيمته المخزَّنة لا بعد تقريبه
+                    # (الخانة بمنزلتين: الفرق حتى نصف هللةٍ وزنية تقريبٌ)
                     q = (v["qty_left"] if abs(q - kv.g(v["qty_left"]))
-                         < 0.0005 else kv.store(q))
+                         <= 0.0051 else kv.store(q))
                 out.append({"src_line_id": v["line"]["id"], "qty": q})
         return out
 

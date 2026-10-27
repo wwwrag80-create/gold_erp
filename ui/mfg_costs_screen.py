@@ -19,6 +19,7 @@ from ui import kit
 from database.database import db
 from models import mfg_costs
 from ui.widgets.common import (ask, big_label, dstr, err, info, make_table, title_label)
+from services import numfmt as _nf
 
 MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو",
           "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
@@ -109,8 +110,8 @@ class SalaryEditDialog(QtWidgets.QDialog):
             self.spins[k] = sp
             form.addRow(f"{label}:", sp)
         info_lbl = QtWidgets.QLabel(
-            f"ساعات الإضافي {float(row.get('overtime_hours') or 0):,.2f}"
-            f" · الغياب {float(row.get('absence') or 0):,.2f} (من التارجت)")
+            f"ساعات الإضافي {_nf.f2(float(row.get('overtime_hours') or 0))}"
+            f" · الغياب {_nf.f2(float(row.get('absence') or 0))} (من التارجت)")
         info_lbl.setObjectName("cardSub")
         form.addRow(info_lbl)
         self.d = kit.DateEdit()
@@ -145,7 +146,7 @@ class SalaryEditDialog(QtWidgets.QDialog):
         r.update(self.values())
         r["deduction"] = r["deduction_manual"]
         net = mfg_costs.compute_salary_row(r)["net_salary"]
-        self.net.setText(f"{float(net):,.2f} ريال")
+        self.net.setText(f"{_nf.f2(float(net))} ريال")
 
 
 class VerticalEnterTable(QtWidgets.QTableWidget):
@@ -216,7 +217,7 @@ def _num(v, d=2):
         f = float(v or 0)
     except Exception:
         return "0.00"
-    return f"({abs(f):,.{d}f})" if f < 0 else f"{f:,.{d}f}"
+    return f"({_nf.f2(abs(f))})" if f < 0 else _nf.f2(f)
 
 
 def _val(text):
@@ -885,7 +886,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                         _num(d) if d else "", _num(c) if c else "",
                         _num(x.get("cbal") or 0))
                 for j, v in enumerate(vals):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(
                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
                         if j == 2 else QtCore.Qt.AlignCenter)
@@ -956,9 +957,9 @@ class MfgCostsScreen(QtWidgets.QWidget):
                    and r.get("staff_kind", "worker") != "worker"])
         who = (f"{n - adm} عامل · {adm} إدارة" if adm else f"{n} عامل")
         self.s_total.setText(
-            f"{who}   |   الصافي: {tot:,.2f}   |   الرصيد: "
+            f"{who}   |   الصافي: {_nf.f2(tot)}   |   الرصيد: "
             f"{mfg_costs.bal_text(ow) or '0.00'}   |   المستحق: "
-            f"{due:,.2f} ريال")
+            f"{_nf.f2(due)} ريال")
 
     # ══════════ الإجراءات ══════════
     def reload(self):
@@ -1099,12 +1100,12 @@ class MfgCostsScreen(QtWidgets.QWidget):
         t.setRowCount(len(pending))
         for i, r in enumerate(pending):
             t.setItem(i, 0, QtWidgets.QTableWidgetItem(str(r["name"])))
-            it = QtWidgets.QTableWidgetItem(f"{float(r['net_salary']):,.2f}")
+            it = QtWidgets.QTableWidgetItem(f"{_nf.f2(float(r['net_salary']))}")
             it.setTextAlignment(QtCore.Qt.AlignCenter)
             t.setItem(i, 1, it)
         tot = sum(float(r["net_salary"]) for r in pending)
         note = QtWidgets.QLabel(
-            f"عدد العمال والموظفين: {len(pending)} · الإجمالي {tot:,.2f}"
+            f"عدد العمال والموظفين: {len(pending)} · الإجمالي {_nf.f2(tot)}"
             " ريال\nلكل شخص قيدٌ مستقل باسمه: مدين مصروف الرواتب · دائن"
             " حسابه.\nويبقى راتب كل مرحّل قابلاً للتعديل بزرّ «✎ تعديل»"
             " عند اسمه.")
@@ -1172,7 +1173,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                 res = mfg_costs.edit_posted_salary(
                     conn, per, employee_id, dlg.values(),
                     self.user["username"], entry_date=dlg.date())
-            info(self, f"عُدّل راتب {r['name']}: الصافي {res['net']:,.2f}"
+            info(self, f"عُدّل راتب {r['name']}: الصافي {_nf.f2(res['net'])}"
                        " ريال\n" + ("وأُعيد قيده بالصافي والتاريخ الجديدين."
                                     if res.get("entry_id") else
                                     "لم يتغيّر الصافي ولا التاريخ — القيد"
@@ -1215,7 +1216,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
             self._edited = set()
             info(self, f"تم الترحيل.\nعدد القيود: {res['count']}"
                        f" — قيدٌ لكل شخص\n"
-                       f"الإجمالي: {res['total']:,.2f} ريال\n\n"
+                       f"الإجمالي: {_nf.f2(res['total'])} ريال\n\n"
                        f"يظهر عند كل اسمٍ «✔ مرحّل»، وفي كشف حسابه راتبه "
                        f"دائناً مقابل مصروف الرواتب.")
             self.reload()

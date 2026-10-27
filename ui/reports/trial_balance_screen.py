@@ -22,6 +22,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, info,
                                title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 COLS = ["الكود", "اسم الحساب",
         "أول المدة — مدين", "أول المدة — دائن",
@@ -39,8 +40,8 @@ def fmt(v, dim):
     """قيمةٌ للعرض — الصفر فارغٌ كما في الموازين المطبوعة."""
     if dim == "gold":
         v = kv.g(v)
-        return f"{v:,.3f}" if abs(v) >= 0.0005 else ""
-    return f"{v:,.2f}" if abs(v) >= 0.005 else ""
+        return _nf.f2(v) if abs(v) >= 0.005 else ""
+    return _nf.f2(v) if abs(v) >= 0.005 else ""
 
 
 class TrialBalanceScreen(QtWidgets.QWidget):

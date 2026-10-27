@@ -33,6 +33,7 @@
 import datetime as _dt
 
 from models.aging import BUCKETS, BUCKET_LABELS
+from services import numfmt as _nf
 
 NO_MODEL = "— بلا موديل —"
 
@@ -195,8 +196,8 @@ def report(conn, as_of=None, model=None):
 
 def verdict(r, fmt=None, money=None):
     """جملةٌ تُقرأ — والمنسِّق من الواجهة لأن الأوزان مكافئُ عيار 18."""
-    fmt = fmt or (lambda v: f"{v:,.3f}")
-    money = money or (lambda v: f"{v:,.2f}")
+    fmt = fmt or (lambda v: _nf.f2(v))
+    money = money or (lambda v: _nf.f2(v))
     out = []
     if not r["items"] and not r["bulk"]["count"]:
         return ["لا مخزون في هذا التاريخ."]

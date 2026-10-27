@@ -44,6 +44,7 @@
 from datetime import date, timedelta
 
 from models import journal
+from services import numfmt as _nf
 
 # ترتيب العرض في الجسر — الأكثر أثراً أولاً، و«أخرى» في الذيل.
 # الاسم للعرض وحده؛ الأثر يُؤخذ من مدين ناقص دائن دائماً.
@@ -353,7 +354,7 @@ def verdict(res, dim="gold", fmt=None, unit=None):
     الواجهةُ لقال المصنعُ الذي يعمل بـ21 رقماً في الجملة وآخر في
     الجدول للحركة نفسها.
     """
-    fmt = fmt or (lambda v: f"{v:,.3f}")
+    fmt = fmt or (lambda v: _nf.f2(v))
     s = res["signals"]
     by = {b["label"]: b for b in res["buckets"]}
     d = s["gold_dir"] if dim == "gold" else s["cash_dir"]

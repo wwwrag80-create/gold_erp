@@ -20,6 +20,7 @@
 import re
 
 from PyQt5 import QtCore, QtGui
+from services import numfmt as _nf
 
 PREF_THEME = "ui_theme"
 PREF_SCALE = "ui_font_scale"
@@ -145,7 +146,7 @@ def set_theme(name, username=None):
 
 def set_scale(value, username=None):
     from ui.widgets.common import save_pref
-    save_pref(PREF_SCALE, f"{float(value):.2f}", username)
+    save_pref(PREF_SCALE, _nf.f2(float(value), sep=False), username)
 
 
 # ══════════════════════════════════════════════════════════════════

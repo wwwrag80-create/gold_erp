@@ -17,6 +17,7 @@ from ui.widgets.common import (busy, confirm_post, big_label, posted, date_edit,
 
 
 from ui.widgets.edit_mode import EditModeMixin
+from services import numfmt as _nf
 
 DRAFT_KEY = "vouchers"
 
@@ -251,7 +252,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         """
         karat = self.g_karat.currentData() or 18
         eq = gold_math.to_base_karat(self.g_weight.value(), karat)
-        self.g_equiv.setText(f"المكافئ بـ{kv.label()}: {kv.g(eq):.2f} جم")
+        self.g_equiv.setText(f"المكافئ بـ{kv.label()}: {_nf.f2(kv.g(eq), sep=False)} جم")
 
     def _current_target(self):
         """(entity، معرّف الجهة) إن كان الحساب المختار حسابَ جهة، وإلا
@@ -364,9 +365,9 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             else:
                 g, c = account_balance(conn, val)
         self.balances.setText(
-            f"الرصيد الحالي — ذهب: {kv.g(g):,.2f} جم {kv.label()} "
+            f"الرصيد الحالي — ذهب: {_nf.f2(kv.g(g))} جم {kv.label()} "
             f"({'مدين' if g >= 0 else 'دائن'}) | "
-            f"نقد: {c:,.2f} ريال ({'مدين' if c >= 0 else 'دائن'})")
+            f"نقد: {_nf.f2(c)} ريال ({'مدين' if c >= 0 else 'دائن'})")
 
     def add_gold_row(self):
         """يضيف سطر ذهب بعياره الخاص إلى أسطر السند."""
@@ -411,19 +412,19 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             if r["kind"] == "gold":
                 eq = gold_math.to_base_karat(r["weight"], r["karat"])
                 tg += eq
-                data.append(("ذهب", f"{r['weight']:,.2f}",
+                data.append(("ذهب", f"{_nf.f2(r['weight'])}",
                              f"عيار {r['karat']}",
-                             f"{kv.g(eq):,.2f}", "—", r["notes"] or "—"))
+                             _nf.f2(kv.g(eq)), "—", r["notes"] or "—"))
             else:
                 tc += r["amount"]
                 data.append(("نقد", "—", "—", "—",
-                             f"{r['amount']:,.2f}", r["notes"] or "—"))
+                             f"{_nf.f2(r['amount'])}", r["notes"] or "—"))
         fill(self.rows_table, ["النوع", "الوزن الفعلي", "العيار",
                                f"المكافئ ع{kv.active()}", "المبلغ",
                                "البيان"], data)
         self.rows_total.setText(
-            f"إجمالي السند — ذهب: {kv.g(tg):,.2f} جم {kv.label()}   |   "
-            f"نقد: {tc:,.2f} ريال   ({len(self.rows)} سطر)")
+            f"إجمالي السند — ذهب: {_nf.f2(kv.g(tg))} جم {kv.label()}   |   "
+            f"نقد: {_nf.f2(tc)} ريال   ({len(self.rows)} سطر)")
 
     def toggle_adjustments(self):
         """تعطيل حقول الخصم وفرق الصافي وتصفيرها ما لم تُفعَّل صراحةً."""
@@ -484,8 +485,8 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                     self,
                     f"{k_label}\n\n"
                     f"الجهة: {self._target_label()}\n"
-                    f"الذهب: {tg:,.2f} جم\n"
-                    f"النقد: {tc:,.2f} ريال\n"
+                    f"الذهب: {_nf.f2(tg)} جم\n"
+                    f"النقد: {_nf.f2(tc)} ريال\n"
                     f"التاريخ: {dstr(self.date)}"):
                 return
             kw = dict(

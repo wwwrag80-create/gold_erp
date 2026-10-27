@@ -31,6 +31,7 @@ from ui.widgets.common import (date_edit, dstr, err, fill, make_table,
                                style_group_row, tab_widget, title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -131,11 +132,11 @@ class ConsignmentTab(QtWidgets.QWidget):
 
     def _render(self, r):
         def m(v):
-            return f"{v:,.2f}"
+            return _nf.f2(v)
 
         def g(v):
             """وزن بمكافئ 18 ← بعيار المصنع (كل أوزان القائمة)."""
-            return f"{kv.g(v):,.2f}"
+            return _nf.f2(kv.g(v))
 
         # الشريط العلوي: حجم حركة البضاعة (وزني، عرض فقط)
         self.movement.setText(
@@ -200,10 +201,10 @@ def money(v, gold=False, paren=True):
 
     `paren=False` (قائمة الدخل، 4.81): السالب بإشارة ناقص «-10» لا «(10)»."""
     v = kv.g(v or 0.0) if gold else (v or 0.0)
-    eps = 0.0005 if gold else 0.005
+    eps = 0.005
     if abs(v) < eps:
         return "—"
-    s = f"{abs(v):,.3f}" if gold else f"{abs(v):,.2f}"
+    s = _nf.f2(abs(v)) if gold else _nf.f2(abs(v))
     if v < 0:
         # LRM قبل الناقص: الخلية عربية الاتجاه فتقلب «-10» إلى «10-»
         return f"({s})" if paren else f"\u200e-{s}"
@@ -422,7 +423,7 @@ class StandardIncomeTab(QtWidgets.QWidget):
             per += (f"   ·   المقارنة: من {st['compare_from']} إلى "
                     f"{st['compare_to']}")
         self.status.setText(
-            f"صافي {kind} الفترة: {abs(net):,.2f} ريال{margin}   ·   {per}"
+            f"صافي {kind} الفترة: {_nf.f2(abs(net))} ريال{margin}   ·   {per}"
             "   ·   من دفتر الأستاذ على أساس الاستحقاق، وقيد الإقفال"
             " السنوي مستبعد")
         self.status.setStyleSheet(

@@ -16,6 +16,7 @@ from database.database import db
 from services import karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, search_combo, title_label)
+from services import numfmt as _nf
 
 
 class WorkshopAccountsScreen(QtWidgets.QWidget):
@@ -226,15 +227,15 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
             tc += cbal
             data.append((
                 f"{x['code']} — {x['name']}",
-                f"{x['gd']:,.3f}", f"{x['gc']:,.3f}", f"{gbal:,.3f}",
-                f"{x['cd']:,.2f}", f"{x['cc']:,.2f}", f"{cbal:,.2f}"))
+                f"{_nf.f2(x['gd'])}", f"{_nf.f2(x['gc'])}", _nf.f2(gbal),
+                f"{_nf.f2(x['cd'])}", f"{_nf.f2(x['cc'])}", _nf.f2(cbal)))
         fill(self.table,
              ["الحساب", "مدين ذهب", "دائن ذهب", "رصيد الذهب",
               "مدين نقد", "دائن نقد", "رصيد النقد"], data)
         self.summary.setText(
             f"{len(self.rows)} حساب   |   مجموع أرصدة الذهب: "
-            f"{kv.g(tg):,.3f} {kv.unit()}   |   "
-            f"مجموع أرصدة النقد: {tc:,.2f} ريال")
+            f"{_nf.f2(kv.g(tg))} {kv.unit()}   |   "
+            f"مجموع أرصدة النقد: {_nf.f2(tc)} ريال")
 
     def print_cmp(self):
         try:

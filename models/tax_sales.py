@@ -31,6 +31,7 @@ from models.entities import get_entity
 from services.accounting_engine import post_entry
 from services.audit import log_action
 from services.fatoora.ubl import money
+from services import numfmt as _nf
 
 PAY_MODES = (("credit", "آجل — على حساب العميل"),
              ("cash", "نقداً — الصندوق الرئيسي"),
@@ -454,7 +455,7 @@ def _rep_line(it, wage_per_gram=None, pieces=None, karat=None):
     k = line_karat(karat if karat is not None else it.get("karat"))
     n = max(1, int(pieces or it.get("pieces") or 1))
     desc = (f"موديل {it['model_no'] or '—'} — رقم التشغيل {it['wo_no']} — "
-            f"{n} قطعة — {kv.g(it['weight'], k):,.3f} جم عيار {k}")
+            f"{n} قطعة — {_nf.f2(kv.g(it['weight'], k))} جم عيار {k}")
     return {"description": desc, "qty": float(it["weight"]),
             "unit_price": rate, "discount": 0,
             "sale_item_id": it["item_id"],
@@ -474,8 +475,8 @@ def spread_discount(grosses, discount):
     if disc <= 0 or not grosses:
         return [0.0] * len(grosses)
     if disc > tot + 1e-9:
-        raise ValueError(f"الخصم {disc:,.2f} أكبر من إجمالي الأجور "
-                         f"{tot:,.2f}")
+        raise ValueError(f"الخصم {_nf.f2(disc)} أكبر من إجمالي الأجور "
+                         f"{_nf.f2(tot)}")
     shares = [float(money(disc * g / tot)) for g in grosses]
     big = max(range(len(grosses)), key=lambda i: grosses[i])
     shares[big] = float(money(shares[big] + disc - sum(shares)))
@@ -529,8 +530,8 @@ def create_rep_invoice(conn, company_id, rep_id, doc_date, items, username,
           {"account_id": acc_id(conn, VAT_OUT), "cash_credit": t["vat"],
            "line_desc": f"ضريبة مخرجات {no}"}]
     je += _memo(comp, rep, t["total"],
-                f"فاتورة ضريبية {no} — أجور {t['net']:,.2f} + ضريبة "
-                f"{t['vat']:,.2f}")
+                f"فاتورة ضريبية {no} — أجور {_nf.f2(t['net'])} + ضريبة "
+                f"{_nf.f2(t['vat'])}")
     entry_id = post_entry(conn, doc_date, f"فاتورة ضريبية {no} — "
                           f"{comp['name']} — المندوب {rep['name']}", je,
                           source_table="tax_sales", source_id=sid,
@@ -638,10 +639,10 @@ def build_doc(conn, sale_id):
                            " ORDER BY line_no", (sale_id,)):
         if li["wo_no"]:
             from services import karat_view as kv
-            extra = f" × أجر {kv.rate(li['unit_price']):,.2f} ريال/جم"
+            extra = f" × أجر {_nf.f2(kv.rate(li['unit_price']))} ريال/جم"
         else:
-            extra = (f" — {li['qty']:g} × {li['unit_price']:,.2f}"
-                     + (f" − خصم {li['discount']:,.2f}"
+            extra = (f" — {li['qty']:g} × {_nf.f2(li['unit_price'])}"
+                     + (f" − خصم {_nf.f2(li['discount'])}"
                         if li["discount"] else ""))
         lines.append({"name": li["description"] + extra, "amount": li["net"]})
     doc = {

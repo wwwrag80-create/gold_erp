@@ -9,6 +9,7 @@ from models.inventory import BOX_CODE, add_scrap_move
 from services import gold_math
 from services.accounting_engine import post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 
 def _resolve_target(conn, entity_id, account_id):
@@ -240,8 +241,8 @@ def create_voucher(conn, kind, voucher_date, username, *,
         for x in norm:
             if x["kind"] == "gold":
                 box = acc_id(conn, BOX_CODE[x["karat"]])
-                d = (f"وزن فعلي {x['weight']:.2f} جم عيار {x['karat']}"
-                     f" = {x['equiv']:.2f} جم عيار 18")
+                d = (f"وزن فعلي {_nf.f2(x['weight'], sep=False)} جم عيار {x['karat']}"
+                     f" = {_nf.f2(x['equiv'], sep=False)} جم عيار 18")
                 if kind == "receipt":
                     lines += [{"account_id": box, "gold_debit": x["equiv"],
                                "line_desc": d},
@@ -273,8 +274,8 @@ def create_voucher(conn, kind, voucher_date, username, *,
                  if gold_weight else 0.0)
         if gold_weight:
             box = acc_id(conn, BOX_CODE[gold_karat])
-            d = (f"وزن فعلي {gold_weight:.2f} جم عيار {gold_karat}"
-                 f" = {equiv:.2f} جم عيار 18")
+            d = (f"وزن فعلي {_nf.f2(gold_weight, sep=False)} جم عيار {gold_karat}"
+                 f" = {_nf.f2(equiv, sep=False)} جم عيار 18")
             if kind == "receipt":
                 lines += [{"account_id": box, "gold_debit": equiv,
                            "line_desc": d},

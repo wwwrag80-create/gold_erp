@@ -26,6 +26,7 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
                                title_label)
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 class StockAgingScreen(QtWidgets.QWidget):
     def __init__(self, user, embedded=False):
@@ -246,10 +247,10 @@ class StockAgingScreen(QtWidgets.QWidget):
         u = kv.unit()
 
         def w(v):
-            return f"{kv.g(v):,.3f}"
+            return _nf.f2(kv.g(v))
 
         def m(v):
-            return f"{v:,.2f}"
+            return _nf.f2(v)
 
         t = r["total"]
         self.c_stock.set_value(f"{t['count']:,}",
@@ -327,10 +328,10 @@ class StockAgingScreen(QtWidgets.QWidget):
         u = kv.unit()
 
         def w(v):
-            return f"{kv.g(v):,.3f}"
+            return _nf.f2(kv.g(v))
 
         def m(v):
-            return f"{v:,.2f}"
+            return _nf.f2(v)
 
         out = [f"أعمار الموديلات — حتى {r['as_of']}"]
         if r.get("filter_models"):

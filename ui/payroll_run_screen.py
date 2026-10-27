@@ -20,6 +20,7 @@ from ui import kit
 from database.database import db
 from models import payroll
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
+from services import numfmt as _nf
 
 MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو",
           "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
@@ -114,15 +115,15 @@ class PayrollRunScreen(QtWidgets.QWidget):
                         total += salary
                         pending += 1
                     data.append((e["name"], e["job_title"] or "—",
-                                 f"{salary:,.2f}", f"{adv:,.2f}",
-                                 f"{net:,.2f}", state))
+                                 _nf.f2(salary), _nf.f2(adv),
+                                 _nf.f2(net), state))
                     self.rows.append(e["id"])
             self.rows = []
             fill(self.table, COLS, data)
             self.summary.setText(
                 f"شهر {self.period_label()} — تاريخ القيد: {self.accrual_date()}"
                 f"   |   {len(data)} موظف نشط   |   "
-                f"{pending} جاهز للترحيل بإجمالي {total:,.2f} ريال")
+                f"{pending} جاهز للترحيل بإجمالي {_nf.f2(total)} ريال")
             self.btn_post.setEnabled(pending > 0)
         except Exception as e:
             err(self, e)
@@ -146,7 +147,7 @@ class PayrollRunScreen(QtWidgets.QWidget):
             if not ask(self,
                        f"ترحيل رواتب {self.period_label()}؟\n\n"
                        f"عدد الموظفين: {len(pend)}\n"
-                       f"إجمالي الاستحقاق: {total:,.2f} ريال\n"
+                       f"إجمالي الاستحقاق: {_nf.f2(total)} ريال\n"
                        f"تاريخ القيد: {self.accrual_date()}\n\n"
                        f"سيُنشأ سند واحد بسطرين لكل موظف."):
                 return
@@ -155,7 +156,7 @@ class PayrollRunScreen(QtWidgets.QWidget):
                                           entry_date=self.accrual_date())
             info(self, f"تم ترحيل رواتب {self.period_label()}.\n"
                        f"عدد الموظفين: {len(res)}\n"
-                       f"إجمالي الاستحقاق: {total:,.2f} ريال\n\n"
+                       f"إجمالي الاستحقاق: {_nf.f2(total)} ريال\n\n"
                        f"يظهر في كشف مصروف الرواتب سطرٌ باسم كل موظف، "
                        f"وفي كشف حساب الموظف راتبه دائناً.")
             self.load()

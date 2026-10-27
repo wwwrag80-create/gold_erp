@@ -47,6 +47,7 @@ import threading
 import time
 from collections import OrderedDict
 from urllib.parse import parse_qs, quote
+from services import numfmt as _nf
 
 PREFIX = "m"
 K_TOKEN = "models_web_token"
@@ -1407,7 +1408,7 @@ def _e(v):
 
 def _w(v):
     from services import karat_view as kv
-    return f"{kv.g(float(v or 0)):,.2f}"
+    return _nf.f2(kv.g(float(v or 0)))
 
 
 def _who(holder, date, bulk=False):
@@ -1431,7 +1432,7 @@ def _rk(i, with_holder):
     from services import karat_view as kv
     key = str(i["wo"]) + (" " + str(i["holder"]) if with_holder else "")
     return (f' data-r="{_e(key.lower())}"'
-            f' data-w="{kv.g(float(i["reg"] or 0)):.2f}"')
+            f' data-w="{_nf.f2(kv.g(float(i["reg"] or 0)), sep=False)}"')
 
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -1721,7 +1722,7 @@ def _pnl(conn, query=None, base="", today=None):
 
     def num(v, gold=False):
         v = kv.g(v or 0.0) if gold else float(v or 0.0)
-        txt = f"{abs(v):,.2f}"
+        txt = _nf.f2(abs(v))
         # LRM قبل الناقص: في السطر العربي يُعرض «-300» لا «300-»
         return (f"\u200e-{txt}", "neg") if v < -0.004 else (txt, "")
 
@@ -1864,7 +1865,7 @@ def _board(conn, query, base):
     rows = res["rows"]
 
     def fmt(sd, v):
-        return f"{kv.g(v):,.3f}" if sd == "gold" else f"{v:,.2f}"
+        return _nf.f2(kv.g(v)) if sd == "gold" else _nf.f2(v)
 
     def pct(v):
         return "—" if v is None else f"{v:,.1f}%"
@@ -1901,7 +1902,7 @@ def _board(conn, query, base):
     s = cb._side(tot, ps)
     u = _e(kv.unit()) if ps == "gold" else "ريال"
     active = sum(1 for r in rows if r["active"])
-    owing = sum(1 for r in rows if r[ps]["remaining"] > 0.0005)
+    owing = sum(1 for r in rows if r[ps]["remaining"] > 0.005)
     summary = (
         f'<div>العملاء<b>{len(rows):,}</b>{active:,} بحركة</div>'
         f'<div>المبيعات<b>{fmt(ps, s["sales"])}</b>{u} · صافيها '
@@ -1918,8 +1919,8 @@ def _board(conn, query, base):
     rows = sorted(rows, key=lambda r: (-r[side]["remaining"],
                                        -r[other]["remaining"], r["name"]))
     # «رصيد سابق» و«حركات أخرى» يُخفيان إن خلَوا — كالشاشة
-    show_open = any(abs(r[side]["open"]) > 0.0005 for r in rows)
-    show_other = any(abs(r[side]["other"]) > 0.0005 for r in rows)
+    show_open = any(abs(r[side]["open"]) > 0.005 for r in rows)
+    show_other = any(abs(r[side]["other"]) > 0.005 for r in rows)
     cols = [("العميل", None), ("رصيد سابق", "open"),
             ("المبيعات", "sales"), ("المرتجع", "returns"),
             ("صافي المبيعات", "net"), ("السداد", "paid"),
@@ -1943,7 +1944,7 @@ def _board(conn, query, base):
         if key == "grade":
             return f'<td>{grade(x["grade"])}</td>'
         if key == "remaining":
-            cr = " cr" if x[key] < -0.0005 else ""
+            cr = " cr" if x[key] < -0.005 else ""
             return f'<td class="rem{cr}">{fmt(side, x[key])}</td>'
         return f'<td>{fmt(side, x[key])}</td>'
     trs = [f'<tr class="crow" data-s="{srch(r)}">'
@@ -2011,10 +2012,10 @@ def _aging(conn, query, base, to, keep, tools, seg):
     head.append("له علينا")
 
     def g(x):
-        return f"{kv.g(x):,.3f}" if x else ""
+        return _nf.f2(kv.g(x)) if x else ""
 
     def c(x):
-        return f"{x:,.2f}" if x else ""
+        return _nf.f2(x) if x else ""
 
     trs = []
     for r in rows:
@@ -2031,9 +2032,9 @@ def _aging(conn, query, base, to, keep, tools, seg):
             cells.append(f'<td class="rem">{c(r["cash"])}</td>')
         cr = []
         if r["cash_credit"]:
-            cr.append(f"نقد {abs(r['cash_credit']):,.2f}")
+            cr.append(f"نقد {_nf.f2(abs(r['cash_credit']))}")
         if r["gold_credit"]:
-            cr.append(f"ذهب {kv.g(abs(r['gold_credit'])):,.3f}")
+            cr.append(f"ذهب {_nf.f2(kv.g(abs(r['gold_credit'])))}")
         cells.append(f'<td class="cr">{" · ".join(cr) or "—"}</td>')
         # المتعثّر يُلوَّن كالشاشة: العين تلتقطه قبل الأرقام
         tone = (' style="color:#9A1414"' if r["days"] >= 91 else
@@ -2047,12 +2048,12 @@ def _aging(conn, query, base, to, keep, tools, seg):
     tot = ['<td class="n">الإجمالي</td>', "<td>—</td>", "<td>—</td>",
            "<td>—</td>"]
     if dim in ("both", "gold"):
-        tot += [f"<td>{kv.g(x):,.3f}</td>" for x in t["gold_buckets"]]
-        tot.append(f"<td>{kv.g(t['gold']):,.3f}</td>")
+        tot += [f"<td>{_nf.f2(kv.g(x))}</td>" for x in t["gold_buckets"]]
+        tot.append(f"<td>{_nf.f2(kv.g(t['gold']))}</td>")
     if dim in ("both", "cash"):
-        tot += [f"<td>{x:,.2f}</td>" for x in t["cash_buckets"]]
-        tot.append(f"<td>{t['cash']:,.2f}</td>")
-    tot.append(f"<td>نقد {abs(t['cash_credit']):,.2f}</td>"
+        tot += [f"<td>{_nf.f2(x)}</td>" for x in t["cash_buckets"]]
+        tot.append(f"<td>{_nf.f2(t['cash'])}</td>")
+    tot.append(f"<td>نقد {_nf.f2(abs(t['cash_credit']))}</td>"
                if t["cash_credit"] else "<td>—</td>")
     body = ("<table><thead><tr>"
             + "".join(f"<th>{_e(h)}</th>" for h in head)

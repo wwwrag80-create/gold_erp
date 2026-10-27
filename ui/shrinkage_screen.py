@@ -15,6 +15,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, info,
 
 
 from ui.widgets.edit_mode import EditModeMixin
+from services import numfmt as _nf
 
 
 class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
@@ -76,7 +77,7 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
                 else:
                     res = shrinkage.create_shrinkage(conn, *args)
             info(self, f"تم ترحيل التسوية {res['op_no']} "
-                       f"بوزن {kv.g(res['weight']):.2f} {kv.unit()}")
+                       f"بوزن {_nf.f2(kv.g(res['weight']), sep=False)} {kv.unit()}")
             self.end_edit()
             self.weight.setValue(0)
             self.notes.clear()
@@ -103,6 +104,6 @@ class ShrinkageScreen(EditModeMixin, QtWidgets.QWidget):
             g = balance_by_code(conn, "1100")[0]
             loss = balance_by_code(conn, "5110")[0]
         self.tazeena.setText(
-            f"رصيد خزينة التصنيع الدفتري: {kv.g(g):,.2f} جم "
+            f"رصيد خزينة التصنيع الدفتري: {_nf.f2(kv.g(g))} جم "
             f"{kv.label()} | "
-            f"مجمع فاقد التصنيع: {kv.g(loss):,.2f} جم")
+            f"مجمع فاقد التصنيع: {_nf.f2(kv.g(loss))} جم")

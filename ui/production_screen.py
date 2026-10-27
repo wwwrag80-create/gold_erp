@@ -24,6 +24,7 @@ from ui.widgets.common import (busy, confirm_post, posted, ask, big_label,
                                TitledSections, wspin)
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.model_pic import ModelPic  # noqa: F401 (4.93: مشتركة)
+from services import numfmt as _nf
 
 DRAFT_KEY = "production"
 
@@ -329,12 +330,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.btn_rate.setMaximumWidth(96)
         self.btn_rate.clicked.connect(self.edit_rate)
         self.notes = kit.LineEdit()
-        # ثلاث منازلٍ لا منزلتان في خانات الوزن: تبديل العيار يقسم
-        # ويضرب، وتقريبُ منزلتين يُرجع 40.01 بدل 40.000 بعد ذهابٍ
-        # وإياب — فيبدو للمستخدم أن الرقم تغيّر من تلقاء نفسه.
-        for w in (self.reg, self.standing, self.gold, self.small,
-                  self.big, self.after):
-            w.setDecimals(3)
+        # 4.99: خانات الوزن بمنزلتين كسائر النظام (كانت ثلاثاً) — بطلب
+        # صاحب النظام: لا يُكتب ولا يُعرض 0.001 بعد اليوم
         for w in (self.gold, self.small, self.big):
             w.valueChanged.connect(self._parts_typed)
         btn_add = kit.PushButton("+ إضافة")
@@ -515,7 +512,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                  ["تاريخ الترحيل", "رقم القيد", "المرجع", "إلى حساب",
                   "عدد الأطقم", f"الوزن المقيد ({u})", "أُرسلت مستعجلةً في"],
                  [(r["date"], r["entry_id"], r["reference"] or "—",
-                   r["dest"], r["count"], f"{kv.g(r['weight']):,.3f}",
+                   r["dest"], r["count"], f"{_nf.f2(kv.g(r['weight']))}",
                    (r["created_at"] or "")[:16])
                   for r in self.urgent_rows])
             n = len(self.urgent_rows)
@@ -812,8 +809,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             standing = gold_math.standing_gold(
                 w_gold.value(), w_small.value(), w_big.value())
             u = kv.unit(int(w_karat.currentData() or k0))
-            prev.setText(f"الوزن المقيد: {reg:,.2f} {u}   ·   "
-                         f"الذهب القائم: {standing:,.2f} {u}")
+            prev.setText(f"الوزن المقيد: {_nf.f2(reg)} {u}   ·   "
+                         f"الذهب القائم: {_nf.f2(standing)} {u}")
         for w in (w_gold, w_small, w_big, w_rate):
             w.valueChanged.connect(_calc)
         w_karat.currentIndexChanged.connect(_calc)
@@ -901,7 +898,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                                del_tip="حذف هذا السطر من الدفعة")
         self.totals.setText(
             f"عدد أطقم الدفعة: {len(self.batch)}   |   إجمالي الوزن "
-            f"المقيد: {kv.g(total18):,.2f} {kv.unit()}")
+            f"المقيد: {_nf.f2(kv.g(total18))} {kv.unit()}")
         self.recalc()
 
     def _headers(self):
@@ -1068,15 +1065,15 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                         f"{len(res['kept_sold'])} مباع بقي كما هو")
                 lines = ("   ·   ".join(parts)
                          + f"\nصافي التغيّر في مخزن الوجهة: "
-                           f"{kv.g(res['delta']):+.3f} {kv.unit()}")
+                           f"{_nf.f2(kv.g(res['delta']), sep=False, sign=True)} {kv.unit()}")
                 if res.get("moved_dest"):
                     lines += (f"\nوحساب الوجهة نُقل من "
                               f"{res['moved_dest'][0]} إلى "
                               f"{res['moved_dest'][1]}.")
             else:
                 lines = "\n".join(f"• {i['work_order_no']}: مقيد "
-                                  f"{kv.g(i['registered_weight']):.2f} / قائم "
-                                  f"{kv.g(i['standing_gold']):.2f} {kv.unit()}"
+                                  f"{_nf.f2(kv.g(i['registered_weight']), sep=False)} / قائم "
+                                  f"{_nf.f2(kv.g(i['standing_gold']), sep=False)} {kv.unit()}"
                                   for i in res["items"])
                 if res.get("dest_name"):
                     lines = f"إلى حساب: {res['dest_name']}\n" + lines
@@ -1088,7 +1085,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 lines += "\n\n✔ اكتملت الدفعة المستعجلة وخرجت من «المستعجل»."
             posted(self, f"تم ترحيل الدفعة بقيد رقم {res.get('entry_id')}\n"
                        f"إجمالي الوزن المقيد: "
-                       f"{kv.g(res.get('total_registered') or 0):.2f} "
+                       f"{_nf.f2(kv.g(res.get('total_registered') or 0), sep=False)} "
                        f"{kv.unit()}\n{lines}", "work_orders",
                    (res.get("items") or [{}])[0].get("id"),
                    editing=was_editing)
@@ -1225,9 +1222,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             snap = inventory.stock_snapshot(conn)
             self._reload_dests(conn)
         self.tazeena_label.setText(
-            f"رصيد خزينة التصنيع: {kv.g(snap['tazeena_gold']):.2f} "
+            f"رصيد خزينة التصنيع: {_nf.f2(kv.g(snap['tazeena_gold']), sep=False)} "
             f"جم {kv.label()}   |   "
-            f"الذهب المشغول: {kv.g(snap['mashghool_gold']):.2f} جم "
+            f"الذهب المشغول: {_nf.f2(kv.g(snap['mashghool_gold']), sep=False)} جم "
             f"({snap['wo_count']} طقم)")
         self.render_batch()
         self._restore_draft()

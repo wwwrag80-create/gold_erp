@@ -14,6 +14,7 @@ from services import gold_math, karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, enter_chain,
                                err, fill, info, make_table, mspin,
                                title_label, wspin)
+from services import numfmt as _nf
 
 COLS = ["رقم التشغيل", "الذهب", "الفصوص", "الأحجار", "الأحجار بعد الخصم",
         "نسبة الخصم", "الوزن المقيد", "الذهب القائم", "الأجر/جم"]
@@ -133,8 +134,8 @@ class OpeningStockScreen(QtWidgets.QWidget):
         after = gold_math.stones_after_discount(self.big.value(), self.rate)
         reg = gold_math.registered_weight(self.gold.value(), self.small.value(),
                                           self.big.value(), self.rate)
-        self.after.setText(f"{after:.2f}")
-        self.reg_label.setText(f"الوزن المقيد: {reg:.2f} {kv.unit()}")
+        self.after.setText(_nf.f2(after, sep=False))
+        self.reg_label.setText(f"الوزن المقيد: {_nf.f2(reg, sep=False)} {kv.unit()}")
 
     def add_row(self):
         try:
@@ -186,7 +187,7 @@ class OpeningStockScreen(QtWidgets.QWidget):
             for b in self.batch), 3)
         self.totals.setText(
             f"عدد الأطقم: {len(self.batch)}   |   إجمالي الوزن المقيد: "
-            f"{total:.2f} {kv.unit()}")
+            f"{_nf.f2(total, sep=False)} {kv.unit()}")
         self.recalc()
 
     def post_batch(self):
@@ -209,7 +210,7 @@ class OpeningStockScreen(QtWidgets.QWidget):
                     conn, batch, dstr(self.date), self.user["username"])
             info(self, f"تم ترحيل الرصيد الافتتاحي بقيد رقم {res['entry_id']}\n"
                        f"إجمالي الوزن المقيد: "
-                       f"{kv.g(res['total_registered']):.2f} {kv.unit()}")
+                       f"{_nf.f2(kv.g(res['total_registered']), sep=False)} {kv.unit()}")
             self.batch = []
             self.render_batch()
             self.refresh()
@@ -221,6 +222,6 @@ class OpeningStockScreen(QtWidgets.QWidget):
             snap = inventory.stock_snapshot(conn)
         self.stock_label.setText(
             f"الذهب المشغول حالياً: "
-            f"{kv.g(snap['mashghool_gold']):.2f} جم {kv.label()} "
+            f"{_nf.f2(kv.g(snap['mashghool_gold']), sep=False)} جم {kv.label()} "
             f"({snap['wo_count']} طقم)")
         self.render_batch()

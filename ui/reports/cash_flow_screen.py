@@ -27,6 +27,7 @@ from ui.widgets.common import (date_edit, dstr, err, info, make_table,
                                style_group_row, title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 class CashFlowScreen(QtWidgets.QWidget):
@@ -180,12 +181,12 @@ class CashFlowScreen(QtWidgets.QWidget):
         t = self.cf["cur"]["totals"]
         ok = self.cf["balanced"]
         extra = (f"   ·   معاملات استثمارية غير نقدية (أصول بالأجل): "
-                 f"{t['noncash']:,.2f} ريال" if abs(t["noncash"]) >= 0.005
+                 f"{_nf.f2(t['noncash'])} ريال" if abs(t["noncash"]) >= 0.005
                  else "")
         self.status.setText(
             ("✔ آخر الفترة = أولها + صافي التدفقات، ويطابق رصيد الصندوق"
              " والبنوك في الدفتر" if ok else
-             f"✘ فرق {t['diff']:,.2f} ريال بين التدفقات والرصيد الدفتري")
+             f"✘ فرق {_nf.f2(t['diff'])} ريال بين التدفقات والرصيد الدفتري")
             + f"   ·   الفترة: من {self.cf['date_from']} إلى "
             f"{self.cf['date_to']}" + extra)
         self.status.setStyleSheet(
@@ -309,7 +310,7 @@ class CashFlowDetail(QtWidgets.QDialog):
                     x["desc"] or "—", x["account"], x["party"] or "—",
                     x["cash_acc"], money(x["amount"])]
             for c, v in enumerate(vals):
-                it = QtWidgets.QTableWidgetItem(str(v))
+                it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                 it.setTextAlignment(
                     (QtCore.Qt.AlignRight if c in (3, 4, 5, 6)
                      else QtCore.Qt.AlignCenter) | QtCore.Qt.AlignVCenter)

@@ -26,6 +26,7 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
                                make_table, run_bg, search_combo, tab_widget,
                                title_label)
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 class MovementScreen(QtWidgets.QWidget):
@@ -187,7 +188,7 @@ class MovementScreen(QtWidgets.QWidget):
 
     # ─────────────────────────────── عرض
     def _fmt(self, v, dim):
-        return (f"{kv.g(v):,.3f}" if dim == "gold" else f"{v:,.2f}")
+        return (_nf.f2(kv.g(v)) if dim == "gold" else _nf.f2(v))
 
     def _unit(self, dim):
         return kv.unit() if dim == "gold" else "ريال"
@@ -226,7 +227,7 @@ class MovementScreen(QtWidgets.QWidget):
             v = b[dim]
             up = b["gold_up"] if dim == "gold" else b["cash_up"]
             dn = b["gold_dn"] if dim == "gold" else b["cash_dn"]
-            if abs(v) < 0.0005 and abs(up) < 0.0005 and abs(dn) < 0.0005:
+            if abs(v) < 0.005 and abs(up) < 0.005 and abs(dn) < 0.005:
                 continue
             rows.append((
                 b["label"],
@@ -279,7 +280,7 @@ class MovementScreen(QtWidgets.QWidget):
         """
         d = (self.res or {}).get("opening_in_period") or {}
         v = d.get(dim, 0.0)
-        if not d.get("docs") or abs(v) < 0.0005:
+        if not d.get("docs") or abs(v) < 0.005:
             return
         tip = (f"يشمل {d['docs']:,} قيداً افتتاحياً/يومياً وقع داخل "
                f"الفترة بمقدار {self._fmt(v, dim)} {unit} — "
@@ -320,7 +321,7 @@ class MovementScreen(QtWidgets.QWidget):
                f"رصيد أول المدة : {self._fmt(r['opening'][dim], dim)} {u}"]
         for b in r["buckets"]:
             v = b[dim]
-            if abs(v) < 0.0005:
+            if abs(v) < 0.005:
                 continue
             out.append(f"  {b['label']:<10} {('زيادة' if v > 0 else 'نقص')} "
                        f"{self._fmt(abs(v), dim)}   "

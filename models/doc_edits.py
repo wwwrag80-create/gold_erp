@@ -28,6 +28,7 @@
 كتابةُ السجلّ وحدها ما يُكتب هنا؛ والتقارير قراءةٌ محضة.
 """
 import datetime as _dt
+from services import numfmt as _nf
 
 KINDS = {"inplace": "عُدّل في مكانه", "repost": "أُلغي وأُعيد ترحيله"}
 
@@ -467,8 +468,8 @@ def history(conn, source_table, source_id):
 
 def verdict(s, fmt=None, money=None):
     """جملٌ تُقرأ — والتعديل مشروعٌ ما دام مرئياً."""
-    fmt = fmt or (lambda v: f"{v:,.3f}")
-    money = money or (lambda v: f"{v:,.2f}")
+    fmt = fmt or (lambda v: _nf.f2(v))
+    money = money or (lambda v: _nf.f2(v))
     t = s["total"]
     out = []
     if not t["count"]:

@@ -29,6 +29,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, info,
                                title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 COLS = ["الحساب", "الكود", "النقد / الأجور (ريال)", "الذهب (جم 18)"]
 
@@ -42,14 +43,14 @@ def money(v, gold=False):
     """مبلغ القائمة: السالب بين قوسين والصفر شرطة."""
     if gold:
         v = kv.g(v or 0.0)
-        if abs(v) < 0.0005:
+        if abs(v) < 0.005:
             return "—"
-        s = f"{abs(v):,.3f}"
+        s = _nf.f2(abs(v))
     else:
         v = v or 0.0
         if abs(v) < 0.005:
             return "—"
-        s = f"{abs(v):,.2f}"
+        s = _nf.f2(abs(v))
     return f"({s})" if v < 0 else s
 
 
@@ -199,10 +200,10 @@ class FinancialPositionTab(QtWidgets.QWidget):
         self.status.setText(
             ("✔ القائمة متوازنة: مجموع الأصول = حقوق الملكية + المطلوبات"
              if ok else
-             f"✘ فرق — نقد: {ct['diff']:,.2f} ريال · ذهب: "
-             f"{kv.g(gt['diff']):,.3f} {kv.unit()}")
-            + f"   ·   الأصول: {ct['assets']:,.2f} ريال · "
-            f"{kv.g(gt['assets']):,.3f} {kv.unit()}"
+             f"✘ فرق — نقد: {_nf.f2(ct['diff'])} ريال · ذهب: "
+             f"{_nf.f2(kv.g(gt['diff']))} {kv.unit()}")
+            + f"   ·   الأصول: {_nf.f2(ct['assets'])} ريال · "
+            f"{_nf.f2(kv.g(gt['assets']))} {kv.unit()}"
             + "   ·   نقرتان على أي بند لعرض حساباته")
         self.status.setStyleSheet(
             "color:#0F5A24;font-weight:bold" if ok
@@ -382,7 +383,7 @@ class AccountTreeTab(QtWidgets.QWidget):
         rows, marks = [], []
 
         def money(c, g):
-            return (f"{c:,.2f}", f"{kv.g(g):,.2f}")
+            return (_nf.f2(c), _nf.f2(kv.g(g)))
 
         for sec in b["sections"]:
             if not sec["rows"] and abs(sec["gold"]) < 0.001 \
@@ -428,7 +429,7 @@ class AccountTreeTab(QtWidgets.QWidget):
             self.table.setRowCount(len(rows))
             for i, row in enumerate(rows):
                 for c, val in enumerate(row):
-                    it = QtWidgets.QTableWidgetItem(str(val))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(val))
                     it.setTextAlignment(
                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
                         if c == 0 else QtCore.Qt.AlignCenter)
@@ -446,15 +447,15 @@ class AccountTreeTab(QtWidgets.QWidget):
         ag, ac = b["assets"]
         rg, rc = b["right_side"]
         self.summary.setText(
-            f"الأصول — نقد: {ac:,.2f} ريال · ذهب: "
-            f"{kv.g(ag):,.2f} {kv.unit()}"
+            f"الأصول — نقد: {_nf.f2(ac)} ريال · ذهب: "
+            f"{_nf.f2(kv.g(ag))} {kv.unit()}"
             f"       |       الخصوم + حقوق الملكية + النتيجة — "
-            f"نقد: {rc:,.2f} ريال · ذهب: {kv.g(rg):,.2f} {kv.unit()}")
+            f"نقد: {_nf.f2(rc)} ريال · ذهب: {_nf.f2(kv.g(rg))} {kv.unit()}")
         ok = b["balanced_cash"] and b["balanced_gold"]
         self.check.setText(
             "✔ الأرصدة متوازنة في البعدين" if ok else
-            f"✘ عجز — فرق النقد: {b['diff_cash']:,.2f} ريال · "
-            f"فرق الذهب: {kv.g(b['diff_gold']):,.2f} {kv.unit()}")
+            f"✘ عجز — فرق النقد: {_nf.f2(b['diff_cash'])} ريال · "
+            f"فرق الذهب: {_nf.f2(kv.g(b['diff_gold']))} {kv.unit()}")
         self.check.setStyleSheet(
             "color:#0F5A24;font-weight:bold" if ok
             else "color:#8A1010;font-weight:bold")

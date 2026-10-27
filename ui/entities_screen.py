@@ -13,6 +13,7 @@ from ui.widgets.common import (TitledSections, ask, big_label, date_edit,
                                dstr, err, fill, info, make_table, mspin,
                                style_group_row, wspin)
 from ui.widgets.table_tools import enhance
+from services import numfmt as _nf
 
 TYPE_ITEMS = [("عميل", "customer"), ("مورد", "supplier"),
               ("شريك", "partner"), ("موظف", "employee"),
@@ -34,6 +35,14 @@ HINTS = {
             "الجهات الأخرى» ضمن الأصول المتداولة، بأرصدة وكشوفات حساب "
             "مفصّلة تماماً كالعملاء والموردين.",
 }
+
+
+def _log(where, e, extra=""):
+    try:
+        from services.health import log_error
+        log_error(where, e, extra)
+    except Exception:
+        pass
 
 
 class EntitiesScreen(QtWidgets.QWidget):
@@ -303,7 +312,7 @@ class EntitiesScreen(QtWidgets.QWidget):
             # ومن راجع فاتورةً قديمة احتاج الاتفاقَ الذي كان نافذاً
             self.lbl_agreed_hist.setText(
                 ("سجلّ الاتفاقات: " + " · ".join(
-                    f"{kv.rate(float(h['wage'])):,.2f} من {h['from_date']}"
+                    f"{_nf.f2(kv.rate(float(h['wage'])))} من {h['from_date']}"
                     for h in hist[:5]))
                 if hist else "لا سجلّ اتفاقاتٍ لهذه الجهة بعد.")
         except Exception:
@@ -364,9 +373,12 @@ class EntitiesScreen(QtWidgets.QWidget):
             self.similar.setText("")
             return
         t = self.etype.currentData()
-        with db() as conn:
-            found = entities.find_similar(conn, text, t)
-            exact = entities.name_exists(conn, text, t)
+        try:
+            with db(readonly=True) as conn:
+                found = entities.find_similar(conn, text, t)
+                exact = entities.name_exists(conn, text, t)
+        except Exception:
+            return            # التلميح رفاهية لا تُعطّل الكتابة
         if exact:
             self.similar.setText(
                 f"⚠ يوجد {entities.TYPE_LABELS[t]} مسجَّل بنفس الاسم: "
@@ -429,18 +441,23 @@ class EntitiesScreen(QtWidgets.QWidget):
             self.group.setCurrentIndex(i)
 
     def _reload_completer(self):
-        with db() as conn:
-            names = [e["name"] for e in
-                     entities.list_entities(conn, (self.etype.currentData(),))]
+        try:
+            with db(readonly=True) as conn:
+                names = [e["name"] for e in entities.list_entities(
+                    conn, (self.etype.currentData(),))]
+        except Exception:
+            return
         self.completer_model.setStringList(names)
 
     def save(self):
+        t = self.etype.currentData()
+        name = self.name.text().strip()
+        opening = bool(self.open_cash.value() or self.open_gold.value())
         try:
-            t = self.etype.currentData()
             sign = 1 if t == "partner" else (self.gold_sign.currentData() or 1)
             with db() as conn:
-                entities.add_entity(
-                    conn, self.name.text(), t,
+                eid = entities.add_entity(
+                    conn, name, t,
                     phone=self.phone.text(), vat_number=self.vat.text(),
                     username=self.user["username"], address=self.address.text(),
                     open_cash=self.open_cash.value(),
@@ -452,17 +469,33 @@ class EntitiesScreen(QtWidgets.QWidget):
                     basic_salary=self.salary.value(),
                     group_id=(self.group.currentData()
                               if t in ("customer", "other") else None))
-            info(self, "تم حفظ الجهة وإنشاء حسابها الفرعي آلياً"
-                       + (" مع قيد الرصيد الافتتاحي"
-                          if (self.open_cash.value() or self.open_gold.value())
-                          else ""))
-            for w in (self.name, self.phone, self.address, self.vat, self.job_title):
+                code = conn.execute(
+                    "SELECT a.code FROM entities e JOIN accounts a"
+                    " ON a.id=e.account_id WHERE e.id=?", (eid,)).fetchone()
+        except ValueError as e:
+            err(self, e, "تعذّر حفظ الجهة")
+            return
+        except Exception as e:
+            # خطأٌ غير متوقَّع: يُسجَّل بأثره كاملاً، ويُعرض بنصّه لا
+            # بكلمة «فشل» وحدها — فيُعرف سببه من أول صورةٍ للرسالة
+            _log("entities.save", e, f"{t}: {name}")
+            err(self, f"لم تُحفظ الجهة «{name}» — لم يُكتب منها شيء.\n\n"
+                      f"السبب: {type(e).__name__}: {e}", "تعذّر حفظ الجهة")
+            return
+        # حُفظت الجهة: ما بعده تحديثٌ للشاشة لا يجوز أن يُظهر الحفظ
+        # الناجح فشلاً — فيعيد المستخدم المحاولة فيُرفض الاسم مكرّراً
+        info(self, f"تم حفظ «{name}» وإنشاء حسابها الفرعي آلياً"
+                   + (f" برقم {code['code']}" if code else "")
+                   + (" مع قيد الرصيد الافتتاحي" if opening else ""))
+        try:
+            for w in (self.name, self.phone, self.address, self.vat,
+                      self.job_title):
                 w.clear()
             for s in (self.share, self.salary, self.open_cash, self.open_gold):
                 s.setValue(0)
             self.refresh()
         except Exception as e:
-            err(self, e)
+            _log("entities.refresh_after_save", e)
 
     def delete_selected(self):
         eid = self._current_id()
@@ -497,11 +530,11 @@ class EntitiesScreen(QtWidgets.QWidget):
                 if e["entity_type"] == "partner":
                     cg, cc_ = entities.capital_balance(conn, e["id"])
                     extra_of[e["id"]] = (
-                        f"رأس مال: {abs(cc_):,.2f} ر / {kv.g(abs(cg)):,.2f}"
-                        f" — حصة {e['share_percent']:.1f}%")
+                        f"رأس مال: {_nf.f2(abs(cc_))} ر / {_nf.f2(kv.g(abs(cg)))}"
+                        f" — حصة {float(e['share_percent'] or 0):.1f}%")
                 elif e["entity_type"] in ("employee", "worker"):
                     extra_of[e["id"]] = (f"{e['job_title'] or '—'} — راتب "
-                                         f"{e['basic_salary']:,.2f}")
+                                         f"{_nf.f2(float(e['basic_salary'] or 0))}")
                 else:
                     extra_of[e["id"]] = " · ".join(
                         x for x in ((e["phone"] or ""),
@@ -512,9 +545,9 @@ class EntitiesScreen(QtWidgets.QWidget):
                 d["limit"] = lc, lg
 
         def _side(v, dec, unit=""):
-            if abs(v) < (0.0005 if dec == 3 else 0.005):
+            if abs(v) < 0.005:
                 return "—"
-            return f"{abs(v):,.{dec}f}{unit} " + ("مدين" if v > 0 else "دائن")
+            return f"{_nf.f2(abs(v))}{unit} " + ("مدين" if v > 0 else "دائن")
 
         order = [v for _l, v in TYPE_ITEMS] + ["internal"]
         by_t = {}
@@ -569,7 +602,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         over_txt = f" | ⛔ متجاوزون للسقف: {len(over)}" if over else ""
         self.summary.setText(
             f"عدد الجهات: {n} | مجموع حصص الشركاء: "
-            f"{share_total:.2f}%{w}{over_txt}\n"
+            f"{_nf.f2(share_total, sep=False)}%{w}{over_txt}\n"
             "مجموع كل نوعٍ يطابق رصيد مجموعته الرقابية في ميزان المراجعة."
             " النقر المزدوج على جهةٍ يفتحها للتعديل أو نقل نوعها.")
         self._reload_completer()

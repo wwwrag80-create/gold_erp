@@ -36,6 +36,7 @@ from datetime import date
 from models.accounts import acc_id
 from services.accounting_engine import post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 ACC_ACCUM = "1790"        # مجمّع إهلاك الأصول الثابتة (مقابل، دائن)
 ACC_EXPENSE = "5860"      # مصروف إهلاك الأصول الثابتة
@@ -96,7 +97,7 @@ def add_asset(conn, name, account_id, cost, life_months, start_date,
          start_date, (notes or "").strip(), username))
     aid = cur.lastrowid
     log_action(conn, username, "create", "fixed_assets", aid,
-               f"تسجيل أصل: {name} — تكلفة {cost:,.2f} · "
+               f"تسجيل أصل: {name} — تكلفة {_nf.f2(cost)} · "
                f"عمر {life_months} شهراً")
     return aid
 
@@ -252,7 +253,7 @@ def run_depreciation(conn, period, username="admin"):
     except Exception:
         pass
     log_action(conn, username, "create", "depreciation", run_id,
-               f"إهلاك شهر {period}: {total:,.2f} على {len(rows)} أصلاً")
+               f"إهلاك شهر {period}: {_nf.f2(total)} على {len(rows)} أصلاً")
     return {"period": period, "entry_id": entry_id, "total": total,
             "lines": len(rows), "already": False}
 

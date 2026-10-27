@@ -14,6 +14,7 @@ from services import karat_view as kv
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
                                make_table, title_label)
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 class DayCloseScreen(QtWidgets.QWidget):
@@ -97,25 +98,25 @@ class DayCloseScreen(QtWidgets.QWidget):
                 d = day_close.summary(conn, dstr(self.date))
             self.data = d
             self.c_docs.set_value(f"{d['count']:,}")
-            self.c_gold.set_value(f"{kv.g(d['gold_total']):,.3f}",
+            self.c_gold.set_value(f"{_nf.f2(kv.g(d['gold_total']))}",
                                   kv.unit())
-            self.c_cash_in.set_value(f"{d['cash_in']:,.2f}")
-            self.c_cash_out.set_value(f"{d['cash_out']:,.2f}",
-                                      f"الصافي {d['cash_net']:+,.2f}")
+            self.c_cash_in.set_value(f"{_nf.f2(d['cash_in'])}")
+            self.c_cash_out.set_value(f"{_nf.f2(d['cash_out'])}",
+                                      f"الصافي {_nf.f2(d['cash_net'], sign=True)}")
 
             fill(self.kinds,
                  ["نوع العملية", "العدد", f"الذهب ({kv.unit()})",
                   "النقد (ريال)"],
-                 [(k["op"], k["count"], f"{kv.g(k['gold']):,.3f}",
-                   f"{k['cash']:,.2f}") for k in d["kinds"]])
+                 [(k["op"], k["count"], f"{_nf.f2(kv.g(k['gold']))}",
+                   f"{_nf.f2(k['cash'])}") for k in d["kinds"]])
 
             fill(self.balances,
                  ["الحساب", "الكود", f"رصيد الذهب ({kv.unit()})",
                   "الرصيد النقدي (ريال)", "الحالة"],
                  [(b["name"], b["code"],
-                   f"{kv.g(abs(b['gold'])):,.3f}"
+                   f"{_nf.f2(kv.g(abs(b['gold'])))}"
                    if b["dim"] != "cash" else "—",
-                   f"{abs(b['cash']):,.2f}" if b["dim"] != "gold" else "—",
+                   f"{_nf.f2(abs(b['cash']))}" if b["dim"] != "gold" else "—",
                    "مدين" if (b["gold"] > 0 or b["cash"] > 0)
                    else ("دائن" if (b["gold"] < 0 or b["cash"] < 0)
                          else "متزن"))
@@ -126,8 +127,8 @@ class DayCloseScreen(QtWidgets.QWidget):
                   f"الذهب ({kv.unit()})", "النقد", "المستخدم"],
                  [((r["when"] or "")[11:16] or "—", r["op"], r["doc_no"],
                    r["accounts"],
-                   f"{kv.g(r['gold']):,.3f}" if r["gold"] else "",
-                   f"{r['cash']:,.2f}" if r["cash"] else "",
+                   f"{_nf.f2(kv.g(r['gold']))}" if r["gold"] else "",
+                   f"{_nf.f2(r['cash'])}" if r["cash"] else "",
                    r["who"]) for r in d["docs"]])
 
             who = "   ·   ".join(f"{u['user']}: {u['count']}"

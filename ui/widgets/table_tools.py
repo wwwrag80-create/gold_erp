@@ -28,6 +28,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from ui import kit
 
 from ui.widgets.common import _norm, err, info, load_pref, save_pref
+from services import numfmt as _nf
 
 TOTAL_ROLE = QtCore.Qt.UserRole + 77       # وسم صف الإجمالي
 _NUM = re.compile(r"^[\s+\-–—]*[\d,٫٬.]+\s*%?$")
@@ -160,7 +161,7 @@ def total_row(table, values, label="الإجمالي"):
     for c in range(table.columnCount()):
         v = values.get(c, "")
         if isinstance(v, float):
-            v = f"{v:,.2f}".rstrip("0").rstrip(".")
+            v = _nf.f2(v).rstrip("0").rstrip(".")
         it = QtWidgets.QTableWidgetItem(label if c == 0 and not v
                                         else ("" if v is None else str(v)))
         it.setFont(f)

@@ -9,6 +9,7 @@ from services import karat_view as kv
 from models.inventory import stock_snapshot
 from ui.widgets.common import big_label, fill, make_table, title_label
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 class StockReportScreen(QtWidgets.QWidget):
@@ -37,14 +38,14 @@ class StockReportScreen(QtWidgets.QWidget):
         with db(readonly=True) as conn:
             s = stock_snapshot(conn)
         self.gold_summary.setText(
-            f"خزينة التصنيع: {kv.g(s['tazeena_gold']):,.2f} جم "
+            f"خزينة التصنيع: {_nf.f2(kv.g(s['tazeena_gold']))} جم "
             f"{kv.label()}   |   "
-            f"الذهب المشغول: {kv.g(s['mashghool_gold']):,.2f} جم "
+            f"الذهب المشغول: {_nf.f2(kv.g(s['mashghool_gold']))} جم "
             f"({s['wo_count']} طقم بمجموع "
-            f"{kv.g(s['wo_weight']):,.2f} جم)")
+            f"{_nf.f2(kv.g(s['wo_weight']))} جم)")
         self.cash_summary.setText(
-            f"الصندوق: {s['cash_box']:,.2f} ريال   |   "
-            f"البنك: {s['bank']:,.2f} ريال")
+            f"الصندوق: {_nf.f2(s['cash_box'])} ريال   |   "
+            f"البنك: {_nf.f2(s['bank'])} ريال")
         # الوزن الفعلي وزنٌ حقيقي بعياره — لا يُحوَّل. المكافئ وحده
         # يُقرأ بوحدة المصنع.
         rows = [(f"عيار {k}", actual, kv.g(ledger))

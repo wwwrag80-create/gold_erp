@@ -16,6 +16,7 @@ from ui import kit
 from database.database import db
 from models import coa
 from ui.widgets.common import ask, big_label, err, info, title_label
+from services import numfmt as _nf
 
 HEADERS = ["الحساب", "الكود", "النوع", "الطبيعة", "المستوى", "نوع القياس",
            "يقبل الحركة", "الحالة", "الوسم النظامي"]
@@ -309,7 +310,7 @@ class CoaScreen(QtWidgets.QWidget):
                     "SELECT id, code, name FROM accounts WHERE parent_id=?"
                     " AND is_postable=1 AND is_active=1 ORDER BY code",
                     (aid,))]
-            if abs(c) < 0.005 and abs(g) < 0.0005:
+            if abs(c) < 0.005 and abs(g) < 0.005:
                 info(self, "لا رصيد مباشر على هذه المجموعة — لا شيء يُنقل.")
                 return
             if not kids:
@@ -319,7 +320,7 @@ class CoaScreen(QtWidgets.QWidget):
             choice, ok = QtWidgets.QInputDialog.getItem(
                 self, "نقل الرصيد إلى فرع",
                 f"رصيد «{grp['code']} {grp['name']}» المباشر:"
-                f" نقد {c:,.2f} · ذهب {g:,.3f}\nإلى الفرع:", labels, 0, False)
+                f" نقد {_nf.f2(c)} · ذهب {_nf.f2(g)}\nإلى الفرع:", labels, 0, False)
             if not ok:
                 return
             child = kids[labels.index(choice)]

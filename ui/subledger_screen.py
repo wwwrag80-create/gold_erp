@@ -17,6 +17,7 @@ from PyQt5 import QtCore
 
 from ui.widgets.common import (Card, bulk_rows, cell, err, fill, info,
                                make_table, title_label)
+from services import numfmt as _nf
 
 CATEGORIES = [("إجمالي العملاء", "customer"), ("إجمالي الموردين", "supplier"),
               ("الشركاء", "partner"), ("الموظفون", "employee"),
@@ -110,9 +111,9 @@ class SubLedgerScreen(QtWidgets.QWidget):
         if cat == "partner":
             headers = ["الشريك", "الجوال", "جاري — نقد", "جاري — ذهب",
                       "رأس المال — نقد", "رأس المال — ذهب", "إجراءات"]
-            data = [(d["name"], d["phone"] or "—", f"{d['cash']:,.2f}",
-                     f"{kv.g(d['gold']):,.2f}", f"{d['cap_cash']:,.2f}",
-                     f"{kv.g(d['cap_gold']):,.2f}") for d in vis]
+            data = [(d["name"], d["phone"] or "—", f"{_nf.f2(d['cash'])}",
+                     f"{_nf.f2(kv.g(d['gold']))}", f"{_nf.f2(d['cap_cash'])}",
+                     f"{_nf.f2(kv.g(d['cap_gold']))}") for d in vis]
         else:
             headers = ["الاسم", "الجوال", "الرصيد النقدي", "الحالة النقدية",
                       f"رصيد الذهب ({kv.unit()})", "الحالة الوزنية",
@@ -124,14 +125,14 @@ class SubLedgerScreen(QtWidgets.QWidget):
                 gs = ("مدين" if d["gold"] > 0 else
                       ("دائن" if d["gold"] < 0 else "متزن"))
                 data.append((d["name"], d["phone"] or "—",
-                             f"{d['cash']:,.2f}", cs,
-                             f"{kv.g(d['gold']):,.2f}", gs))
+                             f"{_nf.f2(d['cash'])}", cs,
+                             f"{_nf.f2(kv.g(d['gold']))}", gs))
         # `bulk_rows` ضرورةٌ لا تحسين: بدونه يُعيد لفُّ النص قياسَ الصف
         # مع كل خلية، فيتجمّد المصنعُ ذو المئات من الجهات عند كل فتح.
         with bulk_rows(self.table, len(data), headers):
             for i, row in enumerate(data):
                 for c, v in enumerate(row):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     self.table.setItem(i, c, it)
                 self.table.setCellWidget(i, len(headers) - 1,
@@ -215,9 +216,9 @@ class SubLedgerScreen(QtWidgets.QWidget):
             self._rows = details
             self.c_count.set_value(str(summary["count"]),
                                   f"فئة: {self.category.currentText()}")
-            self.c_cash.set_value(f"{summary['total_cash']:,.2f}",
+            self.c_cash.set_value(f"{_nf.f2(summary['total_cash'])}",
                                  "إجمالي الفئة — ريال")
-            self.c_gold.set_value(f"{kv.g(summary['total_gold']):,.2f}",
+            self.c_gold.set_value(f"{_nf.f2(kv.g(summary['total_gold']))}",
                                  f"إجمالي الفئة — جم {kv.label()}")
             self.render()
         except Exception as e:

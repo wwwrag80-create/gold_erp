@@ -20,6 +20,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
                                reload_combo, save_pref, search_combo,
                                title_label)
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 PANELS = [("sales", "إجمالي المبيعات"), ("returns", "إجمالي المرتجعات"),
           ("net_sold", "إجمالي المباع الفعلي"), ("collection", "إجمالي التحصيل")]
@@ -272,17 +273,17 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
             if self.mode == "report":
                 p["net_sold"] = sa.report_net(p)
             self.columns["sales"].set_value(
-                f"{self._g(p['sales']['weight']):,.2f} جم {k}")
+                f"{_nf.f2(self._g(p['sales']['weight']))} جم {k}")
             self.columns["returns"].set_value(
-                f"{self._g(p['returns']['weight']):,.2f} جم {k}")
+                f"{_nf.f2(self._g(p['returns']['weight']))} جم {k}")
             # الصافي ناتجاً مباشرةً (4.51) — في «تقرير» يُحسب: المصروف −
             # المرتجع، ويُعرض رقمه وحده بلا المعادلة
             self.columns["net_sold"].set_value(
-                f"{self._g(p['net_sold']['weight']):,.2f} جم {k}")
+                f"{_nf.f2(self._g(p['net_sold']['weight']))} جم {k}")
             coll = p["collection"]
             self.columns["collection"].set_value(
-                f"ذهب {self._g(coll['gold']):,.2f} · "
-                f"نقد {coll['cash']:,.2f}")
+                f"ذهب {_nf.f2(self._g(coll['gold']))} · "
+                f"نقد {_nf.f2(coll['cash'])}")
             # الرصيد المتبقي = رصيد حساب العميل في الدليل
             with db(readonly=True) as conn:
                 acc = conn.execute(
@@ -299,21 +300,21 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                         (acc["account_id"],)).fetchone()
                     g, c = round(r["g"], 2), round(r["c"], 2)
             self.remaining.setText(
-                f"الرصيد المتبقي على العميل — ذهب: {self._g(g):,.2f} جم "
-                f"عيار {k}   |   نقد: {c:,.2f} ريال      "
+                f"الرصيد المتبقي على العميل — ذهب: {_nf.f2(self._g(g))} جم "
+                f"عيار {k}   |   نقد: {_nf.f2(c)} ريال      "
                 f"({'مدين/عليه' if (g > 0 or c > 0) else 'دائن/له'})")
             for key, _ in PANELS:
                 if key == "collection":
                     # التحصيل: عمود المبلغ النقدي بجانب الذهب
-                    rows = [(d["wo"], f"{self._g(d['weight']):,.2f}",
-                             f"{d.get('cash', 0):,.2f}")
+                    rows = [(d["wo"], f"{_nf.f2(self._g(d['weight']))}",
+                             f"{_nf.f2(d.get('cash', 0))}")
                             for d in details[key]]
                     self.columns[key].set_rows(
                         rows, ["رقم السند", f"الذهب (جم {k})",
                                "المبلغ (ريال)"])
                 elif key in self.merged:
                     # مفروزة: رقم التشغيل مرةً واحدة ووزنه وحده
-                    rows = [(d["wo"], f"{self._g(d['weight']):,.2f}")
+                    rows = [(d["wo"], f"{_nf.f2(self._g(d['weight']))}")
                             for d in details[key]]
                     self.columns[key].set_rows(
                         rows, [WO_UNIQUE,
@@ -321,14 +322,14 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                                else f"الوزن المقيد (جم {k})"])
                 elif key == "net_sold":
                     # المباع الفعلي: المبيعات والمرتجعات والصافي
-                    rows = [(d["wo"], f"{self._g(d.get('sold', 0)):,.2f}",
-                             f"{self._g(d.get('returned', 0)):,.2f}",
-                             f"{self._g(d['weight']):,.2f}")
+                    rows = [(d["wo"], f"{_nf.f2(self._g(d.get('sold', 0)))}",
+                             f"{_nf.f2(self._g(d.get('returned', 0)))}",
+                             f"{_nf.f2(self._g(d['weight']))}")
                             for d in details[key]]
                     self.columns[key].set_rows(
                         rows, ["رقم التشغيل", "المباع", "المرتجع", "الصافي"])
                 else:
-                    rows = [(d["wo"], f"{self._g(d['weight']):,.2f}")
+                    rows = [(d["wo"], f"{_nf.f2(self._g(d['weight']))}")
                             for d in details[key]]
                     self.columns[key].set_rows(
                         rows, ["رقم التشغيل", f"الوزن المقيد (جم {k})"])

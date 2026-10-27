@@ -13,6 +13,7 @@
 قراءةٌ محضة لا تعدّل شيئاً.
 """
 from models import statements as st
+from services import numfmt as _nf
 
 ERROR, WARN, INFO = "خطأ", "تنبيه", "ملاحظة"
 
@@ -113,15 +114,15 @@ def audit(conn):
         kind = st._classify(r, by_id)
         if kind == "cash" and b < -EPS:
             abnormal.append(f"{r['code']} {r['name']}: رصيد نقدي دائن"
-                            f" {-b:,.2f}")
+                            f" {_nf.f2(-b)}")
         elif kind == "inventory" and g < -0.0005:
-            abnormal.append(f"{r['code']} {r['name']}: وزن سالب {g:,.3f}")
+            abnormal.append(f"{r['code']} {r['name']}: وزن سالب {_nf.f2(g)}")
         elif kind in ("ppe_dep", "ecl") and b > EPS:
-            abnormal.append(f"{r['code']} {r['name']}: رصيد مدين {b:,.2f}"
+            abnormal.append(f"{r['code']} {r['name']}: رصيد مدين {_nf.f2(b)}"
                             " لحساب مقابل")
         elif kind in ("zakat", "eosb", "accrued", "loans_st", "loans_lt") \
                 and b > EPS:
-            abnormal.append(f"{r['code']} {r['name']}: رصيد مدين {b:,.2f}"
+            abnormal.append(f"{r['code']} {r['name']}: رصيد مدين {_nf.f2(b)}"
                             " لالتزام")
     if abnormal:
         out.append((WARN, "أرصدة على خلاف طبيعة الحساب",
@@ -139,7 +140,7 @@ def audit(conn):
         g = sum(gold.get(i, 0.0) for i in ids)
         if abs(b) >= 0.01 or abs(g) >= 0.001:
             out.append((WARN, f"حساب وسيط برصيد: {code} {name}",
-                        f"نقد {b:,.2f} · ذهب {g:,.3f} — يُصفَّر بقيد تسوية"
+                        f"نقد {_nf.f2(b)} · ذهب {_nf.f2(g)} — يُصفَّر بقيد تسوية"
                         " قبل اعتماد القوائم", [code]))
 
     # ── 8) حسابات مجمَّدة برصيد

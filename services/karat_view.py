@@ -30,6 +30,7 @@
 import threading
 
 from services import gold_math
+from services import numfmt as _nf
 
 BASE = gold_math.BASE_KARAT              # 18
 KARATS = gold_math.KARATS                # (18, 21, 22, 24)
@@ -141,7 +142,7 @@ def rate_store(rate_view, karat=None):
 
 def fmt(weight18, decimals=3, karat=None):
     """وزن جاهز للعرض بعيار المصنع، بفواصل الآلاف."""
-    return f"{g(weight18, karat):,.{decimals}f}"
+    return _nf.f2(g(weight18, karat))
 
 
 # ══════════════════════════════════════════════════════════════════

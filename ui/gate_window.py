@@ -34,11 +34,15 @@ from services import login_flow
 from ui.widgets.cinema_stage import CinemaStage
 from ui.widgets.gold_frame import screen_overlay
 from ui.widgets.gold_stage import ShineLabel, animations_on
+from services import numfmt as _nf
 
 # 4.68: لوحة الدخول في الجهة اليمنى (بداية القراءة) والذهب في يسار
-# المشهد — على الشاشات العريضة. والضيّقة (4:3) تتوسّطها اللوحة.
-BLOCK_X = 0.72
-WIDE = 1.5
+# المشهد. 4.99: **على كل شاشة** — عريضةً كانت أو 4:3 — بهامشٍ ثابت
+# من الحافة اليمنى؛ فكانت الكتلة (660 بكسلاً) تبدو في الوسط على شاشات
+# 1366 وما دونها. الآن أضيق (HERO_W) وملاصقةٌ لليمين بهامش MARGIN_X.
+BLOCK_X = 0.80
+HERO_W = 580
+MARGIN_X = 0.06
 
 # اسمُ النظام كما يُخاطَب به صاحبه — لا العنوان التقني
 WELCOME = "مرحباً بك في نظام إدارة مصانع الذهب"
@@ -275,15 +279,20 @@ class _CardKeys(QtCore.QObject):
     المرور يريد الرجوع سطراً لا أن يلتقط الفأرة.
     """
 
-    def __init__(self, chain, parent=None):
+    def __init__(self, chain, parent=None, on_enter=None):
         super().__init__(parent)
         self.chain = list(chain)
+        self.on_enter = dict(on_enter or {})
         for w in self.chain:
             w.installEventFilter(self)
 
     def eventFilter(self, obj, ev):
         if ev.type() != QtCore.QEvent.KeyPress:
             return False
+        if ev.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter) \
+                and obj in self.on_enter:
+            self.on_enter[obj]()
+            return True
         if ev.key() not in (QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
             return False
         try:
@@ -394,7 +403,7 @@ class GateWindow(QtWidgets.QDialog):
         # تُقرأ — تُبنى لوحةُ الدخول وتصعد مع موجتها.
         self.hero = QtWidgets.QWidget(self)
         self.hero.setObjectName("gateHero")
-        self.hero.setFixedWidth(660)
+        self.hero.setFixedWidth(HERO_W)
         self._build_hero()
         self.hero.hide()
         self.card = None            # تُبنى في `_begin_card`
@@ -538,9 +547,8 @@ class GateWindow(QtWidgets.QDialog):
         self.password.setObjectName("gateInput")
         self.password.setPlaceholderText("كلمة المرور")
         self.password.setEchoMode(QtWidgets.QLineEdit.Password)
-        self.password.returnPressed.connect(self.try_login)
-        self.username.returnPressed.connect(
-            lambda: self.password.setFocus())
+        # Enter نفسه تتولّاه سلسلة `enter_chain` آخر `_build_card` —
+        # وربطُه هنا كذلك كان يطلب الدخول مرتين في ضغطةٍ واحدة
         for w, icon in ((self.username, "👤"), (self.password, "🔒")):
             row = QtWidgets.QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
@@ -610,19 +618,21 @@ class GateWindow(QtWidgets.QDialog):
         lay.addWidget(self.stamp)
 
         # ══ لوحة المفاتيح وحدها تكفي للدخول ══
-        # Enter كان ينتقل من الاسم إلى كلمة المرور ثم يدخل — وهو
-        # الأكثر استعمالاً. وأُضيف إليه: الأسهم ↑ ↓ (وكذلك ← →)
-        # تتنقّل بين الخانات كما في شاشات النظام، فلا تختلف البوابة
-        # عمّا بعدها. وEnter على «تذكّر اسمي» يدخل مباشرةً.
+        # Enter من الاسم إلى كلمة المرور، وEnter بعد كلمة المرور **يدخل
+        # فوراً** (4.99). كانت «تذكّر اسمي» آخرَ السلسلة فيذهب أول Enter
+        # إليها ويحتاج الدخولُ ضغطةً ثانية. وما زالت الأسهم ↑ ↓ (و← →)
+        # تتنقّل بين الخانات كما في شاشات النظام، وEnter على «تذكّر
+        # اسمي» يدخل كذلك.
         from ui.widgets.common import enter_chain
-        enter_chain(self, [self.username, self.password, self.remember],
+        enter_chain(self, [self.username, self.password],
                     on_last=lambda: (self.try_login(), False)[1])
         self._install_card_keys()
 
     def _install_card_keys(self):
         """↑ ↓ تتنقّلان بين خانات اللوحة — والأسهم الأفقية في السلسلة."""
         self._card_keys = _CardKeys(
-            [self.username, self.password, self.remember, self.btn], self)
+            [self.username, self.password, self.remember, self.btn], self,
+            on_enter={self.remember: self.try_login})
 
     # ─────────────────────────────── العرض والحركة
     def showEvent(self, e):
@@ -809,22 +819,21 @@ class GateWindow(QtWidgets.QDialog):
         self._sync_stage()
 
     def _block_x(self):
-        """مركز الترحيب واللوحة أفقياً: يمين الشاشة العريضة، ووسط الضيّقة.
+        """مركز الترحيب واللوحة أفقياً: **جانب الشاشة الأيمن** دائماً.
 
         على اليمين يبقى الذهب في يسار المشهد ظاهراً كاملاً واللوحة فوق
-        فضاءٍ داكن هادئ — فلا يتزاحمان. ولا تقترب الكتلة من الحافة.
+        فضاءٍ داكن هادئ — فلا يتزاحمان. والكتلة ملاصقةٌ لليمين بهامشٍ
+        نسبيّ (MARGIN_X) لا تقترب منه من الحافة، ولا تعبر منتصف
+        الشاشة إلى يسارها مهما ضاقت.
         """
-        w, h = max(1, self.width()), max(1, self.height())
-        wide = w / float(h) >= WIDE
-        side = "right" if wide else "center"
-        if getattr(self.stage, "side", None) != side:
-            self.stage.side = side
+        w = max(1, self.width())
+        if getattr(self.stage, "side", None) != "right":
+            self.stage.side = "right"
             self.stage.update()
-        if not wide:
-            return w / 2.0
         half = max(self.hero.width(),
                    self.card.width() if self.card is not None else 0) / 2.0
-        return min(w - half - 36.0, max(w / 2.0, w * BLOCK_X))
+        margin = max(40.0, w * MARGIN_X)
+        return max(w / 2.0, min(w - half - margin, w * BLOCK_X))
 
     def _sync_stage(self):
         """يُخبر المسرحَ بموضع الشعار واللوحة: أشعّته خلف الشعار،
@@ -906,7 +915,7 @@ class GateWindow(QtWidgets.QDialog):
         c = QtGui.QColor(color)
         v = max(0.0, min(1.0, float(value)))
         label.setStyleSheet(
-            f"color: rgba({c.red()}, {c.green()}, {c.blue()}, {v:.3f});")
+            f"color: rgba({c.red()}, {c.green()}, {c.blue()}, {_nf.f2(v, sep=False)});")
         pal = label.palette()
         c2 = QtGui.QColor(c)
         c2.setAlphaF(v)

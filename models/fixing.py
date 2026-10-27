@@ -14,6 +14,7 @@ from models.accounts import acc_id
 from models.entities import get_entity
 from services.accounting_engine import post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 
 def create_fixing(conn, entity_id, weight, price, op_date, username,
@@ -41,7 +42,7 @@ def create_fixing(conn, entity_id, weight, price, op_date, username,
     if not gold_only:            # الشق النقدي يُضاف فقط عند وجود مبلغ
         lines += [
             {"account_id": ent["account_id"], "cash_debit": amount,
-             "line_desc": f"تسكير {weight:.2f} جم × {price:.2f}"},
+             "line_desc": f"تسكير {_nf.f2(weight, sep=False)} جم × {_nf.f2(price, sep=False)}"},
             {"account_id": bridge, "cash_credit": amount},
         ]
     cur = conn.execute(

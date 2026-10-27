@@ -24,6 +24,7 @@ import config
 from models.inventory import is_bulk_no
 from database.database import db
 from models import melting
+from services import numfmt as _nf
 
 def _qd(qdate):
     """نص تاريخ بأرقام إنجليزية دائماً (انظر ui.widgets.common.qdstr)."""
@@ -420,9 +421,10 @@ def _rows(rows, date_col=None):
 
 def _w(v, d=2):
     """تنسيق رقمي موحّد بأرقام إنجليزية دائماً — منزلتان عشريتان
-    في كل مستندات النظام."""
+    نصفياً للأعلى في كل مستندات النظام (4.99). `d` باقٍ لتوافق
+    المستدعين ولا يغيّر المنازل."""
     try:
-        return en(f"{float(v):,.{d}f}")
+        return en(_nf.f2(float(v)))
     except (TypeError, ValueError):
         return "—"
 
@@ -1167,7 +1169,7 @@ def _tpl_tax_sale(conn, sid):
             from services import karat_view as kv
             _lk = int(li["karat"] or 0) if "karat" in li.keys() else 0
             _np = int(li["pieces"] or 1) if "pieces" in li.keys() else 1
-            _wt = (f"{kv.g(li['qty'], _lk):,.3f}" if _lk
+            _wt = (f"{_nf.f2(kv.g(li['qty'], _lk))}" if _lk
                    else _gw(li["qty"], 3))
             _rt = (kv.rate(li["unit_price"], _lk) if _lk
                    else _krate(li["unit_price"]))
@@ -2333,7 +2335,7 @@ def _tpl_trial_balance(conn, _id=0, date_from=None, date_to=None,
 
     def f(v):
         if gold:
-            return _gw(v, 3) if abs(v) >= 0.0005 else ""
+            return _gw(v, 3) if abs(v) >= 0.005 else ""
         return _w(v, 2) if abs(v) >= 0.005 else ""
 
     keys = ("open_dr", "open_cr", "dr", "cr", "close_dr", "close_cr")
@@ -2414,7 +2416,7 @@ def _fp_money(v, gold=False, paren=True):
     """مبلغ القائمة: السالب بين قوسين والصفر شرطة — كالقوائم المدقّقة.
 
     `paren=False` (قائمة الدخل، 4.81): السالب بإشارة ناقص «-10»."""
-    eps = 0.0005 if gold else 0.005
+    eps = 0.005
     if abs(v or 0.0) < eps:
         return "—"
     s = _gw(abs(v), 3) if gold else _w(abs(v), 2)
@@ -3501,7 +3503,7 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
     if bars:
         items = ""
         for b in bars:
-            pct = "—" if b["pct"] is None else "{:,.2f}%".format(b["pct"])
+            pct = "—" if b["pct"] is None else _nf.f2(b["pct"]) + "%"
             mode = ("عكسية" if b.get("mode") == "inverse" else "مباشرة")
             detail = "{} · {} {} ÷ {} {}".format(
                 mode, b["second_name"], _w(b["second_value"]),
@@ -3667,7 +3669,7 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
     <style>
       table.photos {{ table-layout: fixed; width: 100%; }}
       table.photos td.ph {{
-        width: {100.0 / cols:.3f}%; height: {ch:.1f}mm; vertical-align: top;
+        width: {_nf.f2(100.0 / cols, sep=False)}%; height: {ch:.1f}mm; vertical-align: top;
         padding: 1.5mm; text-align: center;
       }}
       .phbox {{
@@ -3793,7 +3795,7 @@ def _tpl_model_order(conn, order_id=0, per_page=4, show_stock=False,
       .ordhead .pg {{ float: left; color: #776b5e; font-size: 9pt; }}
       table.photos {{ table-layout: fixed; width: 100%; }}
       table.photos td.ph {{
-        width: {100.0 / cols:.3f}%; height: {ch:.1f}mm; vertical-align: top;
+        width: {_nf.f2(100.0 / cols, sep=False)}%; height: {ch:.1f}mm; vertical-align: top;
         padding: 1.5mm; text-align: center;
       }}
       .phbox {{
@@ -4263,7 +4265,7 @@ def _tpl_scrap_karat(conn, karat, date_from=None, date_to=None, only=None,
     today = _qd(QtCore.QDate.currentDate())
 
     def wt(v):
-        return _w(v, 3) if abs(v or 0) >= 0.0005 else ""
+        return _w(v, 3) if abs(v or 0) >= 0.005 else ""
 
     body = ""
     tin = tout = 0.0
@@ -4347,8 +4349,8 @@ def _tpl_customer_board(conn, _id=0, date_from=None, date_to=None,
             tot[k] += r[side][k]
     t = cb._side(tot, side)
     # كما في الشاشة: «رصيد سابق» و«حركات أخرى» لا يُطبعان إن خلَوا
-    show_open = any(abs(r[side]["open"]) > 0.0005 for r in rows)
-    show_other = any(abs(r[side]["other"]) > 0.0005 for r in rows)
+    show_open = any(abs(r[side]["open"]) > 0.005 for r in rows)
+    show_other = any(abs(r[side]["other"]) > 0.005 for r in rows)
 
     def _row(name, x, grade_txt, last, cell):
         out = [cell(name)]
@@ -4427,7 +4429,7 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
         thw("رصيد أول المدة"), thw(_g(r["opening"]["gold"])),
         thw(_m(r["opening"]["cash"])), thw("—"), thw("—")) + "</tr>"
     for x in r["buckets"]:
-        if abs(x["gold"]) < 0.0005 and abs(x["cash"]) < 0.005:
+        if abs(x["gold"]) < 0.005 and abs(x["cash"]) < 0.005:
             continue
         bridge += "<tr>" + cells(
             tdw(x["label"], align="right"), tdw(_g(x["gold"])),
@@ -4469,7 +4471,7 @@ def _tpl_dossier(conn, entity_id=0, date_from=None, date_to=None):
         return en(f"{v:,.1f}%") if v is not None else "—"
 
     _other_up = ""
-    if abs(fl["other_up"]) > 0.0005 or abs(flife["other_up"]) > 0.0005:
+    if abs(fl["other_up"]) > 0.005 or abs(flife["other_up"]) > 0.005:
         _other_up = "<tr>" + cells(
             tdw("وما زاد ذمّته بغير البضاعة", align="right"),
             tdw(_g(fl["other_up"])), tdw("—"),

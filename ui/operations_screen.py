@@ -15,6 +15,7 @@ from models import entities, invoices, operations
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, reload_combo, search_combo,
                                title_label)
+from services import numfmt as _nf
 
 DOC_COLS = ["الرقم", "النوع", "التاريخ", "الجهة", "الوزن", "القيمة"]
 # عمود الوزن بمكافئ عيار المصنع — يُسمّى عند التعبئة (`_doc_cols`)
@@ -193,8 +194,8 @@ class OperationsScreen(QtWidgets.QWidget):
                          for r in rows]
             fill(self.table, _doc_cols(),
                  [(r["no"], lbl.get(r["k"], r["k"]), r["d"],
-                   r["party"] or "—", f"{kv.g(r['w'] or 0):,.2f}",
-                   f"{r['v'] or 0:,.2f}") for r in rows])
+                   r["party"] or "—", f"{_nf.f2(kv.g(r['w'] or 0))}",
+                   f"{_nf.f2(r['v'] or 0)}") for r in rows])
             self.picked.setText(f"{len(rows)} عملية — اختر سطراً للتحويل")
         except Exception as e:
             err(self, e)
@@ -412,12 +413,12 @@ class InvoiceItemsDialog(QtWidgets.QDialog):
         # هنا وحده، فلا يمرّ رقم معروض إلى القاعدة.
         fill(self.table, ["رقم التشغيل", f"الوزن المقيد ({kv.unit()})",
                           f"الأجر/جم {kv.active()}"],
-             [(c["wo"], f"{kv.g(c['weight']):,.2f}",
-               f"{kv.rate(c['wage_override']):,.2f}")
+             [(c["wo"], f"{_nf.f2(kv.g(c['weight']))}",
+               f"{_nf.f2(kv.rate(c['wage_override']))}")
               for c in self.cart])
         self.total.setText(
             f"{len(self.cart)} بند — إجمالي الوزن: "
-            f"{kv.g(sum(c['weight'] for c in self.cart)):,.2f} "
+            f"{_nf.f2(kv.g(sum(c['weight'] for c in self.cart)))} "
             f"{kv.unit()}")
 
     def add_item(self):

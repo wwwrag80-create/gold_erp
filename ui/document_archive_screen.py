@@ -18,6 +18,7 @@ from services import browser_print
 from ui.widgets.common import (big_label, bulk_rows, busy, date_edit, dstr,
                                err, info, make_table, run_bg, title_label,
                                warn)
+from services import numfmt as _nf
 
 # ══ سقف العرض ══
 # البحث قد يُرجع آلاف المستندات، وكل صفٍّ يحمل ثلاثة أزرار. لا أحد
@@ -193,11 +194,11 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         with bulk_rows(self.table, len(shown), COLS):
             for i, r in enumerate(shown):
                 vals = [r["label"], r["doc_no"], r["date"], r["party"],
-                        f"{(r['cash'] or 0):,.2f}",
-                        f"{kv.g(r['gold'] or 0):,.2f}",
+                        f"{_nf.f2((r['cash'] or 0))}",
+                        f"{_nf.f2(kv.g(r['gold'] or 0))}",
                         "ملغى" if r["deleted"] else "ساري"]
                 for c, v in enumerate(vals):
-                    it = QtWidgets.QTableWidgetItem(str(v))
+                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
                     it.setTextAlignment(QtCore.Qt.AlignCenter)
                     self.table.setItem(i, c, it)
                 self.table.setCellWidget(i, len(COLS) - 1, self._actions(r))
@@ -207,8 +208,8 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
         self.summary.setText(
             f"عدد المستندات: {len(self.results):,}"
             + (f"   ({len(shown):,} معروضة · {rest:,} بقيّة)" if rest else "")
-            + f"   |   إجمالي القيم النقدية: {tc:,.2f} ريال"
-            + f"   |   إجمالي الأوزان: {kv.g(tg):,.2f} {kv.unit()}")
+            + f"   |   إجمالي القيم النقدية: {_nf.f2(tc)} ريال"
+            + f"   |   إجمالي الأوزان: {_nf.f2(kv.g(tg))} {kv.unit()}")
         self.btn_more.setVisible(bool(rest))
         self.btn_more.setText(f"▼ عرض {min(PAGE, rest):,} مستنداً إضافياً")
 

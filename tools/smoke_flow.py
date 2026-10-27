@@ -9018,6 +9018,91 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("118) 4.99: منزلتان نصفياً للأعلى · Enter يدخل · الجهات")
+    from services import numfmt as _nf118
+    check("الأرقام بمنزلتين نصفياً للأعلى: 0.001←0.00 · 0.005←0.01 ·"
+          " 10.125←10.13 · 2.675←2.68 · بلا «‎-0.00»",
+          [_nf118.f2(x) for x in (0.001, 0.005, 10.125, 2.675, -0.001,
+                                  1234.5, 10.124999999999998)]
+          == ["0.00", "0.01", "10.13", "2.68", "0.00", "1,234.50", "10.13"]
+          and _nf118.f2(-1234.565, sign=True) == "-1,234.57"
+          and _nf118.f2(None) == "" and _nf118.r2(0.125) == 0.13)
+    from services import karat_view as _kv118, print_manager as _pm118
+    check("وزن العرض والطباعة بمنزلتين ولو طُلبت ثلاث",
+          _kv118.fmt(10.125, karat=18) == "10.13"
+          and _pm118._w(10.125, 3) == "10.13")
+    import re as _re118
+    _left118 = []
+    for _d118 in ("ui", "services", "models"):
+        for _p118 in (Path(ROOT) / _d118).rglob("*.py"):
+            _rel = _p118.relative_to(Path(ROOT)).as_posix()
+            if _rel.startswith("services/fatoora/") or _rel in (
+                    "models/integrity.py", "services/accounting_engine.py",
+                    "services/audit.py"):
+                continue
+            if _re118.search(r"\.3f[}'\"]",
+                             _p118.read_text(encoding="utf-8")):
+                _left118.append(_rel)
+    check("لا منزلة ثالثة في عرض الشاشات والطباعة ورابط المدير",
+          not _left118, ", ".join(_left118[:5]))
+    try:
+        from PyQt5 import QtWidgets as _QW118
+        _app118 = _QW118.QApplication.instance() or _QW118.QApplication([])
+        from ui.widgets import common as _cm118
+        _t118 = _QW118.QTableWidget()
+        _cm118.fill(_t118, ["أ", "ب", "ج"], [(10.0, 0.004, 3)])
+        _sp118 = _cm118.wspin()
+        _sp118.setValue(10.125)
+        check("الجداول: «10.00» لا «10» و«0.00» لا «0.004» · والخانة 10.13",
+              [_t118.item(0, c).text() for c in range(3)]
+              == ["10.00", "0.00", "3"]
+              and _cm118.num_item(0.005).text() == "0.01"
+              and abs(_sp118.value() - 10.13) < 1e-9)
+        import inspect as _in118
+        from ui import gate_window as _gw118
+        _src118 = _in118.getsource(_gw118.GateWindow._build_card)
+        check("البوابة: Enter بعد كلمة المرور يدخل مباشرةً (لا يمرّ"
+              " بـ«تذكّر اسمي»)",
+              "enter_chain(self, [self.username, self.password]," in _src118
+              and "self.password.returnPressed.connect" not in _src118)
+
+        class _Fake118:
+            def __init__(self, w, h):
+                self._w, self._h = w, h
+                self.hero = _QW118.QWidget()
+                self.hero.setFixedWidth(_gw118.HERO_W)
+                self.card = _QW118.QWidget()
+                self.card.setFixedWidth(500)
+                self.stage = type("S", (), {"side": "center",
+                                            "update": lambda s: None})()
+
+            def width(self):
+                return self._w
+
+            def height(self):
+                return self._h
+        _xs118 = {}
+        for _wh in ((1920, 1080), (1366, 768), (1024, 768)):
+            _f = _Fake118(*_wh)
+            _x = _gw118.GateWindow._block_x(_f)
+            _xs118[_wh] = (round(_x / _wh[0], 2), _f.stage.side,
+                           _x + _gw118.HERO_W / 2 <= _wh[0] - 40)
+        check("البوابة: الحقول في جانب الشاشة الأيمن على كل مقاس (4:3 أيضاً)",
+              all(r > 0.6 and s == "right" and fits
+                  for r, s, fits in _xs118.values()), str(_xs118))
+        from ui import entities_screen as _es118, sales_screen as _ss118
+        _sv118 = _in118.getsource(_es118.EntitiesScreen.save)
+        check("حفظ الجهة: السبب ظاهرٌ بنصّه، وتحديث الشاشة بعد الحفظ لا يُظهر"
+              " فشلاً",
+              "تعذّر حفظ الجهة" in _sv118 and "refresh_after_save" in _sv118)
+        check("المبيعات: الوزن المقترح من الطقم يُباع بدقّته المخزَّنة",
+              "_reg_exact" in _in118.getsource(_ss118.SalesScreen.add_line)
+              if hasattr(_ss118.SalesScreen, "add_line") else
+              "_reg_exact" in Path(_ss118.__file__).read_text(
+                  encoding="utf-8"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

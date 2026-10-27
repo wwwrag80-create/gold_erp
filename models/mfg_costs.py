@@ -27,6 +27,7 @@ import calendar
 from models.accounts import acc_id
 from services.accounting_engine import post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 WORKER_EXPENSE = "5710"      # مصروف رواتب عمال التصنيع
 CASH_BOX = "1400"            # صندوق النقدي
@@ -274,7 +275,7 @@ def bal_text(v):
     if abs(v) < 0.005:
         return ""
     shown = -v
-    return f"\u200e-{abs(shown):,.2f}" if shown < 0 else f"{shown:,.2f}"
+    return f"\u200e-{_nf.f2(abs(shown))}" if shown < 0 else _nf.f2(shown)
 
 
 def withdrawals(conn, employee_id, period):
@@ -836,7 +837,7 @@ def post_salaries(conn, period, username, entry_date=None, rows=None):
         total += res["net"]
     log_action(conn, username, "create", "mfg_salaries", ids[0],
                f"ترحيل رواتب {period}: {len(pending)} موظف بقيدٍ لكلٍّ"
-               f" بإجمالي {total:,.2f}")
+               f" بإجمالي {_nf.f2(total)}")
     return {"entry_id": ids[0], "entry_ids": ids, "count": len(pending),
             "total": round(total, 2)}
 
@@ -980,7 +981,7 @@ def edit_posted_salary(conn, period, employee_id, values, username,
     res = repost_salary(conn, period, eid, username, entry_date=entry_date)
     log_action(conn, username, "update", "mfg_salaries", eid,
                f"تعديل راتب مرحّل {period} — {r['name']}: صافي"
-               f" {r['net_salary']:,.2f}"
+               f" {_nf.f2(r['net_salary'])}"
                + (f" بتاريخ {entry_date}" if entry_date else ""))
     out = {"net": round(float(r["net_salary"]), 2)}
     if res:

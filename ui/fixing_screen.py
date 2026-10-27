@@ -15,6 +15,7 @@ from ui.widgets.common import (confirm_post, big_label, date_edit, dstr, enter_c
 
 
 from ui.widgets.edit_mode import EditModeMixin
+from services import numfmt as _nf
 
 
 class FixingScreen(EditModeMixin, QtWidgets.QWidget):
@@ -83,7 +84,7 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
             self.amount.setText("تسكير ذهب فقط — لا مبلغ نقدي")
         else:
             self.amount.setText(
-                f"المبلغ = {self.weight.value() * self.price.value():,.2f} ريال")
+                f"المبلغ = {_nf.f2(self.weight.value() * self.price.value())} ريال")
 
     def show_balances(self):
         cid = self.customer.currentData()
@@ -96,8 +97,8 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
         with db() as conn:
             g, c = entities.balances(conn, cid)
         self.balances.setText(
-            f"الرصيد الحالي — ذهب: {kv.g(g):,.2f} {kv.unit()} | "
-            f"نقد/جاري: {c:,.2f} ريال")
+            f"الرصيد الحالي — ذهب: {_nf.f2(kv.g(g))} {kv.unit()} | "
+            f"نقد/جاري: {_nf.f2(c)} ريال")
 
     def save(self):
         try:
@@ -123,11 +124,11 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
                         (0 if self.gold_only.isChecked()
                          else kv.rate_store(self.price.value())),
                         dstr(self.date), self.user["username"])
-            msg = (f"تم تسكير {kv.g(res['weight']):,.2f} {kv.unit()} "
+            msg = (f"تم تسكير {_nf.f2(kv.g(res['weight']))} {kv.unit()} "
                    f"ذهباً فقط ({res['op_no']})"
                    if res.get("gold_only")
                    else f"تم التسكير {res['op_no']} بمبلغ "
-                        f"{res['amount']:,.2f} ريال")
+                        f"{_nf.f2(res['amount'])} ريال")
             info(self, msg)
             self.end_edit()
             self.weight.setValue(0)

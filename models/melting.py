@@ -29,6 +29,7 @@ from models.inventory import BOX_CODE, add_scrap_move
 from services import gold_math
 from services.accounting_engine import account_balance, post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 REFINING = "5125"        # حـ/ فاقد التصفية والصب (كان 1350 — 4.40)
 TECH_LOSS = "5120"       # حـ/ الفاقد الفني للصب
@@ -83,11 +84,11 @@ def create_disbursement(conn, lines, op_date, username, notes=""):
     """(أ) صرف كسر/خام من صناديق العيارات إلى حساب الصب والتصفية."""
     lines, total = _clean_lines(lines)
     jl = [{"account_id": acc_id(conn, REFINING), "gold_debit": total,
-           "line_desc": f"صرف للصب — إجمالي {total:.2f} جم مكافئ 18"}]
+           "line_desc": f"صرف للصب — إجمالي {_nf.f2(total, sep=False)} جم مكافئ 18"}]
     for ln in lines:
         jl.append({"account_id": acc_id(conn, BOX_CODE[ln["karat"]]),
                    "gold_credit": ln["equiv18"],
-                   "line_desc": f"وزن فعلي {ln['weight']:.2f} جم عيار "
+                   "line_desc": f"وزن فعلي {_nf.f2(ln['weight'], sep=False)} جم عيار "
                                 f"{ln['karat']}"})
     op_id = _insert_op(conn, "disbursement", op_date, total, notes, username,
                        lines)
@@ -113,10 +114,10 @@ def create_receipt(conn, lines, op_date, username, notes=""):
     for ln in lines:
         jl.append({"account_id": acc_id(conn, BOX_CODE[ln["karat"]]),
                    "gold_debit": ln["equiv18"],
-                   "line_desc": f"وزن فعلي {ln['weight']:.2f} جم عيار "
+                   "line_desc": f"وزن فعلي {_nf.f2(ln['weight'], sep=False)} جم عيار "
                                 f"{ln['karat']}"})
     jl.append({"account_id": acc_id(conn, REFINING), "gold_credit": total,
-               "line_desc": f"قبض مصفى — إجمالي {total:.2f} جم مكافئ 18"})
+               "line_desc": f"قبض مصفى — إجمالي {_nf.f2(total, sep=False)} جم مكافئ 18"})
     op_id = _insert_op(conn, "receipt", op_date, total, notes, username, lines)
     op_no = _numbering.next_no(conn, "MR")
     entry_id = post_entry(conn, op_date, f"سند قبض مصفى {op_no}", jl,
@@ -160,7 +161,7 @@ def close_cycle(conn, op_date, username, notes=""):
     summary = cycle_summary(conn)
     if bal > 0:
         jl = [{"account_id": acc_id(conn, TECH_LOSS), "gold_debit": bal,
-               "line_desc": f"فاقد فني للصب ({summary['loss_ratio']*100:.2f}%)"},
+               "line_desc": f"فاقد فني للصب ({_nf.f2(summary['loss_ratio']*100, sep=False)}%)"},
               {"account_id": acc_id(conn, REFINING), "gold_credit": bal,
                "line_desc": "تصفير حساب الصب والتصفية"}]
     else:

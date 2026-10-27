@@ -22,6 +22,7 @@ from ui.widgets.common import (date_edit, dstr, err, info, make_table,
                                style_group_row, title_label)
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 class EquityChangesScreen(QtWidgets.QWidget):
@@ -201,7 +202,7 @@ class EquityChangesScreen(QtWidgets.QWidget):
              " حقوق الملكية في قائمة المركز المالي" if eq["balanced"]
              else "✘ فرقٌ بين الحركات والأرصدة — راجع القيود")
             + f"   ·   حقوق الملكية آخر الفترة: "
-            f"{(kv.g(cur) if gold else cur):,.{3 if gold else 2}f} {unit}")
+            f"{_nf.f2((kv.g(cur) if gold else cur))} {unit}")
         self.status.setStyleSheet(
             "color:#0F5A24;font-weight:bold" if eq["balanced"]
             else "color:#9A0018;font-weight:bold")

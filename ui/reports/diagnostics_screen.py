@@ -25,6 +25,7 @@ from services import health
 from ui.widgets.common import big_label, err, fill, info, make_table, \
     title_label
 from ui.widgets.table_tools import enhance
+from services import numfmt as _nf
 
 COLS = ["الحالة", "الفحص", "النتيجة"]
 
@@ -130,9 +131,9 @@ class DiagnosticsScreen(QtWidgets.QWidget):
             for r in neg[:5]:
                 p = []
                 if r["gold"]:
-                    p.append(f"ذهب {_kv.g(r['gold']):,.3f}")
+                    p.append(f"ذهب {_nf.f2(_kv.g(r['gold']))}")
                 if r["cash"]:
-                    p.append(f"نقد {r['cash']:,.2f}")
+                    p.append(f"نقد {_nf.f2(r['cash'])}")
                 bits.append(f"{r['name']} ({' · '.join(p)})")
             rows.append(("⚠ يُراجَع", "أرصدة مادية سالبة",
                          " · ".join(bits)))

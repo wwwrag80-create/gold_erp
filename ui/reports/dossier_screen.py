@@ -28,11 +28,12 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
                                tab_widget, title_label)
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
+from services import numfmt as _nf
 
 
 def rnum(v, d=2):
     """السالب بين قوسين — لا بإشارةٍ تزيغ في نصٍّ عربي."""
-    return f"({abs(v):,.{d}f})" if v < 0 else f"{v:,.{d}f}"
+    return f"({_nf.f2(abs(v))})" if v < 0 else _nf.f2(v)
 
 
 class DossierScreen(QtWidgets.QWidget):
@@ -222,7 +223,7 @@ class DossierScreen(QtWidgets.QWidget):
         rows = [("رصيد أول المدة", w(r["opening"]["gold"]),
                  m(r["opening"]["cash"]), "", "")]
         for x in r["buckets"]:
-            if abs(x["gold"]) < 0.0005 and abs(x["cash"]) < 0.005:
+            if abs(x["gold"]) < 0.005 and abs(x["cash"]) < 0.005:
                 continue
             rows.append((x["label"], w(x["gold"]), m(x["cash"]),
                          f"{x['docs']:,}", x["days_label"]))
@@ -308,7 +309,7 @@ class DossierScreen(QtWidgets.QWidget):
             ("ما خرج إليه — بضاعة (مبيعات)", w(f["out_weight"]),
              m(f["out_wages"]), w(fl["out_weight"])),
         ]
-        if abs(f["other_up"]) > 0.0005 or abs(fl["other_up"]) > 0.0005:
+        if abs(f["other_up"]) > 0.005 or abs(fl["other_up"]) > 0.005:
             rows.append(("وما زاد ذمّته بغير البضاعة", w(f["other_up"]),
                          "", w(fl["other_up"])))
         marks = [len(rows)]

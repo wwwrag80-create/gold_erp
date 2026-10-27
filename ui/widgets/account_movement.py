@@ -19,6 +19,7 @@ from ui import kit
 from database.database import db
 from services import karat_view as kv
 from ui.widgets.common import err, make_table, title_label
+from services import numfmt as _nf
 
 # ما تستبعده كل قائمة من القيود — فيطابق آخرُ رصيدٍ رقمَها
 # · قائمة الدخل: قيد الإقفال السنوي (يصفّر الإيراد والمصروف)
@@ -40,15 +41,15 @@ def _ids(conn, code):
 def _num(v, gold=False):
     if gold:
         v = kv.g(v)
-        return f"{v:,.3f}" if abs(v) >= 0.0005 else ""
-    return f"{v:,.2f}" if abs(v) >= 0.005 else ""
+        return _nf.f2(v) if abs(v) >= 0.005 else ""
+    return _nf.f2(v) if abs(v) >= 0.005 else ""
 
 
 def _bal(v, gold=False):
     """رصيدٌ متراكم: يُطبع صفره ولا يُترك فارغاً."""
     if gold:
-        return f"{kv.g(v):,.3f}"
-    return f"{v:,.2f}"
+        return _nf.f2(kv.g(v))
+    return _nf.f2(v)
 
 
 class AccountMovementDialog(QtWidgets.QDialog):
@@ -115,7 +116,7 @@ class AccountMovementDialog(QtWidgets.QDialog):
 
     def _render(self):
         rows = self.rows
-        has_g = any(abs(r["gd"]) + abs(r["gc"]) + abs(r["gbal"]) >= 0.0005
+        has_g = any(abs(r["gd"]) + abs(r["gc"]) + abs(r["gbal"]) >= 0.005
                     for r in rows)
         has_c = any(abs(r["cd"]) + abs(r["cc"]) + abs(r["cbal"]) >= 0.005
                     for r in rows)

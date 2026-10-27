@@ -12,6 +12,7 @@ from models import inventory, stocktake
 from services.accounting_engine import account_balance
 from ui.widgets.common import (search_combo, ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, title_label, wspin)
+from services import numfmt as _nf
 
 BULK_CHOICES = [("خزينة التصنيع", "1100"), ("صندوق كسر عيار 18", "1310"),]
 
@@ -84,7 +85,7 @@ class StocktakeScreen(QtWidgets.QWidget):
         # حيث لا فرق وقُيّد عجزٌ وهميّ.
         self._ledger_value = ledger
         self.b_ledger.setText(
-            f"الرصيد الدفتري الحالي: {kv.g(ledger):,.2f} جم {kv.label()}")
+            f"الرصيد الدفتري الحالي: {_nf.f2(kv.g(ledger))} جم {kv.label()}")
         self.show_diff()
 
     def show_diff(self):
@@ -97,10 +98,10 @@ class StocktakeScreen(QtWidgets.QWidget):
                 f"الفرق: 0.000 {u} (مطابق تماماً — لا حاجة لقيد)")
         elif diff < 0:
             self.b_diff.setText(
-                f"عجز: {abs(diff):,.2f} {u} (سيُقيَّد كخسارة)")
+                f"عجز: {_nf.f2(abs(diff))} {u} (سيُقيَّد كخسارة)")
         else:
             self.b_diff.setText(
-                f"زيادة: {diff:,.2f} {u} (سيُقيَّد كتخفيض فاقد سابق)")
+                f"زيادة: {_nf.f2(diff)} {u} (سيُقيَّد كتخفيض فاقد سابق)")
 
     def save_bulk(self):
         try:
@@ -111,7 +112,7 @@ class StocktakeScreen(QtWidgets.QWidget):
                     dstr(self.b_date), self.user["username"], self.b_notes.text())
             if res["entry_id"]:
                 info(self, f"تم ترحيل جرد {res['stocktake_no']} — الفرق "
-                           f"{kv.g(res['diff']):+.2f} {kv.unit()} "
+                           f"{_nf.f2(kv.g(res['diff']), sep=False, sign=True)} {kv.unit()} "
                            f"(قيد رقم {res['entry_id']})")
             else:
                 info(self, f"تم تسجيل جرد {res['stocktake_no']} — مطابق تماماً، "
@@ -215,7 +216,7 @@ class StocktakeScreen(QtWidgets.QWidget):
                             if r["work_order_no"] in missing)
             msg = (f"مطابق: {len(scanned_set & system_nos)} | "
                   f"عجز/مفقود: {len(missing)} "
-                  f"(وزن {kv.g(missing_w):.2f} {kv.unit()}) | "
+                  f"(وزن {_nf.f2(kv.g(missing_w), sep=False)} {kv.unit()}) | "
                   f"زيادة/غير مسجَّل: {len(excess)}\n\n"
                   "سيُرحَّل قيد عجز بوزن المفقود تلقائياً (إن وُجد) وتُخرَج "
                   "أرقامه من الرصيد المتاح. متابعة؟")
@@ -231,7 +232,7 @@ class StocktakeScreen(QtWidgets.QWidget):
             fill(self.result_table, ["رقم التشغيل", "الحالة", "ملاحظة"], rows)
             if res["entry_id"]:
                 info(self, f"تم ترحيل الجرد {res['stocktake_no']} — عجز "
-                           f"{kv.g(res['missing_weight']):.2f} {kv.unit()} "
+                           f"{_nf.f2(kv.g(res['missing_weight']), sep=False)} {kv.unit()} "
                            f"(قيد رقم {res['entry_id']})")
             else:
                 info(self, f"تم تسجيل الجرد {res['stocktake_no']} — لا عجز، بلا قيد")

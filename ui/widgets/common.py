@@ -7,6 +7,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 # مكوّنات الواجهة الحديثة (QFluentWidgets) أو مكوّنات Qt إن غابت — `ui.kit`
 from ui import kit
+from services import numfmt as _nf
 
 
 class Card(QtWidgets.QFrame):
@@ -135,6 +136,14 @@ class _BlankZeroSpin(kit.DoubleSpinBox):
         if value == 0:
             return ""
         return super().textFromValue(value)
+
+    def setValue(self, value):
+        # 4.99: القيمة المقترحة (وزن طقمٍ مخزَّن بثلاث منازل) تُقرَّب
+        # نصفياً للأعلى كسائر العرض — Qt يقرّب التعادل ‎10.125 أحياناً
+        # إلى 10.12
+        if self.decimals() == 2:
+            value = _nf.r2(value)
+        super().setValue(value)
 
     def valueFromText(self, text):
         from ui.widgets import smart_input as _si
@@ -511,8 +520,8 @@ def fill(table, headers, rows):
         for r, row in enumerate(rows):
             for c, val in enumerate(row):
                 if isinstance(val, float):
-                    val = (f"{val:,.2f}".rstrip("0").rstrip(".")
-                           if abs(val) < 1e12 else str(val))
+                    # 4.99: منزلتان دائماً ونصفياً للأعلى — «10.00» لا «10»
+                    val = _nf.f2(val) if abs(val) < 1e12 else str(val)
                 txt = "" if val is None else str(val)
                 item = QtWidgets.QTableWidgetItem(txt)
                 # النصّ الكامل في التلميح: القصّ لا يُخفي شيئاً
@@ -743,6 +752,8 @@ def num_item(text, tip=None):
     الأرقام الموسَّطة تتراقص يميناً ويساراً بطول الرقم، فلا تُقارَن
     خانةٌ بخانة. ومحاذاتها لليمين هي عُرف كل كشف حساب.
     """
+    if isinstance(text, float):
+        text = _nf.f2(text)          # 4.99: منزلتان نصفياً للأعلى
     it = QtWidgets.QTableWidgetItem(str(text))
     # `AlignAbsolute` ضرورية: بدونها يقلب Qt معنى «اليمين» في الواجهة
     # العربية فتلتصق الأرقام بالحافة اليسرى — وهو عكس المقصود تماماً.

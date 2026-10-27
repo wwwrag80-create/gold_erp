@@ -30,6 +30,7 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
+from services import numfmt as _nf
 
 BUCKET = "invoice-photos"
 SETTING_MODE = "invoice_share_mode"      # auto · cloud · lan · off
@@ -202,7 +203,7 @@ def page_html(data, models, img_src, company=""):
         cards.append(
             f'<div class="m">{pic}<div class="mt">'
             f'<b>{_esc(m["model"])}</b>'
-            f'<span>العدد: {m["count"]} · {m["weight"]:,.3f} '
+            f'<span>العدد: {m["count"]} · {_nf.f2(m["weight"])} '
             f'{_esc(m["unit"])}</span></div></div>')
     body = ("".join(cards) if cards
             else '<div class="card">لا توجد موديلات في هذه الفاتورة.</div>')
@@ -336,7 +337,7 @@ def render_page_image(data, models, company="", width=PAGE_WIDTH):
                      font(10), "#B3AB9A", AC)
             text(m["model"], cx + 6, y + THUMB_H + 8, cw - 12, 24,
                  font(11, True), _C_INK, AC)
-            text(f'العدد: {m["count"]} · {m["weight"]:,.3f} {m["unit"]}',
+            text(f'العدد: {m["count"]} · {_nf.f2(m["weight"])} {m["unit"]}',
                  cx + 6, y + THUMB_H + 30, cw - 12, 22, font(9), _C_MUT, AC)
         if models:
             y += THUMB_H + 66

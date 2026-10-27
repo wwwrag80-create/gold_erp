@@ -16,6 +16,7 @@ from models import stock_home
 from services import gold_math, zatca
 from services.accounting_engine import post_entry
 from services.audit import log_action
+from services import numfmt as _nf
 
 # ══════════════════════════════════════════════════════════════════
 #  «من أي حساب يخرج ذهب الفاتورة؟»
@@ -440,7 +441,7 @@ def _sync_wo_weight(conn, wo, new_reg, username):
          round(float(wo["stones_weight"] or 0) * k, 3),
          wo["id"]))
     log_action(conn, username, "update", "work_orders", wo["id"],
-               f"اعتماد وزن عائد بالمرتجع: {old:.3f} ← {new_reg:.3f} جم")
+               f"اعتماد وزن عائد بالمرتجع: {_nf.f2(old, sep=False)} ← {_nf.f2(new_reg, sep=False)} جم")
     return True
 
 
@@ -1114,7 +1115,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                  li.get("note") or ""))
             if _svc:
                 dg += wages
-                added.append(f"{wo['work_order_no']} {wages:,.2f}")
+                added.append(f"{wo['work_order_no']} {_nf.f2(wages)}")
                 continue
             if kind == "sale_return" and not wo["is_bulk"] \
                     and not li.get("acc"):
@@ -1289,7 +1290,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     log_action(conn, username, "update", "invoices", invoice_id,
                f"تعديل {inv['invoice_no']} في مكانه: +{len(added)} · "
                f"~{len(updated)} · -{len(removed)} · "
-               f"وزن {dw:+.3f} · أجور {dg:+.2f}{_mv}")
+               f"وزن {_nf.f2(dw, sep=False, sign=True)} · أجور {_nf.f2(dg, sep=False, sign=True)}{_mv}")
     _de.record(conn, "invoices", invoice_id, username, _before,
                doc_no=inv["invoice_no"] or "", entry_id=inv["entry_id"],
                kind="inplace", before_html=_before_html,
