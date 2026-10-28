@@ -1261,12 +1261,14 @@ def _period_head(date_from, date_to):
     </table><br/>''', today
 
 
-def _tpl_tax_sales_register(conn, _id=0, date_from=None, date_to=None):
+def _tpl_tax_sales_register(conn, _id=0, date_from=None, date_to=None,
+                            q="", kind=None):
     """سجل المبيعات الضريبية للفترة — ضريبية/مبسطة لكل مستند، والإجماليات
-    التي تنتقل للإقرار."""
+    التي تنتقل للإقرار. و`q`/`kind` (5.0.1) بحث الشاشة ونوعها: تُطبع
+    المستندات المعروضة وحدها، والإجماليات للفترة كما في بطاقات الشاشة."""
     from models import tax_sales
-    rows = sorted(tax_sales.search(conn, "", date_from, date_to,
-                                   limit=100000),
+    rows = sorted(tax_sales.search(conn, q or "", date_from, date_to,
+                                   kind or None, limit=100000),
                   key=lambda r: (r["doc_date"], r["id"]))
     kinds = {"invoice": "فاتورة", "credit": "إشعار دائن",
              "debit": "إشعار مدين"}
@@ -1372,13 +1374,18 @@ def _tpl_fixing(conn, op_id):
 
 
 def _tpl_statement(conn, account_id, date_from=None, date_to=None,
-                   karat=None):
+                   karat=None, rows=None, op_label="", diamonds=None):
     """كشف الحساب بالمعيار التصميمي الموحد: RTL إجباري · الجدول بعرض
     الصفحة ومتوسط · أعمدة مرنة (البيان يأخذ المساحة الأكبر والتواريخ
     والمبالغ تتقلص) · صف رصيد ختامي بارز · توقيعان.
 
     `karat` عيار **عرض** الأوزان: الورقة تخرج بنفس عيار الشاشة فلا
     يقرأ المستخدم رقمين مختلفين للحركة الواحدة. القيد لا يتغيّر.
+
+    5.0.1 — **الورقة ما تعرضه الشاشة**: `rows` أسطر الكشف كما هي على
+    الشاشة (بعد ترشيح «العملية» وبحث Ctrl+F وبأرصدتها المعروضة)، فلا
+    تُطبع كل العمليات وقد عُرضت سندات القبض وحدها. و`op_label` يُكتب
+    في رأس الورقة، و`diamonds` ({فاتورة: ماس}) عمود «الماس» إن كان ظاهراً.
     """
     from models import journal
     from services import gold_math
@@ -1386,7 +1393,10 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
                        (account_id,)).fetchone()
     if not acc:
         raise ValueError("الحساب غير موجود")
-    rows = journal.statement(conn, account_id, date_from, date_to)
+    if rows is None:
+        rows = journal.statement(conn, account_id, date_from, date_to)
+    rows = list(rows)
+    dia = diamonds if isinstance(diamonds, dict) else None
     from services import karat_view
     k = int(karat or karat_view.active())
 
@@ -1395,23 +1405,36 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
 
     body_rows = ""
     tot_gd = tot_gc = tot_cd = tot_cc = 0.0
+    tot_dia = 0.0
+
+    def _dval(r):
+        if dia is None or r.get("src") != "invoices":
+            return 0.0
+        return float(dia.get(r.get("sid"), 0.0) or 0.0)
     for r in rows:
-        tot_gd += r["gd"] or 0
-        tot_gc += r["gc"] or 0
-        tot_cd += r["cd"] or 0
-        tot_cc += r["cc"] or 0
+        if r["op"] != "رصيد سابق":
+            tot_gd += r["gd"] or 0
+            tot_gc += r["gc"] or 0
+            tot_cd += r["cd"] or 0
+            tot_cc += r["cc"] or 0
+        _dv = _dval(r)
+        tot_dia += _dv * (-1 if "مرتجع" in (r["op"] or "") else 1)
         body_rows += "<tr>" + cells(
             tdw(en(r["date"]), 9), tdw(r["op"], 9),
             tdw(en(r["doc_no"] or ""), 9), tdw(r["name"] or "", 12),
-            tdw(r["desc"] or "", 16, "right"),
+            tdw(r["desc"] or "", 16 if dia is None else 12, "right"),
             tdw(_w(_g(r["gd"])) if r["gd"] else "", 7),
             tdw(_w(_g(r["gc"])) if r["gc"] else "", 7),
             tdw(_w(_g(r["gbal"])), 8),
             tdw(_w(r["cd"], 2) if r["cd"] else "", 7),
             tdw(_w(r["cc"], 2) if r["cc"] else "", 7),
-            tdw(_w(r["cbal"], 2), 9)) + "</tr>"
+            tdw(_w(r["cbal"], 2), 9),
+            *([tdw(_w(_dv, 2) if _dv else "", 4)]
+              if dia is not None else [])) + "</tr>"
+    _ncol = 11 + (1 if dia is not None else 0)
     if not body_rows:
-        body_rows = f'<tr><td {TD} colspan="11">لا توجد حركات</td></tr>'
+        body_rows = (f'<tr><td {TD} colspan="{_ncol}">لا توجد حركات'
+                     '</td></tr>')
 
     g = rows[-1]["gbal"] if rows else 0.0
     c = rows[-1]["cbal"] if rows else 0.0
@@ -1427,6 +1450,8 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
           <td>{en(acc["code"])}</td></tr>
       <tr><th>الفترة من</th><td>{en(date_from or "—")}</td>
           <th>إلى</th><td>{en(date_to or "—")}</td></tr>
+      {(f'<tr><th>العمليات المعروضة</th><td {TD} colspan="3">'
+        f'{op_label}</td></tr>') if op_label else ""}
       <tr><th>تاريخ الطباعة</th>
           <td {TD} colspan="3">{en(today)}</td></tr>
     </table>
@@ -1434,17 +1459,20 @@ def _tpl_statement(conn, account_id, date_from=None, date_to=None,
     {TBL}
       <tr>{cells(thw("التاريخ", 9), thw("نوع العملية", 9),
                  thw("رقم المستند", 9), thw("الجهة المقابلة", 12),
-                 thw("البيان", 16), thw(f"مدين ذهب {en(k)}", 7),
+                 thw("البيان", 16 if dia is None else 12),
+                 thw(f"مدين ذهب {en(k)}", 7),
                  thw(f"دائن ذهب {en(k)}", 7),
                  thw(f"رصيد ذهب {en(k)}", 8),
                  thw("مدين نقد", 7), thw("دائن نقد", 7),
-                 thw("رصيد نقد", 9))}</tr>
+                 thw("رصيد نقد", 9),
+                 *([thw("الماس", 4)] if dia is not None else []))}</tr>
       {body_rows}
       <tr><td {TD_TOT} colspan="5">إجمالي الحركة</td>
         <td>{_w(_g(tot_gd))}</td><td>{_w(_g(tot_gc))}</td>
         <td>—</td>
         <td>{_w(tot_cd, 2)}</td><td>{_w(tot_cc, 2)}</td>
-        <td>—</td></tr>
+        <td>—</td>{f"<td>{_w(tot_dia, 2)}</td>" if dia is not None
+                   else ""}</tr>
     </table>
 
     {TBL}
@@ -1869,6 +1897,106 @@ def _tpl_balances(conn, entity_type, rows):
                     show_meta=False) + body)
 
 
+def _tpl_screen_view(conn, _id=0, view=None, title="", note=""):
+    """**الورقة صورةُ الشاشة** (5.0.1): الجدول كما يظهر — أعمدته الظاهرة
+    بعناوينها، وأسطره الظاهرة وحدها بترتيبها (بعد البحث والفرز والطيّ)،
+    وصفوف الإجمالي بارزة. يُستعمل حين تعرض الشاشة ما لا يعرفه قالبها
+    (بحث Ctrl+F مثلاً) — فلا تخرج الورقة بغير ما رآه المستخدم."""
+    import html as _h
+    v = view or {}
+    heads = list(v.get("headers") or [])
+    widths = list(v.get("widths") or [])
+    if len(widths) != len(heads):
+        widths = [round(100.0 / max(len(heads), 1), 1)] * len(heads)
+
+    def _esc(t):
+        return _h.escape(str(t or "")).replace("\n", "<br/>")
+    head = cells(*[
+        f'<th width="{w}%" style="width:{w}%;">{_esc(h)}</th>'
+        for h, w in zip(heads, widths)])
+    body = ""
+    for r in v.get("rows") or []:
+        tds = []
+        for t, isnum in zip(r.get("cells") or [], r.get("num") or []):
+            tds.append(f'<td>{en(_esc(t))}</td>' if isnum
+                       else f'<td class="r">{_esc(t)}</td>')
+        style = (' style="font-weight:bold; background:#F2EBD9;"'
+                 if r.get("total") else "")
+        body += f"<tr{style}>" + cells(*tds) + "</tr>"
+    if not body:
+        body = (f'<tr><td {TD} colspan="{max(len(heads), 1)}">'
+                "لا توجد أسطر ظاهرة</td></tr>")
+    today = _qd(QtCore.QDate.currentDate())
+    meta = (f'{TBL}<tr><td {TH} width="20%">المعروض</td>'
+            f'<td class="r">{_esc(note) or "—"}</td></tr>'
+            f'<tr><th>تاريخ الطباعة</th><td>{en(today)}</td></tr></table>')
+    return (_header(title or "تقرير", "", today, show_meta=False) + meta
+            + f'{TBL}<tr>{head}</tr>{body}'
+              '</table>')
+
+
+# أنواع التقارير والقوائم: تُطبع صورةَ الشاشة متى رشّح بحث Ctrl+F جدولها
+# (المستند المفرد — فاتورة وسند — يبقى بقالبه دائماً، وكشف الحساب يمرّر
+# أسطره المعروضة بنفسه).
+_REPORT_TYPES = {
+    "balances", "turnover", "aging", "tax_sales_register",
+    "purchases_register", "day_close", "trial_balance", "coa_list",
+    "workshop_losses_log", "workshop_accounts", "customer_board",
+    "dash_panel", "cash_flow", "income_statement", "financial_position",
+    "balance_tree", "equity_changes", "doc_edits", "stock_aging",
+    "dossier", "scrap_karat", "party_group", "party_groups_all",
+    "models_catalog", "models_received", "orders_production",
+    "mfg_target", "mfg_salary", "mfg_summary"}
+
+
+def as_shown(parent, doc_type, doc_id, kw):
+    """(النوع، المعرّف، المعطيات) بعد مراعاة ما على الشاشة.
+
+    إن كان في الشاشة جدولٌ رشّحه بحث Ctrl+F (أسطرٌ مخفية والشريط مفتوح
+    بنصّ)، طُبع ذلك الجدول كما هو بدل القالب الذي يقرأ كل الأسطر من
+    القاعدة. وإلا بقي الطلب كما هو."""
+    if doc_type not in _REPORT_TYPES or parent is None \
+            or kw.get("view") is not None:
+        return doc_type, doc_id, kw
+    try:
+        from ui.widgets import table_search
+        hit = table_search.active_filter(parent)
+    except Exception:
+        hit = None
+    if not hit:
+        return doc_type, doc_id, kw
+    view, query = hit
+    from ui.widgets.common import view_snapshot
+    title = DOC_TITLES.get(doc_type) or "تقرير"
+    note = f"مرشَّح بالبحث: «{query}»"
+    if kw.get("date_from") or kw.get("date_to"):
+        note += (f" · من {kw.get('date_from') or '—'}"
+                 f" إلى {kw.get('date_to') or '—'}")
+    elif kw.get("as_of"):
+        note += f" · حتى {kw.get('as_of')}"
+    return "screen_view", 0, {"view": view_snapshot(
+        view, skip=("معاينة", "كشف حساب")), "title": title, "note": note}
+
+
+DOC_TITLES = {
+    "balances": "أرصدة الحسابات", "turnover": "حركة الأطقم",
+    "aging": "أعمار الديون", "tax_sales_register": "سجل المبيعات الضريبية",
+    "purchases_register": "سجل المشتريات", "day_close": "إقفال اليوم",
+    "trial_balance": "ميزان المراجعة", "coa_list": "دليل الحسابات",
+    "workshop_losses_log": "سجل خزينة التصنيع",
+    "workshop_accounts": "حسابات الورش", "customer_board": "العملاء",
+    "dash_panel": "لوحة التحكم", "cash_flow": "قائمة التدفقات النقدية",
+    "income_statement": "قائمة الدخل",
+    "financial_position": "قائمة المركز المالي",
+    "balance_tree": "شجرة الأرصدة", "equity_changes": "التغيرات في حقوق الملكية",
+    "doc_edits": "سجل التعديلات", "stock_aging": "أعمار المخزون",
+    "dossier": "ملف الجهة", "scrap_karat": "صندوق الكسر",
+    "party_group": "مجموعة", "party_groups_all": "المجموعات",
+    "models_catalog": "دليل الموديلات", "models_received": "الموديلات الواردة",
+    "orders_production": "طلبات الإنتاج", "mfg_target": "التارجت",
+    "mfg_salary": "رواتب التصنيع", "mfg_summary": "تكاليف التصنيع"}
+
+
 def build_body(doc_type, doc_id, **kw):
     """يبني **جسم** المستند فقط (بلا ترويسة HTML ولا أنماط).
 
@@ -1876,10 +2004,16 @@ def build_body(doc_type, doc_id, **kw):
     يوفّر أنماطه الكاملة بنفسه.
     """
     with db() as conn:
+        if doc_type == "screen_view":
+            return _tpl_screen_view(conn, 0, kw.get("view"),
+                                    kw.get("title") or "",
+                                    kw.get("note") or "")
         if doc_type == "statement":
             return en(_tpl_statement(conn, doc_id, kw.get("date_from"),
                                      kw.get("date_to"),
-                                     _karat_kw(kw)))
+                                     _karat_kw(kw), kw.get("rows"),
+                                     kw.get("op_label") or "",
+                                     kw.get("diamonds")))
         if doc_type == "balances":
             return en(_tpl_balances(conn, doc_id, kw.get("rows") or []))
         if doc_type == "customer_analytics":
@@ -1897,7 +2031,8 @@ def build_body(doc_type, doc_id, **kw):
                                     kw.get("date_to")))
         if doc_type == "tax_sales_register":
             return en(_tpl_tax_sales_register(
-                conn, doc_id, kw.get("date_from"), kw.get("date_to")))
+                conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                kw.get("q") or "", kw.get("kind")))
         if doc_type == "purchases_register":
             return en(_tpl_purchases_register(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to")))
@@ -1926,14 +2061,16 @@ def build_body(doc_type, doc_id, **kw):
             return en(_tpl_models_received_photos(
                 conn, doc_id, kw.get("date_from"), kw.get("date_to"),
                 kw.get("mode", "all"), kw.get("sort", "az"),
-                kw.get("per_page", 4), kw.get("with_bg", False)))
+                kw.get("per_page", 4), kw.get("with_bg", False),
+                kw.get("only")))
         if doc_type == "model_photos":
             return en(_tpl_model_photos(conn, doc_id,
                                         kw.get("min_count", 3),
                                         kw.get("mode", "all"),
                                         kw.get("sort", "az"),
                                         kw.get("per_page", 4),
-                                        kw.get("with_bg", False)))
+                                        kw.get("with_bg", False),
+                                        kw.get("only")))
         if doc_type == "dash_panel":
             return en(_tpl_dash_panel(
                 conn, doc_id, kw.get("title", ""),
@@ -3183,7 +3320,7 @@ RECV_PHOTO_CSS = """
 
 def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
                                 mode="all", sort="az", per_page=4,
-                                with_bg=False):
+                                with_bg=False, only=None):
     """صور الوارد من التصنيع — أربع في كل صفحة A4، وتحتها بياناتها.
 
     تحت كل صورة: اسم الموديل وعددُ قطعه ووزنُها، ثم جدولٌ بأرقام
@@ -3198,7 +3335,10 @@ def _tpl_models_received_photos(conn, _id=0, date_from=None, date_to=None,
     today = _qd(QtCore.QDate.currentDate())
 
     picked = []
+    keep = None if only is None else {str(x) for x in only}
     for m in res["models"]:
+        if keep is not None and str(m["model"]) not in keep:
+            continue              # 5.0.1: ما أبقاه بحث الشاشة وحده
         items = [i for i in m["items"]
                  if mode == "all"
                  or (mode == "in_stock" and i["safe"])
@@ -3594,7 +3734,7 @@ def photo_grid(n, width_mm=190.0, height_mm=258.0, caption_mm=14.0):
 
 
 def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
-                      per_page=4, with_bg=False):
+                      per_page=4, with_bg=False, only=None):
     """ورقة صور الموديلات — بالعدد الذي يختاره المستخدم في كل صفحة.
 
     تُطبع صور الموديلات التي بلغ عددها الحدّ المطلوب، و**عدد الصور في
@@ -3608,6 +3748,9 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
     from models import models_catalog as mc
 
     models = mc.list_models(conn)
+    if only is not None:          # 5.0.1: ما أبقاه بحث الشاشة وحده
+        _keep = {str(x) for x in only}
+        models = [m for m in models if str(m["model"]) in _keep]
     if mode == "in_stock":
         models = [m for m in models if m["in_count"]]
     elif mode == "sold":
@@ -4749,6 +4892,8 @@ BUILDERS = {
     "scrap_karat": _tpl_scrap_karat,
     "party_group": _tpl_party_group,
     "party_groups_all": _tpl_party_groups_all,
+    # 5.0.1: صورة الشاشة — الجدول كما يُرى (بحثٌ أو ترشيحٌ لا يعرفه قالب)
+    "screen_view": _tpl_screen_view,
 }
 
 DOC_LABELS = {
@@ -4764,9 +4909,15 @@ DOC_LABELS = {
 def build_html(doc_type, doc_id, **kw):
     """يبني مستند HTML كاملاً من قاعدة البيانات (لمحرك Qt)."""
     with db() as conn:
+        if doc_type == "screen_view":
+            return _tpl_screen_view(conn, 0, kw.get("view"),
+                                    kw.get("title") or "",
+                                    kw.get("note") or "")
         if doc_type == "statement":
             html = _tpl_statement(conn, doc_id, kw.get("date_from"),
-                                  kw.get("date_to"), _karat_kw(kw))
+                                  kw.get("date_to"), _karat_kw(kw),
+                                  kw.get("rows"), kw.get("op_label") or "",
+                                  kw.get("diamonds"))
         elif doc_type == "balances":
             html = _tpl_balances(conn, doc_id, kw.get("rows") or [])
         elif doc_type == "customer_analytics":
@@ -4788,9 +4939,13 @@ def build_html(doc_type, doc_id, **kw):
                               kw.get("as_of"), kw.get("dim", "both"),
                               kw.get("only"))
         elif doc_type in ("tax_sales_register", "purchases_register"):
-            fn = (_tpl_tax_sales_register if doc_type == "tax_sales_register"
-                  else _tpl_purchases_register)
-            html = fn(conn, doc_id, kw.get("date_from"), kw.get("date_to"))
+            if doc_type == "tax_sales_register":
+                html = _tpl_tax_sales_register(
+                    conn, doc_id, kw.get("date_from"), kw.get("date_to"),
+                    kw.get("q") or "", kw.get("kind"))
+            else:
+                html = _tpl_purchases_register(
+                    conn, doc_id, kw.get("date_from"), kw.get("date_to"))
         elif doc_type == "day_close":
             html = _tpl_day_close(conn, doc_id, kw.get("date"))
         elif doc_type == "dossier_models":
@@ -4912,6 +5067,8 @@ def preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     إن تعذّر فتح المتصفح لأي سبب، يُرجع النظام تلقائياً إلى معاينة Qt
     حتى لا تتعطّل الطباعة.
     """
+    # 5.0.1: الورقة ما تعرضه الشاشة — جدولٌ رشّحه البحث يُطبع كما هو
+    doc_type, doc_id, kw = as_shown(parent, doc_type, doc_id, kw)
     # 4.96: عارض الطباعة (نافذة النظام بمحرّك ويندوز) — وبدونه المعاينة
     # الاحتياطية داخل النظام (Qt) لا المتصفح الافتراضي
     from services import browser_print, print_viewer
@@ -4956,6 +5113,7 @@ def print_document(parent, doc_type, doc_id, **kw):
     يتجاوز مشاكل `QPrintPreviewDialog` تماماً: تُبنى الوثيقة وتُلاءم
     مع أبعاد الطابعة **بعد** أن يؤكد المستخدم اختيار الطابعة.
     """
+    doc_type, doc_id, kw = as_shown(parent, doc_type, doc_id, kw)
     # 4.96: في عارض الطباعة — نافذة الطباعة الكاملة تُفتح مع الورقة
     # (الطابعة · النسخ · الصفحات · الهوامش · PDF) بمحرّكٍ يرسم القالب كما
     # صُمّم؛ ومحرّك Qt احتياطٌ لجهازٍ بلا عارض

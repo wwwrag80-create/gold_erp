@@ -240,6 +240,10 @@ def build_page(doc_type, doc_id, auto_print=True, viewer=False, **kw):
     finally:
         print_manager.RTL_ORDER_OVERRIDE = prev
     setup = _page_setup(doc_type)
+    if doc_type == "screen_view":
+        # صورة الشاشة (5.0.1): الجدول العريض أفقيٌّ كما على الشاشة
+        if len((kw.get("view") or {}).get("headers") or []) > 6:
+            setup = _page_setup("statement")
     from services import print_fonts
     setup["family"] = print_fonts.family_css()
     toolbar = ""
@@ -249,7 +253,8 @@ def build_page(doc_type, doc_id, auto_print=True, viewer=False, **kw):
         from services import print_viewer
         extra_css = print_viewer.VIEWER_CSS
         toolbar = print_viewer.toolbar(
-            _title(doc_type), landscape="landscape" in setup["size"])
+            (kw.get("title") if doc_type == "screen_view" else None)
+            or _title(doc_type), landscape="landscape" in setup["size"])
         if auto_print:
             script = ("<script>window.addEventListener('load',function(){"
                       "setTimeout(function(){window.print();},450);});"

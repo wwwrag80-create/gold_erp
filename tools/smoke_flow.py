@@ -9202,6 +9202,75 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("120) 5.0.1: الورقة ما تعرضه الشاشة")
+    from services import print_manager as _pm120
+    from models import journal as _jr120
+    with db(readonly=True) as _c120:
+        _acc120 = _c120.execute(
+            "SELECT l.account_id a FROM journal_lines l JOIN journal_entries"
+            " e ON e.id=l.entry_id AND e.is_deleted=0 GROUP BY l.account_id"
+            " HAVING COUNT(DISTINCT e.source_table) > 1"
+            " ORDER BY COUNT(*) DESC LIMIT 1").fetchone()["a"]
+        _all120 = _jr120.statement(_c120, _acc120, None, None)
+    _kind120 = next((r["op"] for r in _all120 if r["op"] != "رصيد سابق"), "")
+    _shown120 = [r for r in _all120 if r["op"] == _kind120]
+    _h120 = _pm120.build_body("statement", _acc120, rows=_shown120,
+                              op_label=_kind120)
+    _others120 = {r["op"] for r in _all120} - {_kind120, "رصيد سابق"}
+    check("كشف الحساب يُطبع بالأسطر المعروضة وحدها (ترشيح «العملية»)، ونوعها"
+          " مكتوبٌ في رأس الورقة",
+          bool(_shown120) and "العمليات المعروضة" in _h120
+          and not any(f"<td>{o}</td>" in _h120 for o in _others120),
+          f"{len(_shown120)} من {len(_all120)}")
+    _sv120 = _pm120.build_body("screen_view", 0, view={
+        "headers": ["الاسم", "المبلغ"], "widths": [70, 30],
+        "rows": [{"cells": ["أ", "1.00"], "num": [False, True],
+                  "total": False},
+                 {"cells": ["الإجمالي", "1.00"], "num": [False, True],
+                  "total": True}]}, title="تجربة", note="مرشَّح")
+    check("وورقة «صورة الشاشة» تطبع الجدول كما يُرى بإجماليه",
+          "تجربة" in _sv120 and "font-weight:bold" in _sv120
+          and _sv120.count("<tr") >= 5)
+
+    class _NoParent:
+        def findChildren(self, *_a):
+            return []
+    check("والقوالب كما هي ما لم يرشّح البحث جدول الشاشة — والمستند المفرد"
+          " بقالبه دائماً",
+          _pm120.as_shown(_NoParent(), "trial_balance", 0, {})[0]
+          == "trial_balance"
+          and _pm120.as_shown(_NoParent(), "invoices", 5, {})[0]
+          == "invoices")
+    try:
+        _tr120 = _pm120.build_body("tax_sales_register", 0, q="لا-يوجد-123",
+                                   kind="invoice")
+        _ok120 = "لا مستندات" in _tr120
+    except Exception as _e120:
+        _ok120 = False
+    check("سجل المبيعات الضريبية يُطبع ببحث الشاشة ونوعها", _ok120)
+    try:
+        from PyQt5 import QtWidgets as _QW120
+        _QW120.QApplication.instance() or _QW120.QApplication([])
+        from ui.widgets.common import view_snapshot as _vs120
+        from ui.widgets import table_search as _ts120
+        _t120 = _QW120.QTableWidget(3, 2)
+        _t120.setHorizontalHeaderLabels(["الاسم", "المبلغ"])
+        for _r, (_a, _b) in enumerate((("ذهب", "1"), ("نقد", "2"),
+                                       ("ذهب أبيض", "3"))):
+            _t120.setItem(_r, 0, _QW120.QTableWidgetItem(_a))
+            _t120.setItem(_r, 1, _QW120.QTableWidgetItem(_b))
+        _t120.setRowHidden(1, True)
+        _snap120 = _vs120(_t120)
+        check("لقطة الجدول: الأسطر الظاهرة وحدها بترتيبها",
+              [r["cells"][0] for r in _snap120["rows"]]
+              == ["ذهب", "ذهب أبيض"] and _snap120["headers"]
+              == ["الاسم", "المبلغ"])
+        check("ويُعرف الجدول الذي يرشّحه بحث Ctrl+F",
+              callable(_ts120.active_filter)
+              and _ts120.active_filter(None) is None)
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

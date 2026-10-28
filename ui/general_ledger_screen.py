@@ -289,45 +289,73 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    def _print_args(self):
+        """ما على الشاشة **كما هو** (5.0.1) — لا الحساب كاملاً.
+
+        كانت الورقة تُبنى من القاعدة من جديد، فمن عرض «سندات القبض»
+        وحدها ثم عاين وجد كل العمليات. الآن تُطبع أسطر الجدول الظاهرة
+        نفسها: بعد ترشيح «العملية» وبحث Ctrl+F، وبأرصدتها المعروضة،
+        وبالحساب والفترة اللذين عُرضا (لا ما غُيّر في الخانات بعدها بلا
+        «عرض»)، ومعها عمود الماس إن كان ظاهراً."""
+        shown = getattr(self, "_shown", None)
+        if not shown:
+            self.load()
+            shown = getattr(self, "_shown", None)
+        if not shown:
+            raise ValueError("اختر الحساب أولاً ثم اعرض الكشف")
+        rows = [r for i, r in enumerate(self.rows)
+                if i < self.table.rowCount()
+                and not self.table.isRowHidden(i)]
+        kw = {"date_from": shown["date_from"], "date_to": shown["date_to"],
+              "karat": shown["karat"], "rows": rows}
+        if shown.get("op_label"):
+            kw["op_label"] = shown["op_label"]
+        if shown.get("diamonds") is not None:
+            kw["diamonds"] = shown["diamonds"]
+        return shown["account_id"], kw
+
     def print_statement(self):
         from services import print_manager
-        """معاينة/طباعة كشف الحساب كاملاً للحساب والفترة المعروضين."""
+        """معاينة/طباعة كشف الحساب كما يظهر على الشاشة."""
         try:
-            code = self.account.currentData()
-            if code is None:
-                raise ValueError("اختر الحساب أولاً ثم اعرض الكشف")
-            with db(readonly=True) as conn:
-                acc = conn.execute("SELECT id FROM accounts WHERE code=?",
-                                   (code,)).fetchone()
-                if not acc:
-                    raise ValueError("الحساب غير موجود")
-            print_manager.preview_document(
-                self, "statement", acc["id"],
-                date_from=dstr(self.d_from),
-                date_to=dstr(self.d_to),
-                karat=self._k())
+            if self._showing_day_book():
+                return self._print_screen(direct=False)
+            aid, kw = self._print_args()
+            print_manager.preview_document(self, "statement", aid, **kw)
         except Exception as e:
             err(self, e)
 
     def print_statement_direct(self):
         from services import print_manager
-        """طباعة كشف الحساب مباشرةً عبر نافذة طباعة النظام."""
+        """طباعة كشف الحساب مباشرةً — كما يظهر على الشاشة."""
         try:
-            code = self.account.currentData()
-            if code is None:
-                raise ValueError("اختر الحساب أولاً ثم اعرض الكشف")
-            with db(readonly=True) as conn:
-                acc = conn.execute("SELECT id FROM accounts WHERE code=?",
-                                   (code,)).fetchone()
-                if not acc:
-                    raise ValueError("الحساب غير موجود")
-            print_manager.print_document(
-                self, "statement", acc["id"],
-                date_from=dstr(self.d_from),
-                date_to=dstr(self.d_to),
-                karat=self._k())
+            if self._showing_day_book():
+                return self._print_screen(direct=True)
+            aid, kw = self._print_args()
+            print_manager.print_document(self, "statement", aid, **kw)
         except Exception as e:
             err(self, e)
+
+    def _showing_day_book(self):
+        """هل المعروض الآن «★ كل الحسابات»؟ — بما عُرض لا بالخانة."""
+        shown = getattr(self, "_shown", None)
+        if shown is None:
+            return self.account.currentData() == journal.ALL_ACCOUNTS
+        return bool(shown.get("day_book"))
+
+    def _print_screen(self, direct=False):
+        """«★ كل الحسابات»: الجدول نفسه كما هو على الشاشة."""
+        from services import print_manager
+        from ui.widgets.common import view_snapshot
+        snap = view_snapshot(self.table, skip=("معاينة",))
+        kw = {"view": snap,
+              "title": "حركة كل الحسابات",
+              "note": f"من {dstr(self.d_from)} إلى {dstr(self.d_to)}"
+                      + (f" · {self.op_kind.currentText()}"
+                         if self.op_kind.currentData() else "")}
+        fn = print_manager.print_document if direct \
+            else print_manager.preview_document
+        fn(self, "screen_view", 0, **kw)
 
     def load(self):
         try:
@@ -365,6 +393,13 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             # عناوين مختصرة على سطرين — تُقلّص عرض الأعمدة فيظهر
             # الجدول كاملاً بلا تمرير أفقي.
             k = self._k()
+            # ما عُرض فعلاً — منه تُطبع الورقة (لا من الخانات بعد تغييرها)
+            self._shown = {"account_id": acc["id"],
+                           "date_from": dstr(self.d_from),
+                           "date_to": dstr(self.d_to), "karat": k,
+                           "op_label": (self.op_kind.currentText()
+                                        if kind else ""),
+                           "diamonds": None}
             headers = ["التاريخ", "نوع\nالعملية", "رقم\nالسند",
                        "الجهة /\nالحساب المقابل", "البيان",
                        f"مدين\nذهب {k}", f"دائن\nذهب {k}",
@@ -380,6 +415,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                         conn, [r.get("sid") for r in rows
                                if r.get("src") == "invoices"])
                 headers.insert(11, "💎 الماس\nجم")
+                self._shown["diamonds"] = dict(dmap)
             self.table.setRowCount(0)
             self.table.setColumnCount(len(headers))
             self.table.setHorizontalHeaderLabels(headers)
@@ -804,6 +840,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         with db(readonly=True) as conn:
             rows = journal.day_book(conn, d1, d2, kind)
         self.rows = rows
+        self._shown = {"day_book": True}
 
         k = self._k()
         headers = ["التاريخ", "نوع\nالعملية", "رقم\nالسند",

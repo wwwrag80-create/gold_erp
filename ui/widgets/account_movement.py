@@ -220,9 +220,14 @@ class AccountMovementDialog(QtWidgets.QDialog):
                                    (self.code,)).fetchone()
             if not acc:
                 raise ValueError("الحساب غير موجود")
+            # 5.0.1: الأسطر المعروضة نفسها — الكشف قد يجمع حسابات المجموعة
+            # كلها ويستثني بعض الحركات، والقالب وحده كان يقرأ الحساب الأب
+            rows = [r for i, r in enumerate(self.rows)
+                    if not self.table.isRowHidden(i)]
             print_manager.preview_document(
                 self, "statement", acc["id"],
-                date_from=self.date_from or "", date_to=self.date_to or "")
+                date_from=self.date_from or "", date_to=self.date_to or "",
+                rows=rows)
         except Exception as e:
             err(self, e)
 

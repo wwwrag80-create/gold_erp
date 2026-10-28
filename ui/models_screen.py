@@ -952,6 +952,34 @@ class ModelsScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    def _shown_models(self):
+        """الموديلات الظاهرة بعد البحث (5.0.1) — None إن لم يكن بحث.
+
+        فالورقة تطبع ما أبقاه البحث على الشاشة، لا الدليل كله."""
+        if not self.search.text().strip():
+            return None
+        out = []
+        try:
+            root = self.model.invisibleRootItem()
+            for i in range(root.rowCount()):
+                if self.tree.isRowHidden(i, root.index()):
+                    continue
+                d = root.child(i).data(QtCore.Qt.UserRole)
+                if d:
+                    out.append(d[1])
+        except Exception:
+            pass
+        return out
+
+    def _print_as_shown(self, title):
+        """البحث فعّال: الشجرة نفسها كما هي على الشاشة."""
+        from services import print_manager
+        from ui.widgets.common import view_snapshot
+        print_manager.preview_document(
+            self, "screen_view", 0, view=view_snapshot(self.tree),
+            title=title,
+            note=f"مرشَّح بالبحث: «{self.search.text().strip()}»")
+
     def _expanded_models(self):
         """الموديلات الموسّعة حالياً — ليحاكيها قالب الطباعة."""
         out = []
@@ -984,7 +1012,7 @@ class ModelsScreen(QtWidgets.QWidget):
                     date_from=dstr(self.d_from), date_to=dstr(self.d_to),
                     mode=self.view_mode.currentData() or "all",
                     sort=self.sort_mode.currentData() or "az",
-                    with_bg=opts[2])
+                    with_bg=opts[2], only=self._shown_models())
                 return
             opts = self._ask_photo_options()
             if not opts:
@@ -994,7 +1022,8 @@ class ModelsScreen(QtWidgets.QWidget):
                 self, "model_photos", 0, min_count=int(n),
                 mode=self.view_mode.currentData() or "all",
                 sort=self.sort_mode.currentData() or "az",
-                per_page=int(per_page), with_bg=with_bg)
+                per_page=int(per_page), with_bg=with_bg,
+                only=self._shown_models())
         except Exception as e:
             err(self, e)
 
@@ -1100,6 +1129,10 @@ class ModelsScreen(QtWidgets.QWidget):
         """
         try:
             from services import print_manager
+            if self.search.text().strip():
+                return self._print_as_shown(
+                    "الوارد من التصنيع" if self.by_date.isChecked()
+                    else "دليل الموديلات")
             if self.by_date.isChecked():
                 # وضع التاريخ يطبع ورقته هو: الوارد ومع من كل قطعة
                 print_manager.preview_document(

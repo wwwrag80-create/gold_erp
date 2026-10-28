@@ -187,3 +187,27 @@ def open_search(view):
     b = bar_for(view)
     b.open_bar()
     return b
+
+
+def active_filter(root):
+    """(الجدول، نصّ البحث) إن كان في `root` جدولٌ يرشّحه البحث الآن.
+
+    تستعمله الطباعة (5.0.1): الورقة تُطبع بما يظهر على الشاشة، فإن رشّح
+    البحث جدولاً طُبع ذلك الجدول كما هو لا كل أسطره من القاعدة."""
+    if root is None:
+        return None
+    try:
+        views = root.findChildren(QtWidgets.QAbstractItemView)
+    except Exception:
+        return None
+    for v in views:
+        b = v.property(_BAR_PROP)
+        if not isinstance(b, SearchBar):
+            continue
+        try:
+            q = (b.edit.text() or "").strip()
+            if q and b.isVisible() and v.isVisible():
+                return v, q
+        except Exception:
+            continue
+    return None

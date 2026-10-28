@@ -1082,6 +1082,92 @@ class _EnterNav(QtCore.QObject):
         return False
 
 
+def _cell_widget_text(w):
+    """نصّ ما في خلية الجدول من عنصر (خانة رقم، قائمة، تسمية)."""
+    if w is None:
+        return ""
+    for attr in ("currentText", "text"):
+        fn = getattr(w, attr, None)
+        if callable(fn) and not isinstance(w, QtWidgets.QAbstractButton):
+            try:
+                return str(fn() or "")
+            except Exception:
+                return ""
+    return ""
+
+
+def view_snapshot(view, skip=()):
+    """الجدول (أو الشجرة) **كما يظهر على الشاشة** — لطباعة ما يُرى (5.0.1).
+
+    الأعمدة الظاهرة بعناوينها وعروضها، والأسطر الظاهرة وحدها بترتيبها
+    الحالي (بعد بحث Ctrl+F والفرز والطيّ)، وصفوف الإجمالي معلَّمة.
+    `skip` عناوين أعمدةٍ لا تُطبع (أزرار «معاينة» ونحوها)، والعمود بلا
+    عنوانٍ لا يُطبع (عمود أزرار السطر)."""
+    model = view.model()
+    hh = view.header() if isinstance(view, QtWidgets.QTreeView) \
+        else view.horizontalHeader()
+    skip = {str(x).replace("\n", " ").strip() for x in skip}
+    cols = []
+    for vis in range(hh.count()):
+        c = hh.logicalIndex(vis)
+        if hh.isSectionHidden(c) or hh.sectionSize(c) <= 0:
+            continue
+        h = model.headerData(c, QtCore.Qt.Horizontal,
+                             QtCore.Qt.DisplayRole)
+        h = str(h or "").strip()
+        if not h or h.replace("\n", " ").strip() in skip:
+            continue
+        cols.append((c, h, hh.sectionSize(c)))
+    try:
+        from ui.widgets.table_tools import TOTAL_ROLE
+    except Exception:
+        TOTAL_ROLE = None
+    rows = []
+
+    def _row(idx_of, depth=0):
+        texts, num, total = [], [], False
+        for c, _h, _w in cols:
+            ix = idx_of(c)
+            t = ix.data(QtCore.Qt.DisplayRole)
+            if t in (None, ""):
+                t = _cell_widget_text(view.indexWidget(ix))
+            t = "" if t is None else str(t)
+            if c == cols[0][0] and depth:
+                t = "\u2003" * depth + t
+            texts.append(t)
+            al = ix.data(QtCore.Qt.TextAlignmentRole)
+            try:
+                num.append(bool(int(al or 0) & int(QtCore.Qt.AlignRight)))
+            except Exception:
+                num.append(False)
+            if TOTAL_ROLE is not None and ix.data(TOTAL_ROLE):
+                total = True
+            f = ix.data(QtCore.Qt.FontRole)
+            if f is not None and getattr(f, "bold", lambda: False)():
+                total = True if c == cols[0][0] else total
+        rows.append({"cells": texts, "num": num, "total": total})
+
+    if isinstance(view, QtWidgets.QTreeView):
+        def _walk(parent, depth):
+            for r in range(model.rowCount(parent)):
+                if view.isRowHidden(r, parent):
+                    continue
+                first = model.index(r, 0, parent)
+                _row(lambda c, _r=r, _p=parent: model.index(_r, c, _p), depth)
+                if model.rowCount(first) and view.isExpanded(first):
+                    _walk(first, depth + 1)
+        _walk(QtCore.QModelIndex(), 0)
+    else:
+        for r in range(model.rowCount()):
+            if view.isRowHidden(r):
+                continue
+            _row(lambda c, _r=r: model.index(_r, c))
+    total_w = sum(w for _c, _h, w in cols) or 1
+    return {"headers": [h for _c, h, _w in cols],
+            "widths": [round(100.0 * w / total_w, 1) for _c, _h, w in cols],
+            "rows": rows}
+
+
 def guard_click(fn, gap=0.7):
     """نقرٌ متلاحق على جدولٍ لا يكرّر عملاً ثقيلاً (5.0).
 

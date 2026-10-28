@@ -394,6 +394,17 @@ class CoaScreen(QtWidgets.QWidget):
     def print_coa(self):
         try:
             from services import print_manager
+            # 5.0.1: الشجرة مرشّحة (بحثٌ أو إخفاء المجمَّدة) ⇒ تُطبع كما
+            # تظهر على الشاشة، لا الدليل كله
+            q = self.search.text().strip()
+            if q or not self.show_frozen.isChecked():
+                from ui.widgets.common import view_snapshot
+                bits = ([f"مرشَّح بالبحث: «{q}»"] if q else []) + (
+                    [] if self.show_frozen.isChecked()
+                    else ["بلا الحسابات المجمَّدة"])
+                return print_manager.preview_document(
+                    self, "screen_view", 0, view=view_snapshot(self.tree),
+                    title="دليل الحسابات", note=" · ".join(bits))
             print_manager.preview_document(self, "coa_list", 0)
         except Exception as e:
             from ui.widgets.common import err

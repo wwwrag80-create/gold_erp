@@ -971,9 +971,11 @@ class TaxSalesScreen(QtWidgets.QWidget):
     def print_register(self):
         try:
             from services import print_manager
+            # 5.0.1: بحث السجل ونوعه كما على الشاشة
             print_manager.preview_document(
                 self, "tax_sales_register", 0, date_from=dstr(self.r_from),
-                date_to=dstr(self.r_to))
+                date_to=dstr(self.r_to), q=self.r_q.text().strip(),
+                kind=self.r_kind.currentData())
         except Exception as e:
             err(self, e)
 
