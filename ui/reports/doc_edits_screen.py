@@ -26,6 +26,7 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 
 def snum(v, d=2):
@@ -115,7 +116,7 @@ class DocEditsScreen(QtWidgets.QWidget):
         _enhance(self.t_rows, key="doc_edits_rows2")
         self.t_rows.cellDoubleClicked.connect(
             lambda r, _c: self.open_compare(r))
-        self.t_rows.cellClicked.connect(self._cell_clicked)
+        self.t_rows.cellClicked.connect(guard_click(self._cell_clicked, 0.3))
         self.t_users = make_table()
         _enhance(self.t_users, key="doc_edits_users")
         self.t_types = make_table()

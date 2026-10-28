@@ -17,6 +17,7 @@ from database.database import db
 from models import inventory, pending
 from models.accounts import acc_id
 from services import drafts, gold_math, karat_view as kv
+from ui.widgets.draft_keeper import keep as keep_draft
 from ui.widgets.common import (busy, confirm_post, posted, ask, big_label,
                                date_edit, dstr, enter_chain, err, fill,
                                load_pref, make_table, mspin,
@@ -25,6 +26,7 @@ from ui.widgets.common import (busy, confirm_post, posted, ask, big_label,
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.model_pic import ModelPic  # noqa: F401 (4.93: مشتركة)
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 DRAFT_KEY = "production"
 
@@ -176,8 +178,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
     # عمود الأجر حُذف مع خانته: التوريد لا يُسأل فيه عن أجر.
     COLS = ["", "رقم الموديل", "رقم التشغيل", "العيار", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
-            "الأحجار بعد الخصم", "نسبة الخصم", "ملاحظات"]
-    COL_W = [6, 10, 10, 6, 9, 9, 8, 8, 8, 9, 7, 10]
+            "الأحجار بعد الخصم", "💎 الماس", "نسبة الخصم", "ملاحظات"]
+    COL_W = [6, 9, 10, 6, 9, 9, 8, 7, 7, 9, 6, 6, 8]
 
     def __init__(self, user):
         super().__init__()
@@ -294,7 +296,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.reg.setReadOnly(True)
         self.reg.setToolTip(
             "الوزن المقيد = الذهب + الفصوص + الأحجار بعد الخصم — "
-            "وهو وحده صاحب الأثر المالي والمخزني. يُحسب تلقائياً.")
+            "وهو وحده صاحب الأثر المالي والمخزني. يُحسب تلقائياً."
+            " (الماس لا يدخله.)")
         self.standing = wspin()
         self.standing.setReadOnly(True)
         self.standing.setToolTip(
@@ -325,6 +328,12 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.after.setReadOnly(True)
         self.after.setToolTip(
             "الأحجار بعد الخصم = وزن الأحجار × (1 − نسبة الخصم)")
+        # 5.0: الماس **للعرض والمعرفة** — لا يدخل المقيد ولا القائم ولا
+        # القيد. يُحفظ على بطاقة الطقم ويظهر في فاتورته وكشف الحساب.
+        self.diamond = wspin()
+        self.diamond.setToolTip(
+            "وزن الماس — للعرض والمعرفة فقط: لا يدخل الوزن المقيد ولا"
+            " القائم ولا أي قيد. يظهر في فاتورة الطقم وفي كشف الحساب.")
         self.btn_rate = kit.PushButton(f"خصم {self.rate*100:.0f}%")
         self.btn_rate.setObjectName("ghost")
         self.btn_rate.setMaximumWidth(96)
@@ -375,6 +384,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             ("الفصوص", self.small, 2),
             ("الأحجار", self.big, 2),
             ("الأحجار بعد الخصم", after_box, 3),
+            ("💎 الماس", self.diamond, 2),
             ("ملاحظات", self.notes, 2),
             ("الوزن المقيد", self.reg, 2),
             ("الوزن القائم", self.standing, 2),
@@ -395,7 +405,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         # إضافة السطر يعود المؤشر إليه لا إلى الموديل — الموديل ثابتٌ
         # لأطقم الدفعة، والرقم هو ما يتغيّر في كل سطر.
         self._chain = [self.model_no, self.wo_no, self.gold, self.small,
-                       self.big, self.notes, self.karat]
+                       self.big, self.diamond, self.notes, self.karat]
         enter_chain(self, self._chain, on_last=self._add_from_enter,
                     require={self.wo_no:
                              lambda: bool(self.wo_no.text().strip())})
@@ -474,8 +484,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
     def _build_urgent(self):
         w = QtWidgets.QWidget()
         self.urgent_tbl = make_table()
-        self.urgent_tbl.doubleClicked.connect(
-            lambda *_: self.complete_selected())
+        self.urgent_tbl.doubleClicked.connect(guard_click(
+            lambda *_: self.complete_selected()))
         self.urgent_rows = []
         b_open = kit.PushButton("✎ استكمال الدفعة")
         b_open.setObjectName("homeBtn")
@@ -736,7 +746,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         try:
             self.wo_no.clear()
             for w in (self.gold, self.small, self.big, self.after,
-                      self.reg, self.standing):
+                      self.reg, self.standing, self.diamond):
                 w.setValue(0)
             self.notes.clear()
         finally:
@@ -757,6 +767,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 "wo_no": wo_no, "gold": self.gold.value(),
                 "small_stones": self.small.value(),
                 "big_stones": self.big.value(), "discount_rate": self.rate,
+                "diamond": self.diamond.value(),
                 # أجر البطاقة الافتراضي بمكافئ 18 مباشرةً — لا خانة له
                 # في الشاشة، فلا يمرّ بتحويل عيارٍ يقرّبه.
                 "wage18": float(config.DEFAULT_WAGE_PER_GRAM),
@@ -798,6 +809,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         w_big.setValue(b["big_stones"])
         w_rate = mspin()
         w_rate.setValue(b["discount_rate"] * 100)
+        w_dia = wspin()
+        w_dia.setValue(float(b.get("diamond") or 0))
         w_notes = kit.LineEdit(str(b.get("notes") or ""))
         prev = QtWidgets.QLabel("")
         prev.setObjectName("cardSub")
@@ -824,6 +837,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         f.addRow("الفصوص:", w_small)
         f.addRow("الأحجار:", w_big)
         f.addRow("نسبة الخصم %:", w_rate)
+        f.addRow("💎 الماس (للعرض):", w_dia)
         f.addRow("ملاحظات:", w_notes)
         f.addRow("العيار:", w_karat)
         f.addRow(prev)
@@ -852,6 +866,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             "wo_no": no, "gold": w_gold.value(),
             "small_stones": w_small.value(), "big_stones": w_big.value(),
             "discount_rate": w_rate.value() / 100.0,
+            "diamond": w_dia.value(),
             "karat": int(w_karat.currentData() or k0),
             "notes": w_notes.text().strip()})
         self.render_batch()
@@ -865,6 +880,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
     def render_batch(self):
         rows = []
         total18 = 0.0
+        t_dia = 0.0
         for b in self.batch:
             k = int(b.get("karat") or kv.active())
             after = gold_math.stones_after_discount(b["big_stones"],
@@ -877,8 +893,10 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             rows.append(("", b.get("model_no") or "—", b["wo_no"],
                          f"عيار {k}", reg, standing, b["gold"],
                          b["small_stones"], b["big_stones"], after,
+                         float(b.get("diamond") or 0),
                          f"{b['discount_rate']*100:.0f}%",
                          b["notes"] or "—"))
+            t_dia += float(b.get("diamond") or 0)
             # الإجمالي يُجمع بمكافئ 18: أسطرٌ بأعيرةٍ مختلفة لا يصحّ
             # جمعها كما تُعرض.
             total18 += kv.store(reg, k)
@@ -886,7 +904,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             u = kv.active()
             rows.append(("", "الإجمالي", f"{len(self.batch)} طقم",
                          f"عيار {u}", round(kv.g(total18), 3),
-                         "", "", "", "", "", "", ""))
+                         "", "", "", "", "", round(t_dia, 3), "", ""))
         fill(self.grid, self._headers(), rows)
         fit_columns(self.grid, self.COL_W)
         if rows:
@@ -898,7 +916,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                                del_tip="حذف هذا السطر من الدفعة")
         self.totals.setText(
             f"عدد أطقم الدفعة: {len(self.batch)}   |   إجمالي الوزن "
-            f"المقيد: {_nf.f2(kv.g(total18))} {kv.unit()}")
+            f"المقيد: {_nf.f2(kv.g(total18))} {kv.unit()}"
+            + (f"   |   💎 الماس (للعرض): {_nf.f2(t_dia)} جم"
+               if t_dia > 0 else ""))
         self.recalc()
 
     def _headers(self):
@@ -978,6 +998,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 self.draft_note.setVisible(True)
         except Exception:
             pass
+        # 5.0: تُحفظ وهي تُكتب — لا عند المغادرة وحدها (انقطاع الكهرباء)
+        keep_draft(self, DRAFT_KEY, self.user.get("username"))
 
     def on_close(self):
         """يُستدعى من `LazyScreen.release` عند مغادرة الشاشة."""
@@ -1166,6 +1188,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                     "discount_rate": r["discount_rate"],
                     "wage_per_gram": r["wage_per_gram"],
                     "karat": (r["karat"] if "karat" in r.keys() else 0),
+                    "diamond": (r["diamond"] if "diamond" in r.keys()
+                                else 0) or 0,
                     "notes": r["notes"] or ""}) for r in rows]
             else:
                 self.batch = [_to_view({
@@ -1176,6 +1200,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                     "big_stones": r["big_stones"],
                     "discount_rate": r["discount_rate"],
                     "wage_per_gram": r["wage_per_gram"], "karat": 0,
+                    "diamond": (r["diamond_weight"]
+                                if "diamond_weight" in r.keys() else 0) or 0,
                     "notes": r["notes"] or ""}) for r in rows]
             # التاريخ يبقى تاريخ العملية الأصلي: التعديل تصحيح لا
             # عملية جديدة، فتغيير تاريخه يُزحزح الأرصدة التاريخية.

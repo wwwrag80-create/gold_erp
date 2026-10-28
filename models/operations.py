@@ -24,6 +24,7 @@ def _invoice_cart(conn, invoice_id):
         "SELECT it.work_order_id, it.registered_weight, it.wage_per_gram,"
         " COALESCE(it.karat,0) karat, it.wages,"
         " COALESCE(it.line_note,'') line_note,"
+        " COALESCE(it.diamond,0) diamond,"
         " COALESCE(w.is_service,0) is_service"
         " FROM invoice_items it JOIN work_orders w ON w.id=it.work_order_id"
         " WHERE it.invoice_id=? ORDER BY it.id",
@@ -34,6 +35,7 @@ def _invoice_cart(conn, invoice_id):
             {"work_order_id": r["work_order_id"],
              "weight": r["registered_weight"],
              "karat": r["karat"],
+             "diamond": r["diamond"],
              "wage_override": r["wage_per_gram"]} for r in rows]
 
 

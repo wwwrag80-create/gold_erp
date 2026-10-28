@@ -100,6 +100,8 @@ class LazyScreen(QtWidgets.QWidget):
         except Exception:
             pass
         self._real = None
+        # بصمة القراءة الأخيرة تخصّ الشاشة المهدومة — لا التي ستُبنى
+        self.__dict__.pop("_seen_data", None)
         # عنصر نائب حتى الفتح التالي
         try:
             self._placeholder = QtWidgets.QLabel("")

@@ -23,6 +23,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, info,
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 COLS = ["الكود", "اسم الحساب",
         "أول المدة — مدين", "أول المدة — دائن",
@@ -102,7 +103,7 @@ class TrialBalanceScreen(QtWidgets.QWidget):
 
         self.table = make_table()
         _enhance(self.table, key="trial_balance_std")
-        self.table.doubleClicked.connect(lambda *_: self.show_movement())
+        self.table.doubleClicked.connect(guard_click(lambda *_: self.show_movement()))
         self.status = big_label()
         self.status.setWordWrap(True)
 

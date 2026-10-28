@@ -3674,8 +3674,10 @@ def main():
                         "role": "admin", "role_local": "accountant"})
         _scr44.refresh()
         # الترتيب الأحدث: المقيد والقائم والعيار والأجر في آخر السطر
+        # 5.0: «💎 الماس» بعد الأحجار بعد الخصم — للعرض لا للمقيد
         _order44 = [_scr44.model_no, _scr44.barcode, _scr44.line_gold,
                     _scr44.line_small, _scr44.line_big, _scr44.line_after,
+                    _scr44.line_diamond,
                     _scr44.line_reg, _scr44.line_standing,
                     _scr44.line_karat, _scr44.line_wage]
         check("سطر الإدخال بالترتيب المطلوب وEnter يمشي عليه",
@@ -3685,9 +3687,10 @@ def main():
               _scr44.COLS == ["", "الموديل", "الصورة", "رقم التشغيل",
                               "العيار", "الوزن المقيد", "الوزن القائم",
                               "الذهب", "الفصوص", "الأحجار",
-                              "الأحجار بعد الخصم", "الأجر/جم",
+                              "الأحجار بعد الخصم", "💎 الماس", "الأجر/جم",
                               "الأجرة (ريال)"]
               and len(_scr44.COL_W) == len(_scr44.COLS)
+              and sum(_scr44.COL_W) == 100
               and _scr44.COLS[_scr44.C_WAGE] == "الأجر/جم"
               and _scr44.COLS[_scr44.C_AMOUNT] == "الأجرة (ريال)"
               and hasattr(_scr44, "model_pic"),
@@ -4048,8 +4051,8 @@ def main():
               not hasattr(_p47, "wage") and "الأجر/جم" not in _p47.COLS)
         check("والتنقّل: الموديل ← الرقم ← المكوّنات ← الملاحظة ← العيار",
               _p47._chain == [_p47.model_no, _p47.wo_no, _p47.gold,
-                              _p47.small, _p47.big, _p47.notes,
-                              _p47.karat])
+                              _p47.small, _p47.big, _p47.diamond,
+                              _p47.notes, _p47.karat])
         _p47.wo_no.clear()
         _p47.wo_no.setFocus()
         _enter47(_p47.wo_no)
@@ -5373,6 +5376,13 @@ def main():
         import ui.sales_screen as _ssm62
         from ui.widgets.common import save_pref as _sp62
         _sp62("sales_scrap_karat", "", "admin")
+        # 5.0: شاشات الفحوص السابقة حيّةٌ ومسوّداتها تُحفظ وهي تُكتب —
+        # تُوقَف ويُمحى ما حفظته، فالفحص عن الافتراض لا عن مسوّدةٍ مستعادة
+        from ui.widgets import draft_keeper as _dk62
+        for _k in list(_dk62._KEEPERS):
+            _k.timer.stop()
+        from services import drafts as _dr62
+        _dr62.clear("sales", "admin")
         _kv.set_active(21, "admin")
         try:
             _s62 = _ssm62.SalesScreen({"id": 1, "username": "admin",
@@ -9100,6 +9110,95 @@ def main():
               if hasattr(_ss118.SalesScreen, "add_line") else
               "_reg_exact" in Path(_ss118.__file__).read_text(
                   encoding="utf-8"))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("119) 5.0: مسوّدةٌ تنجو من انقطاع الكهرباء · الماس · التجمّد · الأمان")
+    import inspect as _in119
+    from models import inventory as _iv119, invoices as _inv119
+    with db() as _c119:
+        _r119 = _iv119.create_work_orders_batch(_c119, [
+            {"wo_no": "119001", "gold": 10.0, "small_stones": 1.0,
+             "big_stones": 2.0, "discount_rate": 0.5, "diamond": 0.75}],
+            "2026-10-28", "admin")
+        _w119 = _c119.execute("SELECT * FROM work_orders WHERE"
+                              " work_order_no='119001'").fetchone()
+        _cust119 = _c119.execute(
+            "SELECT id FROM entities WHERE entity_type='customer'"
+            " AND is_deleted=0 ORDER BY id LIMIT 1").fetchone()["id"]
+        _s119 = _inv119.create_sale(_c119, _cust119,
+                                    [{"work_order_id": _w119["id"]}],
+                                    "2026-10-28", "admin", False, "")
+        _d119 = _inv119.diamonds_by_invoice(_c119, [_s119["id"]])
+        _html119 = __import__("services.print_manager", fromlist=["x"]) \
+            ._tpl_invoice(_c119, _s119["id"])
+    check("الماس للعرض: لا يدخل المقيد (12 لا 12.75) ولا القائم، ويُحفظ على"
+          " البطاقة وسطر الفاتورة ويظهر في الورقة",
+          abs(_w119["registered_weight"] - 12.0) < 1e-6
+          and abs(_w119["standing_gold"] - 13.0) < 1e-6
+          and abs(_w119["diamond_weight"] - 0.75) < 1e-6
+          and abs(_r119["total_registered"] - 12.0) < 1e-6
+          and abs(_d119.get(_s119["id"], 0) - 0.75) < 1e-6
+          and "الماس" in _html119)
+    with db() as _c119:
+        try:
+            _iv119.create_work_orders_batch(_c119, [
+                {"wo_no": "119002", "gold": 5.0, "diamond": -1}],
+                "2026-10-28", "admin")
+            _neg119 = False
+        except ValueError:
+            _neg119 = True
+    check("والماس السالب يُرفض", _neg119)
+    from database import database as _dbm119
+    _t0 = _dbm119.data_token()
+    with db() as _c119:
+        _c119.execute("SELECT 1").fetchone()
+    _t1 = _dbm119.data_token()
+    with db() as _c119:
+        _c119.execute("UPDATE app_settings SET value=value WHERE 1=0")
+        _c119.execute("INSERT OR REPLACE INTO app_settings(key,value)"
+                      " VALUES('smoke119','1')")
+    _t2 = _dbm119.data_token()
+    check("بصمة البيانات تتغيّر بالكتابة الفعلية وحدها — فالعودة لشاشةٍ لم"
+          " يتغيّر تحتها شيء لا تُعاد قراءتها",
+          _t0 == _t1 and _t2 != _t1)
+    from services import invoice_share as _is119
+    _ep119 = _in119.getsource(_is119.ensure_published)
+    check("رفع صفحة الفاتورة لا يحبس قفل الكتابة (معاملةٌ قصيرة لكل عبارة)",
+          "_ShortTx()" in _ep119 and "with db() as conn" not in _ep119)
+    from services import cloud_auth as _ca119
+    _sql119 = (Path(ROOT) / "cloud" / "admin_rpc.sql").read_text(
+        encoding="utf-8")
+    check("الدخول السحابي بإثبات كلمة المرور: لا تعود البصمة ولا الرمز"
+          " الإداري لمن يعرف الاسم وحده، وقفلٌ بعد محاولاتٍ خاطئة",
+          "auth_login2" in _sql119 and "auth_salt" in _sql119
+          and "failed_logins" in _sql119
+          and "NULL::TEXT, u.tenant_id" in _sql119
+          and _ca119.RPC_EXPECTED == "3.0.0"
+          and "_secure_login" in _in119.getsource(_ca119.login))
+    _sa119 = (Path(ROOT) / "ui" / "super_admin_screen.py").read_text(
+        encoding="utf-8")
+    check("شاشة الإدارة العليا بكلمة مرور المدير لا برمزٍ مكتوب في الشيفرة",
+          "ACCESS_CODE" not in _sa119 and "_password_ok" in _sa119)
+    try:
+        from ui.widgets import draft_keeper as _dk119
+        from ui.widgets.common import guard_click as _gc119
+        _hits = []
+        _g = _gc119(lambda: _hits.append(1), 0.5)
+        _g()
+        _g()
+        check("نقرٌ متلاحق على الجدول لا يكرّر العمل الثقيل",
+              _hits == [1])
+        _srcs = {m: (Path(ROOT) / "ui" / f"{m}.py").read_text(
+            encoding="utf-8") for m in ("sales_screen", "production_screen",
+                                        "vouchers_screen", "melting_screen",
+                                        "journal_screen")}
+        check("المسوّدة تُحفظ وهي تُكتب في المبيعات والوارد والسندات والصب"
+              " والقيود — لا عند المغادرة وحدها",
+              all("keep_draft(self, DRAFT_KEY" in v for v in _srcs.values())
+              and callable(_dk119.flush_all)
+              and "flush_all" in (Path(ROOT) / "ui" / "main_window.py")
+              .read_text(encoding="utf-8"))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

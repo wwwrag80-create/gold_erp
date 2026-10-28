@@ -29,6 +29,7 @@ from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import (TOTAL_ROLE, enhance, export_csv,
                                     total_row)
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 ACC_ROLE = QtCore.Qt.UserRole + 11          # معرّف الحساب في خلية الاسم
 
@@ -269,7 +270,7 @@ class CustomersScreen(QtWidgets.QWidget):
         t.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         t.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         t.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        t.doubleClicked.connect(self.open_ledger)
+        t.doubleClicked.connect(guard_click(self.open_ledger))
         t.itemSelectionChanged.connect(self._selection_changed)
         t.currentCellChanged.connect(
             lambda *_: self._selection_changed())

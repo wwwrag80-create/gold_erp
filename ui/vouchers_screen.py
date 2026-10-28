@@ -10,6 +10,7 @@ from database.database import db
 from models import coa, editing, entities, inventory, vouchers
 from models.accounts import list_postable
 from services import drafts, gold_math, karat_view as kv
+from ui.widgets.draft_keeper import keep as keep_draft
 from services.accounting_engine import account_balance
 from ui.widgets.common import (busy, confirm_post, big_label, posted, date_edit, dstr, enter_chain, err,
                                fill, info, make_table, mspin, reload_combo,
@@ -683,6 +684,8 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                 self.draft_note.setVisible(True)
         except Exception:
             pass
+        # 5.0: تُحفظ وهي تُكتب — لا عند المغادرة وحدها (انقطاع الكهرباء)
+        keep_draft(self, DRAFT_KEY, self.user.get("username"))
 
     def _drop_draft(self):
         """يمحو المسوّدة — فور الترحيل."""

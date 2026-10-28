@@ -221,6 +221,37 @@ def batch_note(reference, rows):
     return "  —  ".join(parts)
 
 
+def diamond_of(r):
+    """وزن الماس في سطر — للعرض وحده (5.0). السالب خطأ إدخال."""
+    try:
+        d = float(r.get("diamond") or 0)
+    except (TypeError, ValueError):
+        d = 0.0
+    if d < 0:
+        raise ValueError(f"وزن الماس لا يكون سالباً — الطقم "
+                         f"{r.get('wo_no') or ''}")
+    return round(d, 3)
+
+
+def sync_diamonds(conn, entry_id, rows):
+    """الماس على بطاقات أطقم الدفعة وأسطرها — بلا أي أثرٍ في الوزن
+    المقيد أو القائم أو القيد (5.0: «الماس للعرض والمعرفة»).
+
+    يُكتب بعد إنشاء الدفعة أو تعديلها، ولو لم يتغيّر غيرُه: تصحيح
+    الماس وحده لا يمسّ حساباً، فيُحدَّث حتى على طقمٍ بيع."""
+    for r in rows:
+        no = str(r.get("wo_no") or "").strip()
+        if not no or is_bulk_no(no):
+            continue
+        d = diamond_of(r)
+        conn.execute("UPDATE wo_batch_lines SET diamond=?"
+                     " WHERE entry_id=? AND wo_no=?", (d, entry_id, no))
+        conn.execute(
+            "UPDATE work_orders SET diamond_weight=? WHERE is_deleted=0"
+            " AND work_order_no=? AND id IN (SELECT work_order_id FROM"
+            " wo_batch_lines WHERE entry_id=?)", (d, no, entry_id))
+
+
 def create_work_orders_batch(conn, rows, entry_date, username,
                              dest_account_id=None, scrap_karat=None,
                              reference=""):
@@ -257,6 +288,7 @@ def create_work_orders_batch(conn, rows, entry_date, username,
             raise ValueError(f"الأوزان لا تقبل السالب للطقم {wo_no}")
         if gold + small + big <= 0:
             raise ValueError(f"أدخل وزناً صحيحاً للطقم {wo_no}")
+        diamond_of(r)             # الماس لا يدخل المقيد — والسالب خطأ
         if not 0 <= rate <= 1:
             raise ValueError(f"نسبة الخصم غير منطقية للطقم {wo_no}")
         # الأجر صفر مقبول محاسبياً (تشغيل بلا أجر أو أجر يُحدَّد لاحقاً)،
@@ -371,6 +403,8 @@ def create_work_orders_batch(conn, rows, entry_date, username,
              p_["gold"], p_["small"], p_["big"], p_["rate"],
              p_["reg"], p_.get("wage", 0), p_.get("notes", ""),
              p_.get("karat", 0), i))
+
+    sync_diamonds(conn, entry_id, rows)
 
     # توريدٌ إلى صندوق الكسر: يزيد الصندوق بعياره لا الحساب وحده
     _k = int(scrap_karat or 0)
@@ -1606,6 +1640,8 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
         conn.execute("DELETE FROM wo_batch_lines WHERE id=?", (ln["id"],))
         delta -= old_reg
         removed.append(no)
+
+    sync_diamonds(conn, entry_id, rows)
 
     # ══ نقل حساب الوجهة ══
     # البضاعة دخلت المخزن الخطأ: لا يُصحَّح بقيدٍ ثانٍ (فتُقرأ

@@ -20,6 +20,7 @@ from database.database import db
 from services import karat_view as kv
 from ui.widgets.common import err, make_table, title_label
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 # ما تستبعده كل قائمة من القيود — فيطابق آخرُ رصيدٍ رقمَها
 # · قائمة الدخل: قيد الإقفال السنوي (يصفّر الإيراد والمصروف)
@@ -75,7 +76,7 @@ class AccountMovementDialog(QtWidgets.QDialog):
         sub.setWordWrap(True)
 
         self.table = make_table()
-        self.table.doubleClicked.connect(lambda *_: self.open_selected())
+        self.table.doubleClicked.connect(guard_click(lambda *_: self.open_selected()))
         self.summary = QtWidgets.QLabel("")
         self.summary.setObjectName("big")
         self.summary.setWordWrap(True)
@@ -269,7 +270,7 @@ class AccountsPicker(QtWidgets.QDialog):
                                      else QtCore.Qt.AlignHCenter)
                                     | QtCore.Qt.AlignVCenter)
                 t.setItem(i, c, it)
-        t.doubleClicked.connect(lambda *_: self.open_selected())
+        t.doubleClicked.connect(guard_click(lambda *_: self.open_selected()))
         b_mov = kit.PushButton("🔎 تفصيل حركة الحساب المحدد")
         b_mov.setObjectName("homeBtn")
         b_mov.clicked.connect(self.open_selected)

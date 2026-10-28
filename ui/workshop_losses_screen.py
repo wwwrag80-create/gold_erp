@@ -22,6 +22,7 @@ from ui.widgets.common import (ask, big_label, confirm_post, date_edit, dstr,
                                err, fill, info, make_table, posted,
                                reload_combo, search_combo, title_label, wspin)
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 KIND_ITEMS = (("payment", "صرف — يخرج الذهب من خزينة التصنيع"),
               ("receipt", "قبض — يعود الذهب إلى خزينة التصنيع"))
@@ -94,7 +95,7 @@ class WorkshopLossesScreen(QtWidgets.QWidget):
 
         self.treasury = big_label()
         self.table = make_table()
-        self.table.doubleClicked.connect(lambda *_: self.print_selected())
+        self.table.doubleClicked.connect(guard_click(lambda *_: self.print_selected()))
         self.totals = big_label()
 
         btn_refresh = kit.PushButton("↻ تحديث")

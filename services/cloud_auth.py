@@ -29,7 +29,7 @@ ADMIN_TOKEN_FILE = config.BASE_DIR / "data" / "admin_token.json"
 OFFLINE_GRACE_DAYS = 30
 
 # إصدار دوال الخادم المتوقَّع — إن اختلف فالترقية لم تُنفَّذ
-RPC_EXPECTED = "2.1.0"
+RPC_EXPECTED = "3.0.0"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -56,9 +56,12 @@ def _cache_write(data):
 
 def _cache_put(username, row):
     data = _cache_read()
-    data.setdefault("users", {})[username.lower()] = {
+    old = data.setdefault("users", {}).get(username.lower()) or {}
+    data["users"][username.lower()] = {
         "tenant_id": row.get("tenant_id", ""),
-        "password_hash": row.get("password_hash", ""),
+        # 3.0.0: حالة الحساب (حارس الإيقاف) تصل بلا بصمة — فتبقى المحفوظة
+        "password_hash": (row.get("password_hash")
+                          or old.get("password_hash", "")),
         "role": row.get("role") or ROLE_FACTORY,
         "full_name": row.get("full_name") or username,
         "is_active": bool(row.get("is_active", True)),
@@ -154,12 +157,61 @@ def _rpc(fn, payload, timeout=25):
         raise ValueError(msg or f"خطأ من الخادم ({e.code})") from e
 
 
+def _missing_fn(e):
+    """هل الخطأ أن الدالة ليست على الخادم بعد (ملف SQL لم يُنفَّذ)؟"""
+    return "غير موجودة على الخادم" in str(e)
+
+
+def _first(rows):
+    if isinstance(rows, list):
+        return dict(rows[0]) if rows else None
+    return dict(rows) if isinstance(rows, dict) else None
+
+
 def fetch_user(username, timeout=15):
-    """يجلب سجل المستخدم عبر دالة الخادم."""
-    rows = _rpc("auth_login", {"p_username": username}, timeout=timeout)
-    if not rows:
+    """حالة الحساب (فعّال؟ دوره؟ مصنعه؟) — **بلا أسرار** (3.0.0).
+
+    يُسأل `auth_status`؛ وعلى خادمٍ لم يُرقَّ بعد `auth_login` القديمة."""
+    try:
+        return _first(_rpc("auth_status", {"p_username": username},
+                           timeout=timeout))
+    except ValueError as e:
+        if not _missing_fn(e):
+            raise
+    return _first(_rpc("auth_login", {"p_username": username},
+                       timeout=timeout))
+
+
+def _secure_login(username, password, timeout=15):
+    """الدخول بإثبات كلمة المرور للخادم (3.0.0) — لا تعود بصمتها ولا تُرسل.
+
+    يعيد سجلّ المستخدم عند المطابقة، و{} عند الرفض، وNone إن لم تكن
+    دوال 3.0.0 على الخادم بعد (فيُستعمل الطريق القديم إلى أن يُنفَّذ
+    ملف SQL). والبصمة المحلية للدخول بلا إنترنت تُبنى هنا من الملح
+    والإثبات نفسيهما."""
+    import hashlib
+    from services.auth import ITER
+    try:
+        salt = _rpc("auth_salt", {"p_username": username}, timeout=timeout)
+    except ValueError as e:
+        if _missing_fn(e):
+            return None
+        raise
+    if not isinstance(salt, str) or not salt.strip():
         return None
-    return rows[0] if isinstance(rows, list) else rows
+    salt = salt.strip()
+    try:
+        raw_salt = bytes.fromhex(salt)
+    except ValueError:
+        return {}
+    proof = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                raw_salt, ITER).hex()
+    row = _first(_rpc("auth_login2", {"p_username": username,
+                                      "p_proof": proof}, timeout=timeout))
+    if not row:
+        return {}
+    row["password_hash"] = f"{salt}${proof}"
+    return row
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -208,18 +260,26 @@ def login(username, password):
     except Exception:
         pass
 
-    # (2) الحساب السحابي
+    # (2) الحساب السحابي — بالإثبات الآمن، أو بالطريق القديم إلى أن
+    #     يُنفَّذ ملف SQL الجديد على الخادم
     online, row, net_err = True, None, ""
+    secure = None
     try:
-        row = fetch_user(username)
+        secure = _secure_login(username, password)
+        if secure is None:
+            row = _first(_rpc("auth_login", {"p_username": username}))
     except ValueError:
         raise                      # رسالة الخادم الواضحة تُعرض كما هي
     except Exception as e:
         online, net_err = False, type(e).__name__
 
     if online:
-        if not row or not verify_password(password,
-                                          row.get("password_hash", "")):
+        if secure is not None:
+            if not secure:
+                raise ValueError("اسم المستخدم أو كلمة المرور غير صحيحة")
+            row = secure
+        elif not row or not verify_password(password,
+                                            row.get("password_hash", "")):
             raise ValueError("اسم المستخدم أو كلمة المرور غير صحيحة")
         if not bool(row.get("is_active", True)):
             raise ValueError("الحساب موقوف — يرجى مراجعة الإدارة")
@@ -276,9 +336,10 @@ def _admin_call(fn, payload, timeout=20):
         if "رمز إداري" in str(e):
             clear_admin_token()
             raise ValueError(
-                "الرمز الإداري لم يعد صالحاً (حُذفت الحسابات من "
-                "السحابة).\n\nأنشئ حساب المدير العام من جديد: ضع "
-                "علامة «حساب مدير عام» واكتب اسماً وكلمة مرور.") from e
+                "الرمز الإداري لم يعد صالحاً — جُدِّد على الخادم (ترقية "
+                "الأمان 3.0.0) أو حُذفت الحسابات.\n\nسجّل الخروج ثم ادخل "
+                "بحساب المدير العام فيُحفظ رمزه الجديد. وإن حُذفت "
+                "الحسابات فأنشئ المدير العام من جديد.") from e
         raise
 
 

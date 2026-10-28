@@ -754,6 +754,44 @@ def mark_cancelled(invoice_id, company=""):
     return ""
 
 
+class _Rows:
+    """نتيجة عبارةٍ نُفّذت في معاملتها القصيرة — بواجهة المؤشّر نفسها."""
+
+    def __init__(self, rows, lastrowid=None):
+        self._rows = list(rows or [])
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
+class _ShortTx:
+    """اتصالٌ بديل: **كل عبارةٍ في معاملةٍ قصيرة وحدها** (5.0).
+
+    **الخلل**: الرفع إلى السحابة كان يجري داخل `with db()` — معاملة
+    كتابة مفتوحة طوال رفع الصورة (حتى ثماني ثوانٍ لكل ملف). فإن رحّل
+    المستخدم الفاتورة التالية أو فتح شاشةً تكتب، انتظرت الواجهة القفل
+    حتى ثلاثين ثانية: شاشةٌ بيضاء و«لا يستجيب» ثم تعود — وأكثر ما يقع
+    مع سرعة الإدخال، وهو ما شُكي منه بالضبط.
+
+    هنا تُفتح المعاملة للعبارة وتُغلق فوراً، والشبكة بين عبارتين لا
+    تحبس شيئاً. والقراءات بلا قفل كتابة (`readonly`)."""
+
+    def execute(self, sql, params=()):
+        from database.database import db
+        head = str(sql).lstrip()[:6].upper()
+        ro = head.startswith("SELECT") or head.startswith("WITH")
+        with db(readonly=ro) as c:
+            cur = c.execute(sql, params)
+            return _Rows(cur.fetchall(), getattr(cur, "lastrowid", None))
+
+
 def ensure_published(invoice_id, company=""):
     """ينشر صفحة الفاتورة سحابياً — **بعد الترحيل وخارج أي معاملة**.
 
@@ -778,8 +816,8 @@ def ensure_published(invoice_id, company=""):
             models = model_lines(conn, invoice_id)
         if not data:
             return ""
-        with db() as conn:
-            return cloud_publish(conn, invoice_id, data, models, company)
+        # الشبكة خارج أي معاملة فعلاً: كل كتابةٍ تُفتح وتُغلق وحدها
+        return cloud_publish(_ShortTx(), invoice_id, data, models, company)
     except Exception:
         return ""             # النشر رفاهية لا تُعطّل ترحيلاً تمّ
 

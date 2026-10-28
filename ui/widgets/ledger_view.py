@@ -27,6 +27,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ui import kit
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 TEXT, MONEY, WEIGHT, NUMBER = "text", "money", "weight", "number"
 SUMMED = (MONEY, WEIGHT)
@@ -286,7 +287,7 @@ class LedgerView(kit.TableView):
             pass
         self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._menu)
-        self.doubleClicked.connect(self._activated)
+        self.doubleClicked.connect(guard_click(self._activated))
         # بلا فرزٍ في أول عرض: الترتيب ترتيب القاعدة (الأحدث أولاً)
         hh.setSortIndicator(-1, QtCore.Qt.AscendingOrder)
 

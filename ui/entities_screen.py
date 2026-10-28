@@ -14,6 +14,7 @@ from ui.widgets.common import (TitledSections, ask, big_label, date_edit,
                                style_group_row, wspin)
 from ui.widgets.table_tools import enhance
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 TYPE_ITEMS = [("عميل", "customer"), ("مورد", "supplier"),
               ("شريك", "partner"), ("موظف", "employee"),
@@ -135,7 +136,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         # بالترتيب، فإعادة ترتيبها تجعل «احذف المحدد» يحذف غير المحدد.
         enhance(self.table, key="entities", sortable=False)
         self.table.itemSelectionChanged.connect(self._row_selected)
-        self.table.doubleClicked.connect(lambda *_: self.edit_selected())
+        self.table.doubleClicked.connect(guard_click(lambda *_: self.edit_selected()))
         self.summary = big_label()
         self.summary.setWordWrap(True)
 

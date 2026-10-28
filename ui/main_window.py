@@ -958,6 +958,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fn = getattr(scr.real, "refresh", None)
             if callable(fn):
                 fn()
+                self._mark_read(scr)
             alive = self.__dict__.setdefault("_alive", [])
             if row not in alive:
                 alive.insert(0, row)      # الأقدم: يُهدم أولاً إن زادت
@@ -1120,7 +1121,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # والشاشة المبنيّة الآن حُمّلت قبل ظهورها: لا تُقرأ مرتين.
         QtCore.QTimer.singleShot(0, lambda: self._mount_screen_tools(screen))
         if hasattr(screen, "refresh") and not fresh:
-            QtCore.QTimer.singleShot(0, self._refresh_current)
+            self._schedule_refresh()
+        elif fresh:
+            self._mark_read(target)
 
     def _on_update_checked(self):
         """يضيء زر التحديثات إن كان هناك إصدار أحدث منشور."""
@@ -1491,16 +1494,62 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             err(self, e)
 
-    def _refresh_current(self):
-        """يحدّث الشاشة الظاهرة حالياً، بحماية من أي استثناء."""
+    # إعادة قراءة الشاشة عند العودة إليها تُتخطّى إن لم يتغيّر شيء في
+    # البيانات منذ آخر قراءة — ما لم يمضِ عليها هذا القدر (ثوانٍ)
+    STALE_AFTER = 120
+
+    @staticmethod
+    def _mark_read(scr):
+        """تُختم الشاشة ببصمة البيانات التي قُرئت عليها."""
+        try:
+            import time as _t
+            from database.database import data_token
+            scr._seen_data = (data_token(), _t.monotonic())
+        except Exception:
+            pass
+
+    def _schedule_refresh(self):
+        """طلب تحديث الشاشة الظاهرة — **مرةً واحدة** مهما تكرّر الطلب.
+
+        التنقّل السريع بين الشاشات كان يُصفّ تحديثاً لكل نقرة، فتُقرأ
+        القاعدة خمس مرات لشاشةٍ واحدة تظهر في الآخر — وتبيضّ النافذة
+        حتى تنتهي. الآن المؤقّت يُعاد ضبطه مع كل نقرة، فلا يُحدَّث إلا
+        ما استقرّ عليه المستخدم."""
+        t = self.__dict__.get("_rf_timer")
+        if t is None:
+            t = QtCore.QTimer(self)
+            t.setSingleShot(True)
+            t.setInterval(60)
+            t.timeout.connect(lambda: self._refresh_current(force=False))
+            self._rf_timer = t
+        t.start()
+
+    def _refresh_current(self, force=True):
+        """يحدّث الشاشة الظاهرة حالياً، بحماية من أي استثناء.
+
+        `force=False` (العودة إلى شاشةٍ حيّة): تُتخطّى القراءة إن لم يتغيّر
+        في البيانات شيء منذ آخر قراءةٍ لها، ولم يمضِ عليها `STALE_AFTER`.
+        وF5 والمظهر يُجبرانها دائماً."""
         try:
             row = getattr(self, "_current_row", 0)
             if not (0 <= row < len(self.screens)):
                 return
             scr = self.screens[row]
             fn = getattr(scr, "refresh", None)
-            if callable(fn):
-                fn()
+            if not callable(fn):
+                return
+            if isinstance(scr, Lazy) and not scr.built:
+                force = True          # شاشةٌ تُبنى الآن: تُقرأ دائماً
+            if not force:
+                import time as _t
+                from database.database import data_token, in_transaction
+                seen = getattr(scr, "_seen_data", None)
+                if seen is not None and not in_transaction() \
+                        and seen[0] == data_token() \
+                        and _t.monotonic() - seen[1] < self.STALE_AFTER:
+                    return            # لا جديد تحتها — تظهر كما تُركت
+            fn()
+            self._mark_read(scr)
         except Exception:
             pass          # فشل التحديث لا يُجمّد النظام
 
@@ -2392,6 +2441,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # ضمان أخير: يُحفظ ترتيب القائمة وأسماؤها قبل الإغلاق
         try:
             self._save_nav_layout()
+        except Exception:
+            pass
+        try:
+            # 5.0: ما لم يُرحَّل في الشاشات الحيّة يُحفظ قبل نسخة الإغلاق
+            from ui.widgets.draft_keeper import flush_all
+            flush_all()
         except Exception:
             pass
         try:

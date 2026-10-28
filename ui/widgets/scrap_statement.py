@@ -17,6 +17,7 @@ from database.database import db
 from services import karat_view as kv
 from ui.widgets.common import err, make_table, title_label
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 
 def _w(v):
@@ -42,7 +43,7 @@ class ScrapKaratDialog(QtWidgets.QDialog):
             " أي سطر يفتح السند الذي أنشأه")
         sub.setWordWrap(True)
         self.table = make_table()
-        self.table.doubleClicked.connect(lambda *_: self.open_selected())
+        self.table.doubleClicked.connect(guard_click(lambda *_: self.open_selected()))
         self.summary = QtWidgets.QLabel("")
         self.summary.setObjectName("big")
         self.summary.setWordWrap(True)

@@ -188,6 +188,9 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
         # مستقلة — ولا يميّزها إلا هذا. (تفصيله في `update_invoice`.)
         out.append({"wo": wo, "weight": round(weight, 3), "wage": wage,
                     "item_id": c.get("item_id"),
+                    # 5.0: الماس للعرض — لا يدخل الوزن ولا الأجر ولا القيد
+                    "diamond": _cart_diamond(c, wo, weight),
+                    "diamond_given": c.get("diamond") not in (None, ""),
                     # عيار الإدخال: وصفٌ لا حساب — الوزن والأجر
                     # وصلا هنا بمكافئ 18 على أي حال.
                     "karat": int(c.get("karat") or 0),
@@ -196,6 +199,24 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
                             if stock_home.home_of(wo) else None),
                     "note": str(c.get("note") or "").strip()})
     return out
+
+
+def _cart_diamond(c, wo, weight18):
+    """ماس السطر: المكتوب في الشاشة إن مُرِّر، وإلا ماس بطاقة الطقم
+    بنسبة الوزن المباع منه (بيع جزءٍ يحمل جزءاً من ماسه)."""
+    if wo["is_bulk"]:
+        return 0.0
+    d = c.get("diamond")
+    if d not in (None, ""):
+        try:
+            return round(max(0.0, float(d)), 3)
+        except (TypeError, ValueError):
+            return 0.0
+    card = float((wo["diamond_weight"] if "diamond_weight" in wo.keys()
+                  else 0) or 0)
+    full = float(wo["registered_weight"] or 0)
+    f = min(1.0, float(weight18 or 0) / full) if full > 0.001 else 1.0
+    return round(card * f, 3)
 
 
 def _line_wages(li, internal):
@@ -521,11 +542,11 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
         conn.execute(
             "INSERT INTO invoice_items(invoice_id,work_order_id,"
             "registered_weight,wage_per_gram,wages,karat,"
-            "stock_account_id,line_note)"
-            " VALUES(?,?,?,?,?,?,?,?)",
+            "stock_account_id,line_note,diamond)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
             (inv_id, wo["id"], li["weight"], li["wage"], w,
              int(li.get("karat") or 0), li.get("acc"),
-             li.get("note") or ""))
+             li.get("note") or "", li.get("diamond") or 0.0))
         if li.get("wage_only"):
             continue                 # أجرٌ فقط: لا مخزون يتحرّك
         if kind == "sale_return" and not wo["is_bulk"] and not li.get("acc"):
@@ -624,11 +645,46 @@ def get_invoice_full(conn, invoice_id):
         "SELECT it.id item_id, it.work_order_id, it.registered_weight,"
         " it.wage_per_gram, it.wages, COALESCE(it.karat,0) karat,"
         " COALESCE(it.line_note,'') line_note, it.stock_account_id,"
+        " COALESCE(it.diamond,0) diamond,"
         " w.work_order_no, w.is_bulk, COALESCE(w.is_service,0) is_service,"
         " w.gold_weight, w.small_stones, w.big_stones, w.stones_after_discount"
         " FROM invoice_items it JOIN work_orders w ON w.id=it.work_order_id"
         " WHERE it.invoice_id=? ORDER BY it.id", (invoice_id,)).fetchall()
     return inv, items
+
+
+def set_diamonds(conn, invoice_id, cart):
+    """الماس على أسطر الفاتورة (5.0) — للعرض وكشف الحساب وحدهما.
+
+    لا يدخل الوزن المقيد ولا الأجور ولا القيد، فيُكتب بعد ترحيل
+    الفاتورة أو تعديلها في المعاملة نفسها. السطر المحمَّل من فاتورةٍ
+    تُعدَّل يُعرف برقمه، والمُضاف حديثاً بطقمه."""
+    for c in cart or ():
+        wid = c.get("work_order_id")
+        if not wid or c.get("wage_only"):
+            continue
+        try:
+            d = round(max(0.0, float(c.get("diamond") or 0)), 3)
+        except (TypeError, ValueError):
+            d = 0.0
+        if c.get("item_id"):
+            conn.execute("UPDATE invoice_items SET diamond=? WHERE id=?"
+                         " AND invoice_id=?", (d, c["item_id"], invoice_id))
+        else:
+            conn.execute("UPDATE invoice_items SET diamond=? WHERE"
+                         " invoice_id=? AND work_order_id=?",
+                         (d, invoice_id, wid))
+
+
+def diamonds_by_invoice(conn, invoice_ids):
+    """{فاتورة: مجموع الماس} — لخيار «💎 الماس» في كشف الحساب."""
+    ids = sorted({int(i) for i in invoice_ids if i})
+    if not ids:
+        return {}
+    q = ",".join("?" * len(ids))
+    return {r["invoice_id"]: float(r["d"] or 0) for r in conn.execute(
+        "SELECT invoice_id, SUM(COALESCE(diamond,0)) d FROM invoice_items"
+        f" WHERE invoice_id IN ({q}) GROUP BY invoice_id", ids)}
 
 
 def recent_invoices(conn, limit=20):
@@ -1103,16 +1159,20 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                     break
         if prev is not None:
             claimed.add(prev["id"])
+            # الماس وحده تغيّر؟ يُحدَّث بلا أثرٍ في وزنٍ أو قيد
+            if li.get("diamond_given"):
+                conn.execute("UPDATE invoice_items SET diamond=? WHERE id=?",
+                             (li.get("diamond") or 0.0, prev["id"]))
 
         if prev is None:
             conn.execute(
                 "INSERT INTO invoice_items(invoice_id,work_order_id,"
                 "registered_weight,wage_per_gram,wages,karat,"
-                "stock_account_id,line_note)"
-                " VALUES(?,?,?,?,?,?,?,?)",
+                "stock_account_id,line_note,diamond)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
                 (invoice_id, wid, w, wage, wages,
                  int(li.get("karat") or 0), li.get("acc"),
-                 li.get("note") or ""))
+                 li.get("note") or "", li.get("diamond") or 0.0))
             if _svc:
                 dg += wages
                 added.append(f"{wo['work_order_no']} {_nf.f2(wages)}")

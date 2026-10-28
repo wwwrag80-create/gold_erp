@@ -22,6 +22,7 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err,
                                info, make_table, search_combo,
                                title_label)
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 def ACC_COLS_NOW():
     """عناوين أعمدة الأرصدة بعيار المصنع الفعّال."""
@@ -166,7 +167,7 @@ class DashboardScreen(QtWidgets.QWidget):
                            btn_ratio]
 
         self.table = make_table()
-        self.table.doubleClicked.connect(self._drill_row)
+        self.table.doubleClicked.connect(guard_click(self._drill_row))
         # لوحة صناديق الكسر: نقرةٌ واحدة على العيار تفتح كشفه
         self.table.clicked.connect(self._click_row)
         self.totals = big_label()

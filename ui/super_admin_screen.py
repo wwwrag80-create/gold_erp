@@ -25,30 +25,54 @@ USER_COLS = ["اسم المستخدم", "المصنع", "هوية المصنع",
 
 
 class SuperAdminScreen(QtWidgets.QWidget):
-    # ══ رمز دخول الشاشة ══
+    # ══ تأكيد الهوية قبل فتح الشاشة ══
     # هذه الشاشة تدير المصانع والنظام السحابي كله، فخطؤها يمسّ كل
-    # العملاء لا مصنعاً واحداً. الرمز طبقة ثانية بعد تسجيل الدخول:
-    # حتى لو تُرك الجهاز مفتوحاً لا تُفتح بنقرة.
-    ACCESS_CODE = "alshabahi"
+    # العملاء لا مصنعاً واحداً. فهي طبقة ثانية بعد تسجيل الدخول: حتى
+    # لو تُرك الجهاز مفتوحاً لا تُفتح بنقرة.
+    # 5.0: **كلمة مرور المدير العام نفسه** لا رمزٌ ثابت مكتوبٌ في الشيفرة
+    # — كان الرمز مقروءاً لكل من رأى الشيفرة أو فكّ الملف التنفيذي.
     _unlocked = False
 
+    @staticmethod
+    def _password_ok(username, plain):
+        """كلمة المرور تطابق حساب المستخدم الحالي (سحابياً أو محلياً)."""
+        if not username or not plain:
+            return False
+        try:
+            from services import cloud_auth
+            from services.auth import verify_password
+            c = cloud_auth._cache_get(username)
+            if c and c.get("password_hash") and verify_password(
+                    plain, c["password_hash"]):
+                return True
+        except Exception:
+            pass
+        try:
+            from services import auth as local_auth
+            return bool(local_auth.verify_login(username, plain))
+        except Exception:
+            return False
+
     @classmethod
-    def request_access(cls, parent=None):
-        """يطلب رمز الدخول — مرة واحدة لكل تشغيل."""
+    def request_access(cls, parent=None, username=None):
+        """يطلب كلمة مرور المدير العام — مرة واحدة لكل تشغيل."""
         if cls._unlocked:
             return True
         from PyQt5 import QtWidgets as _W
+        if username is None:
+            username = ((getattr(parent, "user", None) or {})
+                        .get("username") or "")
         code, ok = _W.QInputDialog.getText(
             parent, "الإدارة العليا",
             "هذه الشاشة تدير النظام السحابي وكل المصانع.\n"
-            "أدخل رمز الدخول للمتابعة:",
+            f"أدخل كلمة مرور حسابك ({username}) للمتابعة:",
             _W.QLineEdit.Password)
         if not ok:
             return False
-        if str(code).strip() != cls.ACCESS_CODE:
+        if not cls._password_ok(username, str(code)):
             _W.QMessageBox.warning(
-                parent, "رمز غير صحيح",
-                "رمز الدخول غير صحيح — لم تُفتح الشاشة.")
+                parent, "كلمة مرور غير صحيحة",
+                "كلمة المرور غير صحيحة — لم تُفتح الشاشة.")
             return False
         cls._unlocked = True
         return True

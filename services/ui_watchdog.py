@@ -36,9 +36,11 @@ TICK_MS = 500
 # لا يُكتب أكثر من بلاغ لكل موضع في هذه المدة — فلا يمتلئ السجل
 # بتكرار عمليةٍ واحدة بطيئة.
 COOLDOWN = 60.0
+# تجمّدٌ بهذا الطول (ثوانٍ) يُبلَّغ به المستخدم بإشعارٍ صغير بعد انفراجه
+NOTIFY_SECONDS = 5.0
 
 _state = {"beat": 0.0, "thread": None, "stop": False, "main_id": None,
-          "seen": {}, "count": 0}
+          "seen": {}, "count": 0, "pending": None, "notify": None}
 _lock = threading.Lock()
 
 
@@ -85,16 +87,22 @@ def _watch():
                 continue
             _state["seen"][where] = now
             _state["count"] += 1
-        try:
-            from services import health
-            health.log_slow(f"تجمّد الواجهة عند {where}", gap,
-                            "\n" + lines)
-        except Exception:
-            pass
-        # ننتظر انفراج التجمّد قبل قياس التالي
+        # ننتظر انفراج التجمّد — فتُسجَّل مدّته كاملةً لا لحظة رصده
         while not _state["stop"] and time.time() - _state["beat"] >= \
                 STALL_SECONDS:
             time.sleep(TICK_MS / 1000.0)
+        total = max(gap, time.time() - beat)
+        try:
+            from services import health
+            health.log_slow(f"تجمّد الواجهة عند {where}", total,
+                            "\n" + lines)
+        except Exception:
+            pass
+        # 5.0: ما بلغ «لا يستجيب» يُقال للمستخدم بموضعه — صورةُ هذا
+        # السطر تكفي لتحديد السبب وعلاجه، بدل شكوى بلا دليل
+        if total >= NOTIFY_SECONDS:
+            with _lock:
+                _state["pending"] = (total, where)
 
 
 def start(parent=None):
@@ -119,8 +127,22 @@ def start(parent=None):
 
 
 def beat():
-    """نبضة خيط الواجهة — إسنادُ رقمٍ لا أكثر."""
+    """نبضة خيط الواجهة — إسنادُ رقمٍ لا أكثر (وإبلاغٌ إن كان مُنتظَراً)."""
     _state["beat"] = time.time()
+    if _state["pending"] is not None:
+        with _lock:
+            p, _state["pending"] = _state["pending"], None
+        fn = _state.get("notify")
+        if p and callable(fn):
+            try:
+                fn(p[0], p[1])
+            except Exception:
+                pass
+
+
+def set_notifier(fn):
+    """`fn(ثوانٍ، موضع)` تُنادى على خيط الواجهة بعد تجمّدٍ طويل."""
+    _state["notify"] = fn
 
 
 def stop():

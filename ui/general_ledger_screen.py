@@ -20,6 +20,7 @@ from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err,
 
 from models.editing import EDITABLE
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 
 def _doc_target(r, builders):
@@ -78,6 +79,17 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.karat.currentIndexChanged.connect(self._karat_changed)
         btn = kit.PushButton("عرض")
         btn.clicked.connect(self.load)
+        # 5.0: «💎 الماس» — عمودٌ يعرض مجموع ماس كل فاتورة في الكشف
+        # (للعرض: الماس لا يدخل الوزن المقيد ولا رصيد الذهب)
+        self.btn_dia = kit.PushButton("💎 الماس")
+        self.btn_dia.setObjectName("ghost")
+        self.btn_dia.setCheckable(True)
+        self.btn_dia.setToolTip(
+            "يُظهر عموداً بمجموع الماس في كل فاتورة مبيعات أو مرتجع —"
+            " للعرض والمعرفة، ولا يدخل الوزن المقيد ولا الرصيد.")
+        self.btn_dia.toggled.connect(lambda *_: self.load()
+                                     if self.account.currentData()
+                                     is not None else None)
         # ست بطاقات: مدين · دائن · الرصيد — للذهب والنقد
         self.g_debit = Card("إجمالي المدين — ذهب", f"جم {kv.label()}")
         self.g_credit = Card("إجمالي الدائن — ذهب", f"جم {kv.label()}")
@@ -92,7 +104,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.table.setSelectionMode(
             QtWidgets.QAbstractItemView.ExtendedSelection)
         # المعاينة بالنقر المزدوج بدل زر في كل صف (أسرع بكثير)
-        self.table.doubleClicked.connect(lambda *_: self.preview_selected())
+        self.table.doubleClicked.connect(guard_click(lambda *_: self.preview_selected()))
 
         # شريط أدوات ثابت: الأزرار والتواريخ لا تخرج من الشاشة مهما
         # طال اسم الحساب — المساحة الفائضة تذهب لفراغ في النهاية.
@@ -109,6 +121,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         head.addWidget(QtWidgets.QLabel("العيارات:"))
         head.addWidget(self.karat, 0)
         head.addWidget(btn, 0)
+        head.addWidget(self.btn_dia, 0)
         head.addStretch(1)
 
         lay = QtWidgets.QVBoxLayout(self)
@@ -357,13 +370,23 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                        f"مدين\nذهب {k}", f"دائن\nذهب {k}",
                        f"رصيد\nذهب {k}",
                        "مدين\nنقد", "دائن\nنقد", "رصيد\nنقد", "معاينة"]
+            # 5.0: عمود الماس قبل «معاينة» — مجموع ماس الفاتورة
+            dia_on = self.btn_dia.isChecked()
+            dmap = {}
+            if dia_on:
+                from models import invoices as _inv
+                with db(readonly=True) as conn:
+                    dmap = _inv.diamonds_by_invoice(
+                        conn, [r.get("sid") for r in rows
+                               if r.get("src") == "invoices"])
+                headers.insert(11, "💎 الماس\nجم")
             self.table.setRowCount(0)
             self.table.setColumnCount(len(headers))
             self.table.setHorizontalHeaderLabels(headers)
             # توزيع العرض: البيان والجهة يأخذان الفائض، والأرقام ضيقة
             # مُحجِّم موحّد: يوزّع الأعمدة على العرض المتاح ويُعيد
             # الحساب تلقائياً مع أي تغيّر في حجم النافذة أو الشاشة.
-            fit_columns(self.table, [
+            _cw = [
                 8,    # التاريخ
                 7,    # نوع العملية
                 6,    # رقم السند
@@ -372,7 +395,12 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 6, 6, 7,      # مدين/دائن/رصيد ذهب
                 6, 6, 7,      # مدين/دائن/رصيد نقد
                 7,    # معاينة
-            ])
+            ]
+            if dia_on:
+                _cw[3] -= 3
+                _cw[4] -= 3
+                _cw.insert(11, 6)
+            fit_columns(self.table, _cw)
             # ══ بناء الجدول دفعةً واحدة ══
             # **الخلل السابق**: زر معاينة QPushButton لكل صف — 500 صف
             # تعني 500 عنصر واجهة إضافي، وكل واحد يُنشئ تخطيطه وأنماطه
@@ -416,6 +444,11 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                         text_item("👁" if (r.get("eid") or (
                             r.get("src") and r.get("sid"))) else "", _C),
                     ]
+                    if dia_on:
+                        _d = (dmap.get(r.get("sid"), 0.0)
+                              if r.get("src") == "invoices" else 0.0)
+                        cellv.insert(11, num_item(_d) if _d > 0
+                                     else text_item(""))
                     for c, it in enumerate(cellv):
                         self.table.setItem(i, c, it)
                 if rows:
@@ -429,6 +462,15 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                         num_item(_nf.f2(tcd_)), num_item(_nf.f2(tcc_)),
                         num_item(_nf.f2(last_c)), text_item("", _C),
                     ]
+                    if dia_on:
+                        # الصافي: ماس المبيعات ناقصاً ماس المرتجع
+                        _net = sum(
+                            dmap.get(r.get("sid"), 0.0)
+                            * (-1 if "مرتجع" in (r["op"] or "") else 1)
+                            for r in rows if r.get("src") == "invoices")
+                        _ti = num_item(_net)
+                        _ti.setToolTip("صافي الماس: المبيعات − المرتجع")
+                        tot.insert(11, _ti)
                     self._sum_row(len(rows), tot)
             finally:
                 self.table.setUpdatesEnabled(True)

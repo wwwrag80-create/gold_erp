@@ -503,6 +503,30 @@ def _state():
     return st
 
 
+# عدّاد التغييرات الفعلية (5.0): يزيد مع كل معاملة كتابةٍ **غيّرت صفوفاً**
+# — لا مع كل `with db()` (كثيرٌ منها قراءةٌ بقفل كتابة). منه تعرف الواجهة
+# أن الشاشة التي تعود إليها لم يتغيّر شيءٌ تحتها فلا تُعاد قراءتها.
+_WRITES = [0]
+
+
+def data_token():
+    """بصمة حالة البيانات: (تغييرات هذا البرنامج، `data_version`).
+
+    `PRAGMA data_version` يتغيّر إذا كتب **اتصالٌ آخر** (خيطٌ خلفي أو
+    جهازٌ آخر على القاعدة نفسها)، والعدّاد يغطّي كتابات الخيط نفسه."""
+    try:
+        dv = _thread_conn().execute("PRAGMA data_version").fetchone()[0]
+    except Exception:
+        dv = None
+    return (_WRITES[0], dv)
+
+
+def in_transaction():
+    """هل في هذا الخيط معاملةٌ مفتوحة الآن؟ — لمن يكتب من مؤقّتٍ
+    (حفظ المسوّدة آلياً) فلا ينضمّ إلى معاملة شاشةٍ لم تُغلق بعد."""
+    return _state()["depth"] > 0
+
+
 def _thread_conn():
     """اتصال هذا الخيط بالقاعدة **النشطة حالياً**.
 
@@ -582,6 +606,7 @@ def db(readonly: bool = False):
         conn = _thread_conn()
         conn.execute(begin)
     st["depth"], st["readonly"] = 1, readonly
+    _changes0 = conn.total_changes
     try:
         yield conn
         # ══ ختم القيود قبل الإغلاق ══
@@ -598,6 +623,8 @@ def db(readonly: bool = False):
             except Exception:
                 pass
         conn.execute("COMMIT")
+        if not readonly and conn.total_changes != _changes0:
+            _WRITES[0] += 1
     except BaseException:
         try:
             conn.execute("ROLLBACK")
@@ -1386,6 +1413,18 @@ def migrate_schema() -> None:
                       else "") or "إيطالي",
                      first["notes"] or
                      "رصيد تجميعي بالوزن — لا يمثل قطعة مفردة"))
+
+        # 27) الماس (5.0): وزنٌ **للعرض والمعرفة** على بطاقة الطقم وسطر
+        #     دفعته وسطر فاتورته — لا يدخل الوزن المقيد ولا القائم ولا
+        #     أي قيد. يُحفظ كما كُتب (بلا تحويل عيار: الحجر لا عيار له).
+        for _tbl, _col in (("work_orders", "diamond_weight"),
+                           ("wo_batch_lines", "diamond"),
+                           ("invoice_items", "diamond")):
+            _cols = [r["name"] for r in conn.execute(
+                f"PRAGMA table_info({_tbl})")]
+            if _cols and _col not in _cols:
+                conn.execute(f"ALTER TABLE {_tbl} ADD COLUMN {_col}"
+                             " REAL NOT NULL DEFAULT 0")
 
         # 18) سلسلة بصمات القيود — سجل تدقيق محصَّن (`models.integrity`).
         #     العمودان يبقيان فارغين للقيود السابقة حتى تُختم دفعةً

@@ -242,12 +242,17 @@ def soft_delete_entry(entry_id: int, username: str) -> str:
     # المعاملة يحبس قفل الكتابة. ومن بيده الورقة سيصوّر رمزها يوماً،
     # فصفحةٌ باقية بمضمونها القديم تُوهمه أن فاتورةً ملغاة ما زالت
     # سارية — وهو أخطر من صفحةٍ مفقودة.
+    # 5.0: وفي خيطٍ جانبي — الرفع على خيط الواجهة كان يُجمّدها حتى
+    # ينتهي (ثماني ثوانٍ لكل محاولة على اتصالٍ بطيء)
     try:
         if src and src["source_table"] == "invoices" and src["source_id"]:
+            import threading
             import config
             from services import invoice_share
-            invoice_share.mark_cancelled(src["source_id"],
-                                         config.COMPANY_NAME)
+            threading.Thread(
+                target=invoice_share.mark_cancelled,
+                args=(src["source_id"], config.COMPANY_NAME),
+                daemon=True, name="InvoiceCancelNotice").start()
     except Exception:
         pass          # إعلان الإلغاء لا يُبطل حذفاً تمّ
     return msg

@@ -28,6 +28,7 @@ from ui.widgets.common import (date_edit, dstr, err, info, make_table,
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 
 class CashFlowScreen(QtWidgets.QWidget):
@@ -88,7 +89,7 @@ class CashFlowScreen(QtWidgets.QWidget):
         _enhance(self.table, key="cash_flow")
         # نقرةٌ على أي بندٍ تفصّل حركته (4.77): ما هو، ومن أي مستند،
         # ونوعه وجهته — والمجموع يساوي رقم البند
-        self.table.cellClicked.connect(self.show_detail)
+        self.table.cellClicked.connect(guard_click(self.show_detail, 0.3))
         self.table.setToolTip("انقر أي بندٍ لتفصيل حركته")
         self.status = QtWidgets.QLabel("")
         self.status.setWordWrap(True)

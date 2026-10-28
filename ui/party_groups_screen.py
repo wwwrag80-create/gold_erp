@@ -21,6 +21,7 @@ from services import karat_view as kv
 from ui.widgets.common import (ask, date_edit, dstr, err, info, make_table,
                                title_label)
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 NO_GROUP = -1      # صفّ «بلا مجموعة» — من حساباتهم تحت الأصل مباشرة
 
@@ -156,7 +157,7 @@ class PartyGroupsScreen(QtWidgets.QWidget):
         self.m_table = make_table()
         self.m_table.setSelectionBehavior(
             QtWidgets.QAbstractItemView.SelectRows)
-        self.m_table.doubleClicked.connect(lambda *_: self.open_ledger())
+        self.m_table.doubleClicked.connect(guard_click(lambda *_: self.open_ledger()))
         b_add = kit.PushButton("➕ إضافة عملاء للمجموعة")
         b_add.setObjectName("homeBtn")
         b_add.clicked.connect(self.add_members)

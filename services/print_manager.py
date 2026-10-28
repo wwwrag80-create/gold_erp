@@ -552,6 +552,13 @@ def _tpl_invoice(conn, invoice_id):
     # الأجر · الأجور
     body_rows = ""
     t_reg = t_standing = t_gold = t_small = t_big = t_after = 0.0
+    # 5.0: عمود «الماس» يظهر في الورقة متى كان في الفاتورة ماس — للعرض،
+    # لا يدخل الوزن المقيد ولا الأجور. وبلا ماس تبقى الورقة كما كانت.
+    _dia_on = any(float(it["diamond"] or 0) > 0 for it in items)
+    t_dia = 0.0
+
+    def _dcell(v):
+        return [tdw(_w(v, 2) if v else "")] if _dia_on else []
     for it in items:
         wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
                           (it["work_order_id"],)).fetchone()
@@ -568,7 +575,7 @@ def _tpl_invoice(conn, invoice_id):
             body_rows += "<tr>" + cells(
                 tdw("—"), tdw("أجر فقط" + (f" — {_nt}" if _nt else "")),
                 tdw(""), tdw(""), tdw(""), tdw(""), tdw(""), tdw(""),
-                tdw("—"), tdw(_w(it["wages"], 2))) + "</tr>"
+                *_dcell(0), tdw("—"), tdw(_w(it["wages"], 2))) + "</tr>"
             continue
         # الرقم التجميعي سجلٌّ واحد يحمل **الرصيد الكلي**، فطباعة
         # أعمدته كما هي تُظهر كل الرصيد بدل الوزن المُدخل في السطر.
@@ -583,6 +590,8 @@ def _tpl_invoice(conn, invoice_id):
         t_small += small
         t_big += big
         t_after += after
+        _dv = float(it["diamond"] or 0)
+        t_dia += _dv
         _mn = ((wo["model_no"] if wo and "model_no" in wo.keys() else "")
                or "—")
         # 4.95: صورة الموديل بدل رقمه — والرقم لمن لا صورة له
@@ -594,6 +603,7 @@ def _tpl_invoice(conn, invoice_id):
             tdw(en(wo["work_order_no"] if wo else "—")),
             tdw(_gw(reg)), tdw(_gw(standing)), tdw(_gw(gold)),
             tdw(_gw(small)), tdw(_gw(big)), tdw(_gw(after)),
+            *_dcell(_dv),
             tdw(_w(_krate(it["wage_per_gram"]), 2)),
             tdw(_w(it["wages"], 2))) + "</tr>"
     if not body_rows:
@@ -610,17 +620,30 @@ def _tpl_invoice(conn, invoice_id):
 
     def _th(label, pct):
         return f'<th width="{pct}%" style="width:{pct}%;">{label}</th>'
-    head_cells = cells(
-        _th("الموديل", 10), _th("رقم<br/>التشغيل", 11),
-        _th(f"الوزن المقيد<br/>{_u}", 10), _th(f"الوزن القائم<br/>{_u}", 10),
-        _th("الذهب", 9), _th("الفصوص", 8), _th("الأحجار", 8),
-        _th("الأحجار<br/>بعد الخصم", 10), _th("الأجر", 9),
-        _th("الأجور", 15))
+    if _dia_on:
+        # بالماس أحد عشر عموداً — ومجموعها 100 كما بدونه
+        head_cells = cells(
+            _th("الموديل", 9), _th("رقم<br/>التشغيل", 10),
+            _th(f"الوزن المقيد<br/>{_u}", 10),
+            _th(f"الوزن القائم<br/>{_u}", 9),
+            _th("الذهب", 8), _th("الفصوص", 7), _th("الأحجار", 7),
+            _th("الأحجار<br/>بعد الخصم", 9), _th("الماس", 8),
+            _th("الأجر", 9), _th("الأجور", 14))
+    else:
+        head_cells = cells(
+            _th("الموديل", 10), _th("رقم<br/>التشغيل", 11),
+            _th(f"الوزن المقيد<br/>{_u}", 10),
+            _th(f"الوزن القائم<br/>{_u}", 10),
+            _th("الذهب", 9), _th("الفصوص", 8), _th("الأحجار", 8),
+            _th("الأحجار<br/>بعد الخصم", 10), _th("الأجر", 9),
+            _th("الأجور", 15))
     total_cells = cells(
         thw(""),
         thw("الإجمالي"), thw(_gw(t_reg)), thw(_gw(t_standing)),
         thw(_gw(t_gold)), thw(_gw(t_small)), thw(_gw(t_big)),
-        thw(_gw(t_after)), thw("—"), thw(_w(inv["total_wages"], 2)))
+        thw(_gw(t_after)),
+        *([thw(_w(t_dia, 2))] if _dia_on else []),
+        thw("—"), thw(_w(inv["total_wages"], 2)))
 
     vat_block = ""
     if inv["vat_applied"]:

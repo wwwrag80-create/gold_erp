@@ -16,6 +16,11 @@ ALTER TABLE factory_users
   ADD COLUMN IF NOT EXISTS full_name TEXT DEFAULT '';
 ALTER TABLE factory_users
   ADD COLUMN IF NOT EXISTS admin_token TEXT;
+-- 3.0.0: قفلٌ بعد محاولات دخولٍ خاطئة متتالية
+ALTER TABLE factory_users
+  ADD COLUMN IF NOT EXISTS failed_logins INT NOT NULL DEFAULT 0;
+ALTER TABLE factory_users
+  ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
 
 ALTER TABLE factory_users
   DROP CONSTRAINT IF EXISTS factory_users_tenant_id_username_key;
@@ -31,7 +36,81 @@ BEGIN
   END IF;
 END $$;
 
--- 2) تسجيل الدخول: يعيد بيانات المستخدم ورمزه الإداري إن كان مديراً
+-- 2) تسجيل الدخول (3.0.0) — **كلمة المرور تُثبَت للخادم ولا تُرسَل
+--    بصمتها إلى أحد**.
+--    كانت `auth_login(اسم)` تعيد بصمة كلمة المرور والرمز الإداري لمن
+--    يعرف الاسم وحده — والمفتاح العام في كل نسخة من البرنامج. فكان
+--    بوسع أي حاملٍ للبرنامج أن يأخذ رمز المدير العام فيوقف المصانع أو
+--    يحذف حساباتها أو يمسح بياناتها السحابية. الآن:
+--      أ) `auth_salt(اسم)`: الملح وحده (ولاسمٍ غير موجود ملحٌ ثابت
+--         مزيّف، فلا يُعرف من الردّ أن الاسم مسجّل).
+--      ب) البرنامج يحسب PBKDF2 بكلمة المرور والملح، ويرسل الناتج إلى
+--         `auth_login2` فيقارنه الخادم بما عنده. والبيانات والرمز
+--         الإداري لا تُعاد إلا لمن طابق.
+--      ج) ثماني محاولات خاطئة متتالية تقفل الحساب ربع ساعة.
+--    و`auth_login` القديمة تبقى للتوافق بلا أسرار، و`auth_status`
+--    لحارس الإيقاف (هل الحساب فعّال؟) بلا أسرار كذلك.
+CREATE OR REPLACE FUNCTION auth_salt(p_username TEXT)
+RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE h TEXT;
+BEGIN
+  SELECT u.password_hash INTO h FROM factory_users u
+   WHERE u.username = p_username LIMIT 1;
+  IF h IS NOT NULL AND position('$' IN h) > 1 THEN
+    RETURN split_part(h, '$', 1);
+  END IF;
+  RETURN substr(encode(digest('jadeite-salt:' || lower(COALESCE(
+    p_username, '')), 'sha256'), 'hex'), 1, 32);
+END $$;
+
+CREATE OR REPLACE FUNCTION auth_login2(p_username TEXT, p_proof TEXT)
+RETURNS TABLE (
+  username TEXT, tenant_id TEXT, role TEXT, is_active BOOLEAN,
+  full_name TEXT, admin_token TEXT
+) LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE u factory_users%ROWTYPE;
+BEGIN
+  SELECT * INTO u FROM factory_users fu
+   WHERE fu.username = p_username LIMIT 1;
+  IF NOT FOUND THEN
+    RETURN;                  -- لا صفّ = بيانات غير صحيحة (بلا تمييز)
+  END IF;
+  IF u.locked_until IS NOT NULL AND u.locked_until > now() THEN
+    RAISE EXCEPTION 'الحساب مقفل مؤقتاً بعد محاولات خاطئة — حاول بعد ربع ساعة';
+  END IF;
+  IF COALESCE(p_proof, '') = ''
+     OR split_part(u.password_hash, '$', 2) <> lower(p_proof) THEN
+    -- العدّاد يُحفظ ثم يُعاد «لا صفّ»: رفع استثناءٍ هنا كان سيُلغي
+    -- تحديث العدّاد مع المعاملة فلا يُقفل الحساب أبداً
+    UPDATE factory_users fu
+       SET failed_logins = COALESCE(fu.failed_logins, 0) + 1,
+           locked_until = CASE WHEN COALESCE(fu.failed_logins, 0) + 1 >= 8
+                               THEN now() + interval '15 minutes'
+                               ELSE fu.locked_until END
+     WHERE fu.id = u.id;
+    RETURN;
+  END IF;
+  UPDATE factory_users fu SET failed_logins = 0, locked_until = NULL
+   WHERE fu.id = u.id;
+  RETURN QUERY SELECT u.username, u.tenant_id, u.role, u.is_active,
+         COALESCE(u.full_name, ''),
+         CASE WHEN u.role = 'super_admin' THEN u.admin_token ELSE NULL END;
+END $$;
+
+CREATE OR REPLACE FUNCTION auth_status(p_username TEXT)
+RETURNS TABLE (
+  username TEXT, tenant_id TEXT, role TEXT, is_active BOOLEAN,
+  full_name TEXT
+) LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  RETURN QUERY
+  SELECT u.username, u.tenant_id, u.role, u.is_active,
+         COALESCE(u.full_name, '')
+  FROM factory_users u WHERE u.username = p_username LIMIT 1;
+END $$;
+
+-- القديمة بلا أسرار: لا بصمة ولا رمز إداري
+DROP FUNCTION IF EXISTS auth_login(TEXT);
 CREATE OR REPLACE FUNCTION auth_login(p_username TEXT)
 RETURNS TABLE (
   username TEXT, password_hash TEXT, tenant_id TEXT,
@@ -39,12 +118,22 @@ RETURNS TABLE (
 ) LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
   RETURN QUERY
-  SELECT u.username, u.password_hash, u.tenant_id, u.role,
-         u.is_active, COALESCE(u.full_name, ''),
-         CASE WHEN u.role = 'super_admin' THEN u.admin_token ELSE NULL END
+  SELECT u.username, NULL::TEXT, u.tenant_id, u.role,
+         u.is_active, COALESCE(u.full_name, ''), NULL::TEXT
   FROM factory_users u
   WHERE u.username = p_username
   LIMIT 1;
+END $$;
+
+-- الرموز الإدارية القديمة كانت مكشوفة لمن طلبها — تُستبدل كلها مرةً
+-- واحدة. (المدير العام يسجّل الخروج والدخول فيأخذ رمزه الجديد.)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'rpc_version')
+     OR (SELECT rpc_version()) <> '3.0.0' THEN
+    UPDATE factory_users SET admin_token = encode(gen_random_bytes(24), 'hex')
+     WHERE role = 'super_admin';
+  END IF;
 END $$;
 
 -- 3) إنشاء حساب (يتحقق من الرمز الإداري أولاً)
@@ -160,12 +249,15 @@ END $$;
 -- 6.5) إصدار الدوال — يكشف تشغيل نسخة قديمة على الخادم
 CREATE OR REPLACE FUNCTION rpc_version()
 RETURNS TEXT LANGUAGE sql SECURITY DEFINER AS $$
-  SELECT '2.1.0'::TEXT;
+  SELECT '3.0.0'::TEXT;
 $$;
 GRANT EXECUTE ON FUNCTION rpc_version() TO anon, authenticated;
 
 -- 7) صلاحيات التنفيذ للمفتاح العام (الدوال تتحقق بنفسها)
 GRANT EXECUTE ON FUNCTION auth_login(TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION auth_salt(TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION auth_login2(TEXT,TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION auth_status(TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION admin_create_user(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
   TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION admin_list_users(TEXT) TO anon, authenticated;

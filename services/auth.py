@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """تسجيل الدخول والصلاحيات: PBKDF2-HMAC-SHA256 (مكتبة قياسية)."""
 import hashlib
+import hmac
 import os
 
 ITER = 200_000
@@ -18,9 +19,13 @@ def verify_password(plain: str, stored: str) -> bool:
         salt_hex, dk_hex = stored.split("$", 1)
     except ValueError:
         return False
-    dk = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"),
-                             bytes.fromhex(salt_hex), ITER)
-    return dk.hex() == dk_hex
+    try:
+        salt = bytes.fromhex(salt_hex)
+    except ValueError:
+        return False
+    dk = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"), salt, ITER)
+    # مقارنةٌ بزمنٍ ثابت: لا يُستدلّ من سرعة الرفض على عدد الأحرف المطابقة
+    return hmac.compare_digest(dk.hex(), dk_hex.strip().lower())
 
 
 def verify_login(username: str, plain: str):

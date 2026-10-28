@@ -18,6 +18,7 @@ from models import entities, inventory, invoices, pending, stock_home
 from models.accounts import acc_id
 from models.inventory import BULK_LABEL, is_bulk_no
 from services import drafts
+from ui.widgets.draft_keeper import keep as keep_draft
 from services import gold_math, karat_view as kv
 from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                big_label, date_edit, dstr, enter_chain, err,
@@ -29,6 +30,7 @@ from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.model_pic import ModelPic, thumb
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 DRAFT_KEY = "sales"
 
@@ -596,14 +598,16 @@ class SalesScreen(QtWidgets.QWidget):
     # العمود الأول بلا عنوان: فيه زرّا تعديل السطر وحذفه.
     # 4.93: صورة الموديل بعد رقمه، و«الحساب» أُخفي من الجدول (يظهر في
     # تلميح رقم التشغيل وفي نافذة تأكيد الترحيل)
+    # 5.0: «💎 الماس» بعد الأحجار — للعرض، لا يدخل المقيد ولا الأجرة
     COLS = ["", "الموديل", "الصورة", "رقم التشغيل", "العيار", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
-            "الأحجار بعد الخصم", "الأجر/جم", "الأجرة (ريال)"]
+            "الأحجار بعد الخصم", "💎 الماس", "الأجر/جم", "الأجرة (ريال)"]
     # أوزان العرض (مجموعها 100): عمود الأزرار يكفيه القليل
-    COL_W = [5, 9, 8, 10, 7, 9, 8, 7, 7, 7, 8, 7, 8]
+    COL_W = [5, 8, 8, 9, 6, 9, 8, 7, 6, 7, 8, 6, 6, 7]
     C_PIC, PIC = 2, 46            # عمود الصورة ومقاس مصغّرتها
+    C_DIA = 11                    # عمود الماس
     # خانتا الأجر — تُكتبان في مكانهما (4.59)
-    C_WAGE, C_AMOUNT = 11, 12
+    C_WAGE, C_AMOUNT = 12, 13
     WAGE_COLS = (C_WAGE, C_AMOUNT)
 
     def __init__(self, user):
@@ -834,6 +838,12 @@ class SalesScreen(QtWidgets.QWidget):
         self.line_small = wspin()
         self.line_big = wspin()
         self.line_after = wspin()
+        # 5.0: الماس للعرض — يُملأ من بطاقة الطقم ولا يدخل المقيد
+        self.line_diamond = wspin()
+        self.line_diamond.setToolTip(
+            "وزن الماس — للعرض والمعرفة فقط: لا يدخل الوزن المقيد ولا"
+            " الأجرة ولا القيد. يُملأ من بطاقة الطقم ويظهر في الفاتورة"
+            " وفي كشف الحساب (خيار «💎 الماس»).")
         # 4.99: خانات الوزن بمنزلتين كسائر النظام (كانت ثلاثاً). وتبديل
         # العيار ذهاباً وإياباً يرجع من الظلّ `_w18` لا من الخانة، والوزن
         # المقترح من الطقم يُحفظ بدقّته المخزَّنة في `_reg_exact`
@@ -877,6 +887,7 @@ class SalesScreen(QtWidgets.QWidget):
             ("الفصوص", self.line_small, 2),
             ("الأحجار", self.line_big, 2),
             ("الأحجار بعد الخصم", self.line_after, 2),
+            ("💎 الماس", self.line_diamond, 2),
             ("الوزن المقيد", self.line_reg, 2),
             ("الوزن القائم", self.line_standing, 2),
             ("العيار", self.line_karat, 2),
@@ -1000,7 +1011,7 @@ class SalesScreen(QtWidgets.QWidget):
     def _build_items(self):
         box = QtWidgets.QGroupBox("③ بنود الفاتورة")
         self.items_table = make_table()
-        self.items_table.cellClicked.connect(self._model_clicked)
+        self.items_table.cellClicked.connect(guard_click(self._model_clicked, 0.3))
         self.items_table.setToolTip(
             "انقر خانة الموديل لعرض صورته المحفوظة في دليل الموديلات\n"
             "وانقر خانة الأجر لتعديله في مكانه — Enter يحفظ وينزل للسطر"
@@ -1086,7 +1097,7 @@ class SalesScreen(QtWidgets.QWidget):
     def _build_held(self):
         w = QtWidgets.QWidget()
         self.held_tbl = make_table()
-        self.held_tbl.doubleClicked.connect(lambda *_: self.open_held())
+        self.held_tbl.doubleClicked.connect(guard_click(lambda *_: self.open_held()))
         self.held_rows = []
         b_open = kit.PushButton("↩ فتح لاستكمالها وإثباتها")
         b_open.setObjectName("homeBtn")
@@ -1391,7 +1402,8 @@ class SalesScreen(QtWidgets.QWidget):
                         "wage": 0.0}
                        if i.get("wage_only") else
                        {"wo_id": i["wo"]["id"], "weight": i["weight"],
-                        "wage": i["wage"], "karat": i.get("karat") or 0})
+                        "wage": i["wage"], "karat": i.get("karat") or 0,
+                        "diamond": i.get("diamond") or 0})
                       for i in self.items],
         }
 
@@ -1417,7 +1429,8 @@ class SalesScreen(QtWidgets.QWidget):
                     items.append(self._item_from_wo(
                         wo, float(it.get("weight") or 0),
                         float(it.get("wage") or 0),
-                        int(it.get("karat") or 0) or kv.active()))
+                        int(it.get("karat") or 0) or kv.active(),
+                        diamond=it.get("diamond")))
         except Exception:
             return False
         if not items:
@@ -1469,6 +1482,8 @@ class SalesScreen(QtWidgets.QWidget):
                 self.live_note.setVisible(True)
         except Exception:
             pass          # المسوّدة راحةٌ لا تُعطّل الشاشة
+        # 5.0: تُحفظ وهي تُكتب — لا عند المغادرة وحدها (انقطاع الكهرباء)
+        keep_draft(self, DRAFT_KEY, self.user.get("username"))
 
     def _save_draft(self):
         try:
@@ -1683,7 +1698,7 @@ class SalesScreen(QtWidgets.QWidget):
             self.model_no.setCurrentText("")
             for w in (self.line_reg, self.line_standing,
                       self.line_gold, self.line_small, self.line_big,
-                      self.line_after):
+                      self.line_after, self.line_diamond):
                 w.setValue(0)
             self.line_wage.set_zero(False)
             self.line_wage.setToolTip("")
@@ -1715,6 +1730,7 @@ class SalesScreen(QtWidgets.QWidget):
                 self.line_after.setValue(0)
                 self.line_standing.setValue(0)
                 self.line_reg.setValue(0)
+                self.line_diamond.setValue(0)
                 self._reg_exact = None
             else:
                 # 4.82: المقترح الباقي في الخزنة (بيع) أو الخارج (مرتجع) —
@@ -1738,6 +1754,11 @@ class SalesScreen(QtWidgets.QWidget):
                     kv.g((wo["stones_after_discount"] or 0) * f, k))
                 self.line_standing.setValue(
                     kv.g((wo["standing_gold"] or 0) * f, k))
+                # الماس بلا عيار: كما كُتب على البطاقة، وبنسبة الجزء
+                self.line_diamond.setValue(
+                    float((wo["diamond_weight"]
+                           if "diamond_weight" in wo.keys() else 0) or 0)
+                    * min(f, 1.0))
                 self.line_reg.setValue(kv.g(avail, k))
                 self._reg_exact = (wo["id"], float(avail or 0))
                 self.line_reg.setToolTip(
@@ -2012,7 +2033,7 @@ class SalesScreen(QtWidgets.QWidget):
         self.render_items()
 
     def _item_from_wo(self, wo, weight, wage, karat, item_id=None,
-                      parts=None):
+                      parts=None, diamond=None):
         """سطرُ سلّةٍ كامل: الوزن والأجر بعياره، والمكوّنات معه.
 
         المكوّنات تُقرأ من بطاقة الطقم ما لم تُمرَّر صراحةً — فالسطر
@@ -2029,9 +2050,22 @@ class SalesScreen(QtWidgets.QWidget):
                          "big": kv.g(wo["big_stones"], k),
                          "after": kv.g(wo["stones_after_discount"], k),
                          "standing": kv.g(wo["standing_gold"], k)}
+        if diamond is None:
+            diamond = self._card_diamond(wo, weight, k)
         return {"wo": wo, "weight": round(float(weight or 0), 3),
                 "wage": float(wage or 0), "karat": k, "item_id": item_id,
-                **parts}
+                "diamond": round(float(diamond or 0), 3), **parts}
+
+    @staticmethod
+    def _card_diamond(wo, weight, k):
+        """ماس البطاقة بنسبة الوزن المباع منها — للعرض وحده (5.0)."""
+        if wo["is_bulk"]:
+            return 0.0
+        card = float((wo["diamond_weight"] if "diamond_weight" in wo.keys()
+                      else 0) or 0)
+        full = float(wo["registered_weight"] or 0)
+        w18 = kv.store(float(weight or 0), k)
+        return card * (min(1.0, w18 / full) if full > 0.001 else 1.0)
 
     def _parts_of(self, it):
         """مكوّنات السطر — تُشتقّ من بطاقته إن كان السطر قديماً بلا مكوّنات.
@@ -2085,7 +2119,8 @@ class SalesScreen(QtWidgets.QWidget):
                         # هويّة السطر: بها يعرف التعديل أيَّ سطرٍ
                         # يُحدِّث. الرقم التجميعي يتكرّر في الفاتورة
                         # بأسطرٍ مستقلة، ولا يميّزها إلا هذا الرقم.
-                        item_id=it["item_id"]))
+                        item_id=it["item_id"],
+                        diamond=float(it["diamond"] or 0)))
                     cart[-1]["acc"] = it["stock_account_id"]
                 src = conn.execute(
                     "SELECT code FROM accounts WHERE id=?",
@@ -2265,8 +2300,14 @@ class SalesScreen(QtWidgets.QWidget):
             self._apply_model(wo)
             with db() as conn:
                 wo = inventory.get_wo_by_no(conn, wo["work_order_no"]) or wo
+            # الماس: المكتوب في سطر الإدخال إن نُسخت إليه بطاقة هذا الطقم
+            # (وقد يُعدَّل يدوياً)، وإلا ماس بطاقته بنسبة الوزن
+            _same = (self._wo is not None and not wo["is_bulk"]
+                     and self._wo["work_order_no"] == wo["work_order_no"])
+            dia = (self.line_diamond.value() if _same or parts is not None
+                   and self.line_diamond.value() > 0 else None)
             self.items.append(self._item_from_wo(wo, weight, wage, k,
-                                                 parts=parts))
+                                                 parts=parts, diamond=dia))
             self._clear_entry()
             self.barcode.setFocus()      # العودة لرقم التشغيل مباشرة
             self.render_items()
@@ -2456,6 +2497,8 @@ class SalesScreen(QtWidgets.QWidget):
         w_reg, w_stand = wspin(), wspin()
         w_gold, w_small, w_big, w_after = wspin(), wspin(), wspin(), wspin()
         w_wage = mspin()
+        w_dia = wspin()
+        w_dia.setValue(float(it.get("diamond") or 0))
         w_reg.setValue(float(it.get("weight") or 0))
         w_stand.setValue(p["standing"])
         w_gold.setValue(p["gold"])
@@ -2478,6 +2521,7 @@ class SalesScreen(QtWidgets.QWidget):
         f.addRow("الفصوص:", w_small)
         f.addRow("الأحجار:", w_big)
         f.addRow("الأحجار بعد الخصم:", w_after)
+        f.addRow("💎 الماس (للعرض):", w_dia)
         f.addRow("الأجر/جم:", w_wage)
         f.addRow(agreed)
         box = QtWidgets.QDialogButtonBox(
@@ -2492,6 +2536,9 @@ class SalesScreen(QtWidgets.QWidget):
             return
         k = int(w_karat.currentData() or k0)
         reg = round(w_reg.value(), 3)
+        _w0 = float(it.get("weight") or 0)
+        if k == k0 and abs(reg - _w0) <= 0.0051:
+            reg = _w0     # لم يُغيَّر: يبقى بدقّته لا بمنزلتي الخانة
         if reg <= 0:
             err(self, "الوزن المقيد يجب أن يكون أكبر من صفر")
             return
@@ -2526,11 +2573,12 @@ class SalesScreen(QtWidgets.QWidget):
         # الأجر الدقيق (أجرةٌ مقطوعة قُسمت على الوزن) يبقى كما هو ما لم
         # يُغيَّر رقمه الظاهر أو عياره — فحفظ النافذة بلا تغييرٍ لا يقرّبه
         wage = round(w_wage.value(), 2)
-        if k == k0 and reg == round(float(it.get("weight") or 0), 3) and \
+        if k == k0 and reg == _w0 and \
                 abs(wage - round(float(it.get("wage") or 0), 2)) < 0.005:
             wage = float(it.get("wage") or 0)
         it.update({"karat": k, "weight": reg,
                    "wage": wage,
+                   "diamond": round(w_dia.value(), 3),
                    "gold": round(w_gold.value(), 3),
                    "small": round(w_small.value(), 3),
                    "big": round(w_big.value(), 3),
@@ -2788,7 +2836,7 @@ class SalesScreen(QtWidgets.QWidget):
         internal = cid is not None and self._is_internal(cid)
         rows = []
         t = {"reg": 0.0, "standing": 0.0, "gold": 0.0, "small": 0.0,
-             "big": 0.0, "after": 0.0, "wages": 0.0}
+             "big": 0.0, "after": 0.0, "wages": 0.0, "diamond": 0.0}
         n_sets = 0
         for it in self.items:
             wo = it["wo"]
@@ -2796,7 +2844,7 @@ class SalesScreen(QtWidgets.QWidget):
                 amt = 0.0 if internal else float(it.get("amount") or 0)
                 rows.append(("", "—", "", "أجر فقط" + (
                     f" — {it['note']}" if it.get("note") else ""),
-                    "—", "", "", "", "", "", "", "—", amt))
+                    "—", "", "", "", "", "", "", "", "—", amt))
                 t["wages"] += amt
                 continue
             n_sets += 1
@@ -2809,7 +2857,9 @@ class SalesScreen(QtWidgets.QWidget):
             rows.append(("", mn, "", wo["work_order_no"], f"عيار {k}",
                          weight,
                          p["standing"], p["gold"], p["small"], p["big"],
-                         p["after"], wage, wages))
+                         p["after"], float(it.get("diamond") or 0),
+                         wage, wages))
+            t["diamond"] += float(it.get("diamond") or 0)
             # الإجماليات تُجمع بمكافئ 18 لا بأرقام الشاشة: أسطرٌ
             # بأعيرةٍ مختلفة لا يصحّ جمعها كما تُعرض.
             t["reg"] += kv.store(weight, k)
@@ -2826,7 +2876,8 @@ class SalesScreen(QtWidgets.QWidget):
                          round(kv.g(t["gold"]), 3),
                          round(kv.g(t["small"]), 3),
                          round(kv.g(t["big"]), 3),
-                         round(kv.g(t["after"]), 3), "—",
+                         round(kv.g(t["after"]), 3),
+                         round(t["diamond"], 3), "—",
                          round(t["wages"], 2)))
         fill(self.items_table, self.COLS, rows)
         # صفوفٌ أعلى من جداول العرض: البنود تُراجَع رقماً رقماً قبل الترحيل
@@ -2978,6 +3029,8 @@ class SalesScreen(QtWidgets.QWidget):
                       "item_id": i.get("item_id"),
                       "weight": self._store_w(i),
                       "karat": int(i.get("karat") or kv.active()),
+                      # 5.0: الماس للعرض — لا يدخل الوزن ولا الأجرة
+                      "diamond": float(i.get("diamond") or 0),
                       "wage_override": (None if internal
                                         else self._wage_store(i))})
                     for i in self.items]

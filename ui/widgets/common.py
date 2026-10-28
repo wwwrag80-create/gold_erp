@@ -1082,6 +1082,40 @@ class _EnterNav(QtCore.QObject):
         return False
 
 
+def guard_click(fn, gap=0.7):
+    """نقرٌ متلاحق على جدولٍ لا يكرّر عملاً ثقيلاً (5.0).
+
+    **الشكوى**: «عند النقر كثيراً بسرعة في الجدول يظهر لا يستجيب». النقرة
+    المزدوجة تفتح كشفاً أو معاينةً أو نافذة — ثانيةٌ أو اثنتان على خيط
+    الواجهة. وما نُقر أثناءها يصطفّ في ويندوز ويُسلَّم بعدها دفعةً
+    واحدة، فيُفتح الشيء نفسه مرةً ثانية وثالثة والنافذة بيضاء.
+
+    هنا: لا يُنفَّذ النداء وسابقه جارٍ، ولا قبل مضيّ `gap` ثانية على
+    انتهائه — فالنقرات المتراكمة تسقط والمقصودة تُنفَّذ مرة. ويُمرَّر من
+    معطيات الإشارة ما تقبله الدالة فقط، كما يفعل Qt."""
+    import inspect
+    import time as _time
+    try:
+        ps = list(inspect.signature(fn).parameters.values())
+        var = any(p.kind == p.VAR_POSITIONAL for p in ps)
+        n = sum(1 for p in ps if p.kind in (p.POSITIONAL_ONLY,
+                                             p.POSITIONAL_OR_KEYWORD))
+    except (TypeError, ValueError):
+        var, n = True, 0
+    st = {"busy": False, "end": 0.0}
+
+    def _run(*args):
+        if st["busy"] or _time.monotonic() - st["end"] < gap:
+            return None
+        st["busy"] = True
+        try:
+            return fn(*(args if var else args[:n]))
+        finally:
+            st["busy"] = False
+            st["end"] = _time.monotonic()
+    return _run
+
+
 def enter_chain(widget_owner, widgets, on_last=None, require=None):
     """يفعّل تسلسل Enter على قائمة حقول. يُحفظ المرجع على الشاشة نفسها
     حتى لا يُلتقط بواسطة جامع المهملات.

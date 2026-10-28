@@ -209,6 +209,12 @@ def wire_gate(app, gate, main_window_factory=None):
         try:
             from services import ui_watchdog
             ui_watchdog.start(win)
+            # 5.0: تجمّدٌ بلغ «لا يستجيب» يُقال بموضعه بعد انفراجه —
+            # صورةُ الإشعار تكفي لتحديد السبب بدل شكوى بلا دليل
+            ui_watchdog.set_notifier(lambda sec, where: win.toast(
+                f"⏱ تأخّر النظام {sec:.0f} ث عند: {where}\n"
+                "سُجّل للتشخيص — صوّر هذا الإشعار وأرسله إن تكرّر.",
+                9000))
         except Exception:
             pass
         # إطارٌ واحد يُرسم فيه النظام خلف البوابة قبل التمازج

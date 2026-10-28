@@ -30,6 +30,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, info,
 from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 COLS = ["الحساب", "الكود", "النقد / الأجور (ريال)", "الذهب (جم 18)"]
 
@@ -338,7 +339,7 @@ class AccountTreeTab(QtWidgets.QWidget):
 
         self.table = make_table()
         _enhance(self.table, key="balance_sheet")
-        self.table.doubleClicked.connect(lambda *_: self.show_movement())
+        self.table.doubleClicked.connect(guard_click(lambda *_: self.show_movement()))
         self._codes = []
         self.summary = big_label()
         self.summary.setWordWrap(True)

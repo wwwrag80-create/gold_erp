@@ -18,6 +18,7 @@ from PyQt5 import QtCore
 from ui.widgets.common import (Card, bulk_rows, cell, err, fill, info,
                                make_table, title_label)
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 CATEGORIES = [("إجمالي العملاء", "customer"), ("إجمالي الموردين", "supplier"),
               ("الشركاء", "partner"), ("الموظفون", "employee"),
@@ -53,7 +54,7 @@ class SubLedgerScreen(QtWidgets.QWidget):
             cards.addWidget(c)
 
         self.table = make_table()
-        self.table.doubleClicked.connect(self.open_ledger)
+        self.table.doubleClicked.connect(guard_click(self.open_ledger))
         btn = kit.PushButton("فتح دفتر الأستاذ للجهة المحددة")
         btn.setObjectName("ghost")
         btn.clicked.connect(self.open_ledger)

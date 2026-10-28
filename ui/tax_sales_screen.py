@@ -29,6 +29,7 @@ from ui.widgets.common import (StatChip as Card, confirm_post, date_edit,
                                title_label)
 from ui.widgets.table_fit import fit_columns
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 PAY_SHORT = {"credit": "آجل", "cash": "نقداً", "bank": "بنك / شبكة"}
 KIND_LABEL = {"invoice": "فاتورة ضريبية", "credit": "إشعار دائن",
@@ -920,8 +921,8 @@ class TaxSalesScreen(QtWidgets.QWidget):
         self.reg_tbl.setColumnCount(len(self.REG_COLS))
         self.reg_tbl.setHorizontalHeaderLabels(self.REG_COLS)
         fit_columns(self.reg_tbl, [5, 9, 9, 8, 9, 15, 12, 8, 8, 8, 9])
-        self.reg_tbl.doubleClicked.connect(
-            lambda ix: self._preview_row(ix.row()))
+        self.reg_tbl.doubleClicked.connect(guard_click(
+            lambda ix: self._preview_row(ix.row())))
         lay = QtWidgets.QVBoxLayout(w)
         lay.addLayout(top)
         lay.addLayout(_cards(self.r_c_inv, self.r_c_crd, self.r_c_net,

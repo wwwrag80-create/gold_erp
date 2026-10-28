@@ -22,6 +22,10 @@ from ui.widgets.common import (confirm_post, posted, ask, big_label, date_edit, 
                                err, fill, info, make_table, title_label,
                                wspin)
 from ui.widgets.edit_mode import EditModeMixin
+from ui.widgets.draft_keeper import keep as keep_draft
+from services import drafts
+
+DRAFT_KEY = "melting"
 from services import numfmt as _nf
 
 # الوزن الفعلي وزنٌ حقيقي بعياره المُدخل — لا يُحوَّل أبداً.
@@ -241,9 +245,61 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
             self.lines = []
             self.notes.clear()
             self.render()
+            self._drop_draft()
             self.refresh()
         except Exception as e:
             err(self, e)
+
+    # ── المسوّدة (5.0): أسطر الصب غير المرحَّلة تبقى بعد انقطاع الكهرباء ──
+    def draft_state(self):
+        if self.is_editing or not self.lines:
+            return None
+        return {"mode": self.kind.currentData(), "date": dstr(self.date),
+                "notes": self.notes.text().strip(),
+                "lines": [dict(ln) for ln in self.lines]}
+
+    def apply_draft(self, d):
+        if not d or not d.get("lines"):
+            return False
+        i = self.kind.findData(d.get("mode"))
+        if i >= 0:
+            self.kind.setCurrentIndex(i)
+        if d.get("date"):
+            self.date.setDate(QtCore.QDate.fromString(d["date"],
+                                                      "yyyy-MM-dd"))
+        self.notes.setText(d.get("notes") or "")
+        self.lines = [{"karat": int(ln.get("karat") or 18),
+                       "weight": float(ln.get("weight") or 0)}
+                      for ln in d["lines"]]
+        self.render()
+        return True
+
+    def _restore_draft(self):
+        if getattr(self, "_draft_done", False):
+            return
+        self._draft_done = True
+        try:
+            if self.apply_draft(drafts.load(DRAFT_KEY,
+                                            self.user.get("username"))):
+                kit.notify(self, "↩ استُعيدت أسطر صبٍّ لم تُرحَّل بعد",
+                           "info")
+        except Exception:
+            pass
+        keep_draft(self, DRAFT_KEY, self.user.get("username"))
+
+    def _drop_draft(self):
+        drafts.clear(DRAFT_KEY, self.user.get("username"))
+        k = getattr(self, "_draft_keeper", None)
+        if k is not None:
+            k.cleared()
+
+    def on_close(self):
+        """يُستدعى من `LazyScreen.release` عند مغادرة الشاشة."""
+        try:
+            drafts.save(DRAFT_KEY, self.user.get("username"),
+                        self.draft_state())
+        except Exception:
+            pass
 
     def close_cycle(self):
         try:
@@ -332,3 +388,4 @@ class MeltingScreen(EditModeMixin, QtWidgets.QWidget):
                 + ("  ⚠ تجاوز الحد" if s["exceeded"] else ""))
         fill(self.log, _log_cols(), rows)
         self.render()
+        self._restore_draft()

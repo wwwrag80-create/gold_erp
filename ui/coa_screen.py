@@ -17,6 +17,7 @@ from database.database import db
 from models import coa
 from ui.widgets.common import ask, big_label, err, info, title_label
 from services import numfmt as _nf
+from ui.widgets.common import guard_click
 
 HEADERS = ["الحساب", "الكود", "النوع", "الطبيعة", "المستوى", "نوع القياس",
            "يقبل الحركة", "الحالة", "الوسم النظامي"]
@@ -147,7 +148,7 @@ class CoaScreen(QtWidgets.QWidget):
         self.model = QtGui.QStandardItemModel()
         self.model.setHorizontalHeaderLabels(HEADERS)
         self.tree.setModel(self.model)
-        self.tree.doubleClicked.connect(self.open_ledger)
+        self.tree.doubleClicked.connect(guard_click(self.open_ledger))
 
         self.search = kit.LineEdit()
         self.search.setPlaceholderText("بحث بالاسم أو الكود…")

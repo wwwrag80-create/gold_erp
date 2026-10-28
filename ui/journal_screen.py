@@ -14,6 +14,10 @@ from ui.widgets.common import (confirm_post, posted, ask, big_label, cell, date_
                                enter_chain, err, fill, info, make_table,
                                mspin, search_combo, title_label, wspin)
 from services import numfmt as _nf
+from services import drafts
+from ui.widgets.draft_keeper import keep as keep_draft
+
+DRAFT_KEY = "journal"
 
 COLS = ["الحساب", "مدين ذهب", "دائن ذهب", "مدين نقد", "دائن نقد"]
 
@@ -282,9 +286,77 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
             self.lines.setRowCount(0)
             self.desc.clear()
             self.recalc()
+            self._drop_draft()
             self.refresh()
         except Exception as e:
             err(self, e)
+
+    # ── المسوّدة (5.0): قيدٌ نصف مكتوب يبقى بعد انقطاع الكهرباء ──
+    def draft_state(self):
+        if getattr(self, "editing_entry_id", None):
+            return None
+        rows = []
+        for r in range(self.lines.rowCount()):
+            acc = self.lines.cellWidget(r, 0)
+            vals = [self.lines.cellWidget(r, c).value() for c in (1, 2, 3, 4)]
+            aid = acc.currentData() if acc is not None else None
+            if aid is None and not any(vals):
+                continue
+            rows.append({"account_id": aid, "vals": vals})
+        if not rows:
+            return None
+        return {"date": dstr(self.date), "desc": self.desc.text().strip(),
+                "karat": kv.active(), "rows": rows}
+
+    def apply_draft(self, d):
+        if not d or not d.get("rows"):
+            return False
+        # أوزان الذهب محفوظة بعيار العرض وقت حفظها — لا تُستعاد بغيره
+        if int(d.get("karat") or kv.active()) != kv.active():
+            return False
+        self.lines.setRowCount(0)
+        for ln in d["rows"]:
+            r = self.add_row()
+            acc = self.lines.cellWidget(r, 0)
+            i = acc.findData(ln.get("account_id"))
+            if i >= 0:
+                acc.setCurrentIndex(i)
+            for col, v in zip((1, 2, 3, 4), ln.get("vals") or ()):
+                self.lines.cellWidget(r, col).setValue(float(v or 0))
+        while self.lines.rowCount() < 2:
+            self.add_row()
+        if d.get("date"):
+            self.date.setDate(QtCore.QDate.fromString(d["date"],
+                                                      "yyyy-MM-dd"))
+        self.desc.setText(d.get("desc") or "")
+        self.recalc()
+        return True
+
+    def _restore_draft(self):
+        if getattr(self, "_draft_done", False):
+            return
+        self._draft_done = True
+        try:
+            if self.apply_draft(drafts.load(DRAFT_KEY,
+                                            self.user.get("username"))):
+                kit.notify(self, "↩ استُعيد قيدٌ لم يُرحَّل بعد", "info")
+        except Exception:
+            pass
+        keep_draft(self, DRAFT_KEY, self.user.get("username"))
+
+    def _drop_draft(self):
+        drafts.clear(DRAFT_KEY, self.user.get("username"))
+        k = getattr(self, "_draft_keeper", None)
+        if k is not None:
+            k.cleared()
+
+    def on_close(self):
+        """يُستدعى من `LazyScreen.release` عند مغادرة الشاشة."""
+        try:
+            drafts.save(DRAFT_KEY, self.user.get("username"),
+                        self.draft_state())
+        except Exception:
+            pass
 
     # ---- سجل القيود ----
     def view_entry(self):
@@ -362,3 +434,4 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
             self.add_row()
             self.add_row()
         self.recalc()
+        self._restore_draft()
