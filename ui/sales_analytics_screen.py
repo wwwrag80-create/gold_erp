@@ -95,6 +95,17 @@ class PanelColumn(QtWidgets.QFrame):
 
     def set_rows(self, rows, headers=None):
         fill(self.table, headers or ["رقم التشغيل", "الوزن المقيد"], rows)
+        # «ايطاليات» (5.0.2): سطر الرقمين التجميعيين معاً — بارزٌ في آخره
+        for r, row in enumerate(rows):
+            if row and row[0] == sa.ITALIAN_LABEL:
+                for c in range(self.table.columnCount()):
+                    it = self.table.item(r, c)
+                    if it is not None:
+                        f = it.font()
+                        f.setBold(True)
+                        it.setFont(f)
+                        it.setToolTip("الرقمان التجميعيان 00010 و0010 معاً:"
+                                      " ما صُرف منهما ناقص ما رجع منهما")
 
 
 class SalesAnalyticsScreen(QtWidgets.QWidget):

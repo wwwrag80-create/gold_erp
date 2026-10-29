@@ -9271,6 +9271,43 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("121) 5.0.2: «ايطاليات» في المباع الفعلي — 00010 و0010 معاً")
+    from models import sales_analytics as _sa121, inventory as _iv121
+    from models import invoices as _inv121
+    with db() as _c121:
+        _bulk121 = {r["work_order_no"]: r["id"] for r in _c121.execute(
+            "SELECT id, work_order_no FROM work_orders WHERE is_deleted=0"
+            " AND work_order_no IN ('00010','0010') AND is_bulk=1")}
+        from models import entities as _en121
+        _cid121 = _en121.add_entity(_c121, "عميل الإيطاليات 121",
+                                      "customer", username="admin")
+        for _no in ("00010", "0010"):
+            _iv121.adjust_bulk_wo(_c121, 50.0, "admin", wo_no=_no)
+        _inv121.create_sale(_c121, _cid121, [
+            {"work_order_id": _bulk121["00010"], "weight": 20},
+            {"work_order_id": _bulk121["0010"], "weight": 15}],
+            "2026-11-05", "admin", False, "")
+        _inv121.create_sale_return(_c121, _cid121, [
+            {"work_order_id": _bulk121["00010"], "weight": 4},
+            {"work_order_id": _bulk121["0010"], "weight": 6}],
+            "2026-11-08", "admin", False, "")
+        _rows121 = _sa121.panel_details(_c121, "net_sold", _cid121,
+                                        "2026-11-01", "2026-11-30")
+        _p121 = _sa121.all_panels(_c121, _cid121, "2026-11-01", "2026-11-30")
+    _last121 = _rows121[-1] if _rows121 else {}
+    check("المباع الفعلي: سطر «ايطاليات» في آخر الجدول = (20+15) − (4+6)"
+          " = 25، بلا سطرين منفصلين للرقمين",
+          _last121.get("wo") == _sa121.ITALIAN_LABEL
+          and abs(_last121.get("weight", 0) - 25.0) < 1e-6
+          and abs(_last121.get("sold", 0) - 35.0) < 1e-6
+          and abs(_last121.get("returned", 0) - 10.0) < 1e-6
+          and not any(r["wo"] in ("00010", "0010") for r in _rows121),
+          str(_rows121))
+    check("وإجمالي اللوحة = مجموع أسطرها = المصروف − المرتجع",
+          abs(_p121["net_sold"]["weight"] - 25.0) < 1e-6
+          and abs(_p121["sales"]["weight"] - _p121["returns"]["weight"]
+                  - 25.0) < 1e-6)
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

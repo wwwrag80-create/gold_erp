@@ -1549,6 +1549,11 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     wo_head = thw("رقم التشغيل<br/>(بلا تكرار)")
 
     head_cells, detail_cells = [], []
+
+    def _it_tr(r):
+        # «ايطاليات» (5.0.2): 00010 و0010 معاً — بارزٌ في آخر الجدول
+        return ('<tr style="font-weight:bold;">'
+                if r.get("wo") == sa.ITALIAN_LABEL else "<tr>")
     for title, value, key in panels:
         head_cells.append(
             f'<td class="ca-head"><div class="ca-title">{title}</div>'
@@ -1568,7 +1573,7 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
                 for r in rows)
         elif net4:
             body_rows = "".join(
-                "<tr>" + cells(
+                _it_tr(r) + cells(
                     f'<td>{en(r["wo"])}</td>',
                     f'<td>{_w(_g(r.get("sold", 0)))}</td>',
                     f'<td>{_w(_g(r.get("returned", 0)))}</td>',
@@ -1576,8 +1581,9 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
                 for r in rows)
         else:
             body_rows = "".join(
-                "<tr>" + cells(f'<td>{en(r["wo"])}</td>',
-                               f'<td>{_w(_g(r["weight"]))}</td>') + "</tr>"
+                _it_tr(r) + cells(f'<td>{en(r["wo"])}</td>',
+                                  f'<td>{_w(_g(r["weight"]))}</td>')
+                + "</tr>"
                 for r in rows)
         if not body_rows:
             body_rows = (f'<tr><td colspan="{4 if net4 else 3}">'

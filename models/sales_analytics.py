@@ -17,6 +17,13 @@ from services import numfmt as _nf
 # اللوحات التي تفاصيلها أرقام تشغيل — فتقبل «الفرز» بلا تكرار
 MERGEABLE = ("sales", "returns", "net_sold")
 OPENING_LABEL = "رصيد افتتاحي"
+# 5.0.2: الرقمان التجميعيان (00010 و0010) سطرٌ واحد في المباع الفعلي
+ITALIAN_LABEL = "ايطاليات"
+
+
+def _is_bulk(wo_no):
+    from models.inventory import is_bulk_no
+    return is_bulk_no(wo_no)
 
 
 def _period_clause(alias, date_from, date_to, params):
@@ -111,8 +118,12 @@ def _net_by_wo(conn, customer_id, date_from, date_to):
     ret_w = {r["wno"]: float(r["rw"] or 0) for r in ret}
 
     agg = {}
+    bulk_sold = 0.0
     for it in sold:
         k = it["wo"]          # رقم التشغيل هو المفتاح
+        if _is_bulk(k):
+            bulk_sold += float(it["rw"] or 0)
+            continue
         a = agg.setdefault(k, {"wo": it["wo"], "sold": 0.0, "ref": it["inv"]})
         a["sold"] += float(it["rw"] or 0)
     out = []
@@ -122,7 +133,19 @@ def _net_by_wo(conn, customer_id, date_from, date_to):
             out.append({"wo": a["wo"], "weight": net, "ref": a["ref"],
                         "sold": round(a["sold"], 3),
                         "returned": round(ret_w.get(wno, 0.0), 3)})
-    return sorted(out, key=lambda x: str(x["wo"]))
+    out.sort(key=lambda x: str(x["wo"]))
+    # ══ «ايطاليات» (5.0.2): 00010 و0010 سطرٌ واحد في آخر الجدول ══
+    # الرقمان رصيدٌ وزنيٌّ واحد بطبيعته لا قطعتان: يُجمع ما صُرف منهما
+    # في الفترة (لوحة المبيعات) ويُطرح ما رجع منهما فيها (لوحة
+    # المرتجعات) — ولو رجع في الفترة ما صُرف قبلها — فيظهر الفارق.
+    bulk_ret = sum(w for k, w in ret_w.items() if _is_bulk(k))
+    if abs(bulk_sold) > 0.0005 or abs(bulk_ret) > 0.0005:
+        out.append({"wo": ITALIAN_LABEL,
+                    "weight": round(bulk_sold - bulk_ret, 3),
+                    "ref": "00010 + 0010",
+                    "sold": round(bulk_sold, 3),
+                    "returned": round(bulk_ret, 3), "italian": True})
+    return out
 
 
 def opening_balance_row(conn, customer_id, date_from=None, date_to=None):
@@ -181,10 +204,13 @@ def merge_by_wo(rows):
     أخذ منهما — ووزن 2 مجموع ما أخذه منه. فإجمالي اللوحة لا يتغيّر.
     الرصيد الافتتاحي ليس رقم تشغيل: يبقى سطره أولاً كما هو.
     """
-    head, agg = [], {}
+    head, agg, tail = [], {}, []
     for r in rows:
         if r.get("wo") == OPENING_LABEL:
             head.append(r)
+            continue
+        if r.get("wo") == ITALIAN_LABEL:
+            tail.append(r)        # «ايطاليات» آخر الجدول دائماً
             continue
         a = agg.setdefault(str(r["wo"]), {"wo": r["wo"], "weight": 0.0,
                                           "ref": r.get("ref")})
@@ -192,7 +218,7 @@ def merge_by_wo(rows):
     out = sorted(agg.values(), key=lambda x: _wo_key(x["wo"]))
     for a in out:
         a["weight"] = round(a["weight"], 3)
-    return head + out
+    return head + out + tail
 
 
 def panel_details(conn, panel, customer_id, date_from=None, date_to=None,
