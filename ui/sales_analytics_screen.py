@@ -357,16 +357,15 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
                             for d in details[key]]
                     self.columns[key].set_rows(
                         rows, [WO_UNIQUE,
-                               f"الصافي (جم {k})" if key == "net_sold"
+                               f"الوزن (جم {k})" if key == "net_sold"
                                else f"الوزن المقيد (جم {k})"])
                 elif key == "net_sold":
-                    # المباع الفعلي: المبيعات والمرتجعات والصافي
-                    rows = [(d["wo"], f"{_nf.f2(self._g(d.get('sold', 0)))}",
-                             f"{_nf.f2(self._g(d.get('returned', 0)))}",
-                             f"{_nf.f2(self._g(d['weight']))}")
+                    # 5.0.4: رقم التشغيل ووزنه (الصافي) وحده — بلا عمودَي
+                    # المباع والمرتجع
+                    rows = [(d["wo"], f"{_nf.f2(self._g(d['weight']))}")
                             for d in details[key]]
                     self.columns[key].set_rows(
-                        rows, ["رقم التشغيل", "المباع", "المرتجع", "الصافي"])
+                        rows, ["رقم التشغيل", f"الوزن (جم {k})"])
                 else:
                     rows = [(d["wo"], f"{_nf.f2(self._g(d['weight']))}")
                             for d in details[key]]

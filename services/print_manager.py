@@ -1569,22 +1569,13 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
         rows = (sa.panel_details(conn, key, customer_id, date_from, date_to,
                                  merged=key in mrg)
                 if key in exp else [])
-        # المباع الفعلي غير المفروز: المباع · المرتجع · الصافي كالشاشة
-        net4 = key == "net_sold" and key not in mrg
+        # 5.0.4: المباع الفعلي برقم التشغيل ووزنه (الصافي) وحده — كالشاشة
         if key == "collection":
             body_rows = "".join(
                 "<tr>" + cells(
                     f'<td>{en(r["wo"])}</td>',
                     f'<td>{_w(_g(r["weight"]))}</td>',
                     f'<td>{_w(r.get("cash", 0), 2)}</td>') + "</tr>"
-                for r in rows)
-        elif net4:
-            body_rows = "".join(
-                _it_tr(r) + cells(
-                    _wo_td(r),
-                    f'<td>{_w(_g(r.get("sold", 0)))}</td>',
-                    f'<td>{_w(_g(r.get("returned", 0)))}</td>',
-                    f'<td>{_w(_g(r["weight"]))}</td>') + "</tr>"
                 for r in rows)
         else:
             body_rows = "".join(
@@ -1593,7 +1584,7 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
                 + "</tr>"
                 for r in rows)
         if not body_rows:
-            body_rows = (f'<tr><td colspan="{4 if net4 else 3}">'
+            body_rows = ('<tr><td colspan="3">'
                          'لا يوجد</td></tr>')
         total = (p["sales"]["weight"] if key == "sales" else
                  p["returns"]["weight"] if key == "returns" else
@@ -1606,23 +1597,10 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
             foot = ("<tr class=\"total\">" + cells(
                 f'<td>الإجمالي</td>', f'<td>{_w(_g(coll["gold"]))}</td>',
                 f'<td>{_w(coll["cash"], 2)}</td>') + "</tr>")
-        elif net4:
-            # الإجماليات من كل الأرقام ولو طُوي الجدول
-            allr = rows or ([] if report else sa.panel_details(
-                conn, key, customer_id, date_from, date_to))
-            head = ("<tr>" + cells(thw("رقم التشغيل"), thw("المباع"),
-                                   thw("المرتجع"),
-                                   thw(f"الصافي {en(k)}")) + "</tr>")
-            foot = ("<tr class=\"total\">" + cells(
-                f'<td>الإجمالي</td>',
-                f'<td>{_w(_g(sum(r.get("sold", 0) for r in allr)))}</td>',
-                f'<td>{_w(_g(sum(r.get("returned", 0) for r in allr)))}</td>',
-                f'<td>{_w(_g(total))}</td>') + "</tr>")
         else:
             head = ("<tr>" + cells(
                 wo_head if key in mrg else thw("رقم التشغيل"),
-                thw(f"الصافي {en(k)}" if key == "net_sold"
-                    else f"الوزن {en(k)}")) + "</tr>")
+                thw(f"الوزن {en(k)}")) + "</tr>")
             foot = ("<tr class=\"total\">" + cells(
                 f'<td>الإجمالي</td>', f'<td>{_w(_g(total))}</td>')
                 + "</tr>")

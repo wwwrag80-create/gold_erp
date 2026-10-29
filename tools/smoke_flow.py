@@ -9303,6 +9303,14 @@ def main():
           and abs(_last121.get("returned", 0) - 10.0) < 1e-6
           and not any(r["wo"] in ("00010", "0010") for r in _rows121),
           str(_rows121))
+    _h121 = __import__("services.print_manager", fromlist=["x"]).build_body(
+        "customer_analytics", _cid121, date_from="2026-11-01",
+        date_to="2026-11-30", visible=["sales", "returns", "net_sold"],
+        expanded=["net_sold"], karat=18, mode="detail")
+    check("5.0.4: المباع الفعلي برقم التشغيل ووزنه وحده — بلا عمودَي المباع"
+          " والمرتجع (الورقة كالشاشة)",
+          "<th>المباع</th>" not in _h121 and "<th>المرتجع</th>" not in _h121
+          and "00010/0010" in _h121)
     check("وإجمالي اللوحة = مجموع أسطرها = المصروف − المرتجع",
           abs(_p121["net_sold"]["weight"] - 25.0) < 1e-6
           and abs(_p121["sales"]["weight"] - _p121["returns"]["weight"]
