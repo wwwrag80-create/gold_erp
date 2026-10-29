@@ -9271,7 +9271,7 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
-    step("121) 5.0.2: «ايطاليات» في المباع الفعلي — 00010 و0010 معاً")
+    step("121) 5.0.2: «00010/0010» في المباع الفعلي — الرقمان معاً")
     from models import sales_analytics as _sa121, inventory as _iv121
     from models import invoices as _inv121
     with db() as _c121:
@@ -9295,9 +9295,9 @@ def main():
                                         "2026-11-01", "2026-11-30")
         _p121 = _sa121.all_panels(_c121, _cid121, "2026-11-01", "2026-11-30")
     _last121 = _rows121[-1] if _rows121 else {}
-    check("المباع الفعلي: سطر «ايطاليات» في آخر الجدول = (20+15) − (4+6)"
+    check("المباع الفعلي: سطر «00010/0010» في آخر الجدول = (20+15) − (4+6)"
           " = 25، بلا سطرين منفصلين للرقمين",
-          _last121.get("wo") == _sa121.ITALIAN_LABEL
+          _last121.get("wo") == _sa121.ITALIAN_LABEL == "00010/0010"
           and abs(_last121.get("weight", 0) - 25.0) < 1e-6
           and abs(_last121.get("sold", 0) - 35.0) < 1e-6
           and abs(_last121.get("returned", 0) - 10.0) < 1e-6

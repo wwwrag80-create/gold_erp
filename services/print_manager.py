@@ -1551,9 +1551,16 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
     head_cells, detail_cells = [], []
 
     def _it_tr(r):
-        # «ايطاليات» (5.0.2): 00010 و0010 معاً — بارزٌ في آخر الجدول
+        # «00010/0010» (5.0.2): الرقمان معاً — بارزٌ في آخر الجدول
         return ('<tr style="font-weight:bold;">'
                 if r.get("wo") == sa.ITALIAN_LABEL else "<tr>")
+
+    def _wo_td(r):
+        # واسمه بخطٍّ أصغر يتّسع له عمود رقم التشغيل (5.0.3)
+        if r.get("wo") == sa.ITALIAN_LABEL:
+            return (f'<td style="font-size:78%; white-space:nowrap;">'
+                    f'{en(r["wo"])}</td>')
+        return f'<td>{en(r["wo"])}</td>'
     for title, value, key in panels:
         head_cells.append(
             f'<td class="ca-head"><div class="ca-title">{title}</div>'
@@ -1574,14 +1581,14 @@ def _tpl_customer_analytics(conn, customer_id, date_from=None,
         elif net4:
             body_rows = "".join(
                 _it_tr(r) + cells(
-                    f'<td>{en(r["wo"])}</td>',
+                    _wo_td(r),
                     f'<td>{_w(_g(r.get("sold", 0)))}</td>',
                     f'<td>{_w(_g(r.get("returned", 0)))}</td>',
                     f'<td>{_w(_g(r["weight"]))}</td>') + "</tr>"
                 for r in rows)
         else:
             body_rows = "".join(
-                _it_tr(r) + cells(f'<td>{en(r["wo"])}</td>',
+                _it_tr(r) + cells(_wo_td(r),
                                   f'<td>{_w(_g(r["weight"]))}</td>')
                 + "</tr>"
                 for r in rows)

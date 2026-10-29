@@ -17,8 +17,9 @@ from services import numfmt as _nf
 # اللوحات التي تفاصيلها أرقام تشغيل — فتقبل «الفرز» بلا تكرار
 MERGEABLE = ("sales", "returns", "net_sold")
 OPENING_LABEL = "رصيد افتتاحي"
-# 5.0.2: الرقمان التجميعيان (00010 و0010) سطرٌ واحد في المباع الفعلي
-ITALIAN_LABEL = "ايطاليات"
+# 5.0.2: الرقمان التجميعيان (00010 و0010) سطرٌ واحد في المباع الفعلي —
+# 5.0.3: باسمهما «00010/0010» (بخطٍّ أصغر في خانته) بدل «ايطاليات»
+ITALIAN_LABEL = "00010/0010"
 
 
 def _is_bulk(wo_no):
@@ -134,7 +135,7 @@ def _net_by_wo(conn, customer_id, date_from, date_to):
                         "sold": round(a["sold"], 3),
                         "returned": round(ret_w.get(wno, 0.0), 3)})
     out.sort(key=lambda x: str(x["wo"]))
-    # ══ «ايطاليات» (5.0.2): 00010 و0010 سطرٌ واحد في آخر الجدول ══
+    # ══ «00010/0010» (5.0.2): الرقمان سطرٌ واحد في آخر الجدول ══
     # الرقمان رصيدٌ وزنيٌّ واحد بطبيعته لا قطعتان: يُجمع ما صُرف منهما
     # في الفترة (لوحة المبيعات) ويُطرح ما رجع منهما فيها (لوحة
     # المرتجعات) — ولو رجع في الفترة ما صُرف قبلها — فيظهر الفارق.
@@ -210,7 +211,7 @@ def merge_by_wo(rows):
             head.append(r)
             continue
         if r.get("wo") == ITALIAN_LABEL:
-            tail.append(r)        # «ايطاليات» آخر الجدول دائماً
+            tail.append(r)        # سطر 00010/0010 آخر الجدول دائماً
             continue
         a = agg.setdefault(str(r["wo"]), {"wo": r["wo"], "weight": 0.0,
                                           "ref": r.get("ref")})

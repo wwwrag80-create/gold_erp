@@ -7,7 +7,7 @@
 تقرير العميل. وزر «فرز» يعرض أرقام تشغيل اللوحات المختارة بلا تكرار
 بأوزانها، والورقة تطبعها كما تُرى.
 """
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ui import kit
 
@@ -95,9 +95,12 @@ class PanelColumn(QtWidgets.QFrame):
 
     def set_rows(self, rows, headers=None):
         fill(self.table, headers or ["رقم التشغيل", "الوزن المقيد"], rows)
-        # «ايطاليات» (5.0.2): سطر الرقمين التجميعيين معاً — بارزٌ في آخره
+        # «00010/0010» (5.0.2): سطر الرقمين التجميعيين معاً — بارزٌ في
+        # آخره، واسمه بخطٍّ أصغر يتّسع له عمود رقم التشغيل (5.0.3)
+        self._bulk_row = None
         for r, row in enumerate(rows):
             if row and row[0] == sa.ITALIAN_LABEL:
+                self._bulk_row = r
                 for c in range(self.table.columnCount()):
                     it = self.table.item(r, c)
                     if it is not None:
@@ -106,6 +109,31 @@ class PanelColumn(QtWidgets.QFrame):
                         it.setFont(f)
                         it.setToolTip("الرقمان التجميعيان 00010 و0010 معاً:"
                                       " ما صُرف منهما ناقص ما رجع منهما")
+        if self._bulk_row is not None:
+            if not getattr(self, "_fit_hooked", False):
+                self._fit_hooked = True
+                self.table.horizontalHeader().sectionResized.connect(
+                    lambda i, *_: self._fit_bulk() if i == 0 else None)
+            self._fit_bulk()
+
+    def _fit_bulk(self):
+        """يصغّر خطّ «00010/0010» حتى يتّسع له عرض الخانة — فلا يُقصّ."""
+        r = getattr(self, "_bulk_row", None)
+        it = self.table.item(r, 0) if r is not None else None
+        if it is None or it.text() != sa.ITALIAN_LABEL:
+            return
+        room = max(30, self.table.columnWidth(0) - 12)
+        f = QtGui.QFont(self.table.font())
+        f.setBold(True)
+        base = f.pointSizeF() if f.pointSizeF() > 0 else 10.0
+        size = base * 0.85
+        while size > 6.0:
+            f.setPointSizeF(size)
+            if QtGui.QFontMetrics(f).horizontalAdvance(it.text()) <= room:
+                break
+            size -= 0.25
+        f.setPointSizeF(max(6.0, size))
+        it.setFont(f)
 
 
 class SalesAnalyticsScreen(QtWidgets.QWidget):
