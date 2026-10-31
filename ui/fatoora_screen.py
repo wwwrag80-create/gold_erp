@@ -315,6 +315,18 @@ class FatooraDialog(QtWidgets.QDialog):
         self.b4.clicked.connect(self.do_production)
         h4.addWidget(self.b4)
 
+        # 5.0.6: التجربة الكاملة بلا فواتير حقيقية — بعد ④ في المحاكاة
+        ht, self.st = step("🧪 تجربة الإرسال — بلا فواتير حقيقية (بيئة "
+                           "المحاكاة وحدها)")
+        self.bt = kit.PushButton("🧪 تجربة الإرسال")
+        self.bt.setToolTip(
+            "يرسل للهيئة (المحاكاة) فاتورةً مبسطة وفاتورةً ضريبية تجريبيتين\n"
+            "ونسخةً من آخر فاتورة بيعٍ ضريبية عندك برقمٍ تجريبي — بالشهادة\n"
+            "الإنتاجية وبالطريق نفسه الذي ستُرسل به فواتيرك.\n"
+            "لا يُكتب شيءٌ في دفاترك: لا مستند ولا عدّاد ولا فاتورة تُقفل.")
+        self.bt.clicked.connect(self.do_trial)
+        ht.addWidget(self.bt)
+
         h5, self.s5 = step("⑤ الإصدار والإرسال التلقائي مع كل فاتورة")
         self.b5 = kit.PushButton("تفعيل")
         self.b5.clicked.connect(self.do_toggle)
@@ -324,7 +336,9 @@ class FatooraDialog(QtWidgets.QDialog):
             "<b>من أين رمز OTP؟</b> ادخل بوابة فاتورة "
             "(fatoora.zatca.gov.sa) بحساب المنشأة ← «تسجيل وحدة/جهاز جديد» "
             "← يظهر رمزٌ صالح لساعة واحدة. للتجربة استخدم بوابة المحاكاة "
-            "أولاً، ثم أعد الخطوات في «البيئة الرسمية» برمزٍ رسمي.")
+            "أولاً (الخطوات ①–④ ثم «🧪 تجربة الإرسال»)، ثم أعد الخطوات في "
+            "«البيئة الرسمية» برمزٍ رسمي.<br/><b>لا تفعّل ⑤ في المحاكاة</b>: "
+            "التفعيل يُصدر مستنداتٍ لفواتيرك الحقيقية ويقفلها عن التعديل.")
         how.setWordWrap(True)
         how.setTextFormat(QtCore.Qt.RichText)
         v.addWidget(how)
@@ -370,6 +384,21 @@ class FatooraDialog(QtWidgets.QDialog):
                          + (f" · تنتهي {prod['expires'][:10]}"
                             if prod.get("expires") else ""))
                         if st["production"] else "لم تصدر")
+        trial = k.get("trial") or {}
+        if env == "production":
+            self.st.setText("في البيئة الرسمية لا تجربة — كل ما يُرسل "
+                            "فاتورةٌ حقيقية")
+        elif not trial:
+            self.st.setText("لم تُجرَّب" + ("" if st["production"] else
+                                            " — بعد الشهادة الإنتاجية ④"))
+        else:
+            self.st.setText(
+                (f"✔ نجحت {trial.get('at', '')} — " if trial.get("ok") else
+                 f"✘ لم تنجح {trial.get('at', '')} — ") + "  ".join(
+                    f"{'✔' if r.get('status') in ledger.ACCEPTED else '✘'} "
+                    f"{r.get('title', '')}" for r in trial.get("results")
+                    or []))
+        self.bt.setEnabled(st["production"] and env in onboard.TRIAL_ENVS)
         self.s5.setText("✔ مفعّل — كل فاتورة ضريبية تُصدر إلكترونياً وتُرسل"
                         if on else "غير مفعّل")
         self.b5.setText("إيقاف" if on else "تفعيل")
@@ -412,8 +441,11 @@ class FatooraDialog(QtWidgets.QDialog):
         env = self._env()
 
         def _run():
-            with db() as conn:
-                return onboard.run_checks(conn, env)
+            # 5.0.6: البيانات تُقرأ ثم تُغلق المعاملة — الاتصال بالهيئة
+            # (ست رسائل) لا يحبس قفل القاعدة
+            with db(readonly=True) as conn:
+                prof = pf.load(conn)
+            return onboard.run_checks(None, env, prof=prof)
 
         def _done(res):
             ok = sum(1 for v in res.values() if v["ok"])
@@ -431,17 +463,66 @@ class FatooraDialog(QtWidgets.QDialog):
                                         "الإرسال من الخطوة ⑤."),
                              self.refresh_all()), self.b4)
 
+    def do_trial(self):
+        env = self._env()
+
+        def _done(res):
+            lines = []
+            for r in res.get("results") or []:
+                ok = r.get("status") in ledger.ACCEPTED
+                lines.append(f"{'✔' if ok else '✘'} {r['title']} "
+                             f"({r['number']}): {r['label']}")
+                for e in (r.get("errors") or [])[:4]:
+                    lines.append(f"      • {e}")
+                for w in (r.get("warnings") or [])[:3]:
+                    lines.append(f"      ⚠ {w}")
+            head = ("✔ الربط يعمل: قبلت الهيئة (المحاكاة) كل المستندات "
+                    "التجريبية.\nلم يُكتب شيءٌ في دفاترك ولم تُقفل فاتورة."
+                    if res.get("ok") else
+                    "✘ لم تنجح التجربة كاملةً — التفاصيل أدناه (لم يُكتب "
+                    "شيءٌ في دفاترك):")
+            (info if res.get("ok") else err)(self, head + "\n\n"
+                                             + "\n".join(lines))
+            self.refresh_all()
+        self._bg(lambda: onboard.trial_send(env), _done, self.bt)
+
     def do_toggle(self):
+        # الحالة تُقرأ ثم تُغلق المعاملة — لا نافذة سؤالٍ تنتظر المستخدم
+        # والقاعدة مقفلة (5.0.6)
+        try:
+            with db(readonly=True) as conn:
+                on = not ledger.enabled(conn)
+                env = pf.load(conn).get("env") or "simulation"
+        except Exception as e:
+            err(self, e)
+            return
+        if on and env != "production":
+            box = QtWidgets.QMessageBox(self)
+            box.setIcon(QtWidgets.QMessageBox.Warning)
+            box.setWindowTitle("تفعيل في بيئة المحاكاة؟")
+            box.setText(
+                "أنت في بيئة المحاكاة. التفعيل هنا يُصدر مستنداً إلكترونياً "
+                "لفواتيرك الحقيقية القادمة ويرسلها للمحاكاة، فتُقفل عن "
+                "التعديل والحذف وتدخل عدّاد المستندات — ولا يُعتدّ بها "
+                "ضريبياً.\n\nللتأكد أن الربط يعمل بلا فواتير حقيقية استعمل "
+                "«🧪 تجربة الإرسال» بدل التفعيل.")
+            b_no = box.addButton("لا — سأستعمل تجربة الإرسال",
+                                 QtWidgets.QMessageBox.RejectRole)
+            box.addButton("تفعيل رغم ذلك",
+                          QtWidgets.QMessageBox.DestructiveRole)
+            box.setDefaultButton(b_no)
+            box.exec_()
+            if box.clickedButton() is b_no:
+                return
+        elif on and QtWidgets.QMessageBox.question(
+                self, "تفعيل الفوترة الإلكترونية",
+                "من الآن: كل فاتورة بيع ضريبية ومرتجعها تُصدر مستنداً "
+                "إلكترونياً مختوماً ويُرسل للهيئة، ولا تُعدَّل "
+                "الفاتورة بعد إصدارها ولا تُحذف (التصحيح بمرتجع).\n\n"
+                "تفعيل؟") != QtWidgets.QMessageBox.Yes:
+            return
         try:
             with db() as conn:
-                on = not ledger.enabled(conn)
-                if on and QtWidgets.QMessageBox.question(
-                        self, "تفعيل الفوترة الإلكترونية",
-                        "من الآن: كل فاتورة بيع ضريبية ومرتجعها تُصدر مستنداً "
-                        "إلكترونياً مختوماً ويُرسل للهيئة، ولا تُعدَّل "
-                        "الفاتورة بعد إصدارها ولا تُحذف (التصحيح بمرتجع).\n\n"
-                        "تفعيل؟") != QtWidgets.QMessageBox.Yes:
-                    return
                 onboard.set_enabled(conn, on, self._uname())
         except Exception as e:
             err(self, e)

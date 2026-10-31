@@ -9402,6 +9402,136 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("123) 5.0.6: تجربة الربط مع الهيئة بلا فواتير حقيقية")
+    import base64 as _b123
+    import http.server as _hs123
+    import json as _js123
+    import os as _os123
+    import threading as _th123
+    import time as _tm123
+    from services.fatoora import ec as _ec123, ledger as _lg123, \
+        onboard as _ob123, readiness as _rd123, ubl as _ubl123
+    from services.fatoora import profile as _pf123
+    from ui.widgets.common import save_pref as _sp123
+    _seen123, _mode123 = [], {"reject": False}
+
+    class _Zatca123(_hs123.BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            body = _js123.loads(self.rfile.read(n) or b"{}")
+            xml = _b123.b64decode(body.get("invoice", "")).decode("utf-8")
+            v = _ubl123.verify_document(xml)
+            t0 = _tm123.monotonic()
+            _sp123("smoke.trial_probe", str(t0))      # القاعدة غير محبوسة؟
+            _seen123.append({"path": self.path, "ok": v["hash_ok"]
+                             and v["signature_ok"],
+                             "auth": self.headers.get("Authorization", ""),
+                             "clr": self.headers.get("Clearance-Status"),
+                             "write_s": _tm123.monotonic() - t0})
+            if _mode123["reject"]:
+                code, out = 400, {"validationResults": {"errorMessages": [
+                    {"code": "BR-KSA-TEST", "message": "رفضٌ تجريبي"}]}}
+            elif "clearance" in self.path:
+                code, out = 200, {"clearanceStatus": "CLEARED",
+                                  "clearedInvoice": body.get("invoice")}
+            else:
+                code, out = 200, {"reportingStatus": "REPORTED"}
+            raw = _js123.dumps(out).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    _srv123 = _hs123.ThreadingHTTPServer(("127.0.0.1", 0), _Zatca123)
+    _th123.Thread(target=_srv123.serve_forever, daemon=True).start()
+    _os123.environ["GOLD_ERP_FATOORA_URL"] = \
+        f"http://127.0.0.1:{_srv123.server_address[1]}"
+    try:
+        _k123 = _ec123.PrivateKey.generate()
+        _tok123 = _b123.b64encode(_ec123.self_signed_certificate(_k123)
+                                  .encode()).decode()
+        with db() as conn:
+            _pf123.save(conn, {"env": "simulation", "enabled": False})
+            _p123 = _pf123.load(conn)
+            _docs0 = conn.execute("SELECT COUNT(*) FROM fatoora_documents"
+                                  ).fetchone()[0]
+            _qr0 = conn.execute("SELECT COUNT(*), COALESCE(GROUP_CONCAT("
+                                "qr_base64),'') FROM invoices").fetchone()
+            _qr0 = tuple(_qr0)
+            _inv123 = conn.execute(
+                "SELECT COUNT(*) FROM invoices i JOIN entities e ON"
+                " e.id=i.customer_id WHERE i.is_deleted=0 AND"
+                " i.vat_applied=1 AND i.kind='sale' AND"
+                " e.entity_type<>'internal'").fetchone()[0]
+        _pf123.save_keys("simulation", {
+            "private_key": _k123.to_pem(), "csr": "x",
+            "compliance": {"token": _tok123, "secret": "s"},
+            "checks": {f"{a}:{b}": {"ok": True} for a, b in _ob123.SAMPLES},
+            "production": {"token": _tok123, "secret": "s"}})
+        _chk123 = _ob123.run_checks(None, "simulation", prof=_p123)
+        check("فحوص الامتثال الستة تُرسل بلا معاملةٍ مفتوحة على القاعدة",
+              all(v["ok"] for v in _chk123.values()) and len(_chk123) == 6
+              and all(s["write_s"] < 2 for s in _seen123), str(
+                  [(n, v["errors"]) for n, v in _chk123.items()
+                   if not v["ok"]]))
+        del _seen123[:]
+        _tr123 = _ob123.trial_send("simulation")
+        _paths123 = [s["path"] for s in _seen123]
+        check("🧪 تجربة الإرسال: مبسطة بالإبلاغ وضريبية بالاعتماد بالشهادة"
+              " الإنتاجية — ونسخةٌ من آخر فاتورة ضريبية — وقبلتها الهيئة",
+              _tr123["ok"] and len(_tr123["results"]) == 2 + bool(_inv123)
+              and "/invoices/reporting/single" in _paths123
+              and "/invoices/clearance/single" in _paths123
+              and all(s["ok"] and s["auth"].startswith("Basic ")
+                      for s in _seen123)
+              and any(s["clr"] == "1" for s in _seen123),
+              str([(r["title"], r["label"], r["errors"])
+                   for r in _tr123["results"]]))
+        check("والهيئة تستلم مستنداتٍ بختمٍ وبصمةٍ صحيحين، والقاعدة غير"
+              " محبوسة أثناء الاتصال",
+              all(s["ok"] and s["write_s"] < 2 for s in _seen123),
+              str([(s["path"], s["ok"], round(s["write_s"], 3))
+                   for s in _seen123]))
+        with db(readonly=True) as conn:
+            _docs1 = conn.execute("SELECT COUNT(*) FROM fatoora_documents"
+                                  ).fetchone()[0]
+            _qr1 = tuple(conn.execute(
+                "SELECT COUNT(*), COALESCE(GROUP_CONCAT(qr_base64),'')"
+                " FROM invoices").fetchone())
+            _v123 = _rd123.run(conn)
+        check("ولا يُكتب شيءٌ في الدفاتر: لا مستند ولا عدّاد ولا رمز QR"
+              " لفاتورة", _docs1 == _docs0 and _qr1 == _qr0,
+              f"{_docs0}→{_docs1}")
+        _ti123 = [i for i in _v123["items"]
+                  if i["title"].startswith("تجربة الإرسال")]
+        check("وفحص الجاهزية يقول: يعمل ومربوطٌ بالمحاكاة — ليس رسمياً بعد",
+              "يعمل ومربوطٌ ببيئة المحاكاة" in _v123["verdict"][1]
+              and "المحاكاة" in _v123["verdict"][1]
+              and _ti123 and _ti123[0]["status"] == "ok",
+              _v123["verdict"][1])
+        _mode123["reject"] = True
+        _tr2 = _ob123.trial_send("simulation")
+        _mode123["reject"] = False
+        check("ورفضُ الهيئة يظهر بسببه ورقم قاعدته",
+              not _tr2["ok"] and any(
+                  "BR-KSA-TEST" in e for r in _tr2["results"]
+                  for e in r["errors"]),
+              str([r["errors"] for r in _tr2["results"]]))
+        try:
+            _ob123.trial_send("production")
+            _pr123 = False
+        except ValueError:
+            _pr123 = True
+        check("ولا تجربة في البيئة الرسمية — كل ما يُرسل هناك فاتورةٌ حقيقية",
+              _pr123)
+    finally:
+        _os123.environ.pop("GOLD_ERP_FATOORA_URL", None)
+        _srv123.shutdown()
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

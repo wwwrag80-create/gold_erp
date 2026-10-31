@@ -109,13 +109,16 @@ def _sample_doc(p, subtype, kind, icv, pih):
     return doc
 
 
-def run_checks(conn, env):
-    """③ ستة مستندات تجريبية لخادم الامتثال — يعيد النتائج لكل نوع."""
+def run_checks(conn, env, prof=None):
+    """③ ستة مستندات تجريبية لخادم الامتثال — يعيد النتائج لكل نوع.
+
+    `prof` (بيانات المنشأة مقروءةً سلفاً) مع `conn=None`: لا معاملة على
+    القاعدة طوال الاتصال بالهيئة (5.0.6)."""
     k = pf.load_keys(env)
     comp = k.get("compliance") or {}
     if not comp.get("token"):
         raise ValueError("احصل على شهادة الامتثال أولاً (الخطوة ②)")
-    p = pf.load(conn)
+    p = prof or pf.load(conn)
     key = ec.PrivateKey.from_pem(k["private_key"])
     cert = api.token_certificate(comp["token"])
     pih, results = ubl.FIRST_PIH, {}
@@ -166,6 +169,102 @@ def request_production(env):
                        "expires": expires}
     pf.save_keys(env, k)
     return k["production"]
+
+
+# ══════════════════════ 🧪 تجربة الإرسال بلا فواتير حقيقية (5.0.6) ══════════
+# بعد الشهادة الإنتاجية في بيئة المحاكاة: يُرسل مستنداتٍ تجريبية بالطريق
+# نفسه الذي ستُرسل به الفواتير (الإبلاغ للمبسطة · الاعتماد للضريبية)
+# وبالشهادة الإنتاجية نفسها — فيُعرف أن الربط يعمل فعلاً من أوله إلى
+# آخره. **ولا يُكتب شيءٌ في دفاتر المصنع**: لا مستند في سجل الفواتير
+# الإلكترونية، ولا عدّاد يتقدّم، ولا فاتورةٌ تُقفل. وتُرفض في البيئة
+# الرسمية: كل ما يُرسل هناك فاتورةٌ حقيقية لدى الهيئة.
+TRIAL_ENVS = ("simulation", "sandbox")
+
+
+def _trial_docs(conn, p):
+    stamp = datetime.now().strftime("%m%d%H%M%S")
+    docs = []
+    for sub, title in (("simplified", "فاتورة مبسطة (إبلاغ)"),
+                       ("standard", "فاتورة ضريبية (اعتماد)")):
+        d = _sample_doc(p, sub, "invoice", 0, "")
+        d["number"] = f"TRIAL-{sub[:3].upper()}-{stamp}"
+        docs.append((title, d))
+    # نسخةٌ من آخر فاتورة بيعٍ ضريبية حقيقية — تكشف ما ينقص بياناتك أنت
+    # (عنوان العميل، أسطر الطقم…) قبل الإطلاق. برقمٍ تجريبي، ولا تُمسّ.
+    try:
+        from services.fatoora import ledger
+        r = conn.execute(
+            "SELECT i.id FROM invoices i JOIN entities e ON"
+            " e.id=i.customer_id WHERE i.is_deleted=0 AND i.vat_applied=1"
+            " AND i.kind='sale' AND e.entity_type<>'internal'"
+            " ORDER BY i.id DESC LIMIT 1").fetchone()
+        if r:
+            d = ledger.build_doc(conn, r["id"], p)
+            title = f"نسخة من فاتورتك {d['number']}"
+            d["number"] = f"TRIAL-COPY-{stamp}"
+            d["issue_date"] = datetime.now().strftime("%Y-%m-%d")
+            d["issue_time"] = datetime.now().strftime("%H:%M:%S")
+            d["supply_date"] = d["issue_date"]
+            docs.append((title, d))
+    except Exception:
+        pass
+    return docs
+
+
+def trial_send(env):
+    """يرسل المستندات التجريبية للمحاكاة ويعيد نتيجة كلٍّ منها.
+
+    لا يكتب في قاعدة المصنع شيئاً — النتيجة تُحفظ في ملف مفاتيح الجهاز
+    لهذه البيئة ليقرأها فحص الجاهزية. والقاعدة تُقرأ في معاملةٍ قصيرة
+    تُغلق قبل أي اتصال: الشبكة لا تحبس قفلها."""
+    from database.database import db
+    from services.fatoora import ledger, rules
+    if env not in TRIAL_ENVS:
+        raise ValueError("التجربة في بيئة المحاكاة وحدها — كل ما يُرسل في "
+                         "البيئة الرسمية فاتورةٌ حقيقية لدى الهيئة.")
+    k = pf.load_keys(env)
+    prod = k.get("production") or {}
+    if not prod.get("token"):
+        raise ValueError("التجربة تحتاج الشهادة الإنتاجية لبيئة المحاكاة "
+                         "(الخطوة ④) — بها تُرسل الفواتير.")
+    with db(readonly=True) as conn:
+        p = pf.load(conn)
+        docs = _trial_docs(conn, p)
+    key = ec.PrivateKey.from_pem(k["private_key"])
+    cert = api.token_certificate(prod["token"])
+    chain = k.get("trial_chain") or {}
+    icv, pih = int(chain.get("icv") or 0), chain.get("pih") or ubl.FIRST_PIH
+    out = []
+    for title, doc in docs:
+        icv += 1
+        doc = dict(doc, icv=icv, pih=pih)
+        res = {"title": title, "number": doc["number"],
+               "subtype": doc["subtype"], "status": "", "label": "",
+               "errors": [], "warnings": [], "local": False}
+        errs, _w = rules.check_document(doc)
+        if errs:
+            res.update(status="local", local=True, errors=errs[:8],
+                       label="لم تُرسل — بياناتٌ ناقصة")
+            icv -= 1
+            out.append(res)
+            continue
+        signed = ubl.sign_document(doc, key, cert)
+        pih = signed["hash"]
+        status, payload, error = ledger.submit_one(
+            {"invoice_hash": signed["hash"], "uuid": signed["uuid"],
+             "xml": signed["xml"], "subtype": doc["subtype"]}, env)
+        e2, w2 = api.messages(payload)
+        res.update(status=status,
+                   label=ledger.STATUS_LABELS.get(status, status),
+                   errors=e2 or ([error] if error and status != "warning"
+                                 else []),
+                   warnings=w2)
+        out.append(res)
+    ok = bool(out) and all(r["status"] in ledger.ACCEPTED for r in out)
+    k["trial_chain"] = {"icv": icv, "pih": pih}
+    k["trial"] = {"at": _now(), "ok": ok, "results": out}
+    pf.save_keys(env, k)
+    return k["trial"]
 
 
 def set_enabled(conn, on, username=None):
