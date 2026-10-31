@@ -27,7 +27,7 @@ from ui.widgets.common import (busy, cell, confirm_post, posted, ask,
                                row_action_buttons, row_height, run_bg,
                                save_pref, search_combo, show_model_image,
                                TitledSections, wspin, zspin)
-from ui.widgets.table_fit import fit_columns
+from ui.widgets.table_fit import fit_columns, two_line_header
 from ui.widgets.model_pic import ModelPic, thumb
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
@@ -489,6 +489,14 @@ class QRDialog(QtWidgets.QDialog):
         lay.addWidget(txt)
 
 
+class _NoteLabel(QtWidgets.QLabel):
+    """سطرُ تنبيهٍ يختفي وهو فارغ (5.0.5) — فلا يترك فراغاً في الرأس."""
+
+    def setText(self, text):
+        super().setText(text)
+        self.setVisible(bool(text))
+
+
 class _Panel(QtWidgets.QFrame):
     """لوحةُ رقمٍ واحد: عنوانٌ صغير، ثم الرقم كبيراً، ثم سطرُ شرح.
 
@@ -508,11 +516,15 @@ class _Panel(QtWidgets.QFrame):
         row = QtWidgets.QHBoxLayout()
         t = QtWidgets.QLabel(title)
         t.setObjectName("chipTitle")
+        # 5.0.5: العنوان ينكسر سطرين في الشاشة الضيّقة بدل أن يفرض عرضه
+        # على صفّ اللوحات كلّه فيظهر شريط السحب الأفقي
+        t.setWordWrap(True)
+        t.setMinimumWidth(70)
         self.value = QtWidgets.QLabel("—")
         self.value.setObjectName("chipValue")
-        row.addWidget(t)
-        row.addStretch(1)
-        row.addWidget(self.value)
+        # العنوان يأخذ المتاح كلّه فلا ينكسر إلا إن ضاق فعلاً
+        row.addWidget(t, 1)
+        row.addWidget(self.value, 0, QtCore.Qt.AlignVCenter)
         lay.addLayout(row)
         self.sub = QtWidgets.QLabel(sub, self)
         self.sub.setObjectName("chipSub")
@@ -602,8 +614,15 @@ class SalesScreen(QtWidgets.QWidget):
     COLS = ["", "الموديل", "الصورة", "رقم التشغيل", "العيار", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
             "الأحجار بعد الخصم", "💎 الماس", "الأجر/جم", "الأجرة (ريال)"]
+    # 5.0.5: العناوين الطويلة تُعرض سطرين في رأس الجدول — فلا يُقصّ
+    # عنوانٌ في الشاشة الضيقة، ويملأ الجدول العرض بلا سحبٍ أفقي
+    HEAD_SHOWN = {"رقم التشغيل": "رقم\nالتشغيل",
+                  "الوزن المقيد": "الوزن\nالمقيد",
+                  "الوزن القائم": "الوزن\nالقائم",
+                  "الأحجار بعد الخصم": "الأحجار\nبعد الخصم",
+                  "الأجرة (ريال)": "الأجرة\n(ريال)"}
     # أوزان العرض (مجموعها 100): عمود الأزرار يكفيه القليل
-    COL_W = [5, 8, 8, 9, 6, 9, 8, 7, 6, 7, 8, 6, 6, 7]
+    COL_W = [5, 8, 7, 8, 6, 7, 7, 7, 7, 7, 8, 7, 7, 9]
     C_PIC, PIC = 2, 46            # عمود الصورة ومقاس مصغّرتها
     C_DIA = 11                    # عمود الماس
     # خانتا الأجر — تُكتبان في مكانهما (4.59)
@@ -663,14 +682,16 @@ class SalesScreen(QtWidgets.QWidget):
         self.kind = kit.ComboBox()
         self.kind.addItem("فاتورة بيع", "sale")
         self.kind.addItem("مرتجع بيع", "sale_return")
-        self.kind.setMinimumWidth(150)
+        self.kind.setMinimumWidth(118)
         self.kind.currentIndexChanged.connect(self.clear_items)
         self.kind.currentIndexChanged.connect(self._clear_held)
         self.kind.currentIndexChanged.connect(self._sync_kind_labels)
         self.date = date_edit()
         self.customer = search_combo("اكتب اسم العميل أو الطرف المقابل…")
         self.customer.currentIndexChanged.connect(self.customer_changed)
-        btn_new_cust = kit.PushButton("+ عميل جديد")
+        self.customer.setMinimumWidth(180)
+        btn_new_cust = kit.PushButton("+ عميل")
+        btn_new_cust.setToolTip("إضافة عميل جديد")
         btn_new_cust.setObjectName("ghost")
         btn_new_cust.clicked.connect(self.new_customer)
 
@@ -679,7 +700,7 @@ class SalesScreen(QtWidgets.QWidget):
         # يُطالَب باختياره في كل فاتورة، ومن لا يعرف الخيار أصلاً يجد
         # الذهب المشغول كما كان دائماً.
         self.source = kit.ComboBox()
-        self.source.setMinimumWidth(240)
+        self.source.setMinimumWidth(150)
         self.source.setToolTip(
             "الحساب الذي يخرج منه ذهب هذه الفاتورة — ويعود إليه في "
             "المرتجع. يُحفظ مع الفاتورة ويُطبع عليها.")
@@ -701,13 +722,14 @@ class SalesScreen(QtWidgets.QWidget):
         self.description = kit.LineEdit()
         self.description.setPlaceholderText(
             "البيان (اختياري) — يُحفظ مع العملية ويظهر في كشف الحساب")
-        self.vat_check = kit.CheckBox("ضريبة 15% (فاتورة ضريبية + QR)")
+        self.vat_check = kit.CheckBox("ضريبة 15%")
+        self.vat_check.setToolTip("فاتورة ضريبية بضريبة 15% ورمز QR الضريبي")
         self.vat_check.setChecked(False)
         self.vat_check.stateChanged.connect(self.recalc)
         # ══ رمز QR لصفحة الفاتورة — قرارٌ لكل فاتورة ══
         # إنشاؤه يعني رفع صور موديلاتها إلى التخزين، فلا يُنشأ ما لم
         # يُطلب. وآخر اختيارٍ يبقى فلا يُسأل عنه كل مرة.
-        self.qr_check = kit.CheckBox("رمز QR لصفحة الفاتورة")
+        self.qr_check = kit.CheckBox("QR الصفحة")
         self.qr_check.setToolTip(
             "عند تفعيله يُطبع على الفاتورة رمزٌ يفتح صفحتها على الجوال:\n"
             "الفاتورة أولاً ثم موديلاتها بأسمائها وأعدادها.\n\n"
@@ -728,7 +750,8 @@ class SalesScreen(QtWidgets.QWidget):
         self.internal_note.setVisible(False)
         # الأجرة المتفق عليها تُستدعى من بطاقة العميل وتظهر أمام عين
         # البائع، ويُنبَّه فوراً إن خالفها — بلا منع.
-        self.wage_note = QtWidgets.QLabel("")
+        self.wage_note = _NoteLabel("")
+        self.wage_note.setVisible(False)
         self.wage_note.setObjectName("cardSub")
         self.wage_note.setProperty("live", True)     # تنبيهٌ حيّ لا شرح
         self.wage_note.setWordWrap(True)
@@ -743,10 +766,10 @@ class SalesScreen(QtWidgets.QWidget):
         self.order_note.setVisible(False)
 
         g = QtWidgets.QGridLayout(box)
-        g.setHorizontalSpacing(10)
+        g.setHorizontalSpacing(8)
         g.addWidget(QtWidgets.QLabel("نوع العملية:"), 0, 0)
         g.addWidget(self.kind, 0, 1)
-        g.addWidget(QtWidgets.QLabel("العميل / الطرف:"), 0, 2)
+        g.addWidget(QtWidgets.QLabel("العميل:"), 0, 2)
         g.addWidget(self.customer, 0, 3)
         g.addWidget(btn_new_cust, 0, 4)
         # العنوان يتبع نوع العملية: البيع **يخرج من** حساب، والمرتجع
@@ -875,6 +898,9 @@ class SalesScreen(QtWidgets.QWidget):
             lbl = QtWidgets.QLabel(t)
             lbl.setObjectName("cardSub")
             lbl.setAlignment(QtCore.Qt.AlignCenter)
+            # 5.0.5: العنوان الطويل («الأحجار بعد الخصم») ينكسر سطرين
+            # بدل أن يفرض عرضه على الخانة كلها
+            lbl.setWordWrap(True)
             return lbl
 
         # الترتيب كما طلبه صاحب النظام: الموديل والرقم ثم المكوّنات،
@@ -909,16 +935,25 @@ class SalesScreen(QtWidgets.QWidget):
         mb.addWidget(self.model_no, 1)
         mb.addWidget(self.model_pic)
         g = QtWidgets.QGridLayout(box)
-        g.setHorizontalSpacing(6)
+        g.setHorizontalSpacing(5)
+        # 5.0.5: الشاشة كاملةً بلا سحبٍ أفقي — كانت كل خانةٍ لا تقلّ عن
+        # 86 بكسلاً فزاد السطر عن عرض الشاشات الشائعة (1366، و1920 بتكبير
+        # 150%) فظهر شريط السحب. الآن أدنى عرضٍ يكفي رقمه، والفائض من
+        # عرض الشاشة يتوزّع على الخانات بنسبها.
+        _min = {self.model_no: 70, self.barcode: 100,
+                self.line_karat: 88}
         for c, (label, widget, stretch) in enumerate(fields):
-            widget.setMinimumWidth(86)
+            widget.setMinimumWidth(_min.get(widget, 58))
             g.addWidget(_sub(label), 0, c)
             g.addWidget(model_box if widget is self.model_no else widget,
                         1, c)
             g.setColumnStretch(c, stretch + (2 if widget is self.model_no
                                              else 0))
+        # 5.0.5: «+ أجر فقط» فوق «+ إضافة سطر» في عمودٍ واحد — صفّ
+        # العناوين فوق الزرّين كان فارغاً، والعمود الثاني كان يزيد السطر
+        # عرضاً حتى يُسحب أفقياً
+        g.addWidget(self.btn_wage_only, 0, len(fields))
         g.addWidget(self.btn_add_line, 1, len(fields))
-        g.addWidget(self.btn_wage_only, 1, len(fields) + 1)
         # Enter على زرّ الإضافة يضغطه (الزر خارج سلسلة الخانات، ومن
         # وصل إليه بـTab كان يحتاج المسطرة لا Enter)
         for _b in (self.btn_add_line, self.btn_wage_only):
@@ -1031,6 +1066,7 @@ class SalesScreen(QtWidgets.QWidget):
             "✎ يفتح السطر كاملاً للتصحيح   ·   ✕ يحذفه من الفاتورة "
             "  ·   خانة الأجر تُعدَّل بالنقر عليها، وEnter ينزل للتي تحتها")
         hint.setObjectName("cardSub")
+        hint.setWordWrap(True)
 
         self.p_weight = _Panel("إجمالي الوزن المقيد")
         self.p_wages = _Panel("إجمالي الأجور")
@@ -2880,6 +2916,8 @@ class SalesScreen(QtWidgets.QWidget):
                          round(t["diamond"], 3), "—",
                          round(t["wages"], 2)))
         fill(self.items_table, self.COLS, rows)
+        two_line_header(self.items_table,
+                        [self.HEAD_SHOWN.get(h, h) for h in self.COLS])
         # صفوفٌ أعلى من جداول العرض: البنود تُراجَع رقماً رقماً قبل الترحيل
         # — وبارتفاع صورة الموديل (4.93)
         self.items_table.verticalHeader().setDefaultSectionSize(

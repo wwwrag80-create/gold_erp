@@ -137,6 +137,8 @@ def restart_app():
         exe = sys.executable
         args = sys.argv[1:] if getattr(sys, "frozen", False) else sys.argv
         if not os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            # 5.0.5: الجديدة تنتظر خروج هذه (`services.single_instance`)
+            os.environ["GOLD_ERP_RELAUNCH"] = "1"
             QtCore.QProcess.startDetached(exe, list(args))
     except Exception:
         pass

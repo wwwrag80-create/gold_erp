@@ -23,7 +23,7 @@ from ui.widgets.common import (busy, confirm_post, posted, ask, big_label,
                                load_pref, make_table, mspin,
                                row_action_buttons, save_pref,
                                TitledSections, wspin)
-from ui.widgets.table_fit import fit_columns
+from ui.widgets.table_fit import fit_columns, two_line_header
 from ui.widgets.model_pic import ModelPic  # noqa: F401 (4.93: مشتركة)
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
@@ -179,7 +179,15 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
     COLS = ["", "رقم الموديل", "رقم التشغيل", "العيار", "الوزن المقيد",
             "الوزن القائم", "الذهب", "الفصوص", "الأحجار",
             "الأحجار بعد الخصم", "💎 الماس", "نسبة الخصم", "ملاحظات"]
-    COL_W = [6, 9, 10, 6, 9, 9, 8, 7, 7, 9, 6, 6, 8]
+    # 5.0.5: العناوين الطويلة سطران في رأس الجدول — فلا يُقصّ عنوانٌ في
+    # الشاشة الضيقة والجدول يملأ العرض بلا سحب (`two_line_header`)
+    HEAD_SHOWN = {"رقم الموديل": "رقم\nالموديل",
+                  "رقم التشغيل": "رقم\nالتشغيل",
+                  "الوزن المقيد": "الوزن\nالمقيد",
+                  "الوزن القائم": "الوزن\nالقائم",
+                  "الأحجار بعد الخصم": "الأحجار\nبعد الخصم",
+                  "نسبة الخصم": "نسبة\nالخصم"}
+    COL_W = [6, 9, 8, 7, 8, 8, 8, 7, 7, 8, 7, 7, 10]
 
     def __init__(self, user):
         super().__init__()
@@ -334,7 +342,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.diamond.setToolTip(
             "وزن الماس — للعرض والمعرفة فقط: لا يدخل الوزن المقيد ولا"
             " القائم ولا أي قيد. يظهر في فاتورة الطقم وفي كشف الحساب.")
-        self.btn_rate = kit.PushButton(f"خصم {self.rate*100:.0f}%")
+        # 5.0.5: النسبة وحدها على الزر (العنوان فوقه «الأحجار بعد الخصم»)
+        self.btn_rate = kit.PushButton(f"{self.rate*100:.0f}%")
+        self.btn_rate.setToolTip("نسبة خصم الأحجار — انقر لتغييرها")
         self.btn_rate.setObjectName("ghost")
         self.btn_rate.setMaximumWidth(96)
         self.btn_rate.clicked.connect(self.edit_rate)
@@ -350,6 +360,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             lbl = QtWidgets.QLabel(t)
             lbl.setObjectName("cardSub")
             lbl.setAlignment(QtCore.Qt.AlignCenter)
+            # 5.0.5: العنوان الطويل ينكسر سطرين لا يفرض عرضه على الخانة
+            lbl.setWordWrap(True)
             return lbl
 
         # 4.82: صورة الموديل بجانب رقمه — يُرى أنه الموديل نفسه قبل الإضافة
@@ -391,9 +403,16 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             ("العيار", self.karat, 2),
         ]
         g = QtWidgets.QGridLayout(box)
-        g.setHorizontalSpacing(6)
+        g.setHorizontalSpacing(5)
+        # 5.0.5: الشاشة كاملةً بلا سحبٍ أفقي — أدنى عرضٍ يكفي رقمه (كان
+        # 86 لكل خانة فزاد السطر عن الشاشة بعد خانة الماس)، والفائض من
+        # عرض الشاشة يتوزّع على الخانات بنسبها
+        self.model_no.setMinimumWidth(70)
+        self.after.setMinimumWidth(58)
+        _min = {self.wo_no: 96, self.karat: 84, self.notes: 64}
         for c, (label, widget, stretch) in enumerate(fields):
-            widget.setMinimumWidth(86)
+            if widget not in (model_box, after_box):   # تُحسب من محتواها
+                widget.setMinimumWidth(_min.get(widget, 58))
             g.addWidget(_sub(label), 0, c)
             g.addWidget(widget, 1, c)
             g.setColumnStretch(c, stretch)
@@ -680,7 +699,7 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         dlg = DiscountDialog(self, self.rate)
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             self.rate = dlg.value()
-            self.btn_rate.setText(f"خصم {self.rate*100:.0f}%")
+            self.btn_rate.setText(f"{self.rate*100:.0f}%")
             self.recalc()
 
     def _snap_w18(self):
@@ -906,6 +925,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                          f"عيار {u}", round(kv.g(total18), 3),
                          "", "", "", "", "", round(t_dia, 3), "", ""))
         fill(self.grid, self._headers(), rows)
+        two_line_header(self.grid, [self.HEAD_SHOWN.get(h, h)
+                                    for h in self._headers()])
         fit_columns(self.grid, self.COL_W)
         if rows:
             self._bold_row(len(rows) - 1)

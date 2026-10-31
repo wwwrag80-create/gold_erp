@@ -44,6 +44,12 @@ def main():
 
     app = QtWidgets.QApplication(sys.argv)
     crash_guard.trace("أُنشئ التطبيق")
+    # ══ نسخةٌ واحدة (5.0.5) ══ نقرةٌ ثانية على الرمز ترفع النسخة المفتوحة
+    # ولا تفتح أخرى تنازعها قفل القاعدة («لا يستجيب» بلا سببٍ ظاهر)
+    from services import single_instance
+    if not single_instance.claim(app):
+        crash_guard.trace("نسخةٌ أخرى تعمل — خروج")
+        return
     # تناسب تلقائي مع حجم شاشة المستخدم: الخطوط والحشو تصغر على
     # الأجهزة الصغيرة وتكبر على الكبيرة — فيبدو النظام متناسقاً
     # على أي جهاز بلا ضبط يدوي.
@@ -93,7 +99,8 @@ def main():
     except Exception:
         pass
 
-    wire_gate(app, gate)
+    holder = wire_gate(app, gate)
+    single_instance.set_target(lambda: holder.get("win") or gate)
     crash_guard.trace("حلقة الأحداث")
     sys.exit(app.exec_())
 
@@ -415,6 +422,7 @@ def _relaunch():
         env = dict(__import__("os").environ)
         env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
         env.pop("_MEIPASS2", None)
+        env["GOLD_ERP_RELAUNCH"] = "1"     # تنتظر خروج هذه النسخة
         subprocess.Popen([sys.executable] + sys.argv[1:], env=env,
                          close_fds=True)
         return True

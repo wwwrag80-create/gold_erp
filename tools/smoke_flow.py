@@ -7422,8 +7422,22 @@ def main():
         _w88._pre_q = [_sa]
         _w88._pre_timer = None
         _w88._prebuild_step()
-        check("وخطوة التجهيز تبني الشاشة وتحمّل بياناتها في الخلفية",
+        check("وخطوة التجهيز تبني الشاشة في وقت الفراغ",
               _w88.sales_screen.built)
+        # 5.0.5: الشاشة الثقيلة (بناؤها فوق الحدّ) لا تُجهَّز مسبقاً
+        _r88 = next(i for i in range(1, len(_w88.screens))
+                    if getattr(_w88.screens[i], "built", True) is False
+                    and i != _w88._current_row and _w88._screen_key(i))
+        _k88 = _w88._screen_key(_r88)
+        _w88._prebuild_costs()[_k88] = 5.0
+        _w88._pre_q = [_r88]
+        _w88._prebuild_step()
+        check("والشاشة الثقيلة لا تُجهَّز في الخلفية (تُبنى حين تُطلب) —"
+              " فلا «لا يستجيب» في لحظة فراغ",
+              not _w88.screens[_r88].built
+              and _w88._prebuild_costs()[_k88] < 5.0
+              and _w88.PREBUILD_IDLE >= 3,
+              f"{_k88} built={_w88.screens[_r88].built}")
         _w88.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
@@ -9315,6 +9329,78 @@ def main():
           abs(_p121["net_sold"]["weight"] - 25.0) < 1e-6
           and abs(_p121["sales"]["weight"] - _p121["returns"]["weight"]
                   - 25.0) < 1e-6)
+
+    step("122) 5.0.5: الشاشة كاملةً بلا سحب · لا تجمّد من المسوّدة"
+         " أو النسخة الثانية")
+    from services import drafts as _dr122
+    from database.database import data_token as _tok122
+    _t122 = _tok122()
+    _dr122.save_async("فحص122", "admin", '{"a": 1}')
+    _ok122 = _dr122.flush(5.0)
+    check("المسوّدة تُكتب في خيطٍ خلفي وفي ملفها المستقل — لا تنتظر الواجهة"
+          " قفل القاعدة ولا تغيّر بصمة بياناتها",
+          _ok122 and _dr122.load("فحص122", "admin") == {"a": 1}
+          and _tok122() == _t122
+          and _dr122._path().endswith(".drafts"))
+    for _i in range(30):
+        _dr122.save_async("فحص122", "admin", '{"a": %d}' % (_i + 2))
+    _dr122.clear("فحص122", "admin")
+    _dr122.flush(5.0)
+    check("والمحو بعد الترحيل يغلب كل كتابةٍ خلفية سبقته — فلا تعود"
+          " مسوّدةٌ مُحيت", _dr122.load("فحص122", "admin") == {})
+    _main122 = (Path(ROOT) / "main.py").read_text(encoding="utf-8")
+    _mw122 = (Path(ROOT) / "ui" / "main_window.py").read_text(
+        encoding="utf-8")
+    _bk122 = (Path(ROOT) / "ui" / "backups_dialog.py").read_text(
+        encoding="utf-8")
+    check("نسخةٌ واحدة على الجهاز: النقرة الثانية ترفع المفتوحة ولا تفتح"
+          " أخرى تنازعها القاعدة — وإعادة التشغيل تنتظر خروج القديمة",
+          "single_instance.claim(app)" in _main122
+          and "GOLD_ERP_RELAUNCH" in _main122
+          and "GOLD_ERP_RELAUNCH" in _mw122
+          and "GOLD_ERP_RELAUNCH" in _bk122)
+    try:
+        from PyQt5 import QtWidgets as _QW122, QtTest as _QT122
+        _app122 = _QW122.QApplication.instance() or _QW122.QApplication([])
+        from services import single_instance as _si122
+        check("ولا نسخة أخرى = يُكمل الإقلاع",
+              _si122.probe("gold_erp-smoke-none-122", 200) == "none")
+        from ui.widgets import draft_keeper as _dk122
+        for _k in list(_dk122._KEEPERS):
+            _k.timer.stop()
+        _dr122.clear("sales", "admin")
+        import ui.sales_screen as _ssm122
+        import ui.production_screen as _psm122
+        _u122 = {"id": 1, "username": "admin", "role": "admin",
+                 "role_local": "accountant"}
+        _w122 = {}
+        for _nm, _cls in (("sales", _ssm122.SalesScreen),
+                          ("prod", _psm122.ProductionScreen)):
+            _s = _cls(_u122)
+            _s.refresh()
+            _s.resize(1500, 900)
+            _s.show()
+            for _ in range(15):
+                _app122.processEvents()
+                _QT122.QTest.qWait(5)
+            _w122[_nm] = _s.minimumSizeHint().width()
+            for _k in list(_dk122._KEEPERS):
+                _k.timer.stop()
+            _s.hide()
+            _s.close()
+        # كانت 1289 قبل 5.0 ثم ~1380 بعد خانة الماس فظهر السحب
+        check("المبيعات والمرتجعات تُعرض كاملةً بلا سحبٍ أفقي (أدنى عرضٍ"
+              " يسع شاشة 1366 بجانب القائمة) — والوارد من التصنيع كذلك",
+              _w122["sales"] <= 1040 and _w122["prod"] <= 1080, str(_w122))
+        _ss = _ssm122.SalesScreen
+        check("وعناوين جدول البنود الطويلة سطران فلا تُقصّ، والأعمدة كما هي",
+              _ss.HEAD_SHOWN["الأحجار بعد الخصم"] == "الأحجار\nبعد الخصم"
+              and all(k in _ss.COLS for k in _ss.HEAD_SHOWN)
+              and sum(_ss.COL_W) == 100
+              and sum(_psm122.ProductionScreen.COL_W) == 100)
+        _dr122.clear("sales", "admin")
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

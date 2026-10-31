@@ -13,8 +13,10 @@
 `synchronous=FULL` فما كُتب ثبت على القرص قبل أن يعود الأمر.
 
 * لا كتابة إن لم يتغيّر شيء — الشاشة الهادئة لا تمسّ القرص.
-* لا ينضمّ إلى معاملةٍ مفتوحة في الشاشة (نافذة تأكيدٍ وسط ترحيل):
-  يؤجَّل إلى الدورة التالية.
+* **الكتابة في خيطٍ خلفي (5.0.5)** وفي ملف المسوّدات المستقل
+  (`services/drafts.py`): الواجهة تقرأ الشاشة وتسلّم النصّ ولا تنتظر
+  القرص ولا قفل قاعدة المصنع — كان الحفظ في خيط الواجهة ينتظر حتى 30
+  ثانية إن كان خيطٌ آخر يكتب في القاعدة، فتبيضّ الشاشة «لا تستجيب».
 * يُحفظ كذلك عند إغلاق البرنامج وعند إيقاف ويندوز (`commitDataRequest`).
 * وضع التعديل لا مسوّدة له — `draft_state()` تعيد None فيه.
 """
@@ -41,12 +43,18 @@ def _dumps(state):
 
 
 def flush_all():
-    """يحفظ مسوّدات كل الشاشات الحيّة الآن — قبل الإغلاق أو الإيقاف."""
+    """يحفظ مسوّدات كل الشاشات الحيّة الآن — قبل الإغلاق أو الإيقاف.
+
+    مباشرةً لا في الخلفية: البرنامج يُغلق بعدها وخيطُ الكتابة معه."""
     for k in list(_KEEPERS):
         try:
             k.tick(force=True)
         except Exception:
             pass
+    try:
+        drafts.flush(2.0)
+    except Exception:
+        pass
 
 
 def _hook_app():
@@ -86,24 +94,28 @@ class DraftKeeper(QtCore.QObject):
 
     def tick(self, force=False):
         try:
-            from database.database import in_transaction
-            if in_transaction():
-                return False      # الشاشة وسط معاملة — الدورة التالية
-        except Exception:
-            pass
-        try:
             state = self.screen.draft_state()
         except Exception:
             return False
         payload = _dumps(state)
-        if payload is None or (payload == self.saved and not force):
+        if payload is None:
             return False
-        if payload == self.saved:
-            return True
-        if drafts.save(self.key, self.user, state):
-            self.saved = payload
-            return True
-        return False
+        if drafts.failed(self.key, self.user):
+            self.saved = None             # فشلت كتابتها الخلفية: تُعاد
+        if payload == self.saved and not force:
+            return False
+        if force:
+            # الإغلاق: الآن ومباشرةً (ويُلغي ما ينتظر الكاتب الخلفي)
+            if payload == self.saved and not drafts.pending(self.key,
+                                                            self.user):
+                return True
+            if drafts.save_payload(self.key, self.user, payload):
+                self.saved = payload
+                return True
+            return False
+        drafts.save_async(self.key, self.user, payload)
+        self.saved = payload
+        return True
 
     def cleared(self):
         """المسوّدة مُحيت (رُحّل المستند) — لا داعي لكتابة الفراغ ثانيةً."""

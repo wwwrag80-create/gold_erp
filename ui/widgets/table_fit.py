@@ -163,6 +163,22 @@ class ColumnFitter(QtCore.QObject):
             self._busy = False
 
 
+def two_line_header(table, labels):
+    """عناوين الجدول كما تُعرض — والطويل منها سطران (5.0.5).
+
+    رأس الجدول في Qt لا يكسر العنوان، فالعنوان الأطول من عموده يُقصّ
+    في الشاشة الضيّقة. يُكتب الطويل بسطرين (`\n`) ويُعطى الرأس ارتفاع
+    سطرين صراحةً — فهو لا يحسب السطر الثاني من تلقاء نفسه.
+    """
+    from PyQt5 import QtGui
+    table.setHorizontalHeaderLabels(list(labels))
+    hh = table.horizontalHeader()
+    if any("\n" in (h or "") for h in labels):
+        two = 2 * QtGui.QFontMetrics(hh.font()).lineSpacing() + 24
+        if hh.minimumHeight() != two:
+            hh.setMinimumHeight(two)
+
+
 _NUMERIC = set("0123456789٠١٢٣٤٥٦٧٨٩.,٫٬-−+%() ")
 
 

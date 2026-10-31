@@ -801,6 +801,15 @@ class MainWindow(QtWidgets.QMainWindow):
     # الفراغ بعد الدخول (`_start_prebuild`).
     KEEP_ALIVE = 14
     PREBUILD = 8
+    # ══ تجهيزٌ لا يُحَسّ (5.0.5) ══
+    # التجهيز يجري في خيط الواجهة: شاشةٌ ثقيلة (لوحة التحكم، العملاء…)
+    # تُبنى في لحظة فراغ فإذا عادت يدُ المستخدم وجدت النظام «لا يستجيب»
+    # ثوانيَ — في كل مرةٍ عند شاشةٍ غير الأخرى. الآن: فراغٌ أطول قبله،
+    # ويُبنى هيكل الشاشة وحده (بياناتها تُقرأ عند فتحها كما كانت تُقرأ
+    # أصلاً بعد دقيقتين)، والشاشة التي استغرق بناؤها أكثر من
+    # `PREBUILD_SLOW` لا تُجهَّز مسبقاً — تُبنى حين تُطلب.
+    PREBUILD_IDLE = 4.0
+    PREBUILD_SLOW = 0.8
 
     def _close_screen(self):
         """«رجوع»: إلى الشاشة السابقة كما تُركت، وإلا إلى الرئيسية."""
@@ -912,9 +921,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _start_prebuild(self, delay=2500):
         """تجهيز الشاشات الأكثر استعمالاً في أوقات الفراغ (4.97).
 
-        شاشةٌ واحدة في كل نبضة، ولا تُبنى إلا بعد ثانيةٍ ونصف بلا نقرٍ
-        ولا كتابة — فلا يُزاحم التجهيزُ يدَ المستخدم. فإذا فتح الشاشة
-        وجدها جاهزةً فتظهر فوراً وتُحدَّث بياناتها خلفها."""
+        شاشةٌ واحدة في كل نبضة، ولا تُبنى إلا بعد `PREBUILD_IDLE` ثوانٍ
+        بلا نقرٍ ولا كتابة — فلا يُزاحم التجهيزُ يدَ المستخدم. فإذا فتح
+        الشاشة وجدها جاهزةً فتظهر فوراً وتُحدَّث بياناتها خلفها."""
         if getattr(self, "_pre_timer", None) is not None:
             return
         self._pre_q = self._prebuild_order()
@@ -944,31 +953,64 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QApplication.instance().removeEventFilter(self)
             except Exception:
                 pass
+            self._save_prebuild_costs()
             return
-        if _t.monotonic() - getattr(self, "_last_input", 0.0) < 1.5:
+        if _t.monotonic() - getattr(self, "_last_input", 0.0) \
+                < self.PREBUILD_IDLE:
             return                  # المستخدم يعمل — يُنتظر فراغه
         row = q.pop(0)
         scr = self.screens[row]
         if not isinstance(scr, Lazy) or scr.built \
                 or row == getattr(self, "_current_row", 0):
             return
+        key = self._screen_key(row)
+        costs = self._prebuild_costs()
+        cost = float(costs.get(key, 0) or 0)
+        if cost > self.PREBUILD_SLOW:
+            # ثقيلة: تُبنى عند طلبها. وتُعاد تجربتها بعد جلساتٍ (الجهاز
+            # ربما كان مشغولاً يوم قيست)
+            costs[key] = round(cost * 0.85, 2)
+            self._costs_dirty = True
+            return
         t0 = _t.monotonic()
         try:
             scr.ensure()
-            fn = getattr(scr.real, "refresh", None)
-            if callable(fn):
-                fn()
-                self._mark_read(scr)
             alive = self.__dict__.setdefault("_alive", [])
             if row not in alive:
                 alive.insert(0, row)      # الأقدم: يُهدم أولاً إن زادت
         except Exception:
             pass
+        dt = _t.monotonic() - t0
+        if key:
+            costs[key] = round(dt, 2)
+            self._costs_dirty = True
         try:
             from services import health
-            dt = _t.monotonic() - t0
             if dt > 1.0:
-                health.log_slow("prebuild", dt, self._screen_key(row))
+                health.log_slow("prebuild", dt, key)
+        except Exception:
+            pass
+
+    def _prebuild_costs(self):
+        c = self.__dict__.get("_pre_costs")
+        if c is None:
+            try:
+                from ui.widgets.common import load_pref
+                c = json.loads(load_pref("ui.prebuild_cost", "{}") or "{}")
+                c = c if isinstance(c, dict) else {}
+            except Exception:
+                c = {}
+            self._pre_costs = c
+        return c
+
+    def _save_prebuild_costs(self):
+        if not getattr(self, "_costs_dirty", False):
+            return
+        self._costs_dirty = False
+        try:
+            from ui.widgets.common import save_pref
+            save_pref("ui.prebuild_cost",
+                      json.dumps(self._prebuild_costs(), ensure_ascii=False))
         except Exception:
             pass
 
@@ -1197,6 +1239,8 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             env = dict(os.environ)
             env.pop("JADEITE_CODE_DIR", None)
+            # 5.0.5: الجديدة تنتظر خروج هذه بدل أن تظنّها نسخةً مفتوحة
+            env["GOLD_ERP_RELAUNCH"] = "1"
             if getattr(sys, "frozen", False):
                 env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
                 env.pop("_MEIPASS2", None)
