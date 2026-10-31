@@ -678,6 +678,9 @@ def _issue_einvoice(conn, sid, username):
         res = ledger.issue(conn, "tax_sales", sid, build_doc(conn, sid),
                            username)
         qr = res["qr"]
+    elif ledger.factory_on(conn):
+        # 5.0.7: المصنع مربوط وهذا الجهاز بلا شهادته — لا فاتورة بلا مستند
+        raise ValueError(ledger.DEVICE_MSG)
     else:
         from datetime import datetime
 

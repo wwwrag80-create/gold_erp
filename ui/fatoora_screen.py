@@ -116,6 +116,17 @@ class FatooraDialog(QtWidgets.QDialog):
         self.score = QtWidgets.QLabel()
         self.score.setObjectName("big")
         row.addWidget(self.score, 1)
+        # 5.0.7: الدورة كلّها مع خادم الهيئة ببياناتٍ تجريبية — قبل إدخال
+        # أي شيء من بيانات المنشأة
+        self.b_quick = kit.PushButton("⚡ اختبار سريع مع الهيئة")
+        self.b_quick.setToolTip(
+            "بلا بيانات منشأتك: يجري مع «بوابة المطوّرين» لدى الهيئة الدورة\n"
+            "كاملة ببياناتٍ تجريبية — طلب شهادة · شهادة امتثال · الفحوص الستة ·\n"
+            "شهادة إنتاجية · إبلاغ فاتورة مبسطة واعتماد فاتورة ضريبية.\n"
+            "يثبت أن الجهاز يتصل بالهيئة وأن النظام يُصدر مستنداتٍ يقبلها\n"
+            "خادمها. لا يُكتب شيءٌ في دفاترك ولا يُمسّ تسجيل منشأتك.")
+        self.b_quick.clicked.connect(self.do_quick_test)
+        row.addWidget(self.b_quick)
         b_ping = kit.PushButton("📡 اختبار الاتصال بالبوابة")
         b_ping.setObjectName("ghost")
         b_ping.clicked.connect(lambda: self.test_connection(b_ping))
@@ -190,6 +201,25 @@ class FatooraDialog(QtWidgets.QDialog):
                 if ok else f"تعذّر الوصول لبوابة فاتورة:\n{st}")
             self.refresh_status()
         self._bg(lambda: api.ping(env), _done, btn)
+
+    def do_quick_test(self):
+        def _done(res):
+            lines = [f"{'✔' if x['ok'] else '✘'} {x['title']}"
+                     + (f"\n      {x['detail']}" if x.get("detail") else "")
+                     for x in res.get("steps") or []]
+            skew = res.get("clock_skew")
+            if skew is not None:
+                lines.append(f"🕒 فرق ساعة الجهاز عن ساعة الهيئة: "
+                             f"{abs(skew):.0f} ثانية"
+                             + (" — اضبط الساعة" if abs(skew) > 120 else ""))
+            head = ("✔ النظام والجهاز جاهزان: خادم الهيئة قبل الدورة كاملة "
+                    "ببياناتٍ تجريبية.\nيبقى تسجيل منشأتك ببياناتها (المحاكاة "
+                    "ثم الرسمية)." if res.get("ok") else
+                    "✘ لم تكتمل الدورة — أين توقّفت وسببه أدناه:")
+            (info if res.get("ok") else err)(
+                self, head + "\n\n" + "\n".join(lines))
+            self.refresh_status()
+        self._bg(onboard.quick_test, _done, self.b_quick)
 
     # ══════════ ② بيانات المنشأة ══════════
     def _tab_profile(self):

@@ -393,6 +393,42 @@ def auto_recover(target=None):
         return {"recovered": False, "reason": str(e)[:150]}
 
 
+def einvoice_head(path):
+    """آخر عدّاد فاتورةٍ إلكترونية (ICV) في ملف قاعدة — 0 إن لم يكن.
+
+    يُقرأ للقراءة وحدها: يُقارَن به قبل الاسترجاع (5.0.7)."""
+    import sqlite3
+    try:
+        con = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True,
+                              timeout=5)
+        try:
+            if not con.execute("SELECT 1 FROM sqlite_master WHERE"
+                               " type='table' AND name='fatoora_documents'"
+                               ).fetchone():
+                return 0
+            r = con.execute("SELECT MAX(icv) FROM fatoora_documents"
+                            " WHERE COALESCE(env,'')='production'"
+                            ).fetchone()
+            return int(r[0] or 0)
+        finally:
+            con.close()
+    except Exception:
+        return 0
+
+
+def einvoice_rollback(backup_path):
+    """كم فاتورةً إلكترونية أُرسلت للهيئة بعد هذه النسخة؟
+
+    استرجاعُ نسخةٍ أقدم من آخر مستندٍ رسمي يعيد العدّاد وأرقام الفواتير
+    إلى الوراء — فتصدر فواتير جديدة بأرقامٍ وعدّاداتٍ سبق أن أُبلغت بها
+    الهيئة. يعيد (عدّاد القاعدة الحالية، عدّاد النسخة)."""
+    try:
+        cur = einvoice_head(db_path())
+    except Exception:
+        cur = 0
+    return cur, einvoice_head(backup_path)
+
+
 def restore(backup_path, target=None):
     """يسترجع نسخة محددة — ويحفظ الحالية أولاً نسخةً «قبل الاسترجاع».
 

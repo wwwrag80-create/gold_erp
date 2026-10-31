@@ -81,6 +81,31 @@ def _has_table(conn):
         " AND name='fatoora_documents'").fetchone())
 
 
+# ══ مصنعٌ مربوط وجهازٌ بلا شهادته (5.0.7) ══
+# شهادة الربط ومفتاحها ملفٌّ على جهاز المصنع (لا في قاعدته: القاعدة تُنسخ
+# احتياطياً والمفتاح سرٌّ). فإن انتقل المصنع إلى جهازٍ جديد أو أُعيد تثبيت
+# البرنامج أو استُرجعت نسخة، بقي «الربط مفعّل» في القاعدة والجهازُ بلا
+# شهادة — وكانت الفاتورة الضريبية تُحفظ حينها **بلا مستندٍ إلكتروني** دون
+# أن يدري أحد. الآن تتوقف بهذه الرسالة حتى يُسجَّل الجهاز.
+DEVICE_MSG = ("الفوترة الإلكترونية مفعّلة لهذا المصنع، لكن هذا الجهاز لا يحمل "
+              "شهادة الربط مع الهيئة (جهازٌ جديد، أو أُعيد تثبيت البرنامج، أو "
+              "استُرجعت نسخة احتياطية).\n\nلم تُحفظ الفاتورة الضريبية حتى لا "
+              "تصدر بلا مستندٍ إلكتروني.\n\nالحل: «الربط مع الهيئة» ← "
+              "«التسجيل والربط»: سجّل هذا الجهاز برمز OTP جديد (الخطوات "
+              "①–④)، فيعود الإصدار والإرسال تلقائياً.")
+VAT_MSG = ("شهادة الربط على هذا الجهاز صدرت لرقمٍ ضريبي غير رقم هذا المصنع "
+           "({cert} ≠ {vat}).\nلا تُختم فاتورة مصنعٍ بشهادة غيره — أعد تسجيل "
+           "الجهاز لهذا المصنع من «الربط مع الهيئة» (الخطوة ① برمز OTP جديد).")
+
+
+def factory_on(conn):
+    """الربط مفعّلٌ لهذا المصنع في قاعدته (أيّاً كان الجهاز)."""
+    try:
+        return bool(pf.load(conn).get("enabled"))
+    except Exception:
+        return False
+
+
 def enabled(conn):
     """الربط مفعّل = شهادةٌ إنتاجية + تفعيلٌ صريح من المستخدم."""
     try:
@@ -200,13 +225,16 @@ def build_doc(conn, invoice_id, prof=None):
 def on_invoice_saved(conn, invoice_id, username=None):
     """يُنادى من حفظ الفاتورة داخل معاملتها — لا يفعل شيئاً ما لم يُفعَّل
     الربط. فاتورة بلا ضريبة أو تحويلٌ داخلي لا يُصدر لهما مستند."""
-    if not enabled(conn):
+    on = enabled(conn)
+    if not on and not factory_on(conn):
         return None
     inv = conn.execute("SELECT i.*, e.entity_type FROM invoices i"
                        " JOIN entities e ON e.id=i.customer_id"
                        " WHERE i.id=?", (invoice_id,)).fetchone()
     if not inv or inv["entity_type"] == "internal" or not inv["vat_applied"]:
         return None
+    if not on:
+        raise ValueError(DEVICE_MSG)
     ensure_tables(conn)
     return issue(conn, "invoices", invoice_id, build_doc(conn, invoice_id),
                  username)
@@ -221,6 +249,9 @@ def issue(conn, source_table, source_id, doc, username=None):
     if not (keys.get("private_key") and token):
         raise ValueError("لا توجد شهادة ربط لهذا الجهاز — افتح «الربط مع "
                          "الهيئة» وأكمل التسجيل")
+    if keys.get("vat") and str(keys["vat"]) != str(p.get("vat") or ""):
+        raise ValueError(VAT_MSG.format(cert=keys["vat"],
+                                        vat=p.get("vat") or "—"))
     icv, pih = _chain_head(conn)
     doc = dict(doc, icv=icv + 1, pih=pih)
     errs, _w = rules.check_document(doc)
@@ -299,23 +330,29 @@ def submit_one(doc_row, env):
                                  doc_row["subtype"] == "standard")
     except api.ApiError as e:
         return "error", {}, str(e)
+    status, error = interpret(st, payload)
+    return status, payload, error
+
+
+def interpret(st, payload):
+    """ردّ البوابة ← (الحالة، نص الخطأ) — للإرسال الحقيقي والتجارب معاً."""
     errs, warns = api.messages(payload)
     if st in (200, 202):
         rs = str(payload.get("clearanceStatus") or payload.get(
             "reportingStatus") or "").upper()
         if rs in ("CLEARED", "REPORTED") or st == 202:
             if warns or st == 202:
-                return "warning", payload, "؛ ".join(warns)
-            return ("cleared" if rs == "CLEARED" else "reported"), payload, ""
-        return "rejected", payload, "؛ ".join(errs) or rs
+                return "warning", "؛ ".join(warns)
+            return ("cleared" if rs == "CLEARED" else "reported"), ""
+        return "rejected", "؛ ".join(errs) or rs
     if st == 400:
-        return "rejected", payload, "؛ ".join(errs) or "رفضت الهيئة المستند"
+        return "rejected", "؛ ".join(errs) or "رفضت الهيئة المستند"
     if st == 409:                       # أُرسل من قبل — مقبولٌ لديها
-        return "reported", payload, "مُرسلٌ سابقاً"
+        return "reported", "مُرسلٌ سابقاً"
     if st in (401, 403):
-        return "error", payload, ("رفضت الهيئة بيانات الاعتماد — جدّد "
-                                  "الشهادة من «الربط مع الهيئة»")
-    return "error", payload, f"ردّ غير متوقع من البوابة ({st})"
+        return "error", ("رفضت الهيئة بيانات الاعتماد — جدّد الشهادة من "
+                         "«الربط مع الهيئة»")
+    return "error", f"ردّ غير متوقع من البوابة ({st})"
 
 
 def process_queue(limit=25):

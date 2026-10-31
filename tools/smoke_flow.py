@@ -9532,6 +9532,170 @@ def main():
         _os123.environ.pop("GOLD_ERP_FATOORA_URL", None)
         _srv123.shutdown()
 
+    step("124) 5.0.7: اختبارٌ سريع بلا بيانات المنشأة · مصانع وأجهزة بلا"
+         " أخطاء صامتة")
+    import sqlite3 as _sq124
+    import tempfile as _tf124
+    from services import storage as _st124
+    _k124 = _ec123.PrivateKey.generate()
+    _tok124 = _b123.b64encode(_ec123.self_signed_certificate(_k124)
+                              .encode()).decode()
+    _q124 = {"paths": [], "csr": b"", "fail": False}
+
+    class _Dev124(_hs123.BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            body = _js123.loads(self.rfile.read(n) or b"{}")
+            _q124["paths"].append(self.path)
+            if self.path.endswith("/compliance"):
+                _q124["csr"] = _b123.b64decode(body.get("csr", ""))
+                code, out = ((400, {"errors": ["رمز OTP غير صحيح"]})
+                             if _q124["fail"] else
+                             (200, {"binarySecurityToken": _tok124,
+                                    "secret": "s", "requestID": 7}))
+            elif self.path.endswith("/production/csids"):
+                code, out = 200, {"binarySecurityToken": _tok124,
+                                  "secret": "s", "requestID": 8}
+            elif "clearance" in self.path:
+                code, out = 200, {"clearanceStatus": "CLEARED"}
+            else:
+                code, out = 200, {"reportingStatus": "REPORTED",
+                                  "clearanceStatus": None}
+            raw = _js123.dumps(out).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    _srv124 = _hs123.ThreadingHTTPServer(("127.0.0.1", 0), _Dev124)
+    _th123.Thread(target=_srv124.serve_forever, daemon=True).start()
+    _os123.environ["GOLD_ERP_FATOORA_URL"] = \
+        f"http://127.0.0.1:{_srv124.server_address[1]}"
+    try:
+        with db(readonly=True) as conn:
+            _p0 = _pf123.load(conn)
+            _d0 = conn.execute("SELECT COUNT(*) FROM fatoora_documents"
+                               ).fetchone()[0]
+        _ks0 = _pf123.load_keys("simulation")
+        _qt = _ob123.quick_test()
+        with db(readonly=True) as conn:
+            _p1 = _pf123.load(conn)
+            _d1 = conn.execute("SELECT COUNT(*) FROM fatoora_documents"
+                               ).fetchone()[0]
+            _rq = _rd123.run(conn)
+        check("⚡ الاختبار السريع: الدورة كلّها مع خادم الهيئة ببياناتٍ"
+              " تجريبية (شهادة امتثال · ستة فحوص · إنتاجية · إبلاغ واعتماد)"
+              " — بلا بيانات المنشأة",
+              _qt["ok"] and len(_qt["steps"]) == 5
+              and _q124["paths"].count("/compliance/invoices") == 6
+              and "/production/csids" in _q124["paths"]
+              and "/invoices/reporting/single" in _q124["paths"]
+              and "/invoices/clearance/single" in _q124["paths"]
+              and b"TSTZATCA-Code-Signing" in _ec123._unpem(
+                  _q124["csr"].decode("ascii")),
+              str([(x["title"], x["ok"], x["detail"][:80])
+                   for x in _qt["steps"]]))
+        check("ولا يمسّ شيئاً: لا بيانات المنشأة ولا شهادات المحاكاة ولا"
+              " الدفاتر — والنتيجة تظهر في الجاهزية",
+              _p0 == _p1 and _d0 == _d1
+              and _pf123.load_keys("simulation") == _ks0
+              and any(i["title"].startswith("الاختبار السريع")
+                      and i["status"] == "ok" for i in _rq["items"]))
+        _q124["fail"] = True
+        _qf = _ob123.quick_test()
+        _q124["fail"] = False
+        check("وإن توقّف: يقول عند أي خطوةٍ وسببها",
+              not _qf["ok"] and not _qf["steps"][-1]["ok"]
+              and "OTP" in _qf["steps"][-1]["detail"],
+              str(_qf["steps"]))
+    finally:
+        _os123.environ.pop("GOLD_ERP_FATOORA_URL", None)
+        _srv124.shutdown()
+
+    # جهازٌ بلا شهادة لمصنعٍ مربوط: لا فاتورة ضريبية صامتة بلا مستند
+    with db() as conn:
+        _c124 = _add9(conn, "عميل الجهاز الجديد", "customer",
+                      username="admin")
+        _b9(conn, [{"wo_no": "DEV-124", "gold": 10.0,
+                    "wage_per_gram": 10.0}], "2026-10-30", "admin")
+        _w124 = conn.execute("SELECT id FROM work_orders WHERE"
+                             " work_order_no='DEV-124'").fetchone()["id"]
+        _pf123.save(conn, {"env": "production", "enabled": True})
+        _n0 = conn.execute("SELECT COUNT(*) FROM invoices").fetchone()[0]
+    try:
+        try:
+            with db() as conn:
+                _inv9.create_sale(conn, _c124, [{"work_order_id": _w124}],
+                                  "2026-10-30", "admin", apply_vat=True)
+            _blk = ""
+        except ValueError as _e124:
+            _blk = str(_e124)
+        with db(readonly=True) as conn:
+            _n1 = conn.execute("SELECT COUNT(*) FROM invoices").fetchone()[0]
+            _v124 = _rd123.verdict(conn)
+        check("مصنعٌ مربوط على جهازٍ بلا شهادته (جديد · إعادة تثبيت ·"
+              " استرجاع): الفاتورة الضريبية تتوقف برسالةٍ تقول الحل — لا"
+              " تُحفظ بلا مستندٍ إلكتروني",
+              "لا يحمل شهادة الربط" in _blk and _n1 == _n0
+              and "بلا شهادة" in _v124[1], _blk[:80] + " | " + _v124[1])
+    finally:
+        with db() as conn:
+            _pf123.save(conn, {"env": "simulation", "enabled": False})
+    # شهادة مصنعٍ لا تختم فواتير مصنعٍ آخر
+    _ksim = _pf123.load_keys("simulation")
+    _pf123.save_keys("simulation", dict(_ksim, vat="399999999900003"))
+    with db() as conn:
+        _pf123.save(conn, {"enabled": True})
+    try:
+        try:
+            with db() as conn:
+                _inv9.create_sale(conn, _c124, [{"work_order_id": _w124}],
+                                  "2026-10-30", "admin", apply_vat=True)
+            _vx = ""
+        except ValueError as _e124:
+            _vx = str(_e124)
+        check("وشهادةٌ صدرت لرقمٍ ضريبي آخر لا تختم فواتير هذا المصنع",
+              "لرقمٍ ضريبي غير رقم هذا المصنع" in _vx, _vx[:90])
+    finally:
+        with db() as conn:
+            _pf123.save(conn, {"enabled": False})
+        _pf123.save_keys("simulation", _ksim)
+    with db() as conn:
+        _ob123.generate(conn, "sandbox", "admin")
+        _u1 = _pf123.load_keys("sandbox")
+        _ob123.generate(conn, "sandbox", "admin")
+        _u2 = _pf123.load_keys("sandbox")
+        _pv = _pf123.load(conn)["vat"]
+    check("كل تسجيلٍ وحدةُ فوترةٍ جديدة برقمها، والشهادة مربوطة برقم المصنع"
+          " الضريبي",
+          _u1.get("unit") and _u2.get("unit") and _u1["unit"] != _u2["unit"]
+          and _u1.get("vat") == _pv
+          and _u1["unit"].encode() in _ec123._unpem(_u1["csr"]))
+    _tmp124 = Path(_tf124.mkdtemp())
+    for _nm, _icvs in (("cur.db", (1, 2, 3)), ("old.db", (1,))):
+        _cx = _sq124.connect(str(_tmp124 / _nm))
+        _cx.execute("CREATE TABLE fatoora_documents(icv INTEGER, env TEXT)")
+        _cx.executemany("INSERT INTO fatoora_documents VALUES(?,?)",
+                        [(i, "production") for i in _icvs]
+                        + [(99, "simulation")])
+        _cx.commit()
+        _cx.close()
+    _orig_dbp = _st124.db_path
+    _st124.db_path = lambda: _tmp124 / "cur.db"
+    try:
+        _rb = _st124.einvoice_rollback(_tmp124 / "old.db")
+    finally:
+        _st124.db_path = _orig_dbp
+    _bk124 = (Path(ROOT) / "ui" / "backups_dialog.py").read_text(
+        encoding="utf-8")
+    check("واسترجاعُ نسخةٍ أقدم من آخر فاتورةٍ إلكترونية رسمية يُنبَّه عليه"
+          " قبله (العدّاد والأرقام تعود للوراء)",
+          _rb == (3, 1) and "einvoice_rollback" in _bk124, str(_rb))
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

@@ -103,6 +103,20 @@ class BackupsDialog(QtWidgets.QDialog):
         if not ok:
             err(self, f"هذه النسخة لا تصلح للاسترجاع:\n{why}")
             return
+        # 5.0.7: نسخةٌ أقدم من آخر فاتورةٍ إلكترونية رسمية — تحذيرٌ صريح
+        try:
+            cur_icv, bak_icv = storage.einvoice_rollback(r["path"])
+        except Exception:
+            cur_icv = bak_icv = 0
+        if cur_icv > bak_icv and not ask(
+                self,
+                "⚠ هذه النسخة أقدم من فواتير إلكترونية أُرسلت للهيئة.\n\n"
+                f"آخر مستندٍ رسمي في النظام الآن: العدّاد {cur_icv}، وفي هذه "
+                f"النسخة: {bak_icv or 'لا شيء'}.\n\nاسترجاعها يُعيد العدّاد "
+                "وأرقام الفواتير إلى الوراء، فتصدر فواتير جديدة بأرقامٍ سبق "
+                "أن أُبلغت بها الهيئة — وهذا مخالف.\n\nلا تسترجعها إلا لسببٍ "
+                "قاهر وبعد مراجعة محاسبك. متابعة رغم ذلك؟"):
+            return
         if not ask(self,
                    f"استرجاع نسخة {r['when']} ({r.get('reason_label', '')})؟"
                    f"\n\nفيها: {why}.\n\n"

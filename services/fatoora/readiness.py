@@ -29,13 +29,21 @@ def verdict(conn, st=None, summ=None):
     summ = summ or ledger.summary(conn)
     acc = sum(summ["by_status"].get(s, 0) for s in ledger.ACCEPTED)
     bad = summ["by_status"].get("rejected", 0)
+    if p.get("enabled") and not st["production"]:
+        return ("fail", "الربط مفعّل للمصنع — وهذا الجهاز بلا شهادة",
+                "الفواتير الضريبية متوقفة على هذا الجهاز حتى يُسجَّل (جهازٌ "
+                "جديد، أو إعادة تثبيت، أو استرجاع نسخة). سجّله من «التسجيل "
+                "والربط» برمز OTP جديد (الخطوات ①–④) فيعود الإرسال تلقائياً.")
     if not st["production"]:
+        quick = onboard.last_quick_test()
+        tail = (" — والاختبار السريع نجح: الجهاز يتصل بالهيئة والنظام "
+                "يُصدر مستنداتٍ يقبلها خادمها." if quick.get("ok") else "")
         if st["compliance"]:
             return ("warn", "غير مربوط بعد — في مرحلة فحص الامتثال",
-                    "أكمل فحوص الامتثال ثم اطلب الشهادة الإنتاجية.")
+                    "أكمل فحوص الامتثال ثم اطلب الشهادة الإنتاجية." + tail)
         return ("fail", "غير مربوط بالهيئة",
                 "لم يُسجَّل هذا الجهاز لدى بوابة فاتورة بعد. ابدأ من "
-                "تبويب «التسجيل والربط» برمز OTP من بوابة فاتورة.")
+                "تبويب «التسجيل والربط» برمز OTP من بوابة فاتورة." + tail)
     if env != "production":
         trial = (st.get("keys") or {}).get("trial") or {}
         if trial.get("ok"):
@@ -100,6 +108,15 @@ def run(conn, deep=True):
           "الهيئة", OK if st["key"] else FAIL,
           "مولَّد ومحفوظ على هذا الجهاز وحده" if st["key"]
           else "لم يُولَّد بعد — الخطوة ①")
+    kv = st["keys"].get("vat")
+    if kv and p.get("vat") and kv != p.get("vat"):
+        _item(items, sec, "شهادة الجهاز تخصّ هذا المصنع (رقمه الضريبي)",
+              FAIL, f"سُجّلت للرقم {kv} والمنشأة الآن {p.get('vat')} — أعد "
+              "التسجيل من الخطوة ①")
+    if p.get("enabled") and not st["production"]:
+        _item(items, sec, "هذا الجهاز يحمل شهادة الربط", FAIL,
+              "الربط مفعّل للمصنع وهذا الجهاز بلا شهادة — الفواتير الضريبية "
+              "متوقفة حتى يُسجَّل برمز OTP جديد")
     _item(items, sec, "شهادة الامتثال (Compliance CSID)",
           OK if st["compliance"] else FAIL,
           (st["keys"].get("compliance") or {}).get("at", "")
@@ -287,7 +304,10 @@ def run(conn, deep=True):
 
     # ════ ٦) البيئة التقنية ════
     sec = "البيئة التقنية"
+    quick = onboard.last_quick_test()
     skew = api.LAST.get("server_skew")
+    if skew is None:                 # آخر اختبارٍ سريع يكفي بعد إعادة التشغيل
+        skew = quick.get("clock_skew")
     if skew is None:
         _item(items, sec, "ساعة الجهاز مضبوطة على ساعة الهيئة", INFO,
               "لم تُقارن بعد — اضغط «اختبار الاتصال»")
@@ -296,10 +316,24 @@ def run(conn, deep=True):
               OK if abs(skew) <= 120 else WARN,
               f"الفرق {abs(skew):.0f} ثانية")
     reach = api.LAST.get("reachable")
+    if reach is None:
+        reach = quick.get("reachable")
     _item(items, sec, "الوصول إلى بوابة فاتورة",
           INFO if reach is None else (OK if reach else WARN),
           "لم يُختبر بعد" if reach is None else
           ("متاحة" if reach else "تعذّر الوصول — تحقق من الإنترنت"))
+    if not quick:
+        _item(items, sec, "الاختبار السريع مع خادم الهيئة (بوابة المطوّرين"
+              " — بياناتٌ تجريبية)", INFO,
+              "لم يُجرَ — زر «⚡ اختبار سريع مع الهيئة» أعلى هذا التبويب")
+    else:
+        bad = [x for x in quick.get("steps") or [] if not x.get("ok")]
+        _item(items, sec, "الاختبار السريع مع خادم الهيئة (بوابة المطوّرين"
+              " — بياناتٌ تجريبية)", OK if quick.get("ok") else FAIL,
+              f"{quick.get('at', '')}: نجحت خطواته الخمس" if quick.get("ok")
+              else f"{quick.get('at', '')}: توقّف عند «"
+              f"{bad[0].get('title', '') if bad else ''}» — "
+              f"{(bad[0].get('detail', '') if bad else '')[:300]}")
     _item(items, sec, "الختم والتوقيع يعملان بلا مكتبات خارجية", OK,
           "secp256k1 · ECDSA-SHA256 · C14N · XAdES — مدمجة في النظام")
     _item(items, sec, "الورقة المطبوعة: «فاتورة ضريبية» / «مبسطة» / «إشعار "
