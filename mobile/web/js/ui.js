@@ -39,6 +39,13 @@
   // إغلاق نافذةٍ يرجع خطوةً في السجل (history.back) — وحدث الرجوع يصل بعد
   // لحظة؛ فالنافذة التالية تنتظره، وإلا التقطته فأُغلقت فور فتحها
   let backPending = null;
+  // `el.append(x, cond ? y : null)` كان يكتب «null» نصّاً في الصفحة: الفارغ
+  // (null · undefined · false) يُتجاهل في كل الواجهة، كما يتجاهله `h()`
+  const nativeAppend = Element.prototype.append;
+  Element.prototype.append = function (...nodes) {
+    return nativeAppend.apply(this, nodes.filter((n) => n !== null && n !== undefined && n !== false));
+  };
+
   function sheet(build) {
     return (backPending || Promise.resolve()).then(() => openSheet(build));
   }

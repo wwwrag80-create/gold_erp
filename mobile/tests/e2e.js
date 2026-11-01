@@ -57,7 +57,11 @@ function check(name, cond, detail) {
 
   await page.goto(url);
   await page.waitForSelector("#tabs");
-  check("الرئيسية تفتح فارغة", (await page.content()).includes("لا عمليات بعد"));
+  const tiles = await page.locator(".op-tile .op-t").allInnerTexts();
+  check("الرئيسية: ستّ لوحاتٍ بالترتيب", tiles.join("،") ===
+    "بيع للعميل،مرتجع للعميل،بضاعة من مصنع،إرجاع للمصنع،تحصيل من العميل،سداد للمصنع", tiles.join("،"));
+  check("ثم «كشف حساب» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
+    "كشف حساب،عمليات اليوم (0)" && (await page.locator(".kpis").count()) === 0);
   check("الاسم: نظام محاسبي للذهب، والشعار في الشريط", (await text("#bar h1")).includes("نظام محاسبي للذهب") &&
     (await page.locator("#bar img.bar-logo").count()) === 1);
   check("خمسة أزرار سفلية بأيقونات: الحسابات والممتلكات", (await page.locator("#tabs button .i svg").count()) === 5 &&
@@ -116,7 +120,7 @@ function check(name, cond, detail) {
   await page.waitForTimeout(250);
   const l1 = page.locator(".line").first();
   check("أجر المصنع المتفق عليه: 12 × 8 = 96", (await l1.innerText()).includes("96.00"));
-  check("والسطر بصورته وماسه", (await l1.locator("img.thumb").count()) === 1 && (await l1.innerText()).includes("💎 0.50"));
+  check("والسطر بصورته وماسه", (await l1.locator("img.thumb").count()) === 1 && (await l1.innerText()).includes("0.50"));
   check("وخانة الصورة تفرغ للسطر التالي", (await page.locator(".photo-pick img.thumb").count()) === 0);
   await fill("الوزن (جم)", "20");
   await tap("button:has-text('+ إضافة')");
@@ -156,13 +160,17 @@ function check(name, cond, detail) {
   await page.waitForTimeout(200);
   check("اختياره يعبّئ وزنه 20 ولا يأخذ أجر المصنع",
     (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "20.00" &&
-    (await page.locator("label.f", { hasText: "الأجر لكل جرام" }).locator("input").inputValue()) === "");
+    (await page.locator("label.f", { hasText: "الأجور" }).locator("input").inputValue()) === "");
+  check("والأجور المتفق عليها تُقترح للوزن (20 × 20 = 400)", (await page.locator("label.f", { hasText: "الأجور" }).locator("input").getAttribute("placeholder")) === "تلقائي 400.00");
+  check("الرأس: «فاتورة بيع» واسم العميل والتاريخ — بلا خانات", (await text("#bar h1")).includes("فاتورة بيع") &&
+    (await text("#bar .chip-btn.party")).includes("محل الأمانة") && (await page.locator("#bar .chip-btn.date").count()) === 1 &&
+    !(await page.content()).includes("العملية والحساب") && !(await page.content()).includes("الأجر لكل جرام"));
   await tap("button:has-text('+ إضافة')");
   await page.waitForTimeout(150);
   check("بأجر المحل المتفق عليه: 20 × 20 = 400", (await page.locator(".line").first().innerText()).includes("400.00"));
   await tap("button:has-text('+ إضافة')");
   await page.waitForTimeout(100);
-  check("الوزن لازم", (await text("#toast")).includes("أدخل الوزن"), await text("#toast"));
+  check("سطرٌ فارغ لا يُضاف: الوزن أو الأجور أو الماس", (await text("#toast")).includes("اكتب الوزن، أو الأجور، أو الماس"), await text("#toast"));
   await fill("الوزن (جم)", "5");
   await tap("button:has-text('+ إضافة')");
   await page.waitForTimeout(150);
@@ -182,7 +190,7 @@ function check(name, cond, detail) {
   await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
   await page.waitForTimeout(100);
   await fill("الوزن (جم)", "5");
-  await fill("الأجر لكل جرام", "20");
+  await fill("الأجور", "100");
   await tap("button:has-text('+ إضافة')");
   await tap(".footer-bar .btn:has-text('ترحيل')");
   await confirm("ترحيل");
@@ -194,13 +202,14 @@ function check(name, cond, detail) {
   await page.waitForSelector(".sheet");
   await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
   await page.waitForTimeout(100);
-  check("شاشة التحصيل بلا «قبض» ولا «صرف»", (await text("#bar h1")).includes("تحصيل من محل") &&
+  check("شاشة التحصيل بلا «قبض» ولا «صرف»", (await text("#bar h1")).includes("تحصيل من العميل") &&
     !(await page.content()).includes("سند قبض") && !(await page.content()).includes("سند صرف"));
   await fill("الوزن (جم)", "6");
   await page.locator("label.f", { hasText: "العيار" }).locator("select").selectOption("21");
   await tap("button:has-text('+ نقد')");
   await fill("المبلغ", "300");
   check("مكافئ 6 جم عيار 21 = 7.00 جم عيار 18", (await page.content()).includes("= 7.00 جم عيار 18"));
+  check("ولا كلمة «null» في الشاشة", !(await page.locator("#view").innerText()).includes("null"));
   await shot("collect");
   await tap(".footer-bar .btn:has-text('ترحيل')");
   await confirm("ترحيل");
@@ -256,7 +265,7 @@ function check(name, cond, detail) {
     (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "12.00");
   check("ويحمل ماسه 0.50 وصورته", (await page.locator("label.f", { hasText: "الماس" }).locator("input").inputValue()) === "0.50" &&
     (await page.locator(".photo-pick img.thumb").count()) === 1);
-  await fill("الأجر لكل جرام", "15");
+  await fill("الأجور", "180");
   await tap("button:has-text('+ إضافة')");
   await tap(".footer-bar .btn:has-text('ترحيل')");
   await confirm("ترحيل");
@@ -327,17 +336,27 @@ function check(name, cond, detail) {
   // الرئيسية
   await tap("#tabs button[data-tab=home]");
   await page.waitForTimeout(250);
-  const hk = (await text(".kpis")).replace(/\s+/g, " ");
-  check("الرئيسية: ذهب على المحلات 25.00 وعليّ للمصانع 77.33", hk.includes("ذهب على المحلات 25.00") && hk.includes("عليّ للمصانع 77.33"), hk);
-  check("وبطاقة «معي الآن»", (await page.content()).includes("معي الآن"));
+  check("عمليات اليوم (6)", (await text(".wide-tile.today")).includes("عمليات اليوم (6)"), await text(".wide-tile.today"));
   await shot("home");
+  await tap(".wide-tile.today");
+  await page.waitForURL(/#\/today/);
+  await page.waitForTimeout(250);
+  check("عمليات اليوم: ستٌّ، لكلٍّ زرّ «معاينة»", (await page.locator(".op-row").count()) === 6 &&
+    (await page.locator(".op-row .prev-btn").count()) === 6);
+  await page.locator(".op-row", { hasText: "S-00002" }).locator(".prev-btn").click();
+  await page.waitForSelector(".sheet .preview iframe");
+  await page.waitForTimeout(400);
+  check("والمعاينة تُظهر الفاتورة", await page.evaluate(() => document.querySelector(".sheet .preview iframe").srcdoc.includes("S-00002")));
+  await shot("today_preview");
+  await page.goBack();
+  await page.waitForTimeout(200);
 
   // «+ جديد»
   await tap("#tabs button[data-tab=plus]");
   await page.waitForSelector(".sheet");
   const ns = await text(".sheet");
   check("«+» بلا قبض ولا صرف: مع المحلات · مع المصانع", ns.includes("مع المحلات") && ns.includes("مع المصانع") &&
-    ns.includes("تحصيل") && ns.includes("دفع لمصنع") && !ns.includes("سند قبض") && !ns.includes("سند صرف"));
+    ns.includes("تحصيل") && ns.includes("سداد للمصنع") && !ns.includes("سند قبض") && !ns.includes("سند صرف"));
   await page.goBack();
 
   // السجل
@@ -363,8 +382,36 @@ function check(name, cond, detail) {
   await page.waitForTimeout(300);
   check("البيانات باقية بعد إعادة الفتح", (await page.evaluate(() => App.state.invoices.length)) === 4);
 
+  // سطرٌ بالماس وحده، وآخر بالأجور وحدها، وثالثٌ بالذهب وحده — وتُرحَّل
+  await page.goto(url + "#/invoice/new?kind=sale");
+  await page.waitForSelector(".sheet");
+  await page.locator(".sheet .list-item", { hasText: "محل النخبة" }).click();
+  await page.waitForTimeout(200);
+  await fill("💎 الماس", "0.3");
+  await tap("button:has-text('+ إضافة')");
+  await page.waitForTimeout(150);
+  await fill("الأجور", "50");
+  await tap("button:has-text('+ إضافة')");
+  await page.waitForTimeout(150);
+  await fill("الوزن (جم)", "2");
+  await tap("button:has-text('+ إضافة')");
+  await page.waitForTimeout(150);
+  const ls = await page.locator(".line").allInnerTexts();
+  check("ماسٌ فقط · أجورٌ فقط · ذهبٌ فقط", ls.length === 3 && ls[0].includes("ماس فقط") && ls[1].includes("أجور فقط") &&
+    ls[2].includes("2.00"), ls.join(" | "));
+  await shot("special_lines");
+  await tap(".footer-bar .btn:has-text('ترحيل')");
+  await confirm("ترحيل");
+  await page.waitForURL(/#\/doc\/inv\//);
+  const s3 = await page.evaluate(() => { const d = App.state.invoices.find((x) => x.no === "S-00003");
+    return d && [d.totalW18, d.wages, Domain.diamondOf(d)]; });
+  check("رُحّلت S-00003: وزن 2 وأجور 50 وماس 0.3", s3 && s3.join() === "2,50,0.3", JSON.stringify(s3));
+
   // الوضع الليلي
   await page.evaluate(() => { App.state.settings.theme = "dark"; document.documentElement.setAttribute("data-theme", "dark"); });
+  await page.goto(url + "#/home");
+  await page.waitForTimeout(300);
+  await shot("home_dark");
   await page.goto(url + "#/holdings");
   await page.waitForTimeout(300);
   await shot("holdings_dark");

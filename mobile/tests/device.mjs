@@ -184,11 +184,12 @@ async function main() {
   await ev(HARNESS);
   await sleep(600);
   check("أول تشغيل: شاشة الترحيب (مجلد الحفظ أو الاسترجاع)", (await ev("location.hash")) === "#/welcome");
+  check("الاسم والشعار: نظام محاسبي للذهب", (await ev("document.title")) === "أهلاً بك" && (await ev("__t.text().includes('نظام محاسبي للذهب')")));
   shot("welcome");
 
   // ══ التحديث: الإصدار، وقراءة القناة من GitHub، وصلاحية PATCH ══
   const us = await ev("Bridge.updateState()");
-  check("الإصدار المثبّت 1.3.0 (4)", us.version === "1.3.0" && us.code === 4 && !us.unsupported, JSON.stringify(us));
+  check("الإصدار المثبّت 1.4.0 (5)", us.version === "1.4.0" && us.code === 5 && !us.unsupported, JSON.stringify(us));
   check("إذن الإشعارات ممنوح", us.canNotify === true);
   let n0 = await evCount(ev, "update");
   await ev("Bridge.checkUpdate(), 1");
@@ -256,7 +257,7 @@ async function main() {
   // مرتجع T1 من الأمانة — يُعبّأ من البيع
   await run(ev, `location.hash = "#/invoice/new?kind=sale_return"; await t.pick("محل الأمانة"); await t.sleep(200);
     t.fill("الطقم", "T1"); await t.sleep(250);`);
-  check("المرتجع يُعبّأ من البيع (12.00 بأجر 20)", (await ev("__t.val('الوزن (جم)')")) === "12.00" && (await ev("__t.val('الأجر لكل جرام')")) === "20.00");
+  check("المرتجع يُعبّأ من البيع (12.00 بأجور 240)", (await ev("__t.val('الوزن (جم)')")) === "12.00" && (await ev("__t.val('الأجور')")) === "240.00");
   await run(ev, `t.click("+ إضافة"); await t.sleep(200); t.click("ترحيل"); await t.confirm("ترحيل"); await t.sleep(800);`);
   check("رُحّل R-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("R-00001"));
 

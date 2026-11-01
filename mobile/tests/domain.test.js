@@ -251,5 +251,23 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("ونسخةٌ بلا صور سليمة", Object.keys(D.backupPhotos(D.toBackup(t))).length === 0);
 }
 
+// ══ الأجور مبلغٌ مباشر، والسطر: ذهبٌ أو ماسٌ أو أجورٌ وحدها ══
+{
+  const a = D.buildLine({ wo: "W", reg: 12.345, wages: 333.333 });
+  check("الأجور تُكتب مبلغاً وتُعتمد كما هي (333.33)", a.wages === 333.33 && !a.wageOnly && a.reg18 === 12.345, a.wages);
+  const d = D.buildLine({ diamond: 0.4 });
+  check("ماسٌ وحده: سطرٌ بلا وزن", !d.wageOnly && d.reg18 === 0 && d.diamond === 0.4 && d.wages === 0);
+  const w = D.buildLine({ wages: 75, wo: "تلميع" });
+  check("أجورٌ وحدها: سطر «أجور فقط» ببيانه", w.wageOnly && w.amount === 75 && w.note === "تلميع");
+  const g = D.buildLine({ reg: 3 });
+  check("ذهبٌ وحده: بلا أجور", !g.wageOnly && g.reg18 === 3 && g.wages === 0);
+  check("والسطر الفارغ مرفوض", throws(() => D.buildLine({ wages: 0 }), /الوزن أو الأجور أو الماس/));
+  const t = D.newState();
+  const sh = D.saveShop(t, { name: "م" });
+  const inv = D.saveInvoice(t, { kind: "sale", shopId: sh.id, lines: [d, w, g] });
+  check("وتُرحَّل معاً: وزن 3 وأجور 75 وماس 0.4", inv.totalW18 === 3 && inv.wages === 75 && D.diamondOf(inv) === 0.4);
+  check("والحساب: 3 جم و75 ريال عليه", D.balance(t, sh.id).gold18 === 3 && D.balance(t, sh.id).cash === 75);
+}
+
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);
 process.exit(fail ? 1 : 0);

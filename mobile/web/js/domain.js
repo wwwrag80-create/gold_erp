@@ -31,8 +31,8 @@
 
   const KIND_LABEL = {
     sale: "فاتورة بيع", sale_return: "مرتجع",
-    purchase: "بضاعة من مصنع", purchase_return: "إرجاع لمصنع",
-    receipt: "تحصيل", payment: "دفع", opening: "رصيد افتتاحي",
+    purchase: "بضاعة من مصنع", purchase_return: "إرجاع للمصنع",
+    receipt: "تحصيل", payment: "سداد", opening: "رصيد افتتاحي",
   };
   const PREFIX = { sale: "S", sale_return: "R", purchase: "P", purchase_return: "PR", receipt: "RV", payment: "PV" };
   // ما يدخل يد المندوب من أطقم وما يخرج منها
@@ -118,10 +118,21 @@
         wo: "", model: "", karat: 0, reg18: 0, gold18: 0, small18: 0, big18: 0,
         after18: 0, standing18: 0, diamond: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
     }
-    // اسم الطقم اختياري — الوزن وحده يكفي
+    // اسم الطقم اختياري. والسطر: ذهبٌ (وزن)، أو ماسٌ وحده، أو أجورٌ وحدها —
+    // والأجور مبلغٌ مباشر (`wages`) أو بالجرام (`wage`/`rate18`) من حركةٍ قديمة
     const wo = String(e.wo || "").trim();
     const reg = Number(e.reg || 0);
-    if (!(reg > 0)) throw new Error(wo ? `أدخل وزن الطقم ${wo}` : "أدخل الوزن");
+    const dia0 = Math.max(0, Number(e.diamond || 0));
+    const direct = e.wages !== undefined && e.wages !== null && e.wages !== "";
+    const wagesAmt = direct ? R(Math.max(0, Number(e.wages)), 2) : null;
+    if (!(reg > 0) && !(dia0 > 0)) {
+      if (wagesAmt > 0) {
+        return { wageOnly: true, amount: wagesAmt, wages: wagesAmt, note: String(e.note || wo).trim(),
+          wo: "", model: "", karat: 0, reg18: 0, gold18: 0, small18: 0, big18: 0,
+          after18: 0, standing18: 0, diamond: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
+      }
+      throw new Error(wo ? `أدخل وزن الطقم ${wo} أو أجوره أو ماسه` : "أدخل الوزن أو الأجور أو الماس");
+    }
     // الوزن المقترح (من مرتجعٍ أو بيعٍ سابق) يُعتمد بدقّته المخزَّنة ما دام
     // لم يُغيَّر — كـ`_reg_exact` في البرنامج: الخانة تعرض منزلتين، وعيار
     // 21 ذهاباً وإياباً كان يترك 0.001 جم من لا شيء
@@ -134,8 +145,13 @@
     const reg18 = R(st18("reg18", reg), 3);
     // الأجر المقترح (المتفق عليه أو أجر حركةٍ سابقة) بدقّته إن مُرِّر —
     // الخانة تعرضه بمنزلتين، فقراءته منها تُنقص الأجرة هللات بعيار 21
-    const rate18 = e.rate18 !== undefined && e.rate18 !== null ? Number(e.rate18)
+    let rate18 = e.rate18 !== undefined && e.rate18 !== null ? Number(e.rate18)
       : Gold.wageStore(Number(e.wage || 0), k);
+    let wages = Gold.totalWages(rate18, reg18);
+    if (direct) {
+      wages = wagesAmt;
+      rate18 = reg18 > 0 ? R(wagesAmt / reg18, 6) : 0;     // للعلم فقط — الأجور هي المكتوبة
+    }
     return {
       wageOnly: false, wo, model: String(e.model || "").trim(), karat: k,
       gold18: st18("gold18", e.gold), small18: st18("small18", e.small),
@@ -143,7 +159,7 @@
       standing18: st18("standing18", e.standing),
       reg18, diamond: R(Math.max(0, Number(e.diamond || 0)), 3),
       stoneRate: e.stoneRate === undefined ? Gold.STONE_DISCOUNT_RATE : Number(e.stoneRate),
-      rate18, wages: Gold.totalWages(rate18, reg18),
+      rate18, wages,
       note: String(e.note || "").trim(),
       // رقم السطر الثابت، ومن أي طقمٍ في اليد جاء (للممتلكات)، وصورته
       lid: e.lid || uid("l"), src: String(e.src || ""), photo: String(e.photo || ""),
