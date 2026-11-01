@@ -1280,8 +1280,12 @@ def main():
     import re as _re
     _used = set(_re.findall(r"@([A-Za-z][A-Za-z0-9_]*)",
                             __import__("ui.styles", fromlist=["x"]).TEMPLATE))
-    check("كل اسمٍ في النمط معرَّف في اللوحتين",
-          not (_used - set(_th.LIGHT)), str(sorted(_used - set(_th.LIGHT))))
+    # 5.1: والمقاسات (`@rCard` · `@fsTitle` …) من نظام التصميم لا اللوحة —
+    # كل اسمٍ إمّا لونٌ في اللوحتين أو مقاسٌ في `ui.design`، ولا ثالث
+    from ui import design as _ds27
+    _known27 = set(_th.LIGHT) | set(_ds27.tokens())
+    check("كل اسمٍ في النمط معرَّف في اللوحتين أو في نظام التصميم",
+          not (_used - _known27), str(sorted(_used - _known27)))
 
     # ── أدوات الجداول: الفرز رقميٌّ لا حرفي ──
     from ui.widgets import table_tools as _tt
