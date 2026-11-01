@@ -29,8 +29,20 @@
   function replace(path) { location.replace("#/" + path); }
 
   async function persist(ops) {
-    try { await S.write(ops); return true; }
+    try { await S.write(ops); scheduleAutoBackup(); return true; }
     catch (e) { err(new Error("تعذّر الحفظ في الجوال: " + ((e && e.message) || e))); return false; }
+  }
+
+  // نسخةٌ في مجلد الحفظ التلقائي (خارج التطبيق) بعد كل تغيير — بتأنٍّ يسير
+  // فتُجمع التغييرات المتتابعة في كتابةٍ واحدة
+  let backupTimer = null;
+  function scheduleAutoBackup() {
+    if (!B.native || !B.backupFolder()) return;
+    clearTimeout(backupTimer);
+    backupTimer = setTimeout(() => B.autoBackup(JSON.stringify(D.toBackup(st()))), 1200);
+  }
+  function lastAutoBackup() {
+    try { return localStorage.getItem("lastAutoBackup") || ""; } catch (e) { return ""; }
   }
 
   function setBar(title, sub, opts) {
@@ -39,7 +51,7 @@
     bar.innerHTML = "";
     if (o.back !== false) {
       bar.appendChild(h("button", { class: "icon-btn", "aria-label": "رجوع",
-        onclick: () => (history.length > 1 ? history.back() : go("home")) }, "→"));
+        onclick: () => (history.length > 1 ? history.back() : go("home")) }, ico("back", 22)));
     }
     bar.appendChild(h("h1", null, title, sub ? h("span", { class: "sub", text: sub }) : null));
     for (const a of o.actions || []) bar.appendChild(a);
@@ -75,7 +87,9 @@
 
   function docItem(d) {
     const type = d.kind === "sale" || d.kind === "sale_return" ? "inv" : "vo";
+    const ic = { sale: "receipt", sale_return: "return", receipt: "in", payment: "out" }[d.kind];
     return h("div", { class: "list-item", onclick: () => go(`doc/${type}/${d.id}`) },
+      h("span", { class: "avatar" + (d.kind === "sale_return" || d.kind === "payment" ? " ret" : "") }, ico(ic, 20)),
       h("div", { class: "grow" },
         h("div", { class: "spread" }, h("span", { class: "t", text: shopTitle(d.shopId) }), kindBadge(d.kind)),
         h("div", { class: "spread muted small" },
@@ -86,7 +100,8 @@
   // ══ الرئيسية ══
   function home() {
     const s = st();
-    setBar(s.settings.name || "جاديت", "حساباتي مع المحلات", { back: false });
+    setBar(s.settings.name || "جاديت", "حساباتي مع المحلات", { back: false,
+      actions: [updateButton()], logo: true });
     setTab("home");
     const v = view();
     const bals = D.allBalances(s);
@@ -109,12 +124,12 @@
         h("div", { class: "kpi" }, h("b", null, "أجور ونقد على المحلات"), h("span", { class: "v num" }, f2(cOn)), h("span", { class: "u" }, " ريال")),
         h("div", { class: "kpi" }, h("b", null, "نقد للمحلات"), h("span", { class: "v num" }, f2(cFor)), h("span", { class: "u" }, " ريال"))),
       h("div", { class: "quick" },
-        quickBtn("🧾", "فاتورة بيع", () => go("invoice/new?kind=sale")),
-        quickBtn("↩️", "مرتجع بيع", () => go("invoice/new?kind=sale_return")),
-        quickBtn("📥", "سند قبض", () => go("voucher/new?kind=receipt")),
-        quickBtn("📤", "سند صرف", () => go("voucher/new?kind=payment")),
-        quickBtn("📒", "كشف حساب", pickShopThen((id) => go(`statement/${id}`))),
-        quickBtn("🔎", "حركة الطقم", () => go("wo"))),
+        quickBtn("receipt", "فاتورة بيع", () => go("invoice/new?kind=sale")),
+        quickBtn("return", "مرتجع بيع", () => go("invoice/new?kind=sale_return")),
+        quickBtn("in", "سند قبض", () => go("voucher/new?kind=receipt")),
+        quickBtn("out", "سند صرف", () => go("voucher/new?kind=payment")),
+        quickBtn("book", "كشف حساب", pickShopThen((id) => go(`statement/${id}`))),
+        quickBtn("search", "حركة الطقم", () => go("wo"))),
     );
     v.append(h("div", { class: "card" }, h("h2", null, "اليوم ", h("span", { class: "muted small", dir: "ltr", text: dmy(t) })),
       h("div", { class: "grid3 small" },
@@ -123,21 +138,37 @@
         h("div", null, h("div", { class: "muted" }, "الأجور"), h("b", { class: "num" }, f2(tg))))));
     const hasData = s.invoices.length + s.vouchers.length > 0;
     const last = s.settings.lastBackup;
-    if (hasData && (!last || D.daysBetween(last.slice(0, 10), t) >= 7)) {
+    const us = B.updateState();
+    if (us.available) {
+      v.append(h("div", { class: "note-bar info tap", style: { marginBottom: "12px" }, onclick: updateSheet },
+        ico("sparkles", 18), ` تحديث ${us.published ? us.published.version : ""} متاح — اضغط للتثبيت (بياناتك تبقى كما هي)`));
+    }
+    if (B.native) {
+      if (!B.backupFolder()) {
+        v.append(h("div", { class: "note-bar warn tap", style: { marginBottom: "12px" }, onclick: () => go("settings") },
+          ico("folder", 18), " فعّل الحفظ التلقائي في مجلدٍ على الجوال — فتبقى بياناتك ولو حُذف التطبيق."));
+      }
+    } else if (hasData && (!last || D.daysBetween(last.slice(0, 10), t) >= 7)) {
       v.append(h("div", { class: "note-bar warn", style: { marginBottom: "12px" }, onclick: () => go("settings") },
         last ? `آخر نسخة احتياطية قبل ${D.daysBetween(last.slice(0, 10), t)} يوماً — احفظ نسخةً جديدة (البيانات في هذا الجوال وحده).`
           : "لم تُحفظ نسخة احتياطية بعد — البيانات في هذا الجوال وحده. اضغط هنا لحفظ نسخة."));
     }
     const recent = [...s.invoices, ...s.vouchers]
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)).slice(0, 8);
-    v.append(h("div", { class: "sec-title" }, "آخر العمليات"));
+    v.append(h("div", { class: "sec-title spread" }, h("span", null, "آخر العمليات"),
+      h("button", { class: "link", onclick: () => go("log") }, "عرض الكل")));
     if (!recent.length) {
       v.append(h("div", { class: "empty" }, "لا عمليات بعد — أضف محلاً ثم أصدر أول فاتورة."));
     } else recent.forEach((d) => v.append(docItem(d)));
   }
 
+  // أيقونة خطّية من مجموعة التطبيق (icons.js) — أو النصّ كما هو
+  function ico(name, size, cls) {
+    return root.ICON_NAMES && root.ICON_NAMES.includes(name) ? root.Icon(name, size, cls)
+      : h("span", { class: "ic" }, name);
+  }
   function quickBtn(icon, label, fn) {
-    return h("button", { onclick: fn }, h("span", { class: "i" }, icon), label);
+    return h("button", { onclick: fn }, h("span", { class: "i" }, ico(icon, 24)), h("span", null, label));
   }
 
   function shopItems() {
@@ -158,12 +189,23 @@
     };
   }
 
-  // ══ المحلات ══
-  function shops() {
-    setBar("المحلات", `${st().shops.length} محل`, { back: false,
-      actions: [h("button", { class: "icon-btn", onclick: () => go("shop-form") }, "+ محل")] });
-    setTab("shops");
+  // ══ العملاء: الأرصدة · المبيعات والسداد ══
+  function customers(q) {
+    const mode = q.view === "board" ? "board" : "list";
+    setBar("العملاء", `${st().shops.length} عميل`, { back: false,
+      actions: [h("button", { class: "icon-btn", "aria-label": "عميل جديد", onclick: () => go("shop-form") },
+        ico("plus", 20), h("span", null, "عميل"))] });
+    setTab("customers");
     const v = view();
+    const seg = h("div", { class: "seg", style: { marginBottom: "10px" } },
+      h("button", { class: mode === "list" ? "on" : "", onclick: () => replace("customers") }, "الأرصدة"),
+      h("button", { class: mode === "board" ? "on" : "", onclick: () => replace("customers?view=board") }, "المبيعات والسداد"));
+    v.append(seg);
+    if (mode === "board") return boardView(v, q);
+    shopsList(v);
+  }
+
+  function shopsList(v) {
     const q = h("input", { class: "in", type: "search", placeholder: "ابحث باسم المحل أو الجوال…" });
     const sortSeg = h("div", { class: "chips", style: { margin: "8px 0" } });
     let sort = "name";
@@ -178,10 +220,11 @@
       if (sort === "cash") arr.sort((a, b) => bals[b.id].cash - bals[a.id].cash);
       list.innerHTML = "";
       if (!arr.length) {
-        list.append(h("div", { class: "empty" }, s.shops.length ? "لا نتائج" : "لا محلات بعد — اضغط «+ محل» لإضافة أول محل."));
+        list.append(h("div", { class: "empty" }, s.shops.length ? "لا نتائج" : "لا عملاء بعد — اضغط «+ عميل» لإضافة أول محل."));
       }
       for (const x of arr) {
         list.append(h("div", { class: "list-item", onclick: () => go(`shop/${x.id}`) },
+          h("span", { class: "avatar" }, (x.name.trim()[0] || "؟")),
           h("div", { class: "grow" }, h("div", { class: "t", text: x.name }),
             x.phone ? h("div", { class: "muted small", dir: "ltr", style: { textAlign: "right" }, text: x.phone }) : null),
           h("div", { style: { textAlign: "left" }, class: "small num" },
@@ -205,10 +248,10 @@
   function shopPage(id) {
     const s = st();
     const shop = D.shopById(s, id);
-    if (!shop) { replace("shops"); return; }
+    if (!shop) { replace("customers"); return; }
     setBar(shop.name, shop.phone || "", {
-      actions: [h("button", { class: "icon-btn", onclick: () => go(`shop-form/${id}`) }, "✎")] });
-    setTab("shops");
+      actions: [h("button", { class: "icon-btn", "aria-label": "تعديل", onclick: () => go(`shop-form/${id}`) }, ico("edit", 20))] });
+    setTab("customers");
     const b = D.balance(s, id);
     const v = view();
     v.append(h("div", { class: "kpis" },
@@ -219,12 +262,12 @@
         `💠 الأجرة المتفق عليها: ${f2(G.rate(shop.agreedWage18, vk()))} ريال لكل جرام عيار ${vk()}`));
     }
     v.append(h("div", { class: "quick" },
-      quickBtn("🧾", "فاتورة بيع", () => go(`invoice/new?kind=sale&shop=${id}`)),
-      quickBtn("↩️", "مرتجع بيع", () => go(`invoice/new?kind=sale_return&shop=${id}`)),
-      quickBtn("📒", "كشف الحساب", () => go(`statement/${id}`)),
-      quickBtn("📥", "سند قبض", () => go(`voucher/new?kind=receipt&shop=${id}`)),
-      quickBtn("📤", "سند صرف", () => go(`voucher/new?kind=payment&shop=${id}`)),
-      shop.phone ? quickBtn("📞", "اتصال", () => B.dial(shop.phone)) : quickBtn("✎", "تعديل المحل", () => go(`shop-form/${id}`))));
+      quickBtn("receipt", "فاتورة بيع", () => go(`invoice/new?kind=sale&shop=${id}`)),
+      quickBtn("return", "مرتجع بيع", () => go(`invoice/new?kind=sale_return&shop=${id}`)),
+      quickBtn("book", "كشف الحساب", () => go(`statement/${id}`)),
+      quickBtn("in", "سند قبض", () => go(`voucher/new?kind=receipt&shop=${id}`)),
+      quickBtn("out", "سند صرف", () => go(`voucher/new?kind=payment&shop=${id}`)),
+      shop.phone ? quickBtn("phone", "اتصال", () => B.dial(shop.phone)) : quickBtn("edit", "تعديل المحل", () => go(`shop-form/${id}`))));
     if (shop.notes) v.append(h("div", { class: "card small" }, shop.notes));
     const docs = D.docsOf(s, id).reverse();
     v.append(h("div", { class: "sec-title" }, `العمليات (${docs.length})`));
@@ -292,7 +335,7 @@
       try {
         if (!(await confirmSheet(`حذف المحل «${shop.name}»؟`, "حذف", true))) return;
         D.deleteShop(s, shop.id);
-        if (await persist([["shops", "del", shop.id]])) { toast("حُذف المحل"); replace("shops"); }
+        if (await persist([["shops", "del", shop.id]])) { toast("حُذف المحل"); replace("customers"); }
       } catch (e) { err(e); }
     };
     v.append(h("div", { class: "footer-bar" },
@@ -624,14 +667,14 @@
               li.wageOnly && li.note ? h("span", { class: "muted small" }, "  · " + li.note) : null,
               li.wageOnly ? null : h("span", { class: "badge", style: { marginRight: "6px" } }, `عيار ${lk}`)),
             h("div", { class: "act" },
-              h("button", { onclick: () => editLine(i), "aria-label": "تعديل" }, "✎"),
+              h("button", { onclick: () => editLine(i), "aria-label": "تعديل" }, ico("edit", 17)),
               h("button", { class: "del", "aria-label": "حذف", onclick: async () => {
                 if (await confirmSheet(`حذف السطر ${li.wageOnly ? "(أجر فقط)" : li.wo}؟`, "حذف", true)) {
                   inv.lines.splice(i, 1);
                   if (ent.editIdx === i) clearEntry();
                   refresh();
                 }
-              } }, "✕"))),
+              } }, ico("x", 17)))),
           li.wageOnly ? h("div", { class: "vals" }, h("div", null, "الأجرة", h("b", { class: "num" }, f2(li.amount))))
             : h("div", { class: "vals" },
               h("div", { class: "muted" }, "المقيد", h("b", { class: "num" }, gw(li.reg18, lk))),
@@ -795,7 +838,7 @@
         const card = h("div", { class: "line" });
         const top = h("div", { class: "top" },
           h("b", null, r.kind === "gold" ? "ذهب" : "نقد"),
-          h("div", { class: "act" }, h("button", { class: "del", onclick: () => { vo.rows.splice(i, 1); renderRows(); refresh(); } }, "✕")));
+          h("div", { class: "act" }, h("button", { class: "del", "aria-label": "حذف", onclick: () => { vo.rows.splice(i, 1); renderRows(); refresh(); } }, ico("x", 17))));
         card.append(top);
         if (r.kind === "gold") {
           const w = numInput({ value: r.weight });
@@ -904,21 +947,21 @@
     const d = (isInv ? s.invoices : s.vouchers).find((x) => x.id === id);
     if (!d) { replace("log"); return; }
     setBar(`${D.KIND_LABEL[d.kind]} ${d.no}`, `${shopTitle(d.shopId)} · ${dmy(d.date)}`);
-    setTab("log");
+    setTab("more");
     const html = isInv ? P.invoiceHtml(s, d) : P.voucherHtml(s, d);
     const v = view();
     const name = `${d.no}`;
     v.append(h("div", { class: "quick" },
-      quickBtn("📷", "مشاركة صورة", () => B.shareHtmlImage(html, name)),
-      quickBtn("🖨", "طباعة / PDF", () => B.printHtml(html, name)),
-      isInv ? quickBtn("💬", "نص واتساب", () => B.shareText(P.invoiceText(s, d))) : quickBtn("📒", "كشف الحساب", () => go(`statement/${d.shopId}`)),
-      quickBtn("✎", "تعديل", () => go(`${isInv ? "invoice" : "voucher"}/edit/${d.id}`)),
-      quickBtn("🗑", "حذف", async () => {
+      quickBtn("share", "مشاركة صورة", () => B.shareHtmlImage(html, name)),
+      quickBtn("printer", "طباعة / PDF", () => B.printHtml(html, name)),
+      isInv ? quickBtn("chat", "نص واتساب", () => B.shareText(P.invoiceText(s, d))) : quickBtn("book", "كشف الحساب", () => go(`statement/${d.shopId}`)),
+      quickBtn("edit", "تعديل", () => go(`${isInv ? "invoice" : "voucher"}/edit/${d.id}`)),
+      quickBtn("trash", "حذف", async () => {
         if (!(await confirmSheet(`حذف ${D.KIND_LABEL[d.kind]} ${d.no}؟\n\nيُلغى أثره من رصيد «${shopTitle(d.shopId)}».`, "حذف", true))) return;
         if (isInv) D.deleteInvoice(s, d.id); else D.deleteVoucher(s, d.id);
         if (await persist([[isInv ? "invoices" : "vouchers", "del", d.id]])) { toast(`حُذف ${d.no}`); replace(`shop/${d.shopId}`); }
       }),
-      isInv ? quickBtn("📒", "كشف الحساب", () => go(`statement/${d.shopId}`)) : quickBtn("🏪", "المحل", () => go(`shop/${d.shopId}`))));
+      isInv ? quickBtn("book", "كشف الحساب", () => go(`statement/${d.shopId}`)) : quickBtn("store", "المحل", () => go(`shop/${d.shopId}`))));
     v.append(previewFrame(html));
   }
 
@@ -947,9 +990,9 @@
   function statementScreen(id, q) {
     const s = st();
     const shop = D.shopById(s, id);
-    if (!shop) { replace("shops"); return; }
+    if (!shop) { replace("customers"); return; }
     setBar("كشف حساب", shop.name);
-    setTab("shops");
+    setTab("customers");
     const v = view();
     const from = h("input", { class: "in", type: "date", value: q.from || "" });
     const to = h("input", { class: "in", type: "date", value: q.to || "" });
@@ -972,8 +1015,8 @@
         h("div", { class: "kpi" }, h("b", null, `رصيد الذهب (عيار ${vk()})`), h("div", { class: "v num" }, goldBal(res.gold18))),
         h("div", { class: "kpi" }, h("b", null, "رصيد النقد"), h("div", { class: "v num" }, cashBal(res.cash)))),
       h("div", { class: "row", style: { marginBottom: "12px" } },
-        h("button", { class: "btn ghost grow", onclick: () => B.shareHtmlImage(html(), `كشف ${shop.name}`) }, "📷 مشاركة صورة"),
-        h("button", { class: "btn ghost grow", onclick: () => B.printHtml(html(), `كشف ${shop.name}`) }, "🖨 طباعة / PDF")));
+        h("button", { class: "btn ghost grow", onclick: () => B.shareHtmlImage(html(), `كشف ${shop.name}`) }, ico("share", 18), "مشاركة صورة"),
+        h("button", { class: "btn ghost grow", onclick: () => B.printHtml(html(), `كشف ${shop.name}`) }, ico("printer", 18), "طباعة / PDF")));
     const card = h("div", { class: "card" });
     if (!res.rows.length) card.append(h("div", { class: "empty" }, "لا حركة في الفترة"));
     const k = vk();
@@ -997,7 +1040,7 @@
   function logScreen(q) {
     const s = st();
     setBar("سجل العمليات", "الفواتير والسندات", { back: false });
-    setTab("log");
+    setTab("more");
     const v = view();
     let kind = q.kind || "";
     const search = h("input", { class: "in", type: "search", placeholder: "ابحث برقم المستند أو المحل أو رقم التشغيل…", value: q.q || "" });
@@ -1082,7 +1125,7 @@
           if (!(await confirmSheet("حذف الفاتورة المعلّقة؟", "حذف", true))) return;
           s.held = s.held.filter((x) => x.id !== hd.id);
           if (await persist([["held", "del", hd.id]])) render();
-        } }, "✕"))));
+        } }, ico("x", 17)))));
     }
     function render() { view().innerHTML = ""; heldScreen(); }
   }
@@ -1093,13 +1136,16 @@
     setTab("more");
     const v = view();
     const item = (icon, t, sub, fn) => h("div", { class: "list-item", onclick: fn },
-      h("span", { style: { fontSize: "22px" } }, icon), h("div", { class: "grow" }, h("div", { class: "t" }, t),
-        sub ? h("div", { class: "muted small" }, sub) : null), h("span", { class: "muted" }, "‹"));
+      h("span", { class: "avatar" }, ico(icon, 20)), h("div", { class: "grow" }, h("div", { class: "t" }, t),
+        sub ? h("div", { class: "muted small" }, sub) : null), ico("chevron", 18, "muted"));
+    const us = B.updateState();
     v.append(
-      item("🔎", "حركة الطقم", "كل ما جرى على رقم تشغيل: بيع ومرتجع", () => go("wo")),
-      item("⏸", "المعلّقات", `${st().held.length} فاتورة لم تُرحَّل`, () => go("held")),
-      item("📒", "كشف حساب محل", "", pickShopThen((id) => go(`statement/${id}`))),
-      item("⚙️", "الإعدادات والنسخ الاحتياطي", "اسم النشاط · العيار · المظهر · حفظ واسترجاع البيانات", () => go("settings")));
+      item("list", "سجل العمليات", "كل الفواتير والسندات — بحثٌ ونوع", () => go("log")),
+      item("search", "حركة الطقم", "كل ما جرى على رقم تشغيل: بيع ومرتجع", () => go("wo")),
+      item("pause", "المعلّقات", `${st().held.length} فاتورة لم تُرحَّل`, () => go("held")),
+      item("book", "كشف حساب عميل", "", pickShopThen((id) => go(`statement/${id}`))),
+      us.unsupported ? null : item("update", "التحديثات", us.available ? "يوجد إصدارٌ جديد" : `الإصدار ${us.version}`, updateSheet),
+      item("settings", "الإعدادات والحفظ", "اسم النشاط · العيار · المظهر · الحفظ التلقائي · النشر", () => go("settings")));
   }
 
   // ══ الإعدادات والنسخ الاحتياطي ══
@@ -1155,9 +1201,50 @@
         App.state = ns;
         applyTheme();
         toast("استُرجعت البيانات");
+        scheduleAutoBackup();
         replace("home");
       } catch (e) { err(e.name === "SyntaxError" ? new Error("الملف تالف أو ليس نسخةً احتياطية") : e); }
     });
+    // الحفظ التلقائي في مجلد
+    const folder = B.backupFolder();
+    const autoCard = !B.native ? null : h("div", { class: "card" }, h("h2", null, ico("folder", 18), "الحفظ التلقائي"),
+      h("div", { class: "small", style: { marginBottom: "8px" } }, folder
+        ? `مفعّل — بعد كل عمليةٍ تُحفظ نسخةٌ في المجلد «${folder}»` + (lastAutoBackup() ? `\nآخر حفظ: ${new Date(+lastAutoBackup()).toLocaleString("ar")}` : "")
+        : "غير مفعّل. اختر مجلداً على الجوال (مثل Documents) يُحفظ فيه كل شيء تلقائياً — فتبقى بياناتك ولو حُذف التطبيق."),
+      h("div", { class: "muted small", style: { marginBottom: "10px" } },
+        "بعد إعادة تثبيت التطبيق: «استرجاع من المجلد» ثم اختر المجلد نفسه — فيعود كل شيء كما كان."),
+      h("div", { class: "grid2" },
+        h("button", { class: "btn" + (folder ? " ghost" : ""), onclick: () => B.pickBackupFolder() }, ico("folder", 18), folder ? "تغيير المجلد" : "اختيار المجلد"),
+        h("button", { class: "btn ghost", onclick: () => B.restoreFromFolder() }, ico("history", 18), "استرجاع من المجلد")));
+    const offF = B.on("backupFolder", (r) => {
+      if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); scheduleAutoBackup(); offF(); offR(); replace("settings"); }
+      else if (r.error) err(new Error(r.error));
+    });
+    const offR = B.on("restore", async (r) => {
+      if (!r.ok) { if (r.error) err(new Error(r.error)); return; }
+      try { if (await restoreText(r.text, r.file)) { offF(); offR(); replace("home"); } } catch (e) { err(e); }
+    });
+    // النشر (للناشر وحده)
+    const tokenIn = h("input", { class: "in", type: "password", dir: "ltr", placeholder: "github_pat_…", autocomplete: "off" });
+    const us = B.updateState();
+    const pubCard = !B.native ? null : h("details", { class: "card" },
+      h("summary", { class: "sec-title", style: { margin: "0" } }, ico("megaphone", 18), "النشر للمستخدمين (للناشر وحده)"),
+      h("div", { class: "small", style: { marginTop: "10px", lineHeight: "1.8" } },
+        "زرّ «إرسال التحديث للجميع» في نافذة التحديثات يُعلن الإصدار المثبّت عندك لكل من يستعمل التطبيق، ",
+        "فيصلهم إشعار ويُنزّلونه من GitHub (لا من سحابتك). يحتاج مرةً واحدة مفتاح نشرٍ من GitHub:"),
+      h("ol", { class: "small steps" },
+        h("li", null, "افتح صفحة المفاتيح: ", h("a", { href: "https://github.com/settings/personal-access-tokens/new", target: "_blank" }, "github.com/settings/personal-access-tokens/new")),
+        h("li", null, "الاسم: Jadeite · Repository access: Only select → gold_erp"),
+        h("li", null, "Permissions → Repository → Issues: Read and write"),
+        h("li", null, "Generate token، ثم انسخه والصقه هنا")),
+      field("مفتاح النشر", tokenIn),
+      h("div", { class: "muted small" }, us.publisher ? "محفوظٌ في هذا الجوال وحده (لا يدخل النسخ الاحتياطية)." : "لا مفتاح محفوظ."),
+      h("div", { class: "grid2", style: { marginTop: "8px" } },
+        h("button", { class: "btn", onclick: () => {
+          if (tokenIn.value.trim().length < 20) { err(new Error("الصق المفتاح كاملاً")); return; }
+          B.setPublisherToken(tokenIn.value.trim()); tokenIn.value = ""; toast("حُفظ مفتاح النشر"); replace("settings");
+        } }, "حفظ المفتاح"),
+        h("button", { class: "btn ghost", onclick: () => { B.setPublisherToken(""); toast("حُذف المفتاح"); replace("settings"); } }, "حذف المفتاح")));
     v.append(
       h("div", { class: "card" }, h("h2", null, "بيانات النشاط (تظهر في الفواتير)"),
         field("الاسم", name), h("div", { style: { height: "8px" } }),
@@ -1169,17 +1256,337 @@
         h("label", { class: "switch" }, showBal, "إظهار رصيد المحل في الفاتورة"),
         h("div", { class: "muted small" }, "الأوزان تُحفظ دائماً بمكافئ عيار 18 كما في البرنامج — العيار هنا وحدة عرضٍ فقط.")),
       h("button", { class: "btn block", onclick: save, style: { marginBottom: "12px" } }, "حفظ الإعدادات"),
-      h("div", { class: "card" }, h("h2", null, "النسخ الاحتياطي"),
+      autoCard,
+      h("div", { class: "card" }, h("h2", null, ico("save", 18), "نسخةٌ في ملف"),
         h("div", { class: "muted small", style: { marginBottom: "10px" } },
-          "البيانات في هذا الجوال وحده. احفظ نسخةً بانتظام (واحفظها خارج الجوال: واتساب أو درايف) — " +
-          "حذفُ التطبيق يحذف بياناته." + (S0.lastBackup ? `\nآخر نسخة: ${dmy(S0.lastBackup.slice(0, 10))}` : "\nلم تُحفظ نسخة بعد.")),
+          "نسخةٌ تحفظها أو ترسلها لنفسك (واتساب · درايف) — تنفع لنقل بياناتك إلى جوالٍ آخر." +
+          (S0.lastBackup ? `\nآخر نسخة: ${dmy(S0.lastBackup.slice(0, 10))}` : "")),
         h("div", { class: "grid2" },
-          h("button", { class: "btn", onclick: () => doBackup(false) }, "💾 حفظ في التنزيلات"),
-          h("button", { class: "btn ghost", onclick: () => doBackup(true) }, "📤 مشاركة النسخة")),
-        h("button", { class: "btn ghost block", style: { marginTop: "8px" }, onclick: () => fileIn.click() }, "♻ استرجاع من نسخة"),
+          h("button", { class: "btn ghost", onclick: () => doBackup(false) }, ico("save", 18), "حفظ ملف"),
+          h("button", { class: "btn ghost", onclick: () => doBackup(true) }, ico("share", 18), "مشاركة")),
+        h("button", { class: "btn ghost block", style: { marginTop: "8px" }, onclick: () => fileIn.click() }, ico("upload", 18), "استرجاع من ملف"),
         fileIn),
+      B.native ? h("button", { class: "btn ghost block", style: { marginBottom: "12px" }, onclick: updateSheet }, ico("update", 18), "التحديثات") : null,
+      pubCard,
       h("div", { class: "muted small", style: { textAlign: "center", margin: "16px 0" } },
         `جاديت للجوال · الإصدار ${B.appVersion()} · ${s.shops.length} محل · ${s.invoices.length} فاتورة · ${s.vouchers.length} سند`));
+  }
+
+  // ══ العملاء — المبيعات والسداد (كشاشة البرنامج) ══
+  const MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس",
+    "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+  function periodPresets() {
+    const t = D.today(), ym = t.slice(0, 7);
+    const d = new Date(+t.slice(0, 4), +t.slice(5, 7) - 2, 1);
+    const prev = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const lastDay = (x) => `${x}-${String(new Date(+x.slice(0, 4), +x.slice(5, 7), 0).getDate()).padStart(2, "0")}`;
+    return [["منذ البداية", "", ""], ["هذا الشهر", ym + "-01", ""], ["الشهر الماضي", prev + "-01", lastDay(prev)],
+      ["هذه السنة", t.slice(0, 4) + "-01-01", ""]];
+  }
+  function gradeBadge(g) {
+    const cls = { "مسدَّد": "good", "ممتاز": "good", "جيد": "", "مقبول": "", "سيء": "bad" }[g];
+    return h("span", { class: "badge grade " + (cls === undefined ? "none" : cls) }, g);
+  }
+  function meter(pctVal) {
+    const p = Math.max(0, Math.min(100, pctVal || 0));
+    return h("div", { class: "meter", role: "meter", "aria-valuenow": String(p), "aria-valuemin": "0", "aria-valuemax": "100" },
+      h("span", { style: { width: p + "%" } }));
+  }
+  function boardView(v, q) {
+    const s = st(), k = vk();
+    const side = q.side === "cash" ? "cash" : "gold";
+    const from = q.from || "", to = q.to || "";
+    const hideIdle = q.all !== "1";
+    const url = (o) => {
+      const x = Object.assign({ view: "board", side, from, to, all: hideIdle ? "" : "1" }, o);
+      return "customers?" + Object.entries(x).filter(([, val]) => val !== "").map(([a, b]) => `${a}=${encodeURIComponent(b)}`).join("&");
+    };
+    const chips = h("div", { class: "chips" });
+    for (const [label, a, b] of periodPresets()) {
+      chips.append(h("button", { class: "chip" + (from === a && to === b ? " on" : ""), onclick: () => replace(url({ from: a, to: b })) }, label));
+    }
+    const fIn = h("input", { class: "in", type: "date", value: from, onchange: (e) => replace(url({ from: e.target.value })) });
+    const tIn = h("input", { class: "in", type: "date", value: to, onchange: (e) => replace(url({ to: e.target.value })) });
+    const sideSeg = h("div", { class: "seg sm" },
+      h("button", { class: side === "gold" ? "on" : "", onclick: () => replace(url({ side: "gold" })) }, `الذهب (عيار ${k})`),
+      h("button", { class: side === "cash" ? "on" : "", onclick: () => replace(url({ side: "cash" })) }, "النقد (ريال)"));
+    const idle = h("input", { type: "checkbox", checked: hideIdle, onchange: (e) => replace(url({ all: e.target.checked ? "" : "1" })) });
+    v.append(h("div", { class: "card" }, chips, h("div", { class: "grid2", style: { marginTop: "8px" } }, field("من", fIn), field("إلى", tIn)),
+      h("div", { style: { marginTop: "10px" } }, sideSeg), h("label", { class: "switch" }, idle, "إخفاء من لا حركة له")));
+    const b = D.board(s, from || null, to || null);
+    const fmt = (x) => (side === "gold" ? gw(x) : f2(x));
+    const unit = side === "gold" ? `جم ${k}` : "ريال";
+    const T = b[side];
+    const rows = hideIdle ? b.rows.filter(D.hasMovement) : b.rows;
+    const tile = (label, val, sub) => h("div", { class: "stat" }, h("span", { class: "l" }, label),
+      h("span", { class: "v" }, val), sub ? h("span", { class: "u" }, sub) : null);
+    v.append(h("div", { class: "stats" },
+      tile("العملاء", String(rows.length)), tile("المبيعات", fmt(T.sales), unit), tile("المرتجع", fmt(T.returns),
+        T.retPct === null ? unit : `${f2(T.retPct)}% · ${unit}`),
+      tile("السداد", fmt(T.paid), T.paidPct === null ? unit : `${f2(T.paidPct)}% · ${unit}`), tile("الباقي", fmt(T.remaining), unit)));
+    if (!rows.length) { v.append(h("div", { class: "empty" }, "لا حركة في الفترة")); return; }
+    for (const r of rows) {
+      const x = r[side];
+      v.append(h("div", { class: "list-item col", onclick: () => go(`shop/${r.id}`) },
+        h("div", { class: "spread" }, h("span", { class: "t" }, r.name), gradeBadge(x.grade)),
+        h("div", { class: "grid3 small" },
+          h("div", null, h("span", { class: "muted" }, "الصافي"), h("b", { class: "num" }, fmt(x.net))),
+          h("div", null, h("span", { class: "muted" }, "السداد"), h("b", { class: "num" }, fmt(x.paid))),
+          h("div", null, h("span", { class: "muted" }, "الباقي"), h("b", { class: "num" }, fmt(x.remaining)))),
+        h("div", { class: "row small", style: { marginTop: "6px" } }, meter(x.paidPct),
+          h("span", { class: "muted num", style: { minWidth: "48px", textAlign: "left" } }, x.paidPct === null ? "—" : `${f2(x.paidPct)}%`)),
+        h("div", { class: "muted small" }, (r.lastPay ? `آخر سداد ${dmy(r.lastPay)}` : "لا سداد في الفترة") +
+          (r.lastSale ? ` · آخر بيع ${dmy(r.lastSale)}` : "") + (x.open ? ` · رصيد سابق ${fmt(x.open)}` : ""))));
+    }
+  }
+
+  // ══ رسمٌ عمودي بسلسلةٍ واحدة (لون الذهب) — مع تلميح ولمسة وجدول ══
+  function niceMax(v) {
+    if (!(v > 0)) return 1;
+    const raw = v / 2, p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * p).find((x) => x >= raw);
+    return step * 2;
+  }
+  function barChart(cfg) {
+    const { labels, values, fmt, title, unit } = cfg;
+    const W = 340, H = 180, top = 24, bottom = 26, axis = 40, left = 6;
+    const plotW = W - axis - left, plotH = H - top - bottom;
+    const max = niceMax(Math.max(0, ...values));
+    const n = values.length, slot = plotW / n, bw = Math.min(24, slot * 0.5);
+    const ns = "http://www.w3.org/2000/svg";
+    const el = (tag, attrs) => { const e = document.createElementNS(ns, tag); for (const [a, b] of Object.entries(attrs)) e.setAttribute(a, b); return e; };
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img",
+      "aria-label": `${title}: ` + labels.map((l, i) => `${l} ${fmt(values[i])}`).join("، ") });
+    for (const f of [0, 0.5, 1]) {
+      const y = top + plotH - f * plotH;
+      svg.append(el("line", { x1: left, x2: left + plotW, y1: y, y2: y, class: f === 0 ? "base" : "grid" }));
+      const t = el("text", { x: W - 2, y: y + 3.5, class: "tick", "text-anchor": "end" });
+      t.textContent = fmt(max * f);
+      svg.append(t);
+    }
+    const tip = h("div", { class: "chart-tip" });
+    const bars = [];
+    values.forEach((v, i) => {
+      // الزمن من اليمين إلى اليسار كالسطر العربي: الأقدم يميناً
+      const cx = left + plotW - slot * (i + 0.5);
+      const hgt = Math.max(0, (v / max) * plotH), x = cx - bw / 2, yb = top + plotH;
+      const r = Math.min(4, hgt);
+      const d = hgt <= 0 ? "" : `M${x},${yb} V${yb - hgt + r} Q${x},${yb - hgt} ${x + r},${yb - hgt} H${x + bw - r} Q${x + bw},${yb - hgt} ${x + bw},${yb - hgt + r} V${yb} Z`;
+      const bar = el("path", { d, class: "bar" });
+      bars.push(bar);
+      svg.append(bar);
+      const lt = el("text", { x: cx, y: H - 8, class: "tick", "text-anchor": "middle" });
+      lt.textContent = labels[i];
+      svg.append(lt);
+      if (i === n - 1 && v > 0) {                     // رقمٌ واحد مباشر: الشهر الحالي
+        const vt = el("text", { x: cx, y: yb - hgt - 6, class: "val", "text-anchor": "middle" });
+        vt.textContent = fmt(v);
+        svg.append(vt);
+      }
+      const hit = el("rect", { x: cx - slot / 2, y: top - 10, width: slot, height: plotH + 10, class: "hit", tabindex: "0" });
+      const show = () => {
+        bars.forEach((b, j) => b.classList.toggle("dim", j !== i));
+        tip.innerHTML = "";
+        tip.append(h("b", { class: "num" }, `${fmt(v)} ${unit}`), h("span", null, labels[i]));
+        tip.style.display = "block";
+        const pctX = (cx / W) * 100;
+        tip.style.left = `clamp(4px, calc(${pctX}% - 60px), calc(100% - 124px))`;
+      };
+      hit.addEventListener("pointerenter", show);
+      hit.addEventListener("pointerdown", show);
+      hit.addEventListener("focus", show);
+      svg.append(hit);
+    });
+    svg.addEventListener("pointerleave", () => { tip.style.display = "none"; bars.forEach((b) => b.classList.remove("dim")); });
+    const table = h("table", { class: "mini-table", style: { display: "none" } },
+      h("thead", null, h("tr", null, h("th", null, "الشهر"), h("th", null, unit))),
+      h("tbody", null, labels.map((l, i) => h("tr", null, h("td", null, l), h("td", { class: "num" }, fmt(values[i]))))));
+    const wrap = h("div", { class: "chart-wrap" }, svg, tip);
+    const toggle = h("button", { class: "link", onclick: () => {
+      const tbl = table.style.display === "none";
+      table.style.display = tbl ? "" : "none";
+      wrap.style.display = tbl ? "none" : "";
+      toggle.textContent = tbl ? "رسم" : "جدول";
+    } }, "جدول");
+    return h("div", { class: "card" }, h("div", { class: "spread" }, h("h2", null, title), toggle), wrap, table);
+  }
+
+  // ══ لوحة التحكم ══
+  function dashboard() {
+    const s = st(), k = vk();
+    setBar("لوحة التحكم", `الذهب بعيار ${k}`, { back: false, actions: [updateButton()] });
+    setTab("dashboard");
+    const v = view();
+    const d = D.dashboard(s, 6);
+    const lbl = d.months.map((m) => MONTHS_AR[+m.slice(5, 7) - 1]);
+    const cur = d.per[d.cur], prev = d.per[d.prev] || { sales: 0 };
+    v.append(h("div", { class: "kpis" },
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "ذهب على العملاء"), h("span", { class: "v" }, gw(d.goldOn)), h("span", { class: "u" }, ` جم ${k}`)),
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "ذهب للعملاء"), h("span", { class: "v" }, gw(d.goldFor)), h("span", { class: "u" }, ` جم ${k}`)),
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "أجور ونقد على العملاء"), h("span", { class: "v" }, f2(d.cashOn)), h("span", { class: "u" }, " ريال")),
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "نقد للعملاء"), h("span", { class: "v" }, f2(d.cashFor)), h("span", { class: "u" }, " ريال"))));
+    const delta = cur.sales - prev.sales;
+    const tile = (label, val, sub, extra) => h("div", { class: "stat" }, h("span", { class: "l" }, label),
+      h("span", { class: "v" }, val), sub ? h("span", { class: "u" }, sub) : null, extra || null);
+    v.append(h("div", { class: "card" }, h("h2", null, `هذا الشهر — ${MONTHS_AR[+d.cur.slice(5, 7) - 1]}`),
+      h("div", { class: "stats in-card" },
+        tile("المبيعات", gw(cur.sales), `جم ${k}`, h("span", { class: "delta " + (delta >= 0 ? "up" : "down") },
+          `${delta >= 0 ? "▲" : "▼"} ${gw(Math.abs(delta))} عن الشهر الماضي`)),
+        tile("المرتجع", gw(cur.returns), `جم ${k}`),
+        tile("الأجور", f2(cur.wages), "ريال"),
+        tile("فواتير البيع", String(cur.n))),
+      h("div", { class: "spread small", style: { marginTop: "10px" } }, h("span", null, "تحصيل الذهب من المستحق هذا الشهر"),
+        h("span", { class: "num" }, d.month.gold.paidPct === null ? "—" : `${f2(d.month.gold.paidPct)}%`)),
+      meter(d.month.gold.paidPct),
+      h("div", { class: "spread small", style: { marginTop: "8px" } }, h("span", null, "تحصيل النقد من المستحق هذا الشهر"),
+        h("span", { class: "num" }, d.month.cash.paidPct === null ? "—" : `${f2(d.month.cash.paidPct)}%`)),
+      meter(d.month.cash.paidPct)));
+    v.append(barChart({ title: `مبيعات الذهب شهرياً`, unit: `جم ${k}`, labels: lbl,
+      values: d.months.map((m) => G.g(d.per[m].sales, k)), fmt: (x) => f2(x) }));
+    v.append(barChart({ title: `تحصيل الذهب شهرياً`, unit: `جم ${k}`, labels: lbl,
+      values: d.months.map((m) => G.g(d.per[m].paidGold, k)), fmt: (x) => f2(x) }));
+    v.append(barChart({ title: "تحصيل النقد شهرياً", unit: "ريال", labels: lbl,
+      values: d.months.map((m) => d.per[m].paidCash), fmt: (x) => f2(x) }));
+    const shopsAt = Object.entries(d.setsOut.byShop).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    v.append(h("div", { class: "card" }, h("h2", null, ico("package", 18), "الأطقم"),
+      h("div", { class: "stats in-card" },
+        tile("عند العملاء", String(d.setsOut.n), `${gw(d.setsOut.w18)} جم ${k}`),
+        tile("رجعت إليك", String(d.setsBack.n), `${gw(d.setsBack.w18)} جم ${k}`)),
+      shopsAt.length ? h("div", { class: "muted small", style: { marginTop: "8px" } },
+        "الأكثر: " + shopsAt.map(([id, n]) => `${shopTitle(id)} (${n})`).join(" · ")) : null,
+      h("button", { class: "btn ghost block sm", style: { marginTop: "10px" }, onclick: () => go("wo") }, ico("search", 18), "حركة طقم")));
+    const topList = (title, arr, val) => h("div", { class: "card" }, h("h2", null, title),
+      arr.length ? arr.map((x) => h("div", { class: "spread row-link", onclick: () => go(`shop/${x.shop.id}`) },
+        h("span", null, x.shop.name), h("b", { class: "num" }, val(x)))) : h("div", { class: "muted small" }, "لا أحد"));
+    v.append(topList(`الأعلى ذهباً عليه (جم ${k})`, d.topGold, (x) => gw(x.gold18)),
+      topList("الأعلى نقداً عليه (ريال)", d.topCash, (x) => f2(x.cash)));
+  }
+
+  // ══ التحديثات ══
+  function updateButton() {
+    const us = B.updateState();
+    const btn = h("button", { class: "icon-btn upd" + (us.available ? " dot" : ""), id: "upd-btn",
+      "aria-label": "التحديثات", onclick: updateSheet }, ico("update", 20));
+    if (us.unsupported) btn.style.display = "none";
+    return btn;
+  }
+  function refreshUpdateDot(us) {
+    const b = document.getElementById("upd-btn");
+    if (b) b.classList.toggle("dot", !!(us && us.available));
+  }
+  let updateOpen = false;
+  async function updateSheet() {
+    if (updateOpen) return;
+    updateOpen = true;
+    const offs = [];
+    await sheet((box) => {
+      const body = h("div");
+      const prog = h("div", { class: "progress", style: { display: "none" } }, h("span"));
+      const note = h("div", { class: "muted small", style: { marginTop: "8px", whiteSpace: "pre-line" } });
+      box.append(h("h3", null, ico("update", 20), " التحديثات"), body, prog, note);
+      const render = (us) => {
+        body.innerHTML = "";
+        if (us.unsupported) {
+          body.append(h("div", { class: "muted" }, "التحديث التلقائي يعمل في تطبيق أندرويد."));
+          return;
+        }
+        const pub = us.published && us.published.code ? us.published : null;
+        body.append(h("div", { class: "spread" }, h("span", null, "الإصدار المثبّت"), h("b", { class: "num" }, us.version)));
+        if (us.available && pub) {
+          body.append(h("div", { class: "update-card" },
+            h("div", { class: "spread" }, h("b", null, `إصدارٌ جديد ${pub.version}`), ico("sparkles", 20)),
+            pub.notes ? h("div", { class: "small", style: { whiteSpace: "pre-line", marginTop: "6px" } }, pub.notes) : null,
+            h("button", { class: "btn block", style: { marginTop: "10px" }, onclick: () => {
+              note.textContent = "جارٍ التنزيل…";
+              prog.style.display = "";
+              B.installUpdate();
+            } }, ico("update", 18), us.ready ? "تثبيت التحديث الآن" : "تنزيل التحديث وتثبيته"),
+            h("div", { class: "muted small", style: { marginTop: "6px" } },
+              "يُنزَّل من GitHub ويُتحقَّق من بصمته، ثم يطلب أندرويد تأكيد التثبيت بلمسة. بياناتك تبقى كما هي.")));
+        } else {
+          body.append(h("div", { class: "ok-line" }, ico("check", 18), " أنت على آخر إصدارٍ منشور"));
+        }
+        if (us.lastCheck) body.append(h("div", { class: "muted small" }, "آخر فحص: " + new Date(us.lastCheck).toLocaleString("ar")));
+        if (us.error) body.append(h("div", { class: "note-bar warn" }, us.error));
+        body.append(h("button", { class: "btn ghost block sm", style: { marginTop: "8px" }, onclick: () => {
+          note.textContent = "جارٍ الفحص…";
+          B.checkUpdate();
+        } }, ico("refresh", 18), "تحقّق الآن"));
+        if (!us.canNotify) {
+          body.append(h("button", { class: "btn ghost block sm", style: { marginTop: "8px" }, onclick: () => B.requestNotifications() },
+            ico("bell", 18), "تفعيل إشعار التحديث"));
+        }
+        if (us.publisher) {
+          const notesIn = h("textarea", { class: "in", rows: 2, placeholder: "ما الجديد؟ (اختياري — يظهر للمستخدمين)" });
+          body.append(h("div", { class: "publish-card" },
+            h("b", null, ico("megaphone", 18), " النشر للمستخدمين"),
+            h("div", { class: "muted small" }, pub ? `المنشور الآن: ${pub.version}` : "لم يُنشر إصدارٌ بعد"),
+            notesIn,
+            h("button", { class: "btn block", style: { marginTop: "8px" }, onclick: async () => {
+              if (!(await confirmSheet(`إرسال الإصدار ${us.version} (المثبّت عندك) إلى كل من يستعمل التطبيق؟\n\n` +
+                "يصلهم إشعار، فيُنزّلونه من GitHub ويُثبّتونه — وبياناتهم تبقى.", "إرسال"))) return;
+              note.textContent = "جارٍ التحقّق من الملف والنشر…";
+              B.publishUpdate(notesIn.value);
+            } }, ico("megaphone", 18), `إرسال ${us.version} للجميع`)));
+        }
+      };
+      offs.push(B.on("update", (us) => {
+        note.textContent = us.error && !us.version ? us.error : "";
+        prog.style.display = "none";
+        if (us.version) render(us);
+        refreshUpdateDot(us);
+      }));
+      offs.push(B.on("updateProgress", (p) => {
+        prog.style.display = "";
+        prog.firstChild.style.width = (p.pct || 0) + "%";
+        note.textContent = `جارٍ التنزيل… ${p.pct || 0}%`;
+      }));
+      offs.push(B.on("publish", (r) => {
+        note.textContent = r.ok ? `أُرسل الإصدار ${r.version} — يصل الإشعار أجهزتهم حين تتصل بالإنترنت.` : (r.error || "تعذّر النشر");
+        if (r.ok) toast("أُرسل التحديث للجميع");
+        render(B.updateState());
+      }));
+      render(B.updateState());
+      if (!B.updateState().unsupported) B.checkUpdate();
+    });
+    offs.forEach((f) => f());
+    updateOpen = false;
+  }
+
+  // ══ الاسترجاع (من مجلد الحفظ التلقائي أو من ملف) ══
+  async function restoreText(text, label) {
+    let obj;
+    try { obj = JSON.parse(text); } catch (e) { throw new Error("الملف تالف أو ليس نسخةً احتياطية"); }
+    const ns = D.fromBackup(obj);
+    const msg = `استرجاع ${label || "النسخة"} (${(obj.savedAt || "").slice(0, 10)}):\n` +
+      `${ns.shops.length} عميل · ${ns.invoices.length} فاتورة · ${ns.vouchers.length} سند\n\n` +
+      "تُستبدل بها البيانات الحالية في هذا الجوال.";
+    if (!(await confirmSheet(msg, "استرجاع", true))) return false;
+    await S.replaceAll(ns);
+    App.state = ns;
+    applyTheme();
+    toast("استُرجعت البيانات");
+    return true;
+  }
+
+  // ══ الترحيب (أول تشغيل): مجلد الحفظ التلقائي أو استرجاع ما سبق ══
+  function welcome() {
+    setBar("أهلاً بك", "", { back: false, noTabs: true });
+    const v = view();
+    const done = () => { try { localStorage.setItem("welcomed", "1"); } catch (e) { /* */ } B.requestNotifications(); replace("home"); };
+    const waitFolder = B.on("backupFolder", (r) => { if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); waitFolder(); waitRestore(); done(); } });
+    const waitRestore = B.on("restore", async (r) => {
+      if (!r.ok) { if (r.error) err(new Error(r.error)); return; }
+      try { if (await restoreText(r.text, r.file)) { waitFolder(); waitRestore(); done(); } } catch (e) { err(e); }
+    });
+    v.append(h("div", { class: "welcome" },
+      h("img", { src: "img/icon.png", alt: "", class: "welcome-logo" }),
+      h("h2", null, "جاديت — حساباتك مع المحلات"),
+      h("p", { class: "muted" }, "بياناتك في جوالك وحده. اختر مجلداً يُحفظ فيه كل شيءٍ تلقائياً بعد كل عملية — " +
+        "فإن حذفت التطبيق ثم ثبّته من جديد، اختر المجلد نفسه فيعود كل شيء كما كان."),
+      h("button", { class: "btn block", onclick: () => B.pickBackupFolder() }, ico("folder", 20), "ابدأ — اختر مجلد الحفظ التلقائي"),
+      h("button", { class: "btn ghost block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "عندي بيانات سابقة — استرجاعها"),
+      h("button", { class: "link", style: { marginTop: "12px" }, onclick: () => { waitFolder(); waitRestore(); done(); } }, "تخطٍّ الآن")));
   }
 
   // ══ «+ جديد» ══
@@ -1187,12 +1594,12 @@
     const r = await sheet((box, close) => {
       box.append(h("h3", null, "عملية جديدة"),
         h("div", { class: "quick" },
-          quickBtn("🧾", "فاتورة بيع", () => close("invoice/new?kind=sale")),
-          quickBtn("↩️", "مرتجع بيع", () => close("invoice/new?kind=sale_return")),
-          quickBtn("🏪", "محل جديد", () => close("shop-form")),
-          quickBtn("📥", "سند قبض", () => close("voucher/new?kind=receipt")),
-          quickBtn("📤", "سند صرف", () => close("voucher/new?kind=payment")),
-          quickBtn("🔎", "حركة الطقم", () => close("wo"))));
+          quickBtn("receipt", "فاتورة بيع", () => close("invoice/new?kind=sale")),
+          quickBtn("return", "مرتجع بيع", () => close("invoice/new?kind=sale_return")),
+          quickBtn("store", "عميل جديد", () => close("shop-form")),
+          quickBtn("in", "سند قبض", () => close("voucher/new?kind=receipt")),
+          quickBtn("out", "سند صرف", () => close("voucher/new?kind=payment")),
+          quickBtn("search", "حركة الطقم", () => close("wo"))));
     });
     if (r) setTimeout(() => go(r), 30);
   }
@@ -1218,7 +1625,10 @@
     try {
       switch (parts[0]) {
         case "home": return home();
-        case "shops": return shops();
+        case "shops": return customers(q);
+        case "customers": return customers(q);
+        case "dashboard": return dashboard();
+        case "welcome": return welcome();
         case "shop": return shopPage(parts[1]);
         case "shop-form": return shopForm(parts[1]);
         case "invoice": return invoiceEditor(q, parts[1], parts[2]);

@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const Num = require(path.join(__dirname, "../web/js/num.js"));
 const Gold = require(path.join(__dirname, "../web/js/gold.js"));
+const Domain = require(path.join(__dirname, "../web/js/domain.js"));
 const cases = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const fn = {
   round: (x, n) => Num.pyRound(x, n),
@@ -15,12 +16,17 @@ const fn = {
   wageStore: Gold.wageStore,
   lineWages: (a, wage, k) => Gold.totalWages(Gold.wageStore(wage, k), Num.pyRound(Gold.store(a, k), 3)),
   voucherEquiv: (a, k) => Gold.voucherGold(a, k).equiv,
+  boardSide: (d, dec) => {
+    const x = Domain.boardSide(d, dec);
+    return [x.net, x.remaining, x.retPct, x.paidPct, x.grade];
+  },
 };
 let bad = 0;
 const seen = {};
 for (const [name, args, want] of cases) {
   const got = fn[name](...args);
-  const ok = typeof want === "string" ? got === want : Object.is(got, want) || got === want;
+  const ok = Array.isArray(want) ? JSON.stringify(got) === JSON.stringify(want)
+    : typeof want === "string" ? got === want : Object.is(got, want) || got === want;
   seen[name] = (seen[name] || 0) + 1;
   if (!ok) {
     bad++;

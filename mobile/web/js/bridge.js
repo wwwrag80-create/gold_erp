@@ -1,10 +1,18 @@
-/* الجسر إلى أندرويد: مشاركة صورة/نص، طباعة وحفظ PDF، حفظ ملف.
+/* الجسر إلى أندرويد: مشاركة صورة/نص، طباعة وحفظ PDF، حفظ ملف، الحفظ
+ * التلقائي في مجلدٍ خارج التطبيق، والتحديث من GitHub.
  * داخل التطبيق يوجد الكائن `AndroidBridge` (من MainActivity)، وفي متصفحٍ
- * عادي (للتجربة) بدائلُ من المتصفح نفسه.
+ * عادي (للتجربة) بدائلُ من المتصفح نفسه. والأصل يرسل أحداثه إلى
+ * `window.__native(اسم، بيانات)`.
  */
 (function (root) {
   "use strict";
   const A = root.AndroidBridge || null;
+  const listeners = {};
+  root.__native = (ev, data) => {
+    for (const fn of (listeners[ev] || []).slice()) {
+      try { fn(data || {}); } catch (e) { console.error(e); }
+    }
+  };
 
   function b64(str) {
     const bytes = new TextEncoder().encode(str);
@@ -27,6 +35,10 @@
 
   const Bridge = {
     native: !!A,
+    on(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); return () => Bridge.off(ev, fn); },
+    off(ev, fn) { listeners[ev] = (listeners[ev] || []).filter((x) => x !== fn); },
+    once(ev) { return new Promise((res) => { const off = Bridge.on(ev, (d) => { off(); res(d); }); }); },
+
     // صفحة المستند صورةً (PNG) تُشارك في واتساب وغيره
     shareHtmlImage(html, name) {
       if (A) { A.shareHtmlImage(html, name); return true; }
@@ -49,7 +61,7 @@
       if (navigator.share) { navigator.share({ text }).catch(() => {}); return; }
       window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
     },
-    // ملف (النسخة الاحتياطية): يُحفظ في «التنزيلات» أو يُشارك
+    // ملف (النسخة الاحتياطية): يُحفظ حيث يختار صاحب الجهاز أو يُشارك
     saveFile(name, text, mime) {
       if (A) { A.saveFile(name, b64(text), mime || "application/json"); return; }
       browserDownload(name, text, mime);
@@ -60,6 +72,23 @@
     },
     dial(phone) { location.href = "tel:" + phone; },
     appVersion() { return A && A.appVersion ? A.appVersion() : "web"; },
+
+    // ── الحفظ التلقائي في مجلدٍ خارج التطبيق (يبقى بعد حذفه) ──
+    backupFolder() { return A && A.backupFolder ? A.backupFolder() : ""; },
+    pickBackupFolder() { if (A) A.pickBackupFolder(); },
+    restoreFromFolder() { if (A) A.restoreFromFolder(); },
+    autoBackup(json) { if (A && A.autoBackup) A.autoBackup(json); },
+
+    // ── التحديث ──
+    updateState() {
+      if (!A || !A.updateState) return { unsupported: true, version: "web" };
+      try { return JSON.parse(A.updateState()); } catch (e) { return { unsupported: true }; }
+    },
+    checkUpdate() { if (A) A.checkUpdate(); },
+    installUpdate() { if (A) A.installUpdate(); },
+    requestNotifications() { if (A && A.requestNotifications) A.requestNotifications(); },
+    setPublisherToken(t) { return A ? A.setPublisherToken(t) : false; },
+    publishUpdate(notes) { if (A) A.publishUpdate(notes || ""); },
   };
   root.Bridge = Bridge;
 })(window);

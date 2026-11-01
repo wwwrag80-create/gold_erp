@@ -391,6 +391,133 @@
     return Math.round((t(b) - t(a)) / 86400000);
   }
 
+  // ══ العملاء — المبيعات والسداد (كـmodels/customer_board.py) ══
+  // لكل عميلٍ وجهين (ذهب · نقد): رصيدٌ سابق، مبيعات (ومعها سندات الصرف:
+  // ما صُرف له فصار عليه)، مرتجع، صافي = سابق + مبيعات − مرتجع، سداد،
+  // باقي = صافي − سداد، ونسبتا المرتجع والسداد، وتقديرٌ بكلمة.
+  const GRADES = ["مسدَّد", "ممتاز", "جيد", "مقبول", "سيء"];
+  function pct(part, whole) { return whole > 1e-9 ? R(part / whole * 100, 1) : null; }
+  function grade(paidPct, remaining, hasSales, paid) {
+    if (remaining <= 0.005) return hasSales || paid > 0.005 ? "مسدَّد" : "—";
+    const p = paidPct === null || paidPct === undefined ? 0 : paidPct;
+    if (p >= 80) return "ممتاز";
+    if (p >= 60) return "جيد";
+    if (p >= 40) return "مقبول";
+    return "سيء";
+  }
+  function boardSide(d, dec) {
+    const x = {};
+    for (const k of ["open", "sales", "returns", "paid", "other"]) x[k] = R(d[k] || 0, dec);
+    x.net = R(x.open + x.sales - x.returns, 3);
+    x.remaining = R(x.net - x.paid + x.other, 3);
+    x.retPct = pct(x.returns, x.open + x.sales);
+    x.paidPct = pct(x.paid, x.net);
+    x.grade = grade(x.paidPct, x.remaining, x.sales > 0.0005 || x.open > 0.0005, x.paid);
+    return x;
+  }
+  function board(st, from, to) {
+    const rows = [];
+    for (const shop of st.shops) {
+      const g = { open: 0, sales: 0, returns: 0, paid: 0, other: 0 };
+      const c = { open: 0, sales: 0, returns: 0, paid: 0, other: 0 };
+      let nInv = 0, lastSale = "", lastPay = "";
+      const op = openingRow(shop);
+      if (op && (!to || op.date <= to)) { g.open += op.gd - op.gc; c.open += op.cd - op.cc; }
+      for (const d of docsOf(st, shop.id)) {
+        if (to && d.date > to) continue;
+        const e = effects(d);
+        if (from && d.date < from) { g.open += e.gd - e.gc; c.open += e.cd - e.cc; continue; }
+        if (d.kind === "sale") { g.sales += e.gd; c.sales += e.cd; nInv++; if (d.date > lastSale) lastSale = d.date; }
+        else if (d.kind === "sale_return") { g.returns += e.gc; c.returns += e.cc; }
+        else if (d.kind === "receipt") {
+          g.paid += e.gc - e.gd; c.paid += e.cc - e.cd;
+          if (d.date > lastPay) lastPay = d.date;
+        } else if (d.kind === "payment") { g.sales += e.gd - e.gc; c.sales += e.cd - e.cc; }
+      }
+      rows.push({ shop, id: shop.id, name: shop.name, gold: boardSide(g, 3), cash: boardSide(c, 2),
+        nInv, lastSale, lastPay });
+    }
+    // الأعلى سداداً أولاً — بالمبلغ لا بالنسبة (`by_paid`)
+    rows.sort((a, b) => (b.gold.paid - a.gold.paid) || (b.cash.paid - a.cash.paid) ||
+      a.name.localeCompare(b.name, "ar"));
+    const tot = (side) => {
+      const t = { open: 0, sales: 0, returns: 0, paid: 0, other: 0 };
+      for (const r of rows) for (const k of Object.keys(t)) t[k] += r[side][k];
+      return boardSide(t, side === "gold" ? 3 : 2);
+    };
+    return { rows, gold: tot("gold"), cash: tot("cash") };
+  }
+  function hasMovement(r) {
+    return [r.gold, r.cash].some((x) => Math.abs(x.open) > 0.0005 || x.sales > 0.0005 ||
+      x.returns > 0.0005 || x.paid > 0.0005);
+  }
+
+  // ══ لوحة التحكم ══
+  function monthKey(iso) { return iso.slice(0, 7); }
+  function monthsBack(n, ref) {
+    const t = ref || today();
+    let y = +t.slice(0, 4), m = +t.slice(5, 7);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.unshift(`${y}-${String(m).padStart(2, "0")}`);
+      m--; if (!m) { m = 12; y--; }
+    }
+    return out;
+  }
+  function dashboard(st, nMonths) {
+    const t = today();
+    const months = monthsBack(nMonths || 6, t);
+    const per = {};
+    for (const k of months) per[k] = { sales: 0, returns: 0, wages: 0, paidGold: 0, paidCash: 0, n: 0 };
+    for (const d of [...st.invoices, ...st.vouchers]) {
+      const m = per[monthKey(d.date)];
+      if (!m) continue;
+      const e = effects(d);
+      if (d.kind === "sale") { m.sales += d.totalW18; m.wages += d.wages; m.n++; }
+      else if (d.kind === "sale_return") { m.returns += d.totalW18; m.wages -= d.wages; }
+      else if (d.kind === "receipt") { m.paidGold += e.gc - e.gd; m.paidCash += e.cc - e.cd; }
+    }
+    for (const k of months) for (const f of Object.keys(per[k])) per[k][f] = R(per[k][f], f === "n" ? 0 : 3);
+    const bal = allBalances(st);
+    let goldOn = 0, goldFor = 0, cashOn = 0, cashFor = 0, owing = 0;
+    const list = [];
+    for (const s of st.shops) {
+      const b = bal[s.id];
+      if (b.gold18 > 0) goldOn += b.gold18; else goldFor -= b.gold18;
+      if (b.cash > 0) cashOn += b.cash; else cashFor -= b.cash;
+      if (b.gold18 > 0.0005 || b.cash > 0.005) owing++;
+      list.push({ shop: s, gold18: b.gold18, cash: b.cash });
+    }
+    // الأطقم عند المحلات: آخر حركةٍ للرقم بيع — وعندك: آخر حركته مرتجع
+    const last = {};
+    for (const inv of st.invoices) {
+      for (const li of inv.lines) {
+        if (li.wageOnly) continue;
+        const k = li.wo.trim();
+        const cur = last[k];
+        if (!cur || docOrder(cur.inv, inv) < 0) last[k] = { inv, line: li };
+      }
+    }
+    let outN = 0, outW = 0, backN = 0, backW = 0;
+    const atShop = {};
+    for (const m of Object.values(last)) {
+      if (m.inv.kind === "sale") {
+        outN++; outW += m.line.reg18;
+        atShop[m.inv.shopId] = (atShop[m.inv.shopId] || 0) + 1;
+      } else { backN++; backW += m.line.reg18; }
+    }
+    const cur = months[months.length - 1], prev = months[months.length - 2];
+    const mb = board(st, cur + "-01", null);
+    return {
+      months, per, cur, prev,
+      goldOn: R(goldOn, 3), goldFor: R(goldFor, 3), cashOn: R(cashOn, 2), cashFor: R(cashFor, 2), owing,
+      topGold: list.filter((x) => x.gold18 > 0.0005).sort((a, b) => b.gold18 - a.gold18).slice(0, 5),
+      topCash: list.filter((x) => x.cash > 0.005).sort((a, b) => b.cash - a.cash).slice(0, 5),
+      setsOut: { n: outN, w18: R(outW, 3), byShop: atShop }, setsBack: { n: backN, w18: R(backW, 3) },
+      month: { gold: mb.gold, cash: mb.cash },
+    };
+  }
+
   // ══ نسخة احتياطية ══
   const BACKUP_FORMAT = "jadeite-mobile-backup";
   function toBackup(st) {
@@ -418,6 +545,7 @@
     voucherRows, saveVoucher, deleteVoucher,
     effects, docsOf, statement, balance, balanceAround, allBalances,
     woHistory, woLast, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
+    GRADES, grade, boardSide, board, hasMovement, dashboard, monthsBack,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

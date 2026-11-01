@@ -4,9 +4,16 @@
     <!-- التطبيق لا يتصل بالإنترنت: صفحاته من داخله (appassets) — لكن WebView
          يحجب كل عنوان https بلا هذا الإذن، ولو كان مخدوماً من داخل التطبيق -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- التحديث: تثبيت الإصدار المنزَّل (بلمسة صاحب الجهاز)، وإشعارٌ حين يجهز،
+         وإعادة جدولة الفحص الدوري بعد إعادة تشغيل الجهاز -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
@@ -25,6 +32,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".UpdateJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

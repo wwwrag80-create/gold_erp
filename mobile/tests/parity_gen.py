@@ -64,4 +64,18 @@ for _ in range(6000):
     wt = round(float(a), 2)
     cases.append(["voucherEquiv", [a, k], gm.to_base_karat(wt, k)])
 
+# العملاء — المبيعات والسداد: الجانب ونسبتاه وتقديره (`models/customer_board.py`)
+from models import customer_board as cb   # noqa: E402
+for _ in range(4000):
+    side = rnd.choice(("gold", "cash"))
+    d = {k: rnd.choice((0.0, round(rnd.uniform(0, 500), rnd.choice((0, 2, 3)))))
+         for k in ("open", "sales", "returns", "paid")}
+    d["other"] = 0.0
+    if rnd.random() < 0.15:
+        d["open"] = -d["open"]
+    x = cb._side(d, side)
+    g = cb.grade(x["paid_pct"], x["remaining"], x["sales"] > 0.0005 or x["open"] > 0.0005, x["paid"])
+    cases.append(["boardSide", [d, 3 if side == "gold" else 2],
+                  [x["net"], x["remaining"], x["ret_pct"], x["paid_pct"], g]])
+
 json.dump(cases, sys.stdout)
