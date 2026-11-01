@@ -82,7 +82,7 @@ async function connect() {
           }
           return r.result && r.result.result ? r.result.result.value : undefined;
         };
-        return { ws, ev };
+        return { ws, ev, send };
       }
     } catch (e) { /* not yet */ }
     await sleep(1000);
@@ -140,6 +140,27 @@ async function waitEv(ev, name, before, ms) {
 }
 const evCount = (ev, name) => ev(`(window.__ev[${JSON.stringify(name)}] || []).length`);
 
+// لمسةٌ حقيقية (من أدوات المطوّر) — نافذة اختيار الملف لا تُفتح بنقرةٍ من سكربت
+async function touch(send, ev, findJs) {
+  const pt = await ev(`(() => { const el = (${findJs})(); if (!el) return null; el.scrollIntoView({ block: "center" });
+    const r = el.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+  if (!pt) return false;
+  await sleep(300);
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await send("Input.dispatchMouseEvent", { type, x: pt[0], y: pt[1], button: "left", clickCount: 1 });
+  }
+  return true;
+}
+// النشاط الظاهر الآن على الشاشة
+function resumed() {
+  const d = adb("shell", "dumpsys", "activity", "activities").toString();
+  return (d.match(/(topResumedActivity|mResumedActivity|ResumedActivity)[^\n]*/g) || []).join(" ");
+}
+// يعيد التطبيق إلى الواجهة (بلا تشغيلٍ جديد إن كان يعمل)
+function front() {
+  try { adb("shell", "am", "start", "-n", `${PKG}/.MainActivity`); } catch (e) { /* */ }
+}
+
 async function relaunch() {
   await sleep(500);
   adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`);
@@ -156,7 +177,7 @@ async function relaunch() {
 const run = async (ev, body) => ev(`(async () => { const t = window.__t; ${body} })()`);
 
 async function main() {
-  let { ws, ev } = await connect();
+  let { ws, ev, send } = await connect();
   for (let i = 0; i < 40; i++) { if (await ev("!!(window.App && App.state)")) break; await sleep(250); }
   check("التطبيق يفتح وتُحمَّل بياناته", await ev("!!(window.App && App.state)"));
   check("الخط العربي محمَّل", await ev("document.fonts.check('16px Plex')"));
@@ -167,7 +188,7 @@ async function main() {
 
   // ══ التحديث: الإصدار، وقراءة القناة من GitHub، وصلاحية PATCH ══
   const us = await ev("Bridge.updateState()");
-  check("الإصدار المثبّت 1.2.0 (3)", us.version === "1.2.0" && us.code === 3 && !us.unsupported, JSON.stringify(us));
+  check("الإصدار المثبّت 1.3.0 (4)", us.version === "1.3.0" && us.code === 4 && !us.unsupported, JSON.stringify(us));
   check("إذن الإشعارات ممنوح", us.canNotify === true);
   let n0 = await evCount(ev, "update");
   await ev("Bridge.checkUpdate(), 1");
@@ -199,14 +220,18 @@ async function main() {
   // بضاعة من المصنع: T1 باسمه، وطقمٌ بوزنه فقط
   await run(ev, `location.hash = "#/invoice/new?kind=purchase"; await t.sleep(400); await t.pick("مصنع الريان");
     t.fill("الطقم", "T1"); await t.sleep(150); t.fill("الوزن (جم)", "12"); t.fill("💎 الماس", "0.5");`);
-  // زرّ الصورة يفتح نافذة أندرويد (الكاميرا والمعرض)
-  await run(ev, `t.click("صورة"); await t.sleep(200);`);
+  // زرّ الصورة (بلمسةٍ حقيقية) يفتح نافذة أندرويد: الكاميرا والمعرض
+  const tapped = await touch(send, ev, `() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "صورة")`);
   await sleep(2500);
   shot("photo_chooser");
-  const ch = adb("shell", "dumpsys", "activity", "activities").toString();
-  check("زرّ الصورة يفتح اختيار الكاميرا أو المعرض", /ChooserActivity|ResolverActivity|documentsui|photopicker/i.test(ch));
-  adb("shell", "input", "keyevent", "4");
+  const ch = resumed();
+  const opened = tapped && /ChooserActivity|ResolverActivity|documentsui|photopicker|camera/i.test(ch);
+  check("زرّ الصورة يفتح اختيار الكاميرا أو المعرض", opened, ch.slice(0, 300));
+  if (opened) adb("shell", "input", "keyevent", "4");
   await sleep(1500);
+  front();
+  await sleep(1000);
+  check("ثم يعود إلى التطبيق", /com\.jadeite\.mobile/.test(resumed()), resumed().slice(0, 200));
   const phId = await ev(`App.attachPhotoData(${JSON.stringify(PHOTO)})`);
   check("الصورة تُربط بالطقم", typeof phId === "string" && phId.startsWith("ph_"), phId);
   await run(ev, `t.click("+ إضافة"); await t.sleep(250);
