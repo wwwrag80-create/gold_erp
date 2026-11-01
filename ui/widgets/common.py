@@ -388,11 +388,28 @@ class TitledSections(QtWidgets.QWidget):
         row.addWidget(title_label(title))
         row.addStretch(1)
         row.addWidget(self.bar, 0, QtCore.Qt.AlignBottom)
+        self._row = row
+        self._docked = True
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)
         lay.addLayout(row)
         lay.addWidget(self.stack, 1)
+
+    # ══ الأقسام في رأس الصفحة (5.1.3) ══
+    # النافذة الرئيسية تأخذ الشريط إلى رأس الصفحة بجانب «رجوع» ما دامت
+    # الشاشة ظاهرة — فلا يبقى له سطرٌ فوق الصفحة يقتطع من جدولها —
+    # وتعيده إلى مكانه هنا عند مغادرتها.
+    def take_bar(self):
+        if self._docked:
+            self._row.removeWidget(self.bar)
+            self._docked = False
+        return self.bar
+
+    def restore_bar(self):
+        if not self._docked:
+            self._row.addWidget(self.bar, 0, QtCore.Qt.AlignBottom)
+            self._docked = True
 
     def _switch(self, i):
         if 0 <= i < self.stack.count():

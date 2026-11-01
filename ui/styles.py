@@ -64,7 +64,7 @@ QPushButton#ghost { background: @surface; color: @ink;
 QPushButton#ghost:hover { background: @hover; border-color: @line3; }
 QPushButton#danger, QPushButton#dangerBtn { background: @red; }
 QPushButton#danger:hover, QPushButton#dangerBtn:hover { background: @redHi; }
-QPushButton[dense="true"] { padding: 2px 10px 3px 10px; }
+QPushButton[dense="true"] { padding: 0px 10px 1px 10px; min-height: 20px; }
 QToolButton { background: @surface; color: @ink; border: 1px solid @line2;
               border-radius: @rCtl; padding: 7px 12px; font-weight: bold; }
 QToolButton:hover { background: @hover; border-color: @line3; }

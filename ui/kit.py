@@ -835,7 +835,7 @@ if ACTIVE:
         # محدِّد النوع وحده
         rule = ('QPushButton[dense="true"][hasIcon="false"], '
                 'QPushButton[dense="true"][hasIcon="true"] '
-                '{ padding: 2px 10px 3px 10px; min-height: 22px; }')
+                '{ padding: 0px 10px 1px 10px; min-height: 20px; }')
 
         def f(t):
             return make(t) + "\n" + rule

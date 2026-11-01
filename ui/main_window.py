@@ -444,6 +444,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tools_lay.setContentsMargins(0, 0, 0, 0)
         self._tools_lay.setSpacing(6)
         sb.addWidget(self.screen_tools)
+        # أقسام الشاشة (إصدار فاتورة · المعلّقات…) بجانب «رجوع» (5.1.3)
+        self.page_tabs = QtWidgets.QWidget()
+        self._ptabs_lay = QtWidgets.QHBoxLayout(self.page_tabs)
+        self._ptabs_lay.setContentsMargins(0, 0, 0, 0)
+        self._ptabs_lay.setSpacing(0)
+        # الشريط على سطح الرأس نفسه — بلا لونٍ خلفه (لا لون جديد)
+        self.page_tabs.setStyleSheet("QWidget { background: transparent; }")
+        self.page_tabs.setVisible(False)
+        self._page_sec = None
+        sb.addWidget(self.page_tabs)
         sb.addWidget(self.btn_close)
         # سعر الذهب: شريطٌ أفقي في أقصى يسار الشريط الفرعي — تحت أزرار
         # «عرض» و«تحديث» — لا لوحةً تأكل من طول الشريط الجانبي
@@ -1175,6 +1185,8 @@ class MainWindow(QtWidgets.QMainWindow):
         prev = getattr(self, "_current_row", 0)
         self._current_row = row
         self.stack.setCurrentIndex(row)
+        # قبل هدم أي شاشةٍ قديمة: شريط أقسام المغادَرة يعود إليها
+        self._mount_page_tabs(target)
         # ══ سلسلة الرجوع ══
         # الانتقال من شاشةٍ إلى أخرى يُبقي الأولى حيّةً خلفها (فيعود
         # إليها «رجوع» كما تُركت). والرجوع يُغلق الشاشة المغادَرة،
@@ -1447,6 +1459,59 @@ class MainWindow(QtWidgets.QMainWindow):
             self._update_done(res)
         except Exception as e:
             err(self, e)
+
+    @staticmethod
+    def _page_sections(screen):
+        """أقسام الشاشة العليا (`TitledSections`) إن كانت — أو None.
+
+        لا تُبنى شاشةٌ من أجلها: الكسولة غير المبنيّة بلا أقسام."""
+        from ui.widgets.common import TitledSections
+        if screen is None or (isinstance(screen, Lazy) and not screen.built):
+            return None
+        real = getattr(screen, "real", screen)
+        try:
+            for sec in real.findChildren(TitledSections):
+                p = sec.parentWidget()
+                while p is not None and p is not real \
+                        and not isinstance(p, TitledSections):
+                    p = p.parentWidget()
+                if p is real:              # الأعلى: لا أقسامَ فوقها
+                    return sec
+        except (RuntimeError, AttributeError):
+            pass
+        return None
+
+    def _mount_page_tabs(self, screen):
+        """شريط أقسام الشاشة الظاهرة في رأس الصفحة بجانب «رجوع» (5.1.3).
+
+        كان سطراً وحده فوق الشاشة («إصدار فاتورة · المعلّقات») يقتطع من
+        جدول البنود. يُعاد شريط الشاشة المغادَرة إلى مكانه فيها أولاً —
+        فإن هُدمت بعدُ هُدم معها، ولا يبقى في الرأس شريطٌ لشاشةٍ ذهبت.
+        """
+        old = self.__dict__.get("_page_sec")
+        self._page_sec = None
+        if old is not None:
+            bar = old.bar
+            try:
+                self._ptabs_lay.removeWidget(bar)
+                old.restore_bar()
+            except RuntimeError:          # الشاشة هُدمت وشريطها هنا
+                try:
+                    bar.hide()
+                    bar.setParent(None)
+                except RuntimeError:
+                    pass
+        sec = self._page_sections(screen)
+        if sec is not None:
+            try:
+                self._ptabs_lay.addWidget(sec.take_bar())
+                self._page_sec = sec
+            except RuntimeError:
+                sec = None
+        try:
+            self.page_tabs.setVisible(sec is not None)
+        except RuntimeError:
+            pass
 
     def _mount_screen_tools(self, screen):
         """يعرض أزرار الشاشة العامة في الشريط العلوي.

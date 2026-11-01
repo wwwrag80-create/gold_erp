@@ -9958,6 +9958,77 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    # ══════════════════════════════════════════════════════════════
+    step("128) 5.1.3: «إصدار فاتورة · المعلّقات» في رأس الصفحة بجانب «رجوع»")
+    try:
+        import time as _tm128
+        from PyQt5 import QtWidgets as _QW128
+        _app128 = _QW128.QApplication.instance() or _QW128.QApplication([])
+        from ui.widgets import declutter as _dc128
+        _dc128.install(_app128)
+        from ui.main_window import MainWindow as _MW128
+        from ui.widgets import draft_keeper as _dk128
+
+        def _pump128(ms):
+            _end = _tm128.time() + ms / 1000
+            while _tm128.time() < _end:
+                _app128.processEvents()
+                _tm128.sleep(0.01)
+        _w128 = _MW128({"id": 1, "username": "admin", "full_name": "م",
+                        "role": "admin", "role_local": "accountant"})
+        _errs128 = []
+        _old128 = sys.excepthook
+        sys.excepthook = lambda t, v, tb: _errs128.append(f"{t.__name__}: {v}")
+        try:
+            _w128.resize(1366, 700)
+            _w128.show()
+            _pump128(150)
+            _keys128 = {v: k for k, v in _w128._screen_keys.items()}
+            _si128 = _keys128["مبيعات/مرتجعات"]
+            _pi128 = _keys128["الوارد من التصنيع"]
+            _w128.switch(_si128)
+            _pump128(400)
+            for _k in list(_dk128._KEEPERS):
+                _k.timer.stop()
+            _s128 = _w128.screens[_si128].real
+            _bar128 = _s128.tabs.bar
+            check("شريط «إصدار فاتورة · المعلّقات» في رأس الصفحة لا فوق "
+                  "الشاشة",
+                  _w128.page_tabs.isVisible()
+                  and _bar128.parentWidget() is _w128.page_tabs
+                  and _bar128.isVisible(),
+                  str(_bar128.parentWidget()))
+            _bar128.setCurrentIndex(1)
+            _pump128(200)
+            check("ويبدّل القسم من هناك (المعلّقات ثم الإصدار)",
+                  _s128.tabs.stack.currentIndex() == 1, "")
+            _bar128.setCurrentIndex(0)
+            _pump128(100)
+            _vp128 = _s128.items_table.viewport().height()
+            _rh128 = _s128.items_table.verticalHeader().defaultSectionSize()
+            check("والجدول في نافذة 1366×700 يتّسع لخمسة صفوفٍ فأكثر "
+                  "(كان صفّين في 5.1.1)",
+                  _vp128 >= 5 * _rh128, f"{_vp128} / {_rh128}")
+            _w128.switch(_pi128)
+            _pump128(400)
+            check("وشاشةٌ أخرى بأقسام: شريطها هو الظاهر، وشريط المبيعات "
+                  "عاد إليها",
+                  _w128._ptabs_lay.count() == 1
+                  and _w128._page_sec is _w128.screens[_pi128].real.tabs
+                  and _bar128.parentWidget() is not _w128.page_tabs, "")
+            _w128.switch(0)
+            _pump128(150)
+            check("والرئيسية بلا شريط أقسام، وكل شريطٍ في شاشته",
+                  not _w128.page_tabs.isVisible()
+                  and _w128._ptabs_lay.count() == 0
+                  and _bar128.parentWidget() is _s128.tabs, "")
+            check("بلا أي خطأ أثناء التنقّل", not _errs128, str(_errs128[:2]))
+        finally:
+            sys.excepthook = _old128
+            _w128.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

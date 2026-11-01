@@ -769,6 +769,11 @@ class SalesScreen(QtWidgets.QWidget):
         self.wage_note.setObjectName("cardSub")
         self.wage_note.setProperty("live", True)     # تنبيهٌ حيّ لا شرح
         self.wage_note.setWordWrap(True)
+        # 5.1.3: في سطر البيان بجانب «إشعار مدين» لا سطراً وحده تحت
+        # الرأس — مختصرٌ هنا وكاملٌ في التلميح، فلا يقتطع من الجدول
+        self.wage_note.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                                     QtWidgets.QSizePolicy.Preferred)
+        self.wage_note.setMinimumWidth(0)
         # 4.59: للعميل طلبٌ مفتوح من دليل الموديلات؟ يظهر هنا عند اختياره
         # برابطٍ يفتحه — فلا يُباع له وطلبه منسيّ في الدفتر
         self.order_note = QtWidgets.QLabel("")
@@ -805,10 +810,10 @@ class SalesScreen(QtWidgets.QWidget):
         opts.addWidget(self.vat_check)
         opts.addWidget(self.qr_check)
         opts.addWidget(btn_tax_note)
-        opts.addStretch(1)
+        opts.addSpacing(6)
+        opts.addWidget(self.wage_note, 1)
         g.addLayout(opts, 1, 6, 1, 4)
         g.addWidget(self.internal_note, 2, 0, 1, 10)
-        g.addWidget(self.wage_note, 3, 0, 1, 10)
         g.addWidget(self.order_note, 4, 0, 1, 10)
         g.setColumnStretch(3, 3)
         g.setColumnStretch(6, 3)
@@ -1697,7 +1702,7 @@ class SalesScreen(QtWidgets.QWidget):
         """
         self._agreed_wage = 0.0
         if not cid:
-            self.wage_note.setText("")
+            self._set_wage_note("")
             return
         try:
             with db(readonly=True) as conn:
@@ -1706,14 +1711,22 @@ class SalesScreen(QtWidgets.QWidget):
             stored = 0.0
         if stored > 0:
             self._agreed_wage = round(kv.rate(stored), 2)
-            self.wage_note.setText(
+            self._set_wage_note(
+                f"💠 الأجرة المتفق عليها: {_nf.f2(self._agreed_wage)} "
+                f"ريال/{kv.unit()}",
                 f"💠 الأجرة المتفق عليها مع هذا العميل: "
                 f"{_nf.f2(self._agreed_wage)} ريال لكل {kv.unit()} — "
                 "تُملأ تلقائياً، ولك أن تغيّرها في أي سطر.")
         else:
-            self.wage_note.setText(
+            self._set_wage_note(
+                "لا أجرةَ متفق عليها مسجّلة لهذا العميل",
                 "لا أجرةَ متفق عليها مسجّلة لهذا العميل — تُكتب في "
                 "بطاقة الجهة، فيُقاس عليها ويُكشف أي انحراف.")
+
+    def _set_wage_note(self, short, full=""):
+        """تنبيه الأجرة: مختصرٌ في سطر البيان، وكاملُه في التلميح."""
+        self.wage_note.setText(short)
+        self.wage_note.setToolTip(full or short)
 
     def _wage_hint(self, used):
         """يوازن أجر السطر بالمتفق عليه ويقول الفرق — بلا منع."""
@@ -1721,13 +1734,15 @@ class SalesScreen(QtWidgets.QWidget):
             return
         d = round(used - self._agreed_wage, 2)
         if abs(d) < 0.005:
-            self.wage_note.setText(
+            self._set_wage_note(
                 f"✔ أجر السطر {_nf.f2(used)} — مطابقٌ للمتفق عليه.")
         else:
-            self.wage_note.setText(
+            side = "أقلّ" if d < 0 else "أعلى"
+            self._set_wage_note(
+                f"⚠ أجر السطر {_nf.f2(used)} {side} من المتفق عليه "
+                f"{_nf.f2(self._agreed_wage)} بـ {_nf.f2(abs(d))}",
                 f"⚠ أجر السطر {_nf.f2(used)} والمتفق عليه "
-                f"{_nf.f2(self._agreed_wage)} — "
-                + ("أقلّ" if d < 0 else "أعلى") +
+                f"{_nf.f2(self._agreed_wage)} — {side}"
                 f" بـ {_nf.f2(abs(d))} ريال لكل {kv.unit()}. "
                 "أُضيف كما أدخلتَه — راجعه إن لم يكن عن قصد.")
 
