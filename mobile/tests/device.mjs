@@ -321,7 +321,13 @@ async function main() {
   check("الممتلكات: صندوق 21 فيه 1.00 جم، والنقد 20، وطقمٌ واحد معي", hd.b21 === 1 && hd.cash === 20 && hd.n === 1, JSON.stringify(hd));
   check("وصناديقها على الشاشة، ثم ذهب المصانع عندي وذهبي عند العملاء", (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
     (await ev("document.querySelectorAll('.wide-tile.big').length")) === 2);
-  check("الرعاة: ملفّهم يُقرأ من GitHub", await ev("fetch(Promo.url).then((r) => r.ok && r.json()).then((j) => !!j && j.channel === 'jadeite-promo').catch(() => false)"));
+  // التطبيق يقرأ الملف من main؛ والتجربة تقرؤه بالطريق نفسه من النسخة المُختبَرة
+  // (فالملف الجديد لا يصل إلى main إلا بعد نجاحها)
+  const promoMain = await ev("Promo.url");
+  const promoUrl = process.env.GITHUB_SHA ? promoMain.replace("/main/", "/" + process.env.GITHUB_SHA + "/") : promoMain;
+  check("الرعاة: ملفّهم يُقرأ من GitHub", promoMain.includes("/main/mobile/promo/promo.json") &&
+    await ev(`fetch(${JSON.stringify(promoUrl)}).then((r) => r.ok && r.json())
+      .then((j) => !!j && j.channel === 'jadeite-promo' && Array.isArray(Promo.sanitize(j).items)).catch(() => false)`), promoUrl);
   shot("holdings");
   await run(ev, `location.hash = "#/customers?view=factories"; await t.sleep(600);`);
   shot("factories");
