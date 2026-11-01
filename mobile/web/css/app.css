@@ -472,7 +472,8 @@ details.opts .in { margin-top: 6px; }
 .photo-fig figcaption { margin-top: 4px; text-align: center; }
 .pc-prev { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .no-ph { flex: 0 0 auto; }
-.sheet .actions.doc-acts { margin: 4px 0 10px; }
+.sheet .actions.doc-acts { margin: 4px 0 10px; gap: 6px; }
+.sheet .actions.doc-acts .btn { padding: 8px 6px; gap: 4px; white-space: nowrap; min-width: 0; font-size: 15px; }
 .wide-tile.big.sets .op-ic { background: var(--goldSoft); color: var(--goldDim); }
 
 /* ══ كشف الحساب: جدولٌ واحد بسيط ══ */
