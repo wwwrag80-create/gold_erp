@@ -24,6 +24,7 @@ function shot(name) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PKG = "com.jadeite.mobile";
+const PHOTO = "data:image/jpeg;base64,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";
 
 // نوافذ النظام (اختيار المجلد، الإذن) تُلمس بنصّ أزرارها من شجرة الواجهة
 function uiNodes() {
@@ -122,7 +123,7 @@ const HARNESS = `(() => {
   };
   // أحداث الأصل تُجمع هنا ليقرأها الاختبار
   window.__ev = {};
-  for (const e of ["update", "updateProgress", "backupFolder", "restore", "backupDone", "testInstall", "testPatch", "publish"]) {
+  for (const e of ["update", "updateProgress", "backupFolder", "restore", "backupDone", "testInstall", "photo", "photosDone", "photosMissing"]) {
     Bridge.on(e, (d) => { (window.__ev[e] = window.__ev[e] || []).push(d); });
   }
   return true;
@@ -173,10 +174,8 @@ async function main() {
   const u1 = await waitEv(ev, "update", n0, 25000);
   check("قراءة قناة التحديث من GitHub", u1 && !u1.error && u1.lastCheck > 0 && u1.published, JSON.stringify(u1));
   check("ولا تحديث أحدث من المثبّت الآن", u1 && u1.available === false);
-  n0 = await evCount(ev, "testPatch");
-  await ev("AndroidBridge._testPatch(), 1");
-  const tp = await waitEv(ev, "testPatch", n0, 25000);
-  check("طلب النشر (PATCH) يصل GitHub — ويُرفض بلا مفتاح", tp && [401, 403, 404].includes(tp.code), JSON.stringify(tp));
+  check("لا نشر داخل التطبيق", (await ev("typeof AndroidBridge.publishUpdate")) === "undefined" &&
+    (await ev("typeof AndroidBridge.setPublisherToken")) === "undefined" && us.publisher === undefined);
 
   // ══ الترحيب: اختيار مجلد الحفظ التلقائي ══
   n0 = await evCount(ev, "backupFolder");
@@ -199,7 +198,18 @@ async function main() {
 
   // بضاعة من المصنع: T1 باسمه، وطقمٌ بوزنه فقط
   await run(ev, `location.hash = "#/invoice/new?kind=purchase"; await t.sleep(400); await t.pick("مصنع الريان");
-    t.fill("الطقم", "T1"); await t.sleep(150); t.fill("الوزن (جم)", "12"); t.click("+ إضافة"); await t.sleep(250);
+    t.fill("الطقم", "T1"); await t.sleep(150); t.fill("الوزن (جم)", "12"); t.fill("💎 الماس", "0.5");`);
+  // زرّ الصورة يفتح نافذة أندرويد (الكاميرا والمعرض)
+  await run(ev, `t.click("صورة"); await t.sleep(200);`);
+  await sleep(2500);
+  shot("photo_chooser");
+  const ch = adb("shell", "dumpsys", "activity", "activities").toString();
+  check("زرّ الصورة يفتح اختيار الكاميرا أو المعرض", /ChooserActivity|ResolverActivity|documentsui|photopicker/i.test(ch));
+  adb("shell", "input", "keyevent", "4");
+  await sleep(1500);
+  const phId = await ev(`App.attachPhotoData(${JSON.stringify(PHOTO)})`);
+  check("الصورة تُربط بالطقم", typeof phId === "string" && phId.startsWith("ph_"), phId);
+  await run(ev, `t.click("+ إضافة"); await t.sleep(250);
     t.fill("الوزن (جم)", "20"); t.click("+ إضافة"); await t.sleep(250);`);
   check("لا خانة موديل ولا فصوص", await run(ev, `const x = document.body.innerHTML; return !x.includes("رقم الموديل") && !x.includes("الفصوص");`));
   shot("purchase_editor");
@@ -262,6 +272,22 @@ async function main() {
     saved ? `${saved.invoices.length}/${saved.vouchers.length}` : "no file");
   const ls = adb("shell", "ls", "/sdcard/Documents").toString();
   check("ونسخة اليوم معه", /gold-data-\d{4}-\d{2}-\d{2}\.json/.test(ls), ls);
+  let pls = "";
+  try { pls = adb("shell", "ls", "/sdcard/Documents/gold-photos").toString(); } catch (e) { /* */ }
+  check("وصورة الطقم في المجلد (gold-photos)", pls.includes(phId + ".jpg"), pls);
+  const dsx = await ev(`(() => { const r = Domain.diamondStatement(App.state, ${JSON.stringify(sid)}); return [r.plus, r.minus, r.diamond]; })()`);
+  check("كشف الماس للأمانة: بيع 0.50 ومرتجع 0.50", dsx.join() === "0.5,0.5,0", JSON.stringify(dsx));
+  // كشف الحساب صورةً بعرض الجوال
+  try { adb("shell", "run-as", PKG, "rm", "-rf", "cache/share"); } catch (e) { /* */ }
+  await ev(`(() => { AndroidBridge.shareHtmlImage(PrintDoc.statementHtml(App.state, ${JSON.stringify(sid)}, null, null, "gold"), "statement"); return 1; })()`);
+  await sleep(6000);
+  let spng = null;
+  try { spng = adb("exec-out", "run-as", PKG, "cat", "cache/share/statement.png"); } catch (e) { /* */ }
+  const sw = spng && spng.length > 24 ? spng.readUInt32BE(16) : 0, sh = spng && spng.length > 24 ? spng.readUInt32BE(20) : 0;
+  check("كشف الحساب صورةٌ بعرض 1080 وطولٍ يناسبه", sw === 1080 && sh > 600, `${sw}x${sh}`);
+  if (spng) fs.writeFileSync(path.join(OUT, "shared_statement.png"), spng);
+  adb("shell", "input", "keyevent", "4");
+  await sleep(1500);
 
   await run(ev, `location.hash = "#/holdings"; await t.sleep(700);`);
   const hd = await ev("(() => { const h = Domain.holdings(App.state); return { b21: (h.boxes.find((b) => b.karat === 21) || {}).weight, cash: h.cash.amount, n: h.pieces.length }; })()");
@@ -357,6 +383,9 @@ async function main() {
   check("استُرجع كل شيء: 4 فواتير وسندان ومحلان ومصنع", (await ev("App.state.invoices.length")) === 4 &&
     (await ev("App.state.vouchers.length")) === 2 && (await ev("App.state.shops.length")) === 3);
   check("والحفظ التلقائي مستمرٌّ في المجلد نفسه", (await ev("Bridge.backupFolder()")) === "Documents");
+  const pd = await waitEv(ev, "photosDone", 0, 20000);
+  await sleep(800);
+  check("وصورة الطقم استُرجعت من المجلد", pd && pd.n === 1 && (await ev(`Store.getPhoto(${JSON.stringify(phId)}).then((d) => !!d)`)), JSON.stringify(pd));
   await run(ev, `location.hash = "#/statement/" + App.state.shops.find((s) => s.name === "محل الأمانة").id; await t.sleep(600);`);
   const kp2 = await ev("document.querySelector('.kpis').innerText");
   check("وكشف الحساب كما كان: 1.50 جم و50.00 ريال عليه", kp2.includes("1.50 جم عليه") && kp2.includes("50.00 ريال عليه"), kp2);

@@ -222,5 +222,34 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("المبيعات والتحصيل للمحلات وحدها", D.board(t, null, null).rows.length === 1);
 }
 
+// ══ الصورة والماس وكشف الماس ══
+{
+  const t = D.newState();
+  const sh = D.saveShop(t, { name: "محل الماس" });
+  const fa = D.saveShop(t, { name: "مصنع الماس", type: "factory" });
+  const li = D.buildLine({ wo: "D1", reg: 10, wage: 5, diamond: 0.5, photo: "ph_abc" });
+  check("السطر يحمل صورته وماسه", li.photo === "ph_abc" && li.diamond === 0.5);
+  check("والتعبئة منه تنقل الصورة", D.lineToEntry(li, 18).photo === "ph_abc");
+  D.saveInvoice(t, { kind: "purchase", shopId: fa.id, date: "2026-03-01", lines: [D.buildLine({ wo: "D1", reg: 10, wage: 5, diamond: 0.5 }),
+    D.buildLine({ wo: "D2", reg: 8, wage: 5, diamond: 0.25 })] });
+  D.saveInvoice(t, { kind: "sale", shopId: sh.id, date: "2026-03-02", lines: [D.buildLine({ wo: "D1", reg: 10, wage: 9, diamond: 0.5 }),
+    D.buildLine({ wo: "D2", reg: 8, wage: 9, diamond: 0.25 })] });
+  D.saveInvoice(t, { kind: "sale_return", shopId: sh.id, date: "2026-03-05", lines: [D.buildLine({ wo: "D2", reg: 8, wage: 9, diamond: 0.25 })] });
+  D.saveInvoice(t, { kind: "sale", shopId: sh.id, date: "2026-03-06", lines: [D.buildLine({ reg: 3, wage: 9 })] });
+  const ds = D.diamondStatement(t, sh.id);
+  check("كشف الماس للمحل: بيع 0.75 · مرتجع 0.25 · صافي 0.50 — وفاتورةٌ بلا ماس لا تظهر",
+    ds.rows.length === 2 && ds.plus === 0.75 && ds.minus === 0.25 && ds.diamond === 0.5, ds);
+  check("وأطقم كل فاتورة بماسها", ds.rows[0].sets.map((x) => `${x.name}:${x.diamond}`).join() === "D1:0.5,D2:0.25");
+  const dp = D.diamondStatement(t, sh.id, "2026-03-03", null);
+  check("من تاريخ: رصيدٌ سابق 0.75 ثم المرتجع", dp.rows[0].kind === "prev" && dp.rows[0].bal === 0.75 && dp.diamond === 0.5, dp.rows);
+  const df = D.diamondStatement(t, fa.id);
+  check("وللمصنع: البضاعة سالبة كالذهب (−0.75)", df.diamond === -0.75 && df.minus === 0.75);
+  check("الماس لا يدخل رصيد الذهب", D.balance(t, sh.id).gold18 === 13);
+  const bk = D.toBackup(t, { ph_ok: "data:image/jpeg;base64,AAAA", "../x": "data:image/jpeg;base64,AA", ph_bad: "javascript:1" });
+  const got = D.backupPhotos(JSON.parse(JSON.stringify(bk)));
+  check("الصور في ملف النسخة — والاسم الغريب أو المحتوى غير الصورة يُرفض", Object.keys(got).join() === "ph_ok");
+  check("ونسخةٌ بلا صور سليمة", Object.keys(D.backupPhotos(D.toBackup(t))).length === 0);
+}
+
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);
 process.exit(fail ? 1 : 0);

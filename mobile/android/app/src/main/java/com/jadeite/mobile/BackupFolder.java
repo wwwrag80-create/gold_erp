@@ -15,7 +15,9 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 
 /**
@@ -106,6 +108,58 @@ final class BackupFolder {
         long now = System.currentTimeMillis();
         prefs(c).edit().putLong("lastWrite", now).apply();
         return now;
+    }
+
+    // ══ صور الأطقم: ملفٌ لكل صورة في مجلدٍ فرعي، يُكتب مرةً ولا يُعاد ══
+    static final String PHOTOS = "gold-photos";
+
+    static boolean validId(String id) {
+        return id != null && id.matches("[A-Za-z0-9_-]{1,64}");
+    }
+
+    static DocumentFile photosDir(Context c, boolean create) {
+        DocumentFile d = dir(c);
+        if (d == null) return null;
+        DocumentFile p = d.findFile(PHOTOS);
+        if (p == null && create) p = d.createDirectory(PHOTOS);
+        return p != null && p.isDirectory() ? p : null;
+    }
+
+    static synchronized void savePhoto(Context c, String id, byte[] jpeg) throws Exception {
+        DocumentFile p = photosDir(c, true);
+        if (p == null) throw new Exception("لم يُختر مجلد الحفظ التلقائي، أو سُحب إذنه");
+        if (p.findFile(id + ".jpg") != null) return;
+        DocumentFile f = p.createFile("image/jpeg", id + ".jpg");
+        if (f == null) throw new Exception("تعذّر حفظ صورة الطقم في المجلد");
+        try (OutputStream os = c.getContentResolver().openOutputStream(f.getUri(), "w")) {
+            if (os == null) throw new Exception("تعذّر حفظ صورة الطقم في المجلد");
+            os.write(jpeg);
+        }
+    }
+
+    static Set<String> photoIds(Context c) {
+        Set<String> out = new HashSet<>();
+        DocumentFile p = photosDir(c, false);
+        if (p == null) return out;
+        for (DocumentFile f : p.listFiles()) {
+            String n = f.getName();
+            if (n != null && n.endsWith(".jpg") && validId(n.substring(0, n.length() - 4))) out.add(n.substring(0, n.length() - 4));
+        }
+        return out;
+    }
+
+    static byte[] readPhoto(Context c, String id) throws Exception {
+        DocumentFile p = photosDir(c, false);
+        DocumentFile f = p == null ? null : p.findFile(id + ".jpg");
+        if (f == null) return null;
+        try (InputStream is = c.getContentResolver().openInputStream(f.getUri())) {
+            if (is == null) return null;
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+            return bo.toByteArray();
+        }
     }
 
     /** أحدث نسخةٍ في المجلد: {اسم الملف، نصّه} — أو null إن خلا منها. */

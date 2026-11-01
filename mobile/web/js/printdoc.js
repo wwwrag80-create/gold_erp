@@ -44,13 +44,34 @@
   .note{border-top:1px dashed #D6CFC0;padding-top:8px;color:#4A443A;font-size:13px}
   .qr{float:left;margin-right:12px}
   .foot{margin-top:18px;color:#4A443A;font-size:12px;text-align:center}
+  td.ph{padding:3px;width:66px}
+  td.ph img{width:60px;height:60px;object-fit:cover;border-radius:6px;display:block;margin:0 auto}
   @page{size:A4;margin:10mm}
   `;
+  // صفحةٌ بعرض الجوال (كشف الحساب): تُقرأ في المعاينة كما هي، وتُلتقط صورةً
+  // بعرضها (`page-width` يقرؤه التطبيق عند التقاط الصورة)
+  const NARROW = 720;
+  const CSS_NARROW = `
+  .page{max-width:${NARROW}px;padding:16px 14px}
+  .head{gap:10px;padding-bottom:10px;margin-bottom:10px}
+  .biz{font-size:18px} .title{font-size:17px}
+  .party{padding:8px 10px;margin-bottom:10px;flex-wrap:wrap}
+  th{font-size:12px;padding:6px 3px} th small{display:block;font-weight:400;font-size:10.5px;color:#4A443A}
+  td{font-size:13px;padding:6px 3px}
+  td small{display:block;color:#4A443A;font-size:11px;font-weight:400}
+  td.d{white-space:nowrap;font-size:12px}
+  td.m{white-space:nowrap}
+  td.m .mv{display:block;font-size:12px;color:#4A443A}
+  td.m b{display:inline-block;font-size:14px}
+  td.m .w{font-size:11px;color:#4A443A;margin-inline-start:3px}
+  .sum{grid-template-columns:repeat(2,1fr);gap:8px}
+  .box span{font-size:16px}
+  `;
 
-  function page(title, body) {
-    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+  function page(title, body, narrow) {
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">${narrow ? `<!--page-width:${NARROW}-->` : ""}
 <base href="${esc(base())}"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><style>${CSS}</style></head><body><div class="page">${body}</div></body></html>`;
+<title>${esc(title)}</title><style>${CSS}${narrow ? CSS_NARROW : ""}</style></head><body><div class="page">${body}</div></body></html>`;
   }
 
   function header(st, title, no, date) {
@@ -92,7 +113,9 @@
     return q.createImgTag(3, 8);
   }
 
-  function invoiceHtml(st, inv) {
+  function invoiceHtml(st, inv, photos) {
+    const ph = photos || {};
+    const anyPh = inv.lines.some((l) => l.photo && ph[l.photo]);
     const k = st.settings.viewKarat || 18;
     const shop = D.shopById(st, inv.shopId) || { name: "—" };
     const title = (INV_TITLE[inv.kind] || "فاتورة") + (inv.vat ? " ضريبية" : "");
@@ -101,18 +124,18 @@
     for (const li of inv.lines) {
       n++;
       if (li.wageOnly) {
-        rows += `<tr><td>${n}</td><td class="t" colspan="${anyDia ? 5 : 4}">أجر فقط${li.note ? " — " + esc(li.note) : ""}</td>
+        rows += `<tr><td>${n}</td><td class="t" colspan="${(anyDia ? 5 : 4) + (anyPh ? 1 : 0)}">أجر فقط${li.note ? " — " + esc(li.note) : ""}</td>
           <td>—</td><td>${f2(li.amount)}</td></tr>`;
         continue;
       }
       const lk = li.karat || 18;
-      rows += `<tr><td>${n}</td><td>${li.wo ? `<span dir="auto">${esc(li.wo)}</span>` : "—"}</td>
+      rows += `<tr><td>${n}</td>${anyPh ? `<td class="ph">${li.photo && ph[li.photo] ? `<img src="${ph[li.photo]}" alt="">` : ""}</td>` : ""}<td>${li.wo ? `<span dir="auto">${esc(li.wo)}</span>` : "—"}</td>
         <td>${lk}</td><td>${f2(G.g(li.standing18, lk))}</td><td><b>${f2(G.g(li.reg18, lk))}</b></td>
         ${anyDia ? `<td>${li.diamond ? f2(li.diamond) : "—"}</td>` : ""}
         <td>${f2(G.wageView(li.rate18, lk))}</td><td>${f2(li.wages)}</td></tr>`;
     }
     const sets = inv.lines.filter((l) => !l.wageOnly).length;
-    rows += `<tr class="tot"><td colspan="4">الإجمالي — ${sets} طقم · عيار ${k}</td>
+    rows += `<tr class="tot"><td colspan="${anyPh ? 5 : 4}">الإجمالي — ${sets} طقم · عيار ${k}</td>
       <td>${f2(G.g(inv.totalW18, k))}</td>${anyDia ? "<td></td>" : ""}<td>—</td><td>${f2(inv.wages)}</td></tr>`;
 
     let qr = "";
@@ -133,8 +156,8 @@
       `<div class="party"><div><b>${PARTY_WORD[inv.kind] || "الحساب"}:</b> ${esc(shop.name)}</div>
        ${shop.phone ? `<div>${ltr(shop.phone)}</div>` : ""}
        ${inv.vat && st.settings.vatNo ? `<div class="muted">الرقم الضريبي: ${ltr(st.settings.vatNo)}</div>` : ""}</div>
-      <table><thead><tr><th>#</th><th>الطقم</th><th>العيار</th>
-      <th>الوزن القائم</th><th>الوزن</th>${anyDia ? "<th>💎 الماس</th>" : ""}<th>الأجر/جم</th><th>الأجرة (ريال)</th></tr></thead>
+      <table><thead><tr><th>#</th>${anyPh ? "<th>الصورة</th>" : ""}<th>الطقم</th><th>العيار</th>
+      <th>الوزن القائم</th><th>الوزن</th>${anyDia ? "<th>💎 الماس (جم)</th>" : ""}<th>الأجر/جم</th><th>الأجرة (ريال)</th></tr></thead>
       <tbody>${rows}</tbody></table>
       ${qr}<div class="sum">
         <div class="box"><b>إجمالي الوزن</b><span>${f2(G.g(inv.totalW18, k))} جم ${k}</span></div>
@@ -176,27 +199,57 @@
     return page(`${title} ${v.no}`, body);
   }
 
-  function statementHtml(st, shopId, from, to) {
+  // كشف الحساب بعرض الجوال: «gold» الذهب والنقد، أو «diamond» الماس
+  function statementHtml(st, shopId, from, to, mode) {
     const k = st.settings.viewKarat || 18;
     const shop = D.shopById(st, shopId) || { name: "—" };
-    const s = D.statement(st, shopId, from, to);
-    let rows = "";
-    for (const r of s.rows) {
-      const z = (v) => (v ? f2(v) : "");
-      rows += `<tr><td>${ltr(dmy(r.date))}</td><td>${esc(r.label)}</td><td>${ltr(r.no)}</td>
-        <td>${z(G.g(r.gd, k))}</td><td>${z(G.g(r.gc, k))}</td><td><b>${f2(G.g(r.gbal, k))}</b></td>
-        <td>${z(r.cd)}</td><td>${z(r.cc)}</td><td><b>${f2(r.cbal)}</b></td><td class="t">${esc(r.desc)}</td></tr>`;
-    }
+    const fac = D.isFactory(shop);
     const period = from || to ? `من ${from ? dmy(from) : "البداية"} إلى ${to ? dmy(to) : "اليوم"}` : "كل الفترات";
-    const body = header(st, "كشف حساب", "", to || D.today()) +
-      `<div class="party"><div><b>${D.isFactory(shop) ? "المصنع" : "المحل"}:</b> ${esc(shop.name)}</div><div class="muted">${period} · الذهب بعيار ${k}</div></div>
-      <table><thead><tr><th>التاريخ</th><th>العملية</th><th>الرقم</th><th>ذهب مدين</th><th>ذهب دائن</th>
-      <th>رصيد الذهب</th><th>نقد مدين</th><th>نقد دائن</th><th>رصيد النقد</th><th>البيان</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="10">لا حركة في الفترة</td></tr>`}</tbody></table>
-      <div class="sum"><div class="box"><b>رصيد الذهب (عيار ${k})</b><span>${balTxt(G.g(s.gold18, k), "جم")}</span></div>
-      <div class="box"><b>رصيد النقد</b><span>${balTxt(s.cash, "ريال")}</span></div></div>
-      <div class="foot">${esc(st.settings.name || APP)} · كشف حساب ${esc(shop.name)}</div>`;
-    return page(`كشف حساب ${shop.name}`, body);
+    const sgn = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + f2(Math.abs(v));
+    const op = (r) => `${esc(r.label)}${r.no ? `<small>${ltr(r.no)}</small>` : ""}${r.desc ? `<small>${esc(r.desc)}</small>` : ""}`;
+    // التاريخ يوماً وشهراً، والسنة تحته — فيتّسع الجدول لعرض الجوال
+    const dt = (iso) => iso ? `${ltr(iso.slice(8, 10) + "-" + iso.slice(5, 7))}<small>${iso.slice(0, 4)}</small>` : "";
+    // الحركة فوق، والرصيد بعدها في الخانة نفسها
+    const cell = (mv, bal, word) => `<td class="m">${mv ? `<span class="mv" dir="ltr">${mv}</span>` : ""}<b>${bal}</b>${word ? `<span class="w">${word}</span>` : ""}</td>`;
+    const partyRow = `<div class="party"><div><b>${fac ? "المصنع" : "المحل"}:</b> ${esc(shop.name)}</div>
+      <div class="muted">${period}${mode === "diamond" ? " · الماس بالجرام" : ` · الذهب بعيار ${k}`}</div></div>`;
+    let body;
+    if (mode === "diamond") {
+      const s = D.diamondStatement(st, shopId, from, to);
+      // للمصنع: البضاعة «+» والإرجاع «−» — من جهته
+      const f = fac ? -1 : 1;
+      let rows = "";
+      for (const r of s.rows) {
+        const v = f * (r.dd - r.dc);
+        const sets = r.sets.map((x) => `${x.name ? esc(x.name) : "طقم"} (${f2(x.diamond)})`).join("، ");
+        rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td><td class="t">${sets || "—"}</td>
+          ${cell(r.kind === "prev" ? "" : sgn(v), f2(f * r.bal), "")}</tr>`;
+      }
+      body = header(st, "كشف حساب الماس", "", to || D.today()) + partyRow +
+        `<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس)</th><th>الماس (جم)<small>الحركة · الصافي</small></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4">لا ماس في الفترة</td></tr>`}</tbody></table>
+        <div class="sum">
+          <div class="box"><b>${fac ? "البضاعة" : "المبيعات"}</b><span>${f2(fac ? s.minus : s.plus)} جم</span></div>
+          <div class="box"><b>${fac ? "الإرجاع" : "المرتجع"}</b><span>${f2(fac ? s.plus : s.minus)} جم</span></div>
+          <div class="box" style="grid-column:span 2"><b>صافي الماس</b><span>${f2(f * s.diamond)} جم</span></div></div>
+        <div class="note">الماس للعرض والمعرفة: لا يدخل الوزن ولا رصيد الذهب.</div>`;
+    } else {
+      const s = D.statement(st, shopId, from, to);
+      let rows = "";
+      for (const r of s.rows) {
+        const gv = G.g(r.gd - r.gc, k), cv = r.cd - r.cc;
+        rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td>
+          ${cell(r.kind === "prev" || !gv ? "" : sgn(gv), f2(Math.abs(G.g(r.gbal, k))), Math.abs(r.gbal) < 0.0005 ? "" : r.gbal > 0 ? "عليه" : "له")}
+          ${cell(r.kind === "prev" || !cv ? "" : sgn(cv), f2(Math.abs(r.cbal)), Math.abs(r.cbal) < 0.005 ? "" : r.cbal > 0 ? "عليه" : "له")}</tr>`;
+      }
+      body = header(st, "كشف حساب", "", to || D.today()) + partyRow +
+        `<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الذهب (جم ${k})<small>الحركة · الرصيد</small></th><th>النقد (ريال)<small>الحركة · الرصيد</small></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4">لا حركة في الفترة</td></tr>`}</tbody></table>
+        <div class="sum"><div class="box"><b>رصيد الذهب (عيار ${k})</b><span>${balTxt(G.g(s.gold18, k), "جم")}</span></div>
+        <div class="box"><b>رصيد النقد</b><span>${balTxt(s.cash, "ريال")}</span></div></div>`;
+    }
+    body += `<div class="foot">${esc(st.settings.name || APP)} · كشف حساب ${esc(shop.name)}</div>`;
+    return page(`كشف حساب ${shop.name}`, body, true);
   }
 
   // نصٌّ قصير للمشاركة في واتساب

@@ -1,0 +1,46 @@
+name: نشر تحديث الجوال
+
+# يعلن للمستخدمين إصداراً من mobile/dist: يتحقّق من الملف (البصمة، رقم الإصدار،
+# مفتاح التوقيع) ثم يكتبه في قناة التحديث (الصفحة #23)، فتجده التطبيقات وتُنبّه
+# أصحابها. يُشغَّل يدوياً: Actions ← «نشر تحديث الجوال» ← Run workflow.
+# لا مفتاح في أي جوال ولا زرّ نشرٍ في التطبيق: الصلاحية من GitHub لصاحب المستودع.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "الإصدار (اتركه فارغاً = آخر إصدار)"
+        required: false
+        default: ""
+      notes:
+        description: "ما الجديد — يظهر للمستخدمين (اختياري)"
+        required: false
+        default: ""
+      dry_run:
+        description: "تجربة فقط بلا نشر"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: mobile-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: التحقّق من الملف ونشره
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python3 mobile/tools/publish_channel.py

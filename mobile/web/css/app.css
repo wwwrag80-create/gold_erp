@@ -375,3 +375,20 @@ main#view.enter { animation: view-in .22s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* صور الأطقم */
+.thumb { object-fit: cover; border-radius: 8px; border: 1px solid var(--line2); background: var(--surface2);
+  flex: 0 0 auto; cursor: zoom-in; display: block; }
+.thumb.sm { width: 40px; height: 40px; }
+.thumb.md { width: 48px; height: 48px; }
+.thumb.lg { width: 76px; height: 76px; border-radius: 10px; }
+.photo-full { width: 100%; height: auto; border-radius: 12px; display: block; }
+.fld { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); min-width: 0; }
+.photo-pick { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.photo-btn { min-height: 44px; }
+.photo-acts { display: flex; flex-direction: column; align-items: flex-start; }
+.line .top { gap: 8px; }
+/* المعاينة المرنة (كشف الحساب): الصفحة بعرض الشاشة كما هي */
+.preview.fluid iframe { width: 100%; transform: none; }
+.preview.fluid { margin-bottom: 12px; }
+.kpi .small-v { font-size: 16px; }

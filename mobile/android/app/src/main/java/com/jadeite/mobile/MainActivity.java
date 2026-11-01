@@ -19,6 +19,7 @@ import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
 import android.provider.DocumentsContract;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Base64;
 import android.view.View;
@@ -37,11 +38,15 @@ import android.widget.Toast;
 import androidx.core.content.FileProvider;
 import androidx.webkit.WebViewAssetLoader;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -66,6 +71,7 @@ public class MainActivity extends Activity {
     FrameLayout root;
     WebViewAssetLoader loader;
     ValueCallback<Uri[]> pickCallback;
+    Uri cameraUri;                  // صورة الكاميرا المنتظرة لاختيار «صورة الطقم»
     byte[] pendingSave;
     WebView printView;              // يبقى حيّاً حتى تنتهي الطباعة
     boolean pageReady;
@@ -116,11 +122,35 @@ public class MainActivity extends Activity {
                                              FileChooserParams params) {
                 if (pickCallback != null) pickCallback.onReceiveValue(null);
                 pickCallback = callback;
+                cameraUri = null;
+                String[] acc = params.getAcceptTypes();
+                boolean image = acc != null && acc.length > 0 && acc[0] != null && acc[0].startsWith("image");
                 Intent i = new Intent(Intent.ACTION_GET_CONTENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
-                i.setType("*/*");
+                i.setType(image ? "image/*" : "*/*");
+                Intent chooser = Intent.createChooser(i, image ? "صورة الطقم" : "اختر ملف النسخة الاحتياطية");
+                if (image) {
+                    // الكاميرا بجانب المعرض: الصورة تُكتب في ملفٍ مؤقت داخل التطبيق
+                    try {
+                        File dir = new File(getCacheDir(), "camera");
+                        if (!dir.exists()) dir.mkdirs();
+                        File[] old = dir.listFiles();
+                        if (old != null) for (File x : old) x.delete();
+                        File f = new File(dir, "shot-" + System.currentTimeMillis() + ".jpg");
+                        cameraUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", f);
+                        Intent cam = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                        cam.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+                        cam.setClipData(ClipData.newRawUri("", cameraUri));
+                        cam.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        if (cam.resolveActivity(getPackageManager()) != null) {
+                            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cam});
+                        } else cameraUri = null;
+                    } catch (Exception e) {
+                        cameraUri = null;
+                    }
+                }
                 try {
-                    startActivityForResult(Intent.createChooser(i, "اختر ملف النسخة الاحتياطية"), REQ_PICK);
+                    startActivityForResult(chooser, REQ_PICK);
                 } catch (ActivityNotFoundException e) {
                     pickCallback = null;
                     return false;
@@ -134,6 +164,8 @@ public class MainActivity extends Activity {
 
         Updater.ensureChannel(this);
         Updater.schedule(this);
+        // النشر خرج من التطبيق (إلى GitHub): لا يبقى مفتاح نشرٍ قديم في أي جوال
+        getSharedPreferences("publisher", MODE_PRIVATE).edit().clear().apply();
         handleIntent(getIntent());
     }
 
@@ -222,9 +254,15 @@ public class MainActivity extends Activity {
         Uri uri = data == null ? null : data.getData();
         if (req == REQ_PICK) {
             if (pickCallback != null) {
-                pickCallback.onReceiveValue(res == RESULT_OK && uri != null ? new Uri[]{uri} : null);
+                Uri[] got = null;
+                if (res == RESULT_OK) {
+                    if (uri != null) got = new Uri[]{uri};
+                    else if (cameraUri != null) got = new Uri[]{cameraUri};   // صورة الكاميرا
+                }
+                pickCallback.onReceiveValue(got);
                 pickCallback = null;
             }
+            cameraUri = null;
         } else if (req == REQ_SAVE) {
             byte[] bytes = pendingSave;
             pendingSave = null;
@@ -310,12 +348,17 @@ public class MainActivity extends Activity {
     }
 
     void capture(String html, String name) {
-        final int widthPx = 1080;                       // صورةٌ بعرض 1080 (الصفحة 1000)
-        final String page = html.replace("width=device-width,initial-scale=1", "width=1000");
+        // الصفحة بعرض 1000 (الفاتورة) — أو بعرض الجوال كما تعلنه (`page-width`، كشف الحساب)
+        int pw = 1000;
+        Matcher pm = Pattern.compile("<!--page-width:(\\d{3,4})-->").matcher(html);
+        if (pm.find()) pw = Math.max(320, Math.min(1000, Integer.parseInt(pm.group(1))));
+        final int pageW = pw;
+        final int widthPx = 1080;                       // الصورة بعرض 1080 دائماً
+        final String page = html.replace("width=device-width,initial-scale=1", "width=" + pageW);
         final WebView[] ref = new WebView[1];
         ref[0] = hiddenPage(page, widthPx, () -> ui.postDelayed(() -> {
             WebView v = ref[0];
-            int h = (int) Math.ceil(v.getContentHeight() * widthPx / 1000f);
+            int h = (int) Math.ceil(v.getContentHeight() * widthPx / (float) pageW);
             if (h <= 0) h = 1400;
             // صورةٌ أطول من هذا تُثقل ذاكرة الجوال — والكشف الطويل له «طباعة / PDF»
             if (h > 9000) {
@@ -478,6 +521,53 @@ public class MainActivity extends Activity {
             ui.post(() -> openTree(REQ_RESTORE, "restore"));
         }
 
+        // ── صور الأطقم في المجلد (gold-photos) ──
+        @JavascriptInterface
+        public void savePhoto(String id, String b64) {
+            if (!BackupFolder.validId(id) || b64 == null || b64.isEmpty()) return;
+            backupQ.execute(() -> {
+                try {
+                    BackupFolder.savePhoto(MainActivity.this, id, Base64.decode(b64, Base64.DEFAULT));
+                } catch (Exception e) {
+                    emit("backupDone", obj("ok", false, "error", String.valueOf(e.getMessage())));
+                }
+            });
+        }
+
+        /** يقارن صور التطبيق بما في المجلد، ويطلب ما نقص منه (حدث photosMissing). */
+        @JavascriptInterface
+        public void syncPhotos(String idsJson) {
+            backupQ.execute(() -> {
+                try {
+                    if (BackupFolder.dir(MainActivity.this) == null) return;
+                    Set<String> have = BackupFolder.photoIds(MainActivity.this);
+                    JSONArray want = new JSONArray(idsJson), missing = new JSONArray();
+                    for (int i = 0; i < want.length(); i++) {
+                        String id = want.optString(i);
+                        if (BackupFolder.validId(id) && !have.contains(id)) missing.put(id);
+                    }
+                    if (missing.length() > 0) emit("photosMissing", obj("ids", missing));
+                } catch (Exception ignored) { }
+            });
+        }
+
+        /** بعد الاسترجاع من المجلد: كل صورةٍ فيه حدثٌ «photo»، ثم «photosDone». */
+        @JavascriptInterface
+        public void restorePhotos() {
+            bg.execute(() -> {
+                int n = 0;
+                try {
+                    for (String id : BackupFolder.photoIds(MainActivity.this)) {
+                        byte[] b = BackupFolder.readPhoto(MainActivity.this, id);
+                        if (b == null) continue;
+                        emit("photo", obj("id", id, "b64", Base64.encodeToString(b, Base64.NO_WRAP)));
+                        n++;
+                    }
+                } catch (Exception ignored) { }
+                emit("photosDone", obj("n", n));
+            });
+        }
+
         @JavascriptInterface
         public void autoBackup(String json) {
             backupQ.execute(() -> {
@@ -541,30 +631,6 @@ public class MainActivity extends Activity {
             }
         }
 
-        // ── الناشر ──
-        @JavascriptInterface
-        public boolean setPublisherToken(String token) {
-            Updater.setToken(MainActivity.this, token);
-            return Updater.hasToken(MainActivity.this);
-        }
-
-        @JavascriptInterface
-        public void publishUpdate(String notes) {
-            bg.execute(() -> {
-                try {
-                    String v = Updater.publish(MainActivity.this, notes);
-                    emit("publish", obj("ok", true, "version", v));
-                } catch (Exception e) {
-                    String msg = String.valueOf(e.getMessage());
-                    if (e instanceof Updater.HttpError && (((Updater.HttpError) e).code == 401
-                            || ((Updater.HttpError) e).code == 403 || ((Updater.HttpError) e).code == 404)) {
-                        msg = "مفتاح النشر غير صالح أو بلا صلاحية «Issues: Read and write» على المستودع";
-                    }
-                    emit("publish", obj("ok", false, "error", msg));
-                }
-            });
-        }
-
         // ── لنسخة الاختبار وحدها (debuggable): تجربة سلسلة التحديث آلياً ──
         @JavascriptInterface
         public void _testInstall(String url, String sha, String version) {
@@ -583,24 +649,6 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                     emit("testInstall", obj("ok", false, "error", String.valueOf(e.getMessage())));
                 }
-            });
-        }
-
-        @JavascriptInterface
-        public void _testPatch() {
-            if (!debuggable()) return;
-            bg.execute(() -> {
-                int code = 0;
-                String err = "";
-                try {
-                    Updater.http(Updater.API_ISSUE, "PATCH", null, "{}", 15000);
-                    code = 200;
-                } catch (Updater.HttpError e) {
-                    code = e.code;
-                } catch (Exception e) {
-                    err = String.valueOf(e);
-                }
-                emit("testPatch", obj("code", code, "error", err));
             });
         }
     }

@@ -13,13 +13,11 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 
 import androidx.core.content.FileProvider;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -34,17 +32,15 @@ import java.net.ProtocolException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Date;
 import java.util.Locale;
-import java.util.TimeZone;
 
 /**
  * تحديث التطبيق من GitHub — بلا سحابة المالك ولا مساحتها.
  *
- * القناة: صفحةٌ (issue) في المستودع يكتب فيها زرُّ الناشر رقم آخر إصدارٍ
- * منشور وبصمته، والملف نفسه في المستودع (mobile/dist) على خوادم GitHub.
+ * القناة: صفحةٌ (issue) في المستودع يكتب فيها سيرُ العمل «نشر تحديث الجوال»
+ * (`.github/workflows/mobile-publish.yml`) رقم آخر إصدارٍ منشور وبصمته،
+ * والملف نفسه في المستودع (mobile/dist) على خوادم GitHub. لا نشر من داخل
+ * التطبيق ولا مفتاح فيه.
  * كل جهازٍ يقرأ القناة دورياً، فإن وجد إصداراً أحدث نزّله، وتحقّق من
  * بصمته، ونبّه صاحبه بإشعار — والتثبيت بلمسته (أندرويد لا يثبّت وحده).
  * والبيانات تبقى: التحديث بالمفتاح نفسه يُثبَّت فوق القديم.
@@ -58,7 +54,6 @@ final class Updater {
     static final String VERSIONS = RAW + "main/mobile/dist/versions.json";
     static final String MARK = "<!-- jadeite-mobile-channel -->";
     static final String PREFS = "updates";
-    static final String PUB_PREFS = "publisher";
     static final String CHANNEL_ID = "updates";
     static final int NOTIFY_ID = 7001;
     static final int JOB_ID = 7002;
@@ -332,91 +327,11 @@ final class Updater {
             s.put("code", ownCode(c));
             s.put("lastCheck", sp.getLong("lastCheck", 0));
             s.put("lastError", sp.getString("lastError", ""));
-            s.put("publisher", hasToken(c));
             s.put("published", p == null ? JSONObject.NULL : p);
             s.put("available", newer(c, p));
             s.put("ready", ready(c, p));
             s.put("canNotify", canNotify(c));
         } catch (Exception ignored) { }
         return s;
-    }
-
-    // ══ الناشر ══
-    static boolean hasToken(Context c) {
-        return c.getSharedPreferences(PUB_PREFS, Context.MODE_PRIVATE).getString("token", "").length() > 10;
-    }
-
-    static void setToken(Context c, String t) {
-        c.getSharedPreferences(PUB_PREFS, Context.MODE_PRIVATE).edit()
-                .putString("token", t == null ? "" : t.trim()).apply();
-    }
-
-    static byte[] signer(PackageInfo pi) {
-        if (pi == null) return null;
-        if (Build.VERSION.SDK_INT >= 28 && pi.signingInfo != null) {
-            Signature[] s = pi.signingInfo.getApkContentsSigners();
-            return s != null && s.length > 0 ? s[0].toByteArray() : null;
-        }
-        //noinspection deprecation
-        return pi.signatures != null && pi.signatures.length > 0 ? pi.signatures[0].toByteArray() : null;
-    }
-
-    @SuppressWarnings("deprecation")
-    static int sigFlag() {
-        return Build.VERSION.SDK_INT >= 28 ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
-    }
-
-    /**
-     * «إرسال التحديث للجميع»: يعلن في القناة الإصدارَ المثبّت عند الناشر نفسه —
-     * بعد التحقّق أن ملفّه في المستودع هو هو: الرقم نفسه والمفتاح نفسه والبصمة.
-     */
-    static String publish(Context c, String notes) throws Exception {
-        String token = c.getSharedPreferences(PUB_PREFS, Context.MODE_PRIVATE).getString("token", "");
-        if (token.length() < 10) throw new Exception("أدخل مفتاح النشر أولاً (الإعدادات ← النشر)");
-        long code = ownCode(c);
-        JSONArray vs = new JSONArray(http(VERSIONS + "?t=" + System.currentTimeMillis(), "GET", null, null, 20000));
-        JSONObject e = null;
-        for (int i = 0; i < vs.length(); i++) {
-            if (vs.getJSONObject(i).optLong("code") == code) e = vs.getJSONObject(i);
-        }
-        if (e == null) {
-            throw new Exception("الإصدار المثبّت عندك (" + BuildConfig.VERSION_NAME
-                    + ") ليس في ملفات التوزيع على GitHub بعد");
-        }
-        String url = RAW + "main/mobile/dist/" + e.getString("file");
-        File tmp = new File(c.getCacheDir(), "publish-check.apk");
-        fetchTo(url, tmp, null);
-        try {
-            String sha = sha256(tmp);
-            if (!sha.equalsIgnoreCase(e.getString("sha256"))) {
-                throw new Exception("ملف الإصدار على GitHub لا يطابق بصمته — لم يُنشر شيء");
-            }
-            PackageManager pm = c.getPackageManager();
-            PackageInfo arch = pm.getPackageArchiveInfo(tmp.getPath(), sigFlag());
-            PackageInfo own = pm.getPackageInfo(c.getPackageName(), sigFlag());
-            long archCode = arch == null ? -1 : (Build.VERSION.SDK_INT >= 28 ? arch.getLongVersionCode() : arch.versionCode);
-            if (archCode != code) throw new Exception("ملف GitHub برقم إصدارٍ غير المثبّت عندك");
-            byte[] a = signer(arch), b = signer(own);
-            if (a == null || !Arrays.equals(a, b)) throw new Exception("ملف GitHub موقّعٌ بمفتاحٍ غير مفتاح تطبيقك");
-            SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
-            iso.setTimeZone(TimeZone.getTimeZone("UTC"));
-            JSONObject p = new JSONObject();
-            p.put("channel", "jadeite-mobile");
-            p.put("version", BuildConfig.VERSION_NAME);
-            p.put("code", code);
-            p.put("sha256", sha.toLowerCase(Locale.US));
-            p.put("url", url);
-            p.put("notes", notes != null && notes.trim().length() > 0 ? notes.trim() : e.optString("notes", ""));
-            p.put("published", iso.format(new Date()));
-            String body = "قناة تحديثات تطبيق «نظام محاسبي للذهب» للجوال: يقرأ التطبيق هذا النص ليعرف آخر إصدارٍ منشور، "
-                    + "فيُنزّله من ملفات المستودع (`mobile/dist`) ويعرض على صاحبه تثبيته.\n\n"
-                    + "يكتب هذا النصَّ زرُّ «إرسال التحديث للجميع» في تطبيق الناشر — فلا تعدّله يدوياً ولا تُغلق هذه الصفحة.\n\n"
-                    + MARK + "\n```json\n" + p.toString() + "\n```\n";
-            http(API_ISSUE, "PATCH", token, new JSONObject().put("body", body).toString(), 20000);
-            prefs(c).edit().putString("pointer", p.toString()).putLong("lastCheck", System.currentTimeMillis()).apply();
-            return BuildConfig.VERSION_NAME;
-        } finally {
-            tmp.delete();
-        }
     }
 }

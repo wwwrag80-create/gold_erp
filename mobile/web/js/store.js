@@ -4,8 +4,10 @@
  */
 (function (root) {
   "use strict";
-  const DB_NAME = "jadeite_mobile", VER = 1;
+  const DB_NAME = "jadeite_mobile", VER = 2;
   const STORES = ["shops", "invoices", "vouchers", "held", "meta"];
+  // صور الأطقم في مخزنٍ وحده (الإصدار 2): لا تُحمَّل مع الحالة ولا تثقلها
+  const PHOTOS = "photos";
   let db = null, fallback = false;
 
   function open() {
@@ -14,7 +16,7 @@
       try { req = indexedDB.open(DB_NAME, VER); } catch (e) { fallback = true; resolve(null); return; }
       req.onupgradeneeded = () => {
         const d = req.result;
-        for (const s of STORES) {
+        for (const s of [...STORES, PHOTOS]) {
           if (!d.objectStoreNames.contains(s)) {
             d.createObjectStore(s, { keyPath: s === "meta" ? "key" : "id" });
           }
@@ -95,5 +97,51 @@
     });
   }
 
-  root.Store = { load, write, put, del, meta, replaceAll };
+  // ══ الصور ══
+  const LS_PHOTOS = DB_NAME + "_photos";
+  function lsPhotos() {
+    try { return JSON.parse(localStorage.getItem(LS_PHOTOS) || "{}"); } catch (e) { return {}; }
+  }
+  function putPhoto(id, data) {
+    if (fallback || !db) {
+      const m = lsPhotos();
+      m[id] = data;
+      try { localStorage.setItem(LS_PHOTOS, JSON.stringify(m)); } catch (e) { return Promise.reject(e); }
+      return Promise.resolve();
+    }
+    return write([[PHOTOS, "put", { id, data }]]);
+  }
+  function getPhoto(id) {
+    if (!id) return Promise.resolve(null);
+    if (fallback || !db) return Promise.resolve(lsPhotos()[id] || null);
+    return new Promise((resolve) => {
+      const r = db.transaction(PHOTOS, "readonly").objectStore(PHOTOS).get(id);
+      r.onsuccess = () => resolve(r.result ? r.result.data : null);
+      r.onerror = () => resolve(null);
+    });
+  }
+  async function getPhotos(ids) {
+    const out = {};
+    for (const id of new Set((ids || []).filter(Boolean))) {
+      const d = await getPhoto(id);
+      if (d) out[id] = d;
+    }
+    return out;
+  }
+  async function allPhotos() {
+    if (fallback || !db) return lsPhotos();
+    const out = {};
+    for (const r of await all(PHOTOS)) out[r.id] = r.data;
+    return out;
+  }
+  function photoIds() {
+    if (fallback || !db) return Promise.resolve(Object.keys(lsPhotos()));
+    return new Promise((resolve) => {
+      const r = db.transaction(PHOTOS, "readonly").objectStore(PHOTOS).getAllKeys();
+      r.onsuccess = () => resolve(r.result || []);
+      r.onerror = () => resolve([]);
+    });
+  }
+
+  root.Store = { load, write, put, del, meta, replaceAll, putPhoto, getPhoto, getPhotos, allPhotos, photoIds };
 })(window);

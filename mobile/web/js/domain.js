@@ -145,8 +145,8 @@
       stoneRate: e.stoneRate === undefined ? Gold.STONE_DISCOUNT_RATE : Number(e.stoneRate),
       rate18, wages: Gold.totalWages(rate18, reg18),
       note: String(e.note || "").trim(),
-      // رقم السطر الثابت، ومن أي طقمٍ في اليد جاء (للممتلكات)
-      lid: e.lid || uid("l"), src: String(e.src || ""),
+      // رقم السطر الثابت، ومن أي طقمٍ في اليد جاء (للممتلكات)، وصورته
+      lid: e.lid || uid("l"), src: String(e.src || ""), photo: String(e.photo || ""),
     };
   }
 
@@ -160,7 +160,7 @@
       big: Gold.g(li.big18, k), after: Gold.g(li.after18, k),
       standing: Gold.g(li.standing18, k), reg: Gold.g(li.reg18, k),
       diamond: li.diamond, stoneRate: li.stoneRate,
-      wage: Gold.wageView(li.rate18, k), note: li.note,
+      wage: Gold.wageView(li.rate18, k), note: li.note, photo: li.photo || "",
       exact18: { gold18: li.gold18, small18: li.small18, big18: li.big18,
         after18: li.after18, standing18: li.standing18, reg18: li.reg18 },
     };
@@ -553,12 +553,55 @@
     return holdings(st).pieces.find((p) => p.id === id) || null;
   }
 
+  // ══ كشف الماس ══
+  // مجموع ماس كل فاتورة — للعرض والمعرفة كما في البرنامج: لا يدخل الوزن ولا
+  // رصيد الذهب. البيع والإرجاع للمصنع «+» والمرتجع والبضاعة «−» كالذهب
+  function diamondOf(doc) {
+    let s = 0;
+    for (const li of doc.lines || []) if (!li.wageOnly) s += Number(li.diamond || 0);
+    return R(s, 3);
+  }
+  function diamondStatement(st, partyId, from, to) {
+    const docs = st.invoices.filter((d) => d.shopId === partyId).sort(docOrder);
+    const rows = [];
+    let bal = 0, prev = 0, hasPrev = false, plusSum = 0, minusSum = 0;
+    const prevRow = () => ({ kind: "prev", label: "رصيد سابق", date: from, no: "", dd: 0, dc: 0, bal: prev, doc: null, sets: [] });
+    for (const d of docs) {
+      const dia = diamondOf(d);
+      if (!(dia > 0)) continue;
+      const plus = d.kind === "sale" || d.kind === "purchase_return";
+      if (from && d.date < from) { prev = R(prev + (plus ? dia : -dia), 3); hasPrev = true; continue; }
+      if (to && d.date > to) continue;
+      if (!rows.length && hasPrev) { bal = prev; rows.push(prevRow()); }
+      bal = R(bal + (plus ? dia : -dia), 3);
+      if (plus) plusSum = R(plusSum + dia, 3); else minusSum = R(minusSum + dia, 3);
+      rows.push({ kind: d.kind, label: KIND_LABEL[d.kind], date: d.date, no: d.no, doc: d,
+        dd: plus ? dia : 0, dc: plus ? 0 : dia, bal,
+        sets: d.lines.filter((l) => !l.wageOnly && Number(l.diamond || 0) > 0)
+          .map((l) => ({ name: (l.wo || "").trim(), diamond: l.diamond })) });
+    }
+    if (!rows.length && hasPrev) rows.push(prevRow());
+    return { rows, diamond: rows.length ? rows[rows.length - 1].bal : 0, plus: plusSum, minus: minusSum };
+  }
+
   // ══ نسخة احتياطية ══
+  // الصور خارج الحالة (مخزنٌ وحده) — وتدخل ملفَّ النسخة إن مُرِّرت
   const BACKUP_FORMAT = "jadeite-mobile-backup";
-  function toBackup(st) {
-    return { format: BACKUP_FORMAT, version: 1, savedAt: nowStamp(),
+  function toBackup(st, photos) {
+    const out = { format: BACKUP_FORMAT, version: 1, savedAt: nowStamp(),
       settings: st.settings, seq: st.seq, shops: st.shops,
       invoices: st.invoices, vouchers: st.vouchers, held: st.held };
+    if (photos) out.photos = photos;
+    return out;
+  }
+  function backupPhotos(obj) {
+    const p = obj && obj.photos;
+    if (!p || typeof p !== "object") return {};
+    const out = {};
+    for (const [id, data] of Object.entries(p)) {
+      if (/^[\w-]{1,64}$/.test(id) && typeof data === "string" && data.startsWith("data:image/")) out[id] = data;
+    }
+    return out;
   }
   function fromBackup(obj) {
     if (!obj || obj.format !== BACKUP_FORMAT) {
@@ -581,6 +624,7 @@
     effects, docsOf, statement, balance, balanceAround, allBalances,
     woHistory, woLast, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
+    diamondOf, diamondStatement, backupPhotos,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

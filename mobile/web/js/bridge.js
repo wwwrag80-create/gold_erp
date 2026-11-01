@@ -78,6 +78,10 @@
     pickBackupFolder() { if (A) A.pickBackupFolder(); },
     restoreFromFolder() { if (A) A.restoreFromFolder(); },
     autoBackup(json) { if (A && A.autoBackup) A.autoBackup(json); },
+    // صور الأطقم في مجلدٍ فرعي (gold-photos) داخل مجلد الحفظ
+    savePhoto(id, b64) { if (A && A.savePhoto) A.savePhoto(id, b64); },
+    syncPhotos(idsJson) { if (A && A.syncPhotos) A.syncPhotos(idsJson); },
+    restorePhotos() { if (A && A.restorePhotos) A.restorePhotos(); },
 
     // ── التحديث ──
     updateState() {
@@ -87,8 +91,7 @@
     checkUpdate() { if (A) A.checkUpdate(); },
     installUpdate() { if (A) A.installUpdate(); },
     requestNotifications() { if (A && A.requestNotifications) A.requestNotifications(); },
-    setPublisherToken(t) { return A ? A.setPublisherToken(t) : false; },
-    publishUpdate(notes) { if (A) A.publishUpdate(notes || ""); },
+
   };
   root.Bridge = Bridge;
 })(window);
