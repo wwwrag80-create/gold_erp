@@ -1,0 +1,153 @@
+# -*- coding: utf-8 -*-
+"""توقيع ملف تثبيت أندرويد بمفتاح المالك — APK Signature Scheme v2.
+
+البناء يجري على خوادم GitHub ويخرج **غير موقّع** (المستودع عام فلا مفتاح
+فيه). هذا الأداة توقّعه خارج المستودع بمفتاحٍ ثابت — والثبات شرطٌ لتحديث
+التطبيق فوق نفسه دون حذف بياناته من الجوال.
+
+    python mobile/tools/sign_apk.py --key DIR in.apk out.apk
+    python mobile/tools/sign_apk.py --key DIR --new-key        # مفتاحٌ جديد
+
+`DIR` يحوي `key.pem` (المفتاح الخاص) و`cert.der` (الشهادة). يُنشأ مرة
+واحدة ويُحفظ عند المالك؛ ضياعه يعني أن التحديث التالي يتطلّب حذف التطبيق
+ثم استرجاع النسخة الاحتياطية.
+
+المرجع: https://source.android.com/docs/security/features/apksigning/v2
+(التنفيذ يتبع `V2SchemeSigner` في apksig سطراً بسطر).
+"""
+import argparse
+import datetime
+import hashlib
+import struct
+import sys
+import zipfile
+from pathlib import Path
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.x509.oid import NameOID
+
+V2_ID = 0x7109871A
+RSA_PKCS1_SHA256 = 0x0103
+MAGIC = b"APK Sig Block 42"
+CHUNK = 1024 * 1024
+
+
+def lp(b):                                   # length-prefixed (uint32)
+    return struct.pack("<I", len(b)) + b
+
+
+def seq(items):                              # sequence of length-prefixed
+    return b"".join(lp(x) for x in items)
+
+
+def pairs(items):                            # (id, bytes) pairs, each length-prefixed
+    return b"".join(lp(struct.pack("<I", i) + lp(v)) for i, v in items)
+
+
+def find_eocd(data):
+    i = data.rfind(b"PK\x05\x06", max(0, len(data) - 65557))
+    while i >= 0:
+        clen = struct.unpack_from("<H", data, i + 20)[0]
+        if i + 22 + clen == len(data):
+            return i
+        i = data.rfind(b"PK\x05\x06", 0, i)
+    raise ValueError("ليس ملف ZIP صالحاً (لا EOCD)")
+
+
+def check_alignment(data):
+    """المخزَّن بلا ضغط يبدأ على حدّ 4 بايت (شرط أندرويد 11+ لـresources.arsc)."""
+    bad = []
+    with zipfile.ZipFile(__import__("io").BytesIO(data)) as z:
+        for info in z.infolist():
+            if info.compress_type != zipfile.ZIP_STORED:
+                continue
+            off = info.header_offset
+            n, e = struct.unpack_from("<HH", data, off + 26)
+            start = off + 30 + n + e
+            if start % 4:
+                bad.append(info.filename)
+    return bad
+
+
+def digest_chunks(sections):
+    chunk_digests = []
+    for sec in sections:
+        for i in range(0, len(sec), CHUNK):
+            c = sec[i:i + CHUNK]
+            chunk_digests.append(hashlib.sha256(b"\xa5" + struct.pack("<I", len(c)) + c).digest())
+    return hashlib.sha256(b"\x5a" + struct.pack("<I", len(chunk_digests))
+                          + b"".join(chunk_digests)).digest()
+
+
+def sign(data, key, cert_der):
+    if data[:2] != b"PK":
+        raise ValueError("ليس ملف APK")
+    eocd = find_eocd(data)
+    cd_off, = struct.unpack_from("<I", data, eocd + 16)
+    if data[cd_off - 16:cd_off] == MAGIC:
+        raise ValueError("الملف موقّعٌ مسبقاً (فيه APK Signing Block)")
+    bad = check_alignment(data)
+    if bad:
+        raise ValueError("ملفاتٌ مخزّنة بلا محاذاة 4 بايت: " + ", ".join(bad[:5]))
+    before, cd, eo = data[:cd_off], data[cd_off:eocd], data[eocd:]
+    digest = digest_chunks([before, cd, eo])     # EOCD يشير إلى cd_off = بداية الكتلة
+
+    pub = key.public_key().public_bytes(serialization.Encoding.DER,
+                                        serialization.PublicFormat.SubjectPublicKeyInfo)
+    signed_data = seq([pairs([(RSA_PKCS1_SHA256, digest)]), seq([cert_der]), b""])
+    sig = key.sign(signed_data, padding.PKCS1v15(), hashes.SHA256())
+    signer = seq([signed_data, pairs([(RSA_PKCS1_SHA256, sig)]), pub])
+    value = lp(seq([signer]))
+    pair = struct.pack("<Q", 4 + len(value)) + struct.pack("<I", V2_ID) + value
+    size = len(pair) + 8 + 16
+    block = struct.pack("<Q", size) + pair + struct.pack("<Q", size) + MAGIC
+    new_eo = bytearray(eo)
+    struct.pack_into("<I", new_eo, 16, cd_off + len(block))
+    return before + block + cd + bytes(new_eo)
+
+
+def new_key(d):
+    d.mkdir(parents=True, exist_ok=True)
+    k = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Jadeite Mobile"),
+                      x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Jadeite")])
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(k.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now).not_valid_after(now + datetime.timedelta(days=365 * 60))
+            .sign(k, hashes.SHA256()))
+    (d / "key.pem").write_bytes(k.private_bytes(serialization.Encoding.PEM,
+                                                serialization.PrivateFormat.PKCS8,
+                                                serialization.NoEncryption()))
+    (d / "cert.der").write_bytes(cert.public_bytes(serialization.Encoding.DER))
+    print("مفتاحٌ جديد في", d, "· بصمة الشهادة SHA-256:",
+          hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest())
+
+
+def load_key(d):
+    key = serialization.load_pem_private_key((d / "key.pem").read_bytes(), password=None)
+    return key, (d / "cert.der").read_bytes()
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--key", required=True, type=Path)
+    ap.add_argument("--new-key", action="store_true")
+    ap.add_argument("inp", nargs="?")
+    ap.add_argument("out", nargs="?")
+    a = ap.parse_args(argv)
+    if a.new_key:
+        if (a.key / "key.pem").exists():
+            sys.exit("يوجد مفتاحٌ هنا — لا يُستبدل (استبداله يمنع تحديث التطبيق المثبّت)")
+        new_key(a.key)
+        return
+    key, cert = load_key(a.key)
+    out = sign(Path(a.inp).read_bytes(), key, cert)
+    Path(a.out).write_bytes(out)
+    print("وُقّع:", a.out, len(out), "بايت · SHA-256:", hashlib.sha256(out).hexdigest())
+
+
+if __name__ == "__main__":
+    main()

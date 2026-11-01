@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+// رقم الإصدار من ملفٍ واحد يقرؤه التطبيق والبناء معاً
+def ver = new groovy.json.JsonSlurper().parse(file("../../web/version.json"))
+
+android {
+    namespace 'com.jadeite.mobile'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.jadeite.mobile"
+        minSdk 24
+        targetSdk 34
+        versionCode ver.code as int
+        versionName ver.name as String
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    buildFeatures {
+        buildConfig true
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    // واجهة التطبيق (mobile/web) تُنسخ إلى أصوله عند كل بناء
+    sourceSets {
+        main {
+            assets.srcDirs += ["$buildDir/webassets"]
+        }
+    }
+}
+
+tasks.register('copyWeb', Copy) {
+    from '../../web'
+    into "$buildDir/webassets/web"
+}
+preBuild.dependsOn copyWeb
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.8.0'
+    implementation 'androidx.core:core:1.12.0'
+}

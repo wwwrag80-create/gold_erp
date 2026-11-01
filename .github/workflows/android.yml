@@ -1,0 +1,64 @@
+name: تطبيق الجوال (أندرويد)
+
+# يبني تطبيق «جاديت للجوال» من mobile/ : يفحص معادلاته مقابل البرنامج
+# (بايثون) أولاً، ثم يبني ملف التثبيت. الملف يُنشر **غير موقّع** —
+# التوقيع بمفتاح المالك يتمّ خارج المستودع، فلا مفتاح ولا سرّ هنا.
+on:
+  push:
+    branches: ["claude/gold-accounting-system-9o1vmw"]
+    paths: ["mobile/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: معادلات الجوال تطابق البرنامج
+        run: |
+          python mobile/tests/parity_gen.py > "$RUNNER_TEMP/cases.json"
+          node mobile/tests/parity.js "$RUNNER_TEMP/cases.json"
+          node mobile/tests/domain.test.js
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.5"
+
+      - name: بناء ملف التثبيت
+        working-directory: mobile/android
+        run: gradle --no-daemon --stacktrace assembleRelease
+
+      - name: نشر الملف (غير موقّع)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(python -c "import json;print(json.load(open('mobile/web/version.json'))['name'])")
+          cp mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk jadeite-mobile-unsigned.apk
+          sha256sum jadeite-mobile-unsigned.apk | tee jadeite-mobile-unsigned.apk.sha256
+          gh release delete mobile-unsigned --yes --cleanup-tag || true
+          gh release create mobile-unsigned jadeite-mobile-unsigned.apk jadeite-mobile-unsigned.apk.sha256 \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Jadeite mobile $V — unsigned build" \
+            --notes "Unsigned build of mobile/ at ${GITHUB_SHA::7}. Not installable as is: it is signed with the owner's key outside this repository."

@@ -23,6 +23,8 @@ sys.path.insert(0, str(ROOT))
 SKIP_DIRS = {
     "data", "backups", "dist", "build", "__pycache__", ".git",
     "_update_tmp", "_update_rollback", ".idea", ".vscode",
+    # تطبيق الجوال يُبنى ويُثبَّت وحده (mobile/) — لا شأن لبرنامج الكمبيوتر به
+    "mobile",
 }
 SKIP_SUFFIX = {".pyc", ".pyo", ".db", ".db-wal", ".db-shm", ".bak",
                ".spec", ".log", ".jup"}
