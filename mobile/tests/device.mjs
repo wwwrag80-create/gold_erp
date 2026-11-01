@@ -68,11 +68,16 @@ async function connect() {
         const pending = new Map();
         ws.onmessage = (m) => {
           const d = JSON.parse(m.data);
-          if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+          if (d.id && pending.has(d.id)) { pending.get(d.id).res(d); pending.delete(d.id); }
         };
-        const send = (method, params) => new Promise((res) => {
+        // انقطاع الاتصال (أُنهي التطبيق مثلاً) يُفشل الطلبات المعلّقة — وإلا بقيت
+        // معلّقةً وخرج node بلا نتيجة كأن الاختبار نجح
+        const lost = () => new Error("انقطع الاتصال بالتطبيق — أُغلق أو أنهاه النظام");
+        ws.onclose = () => { for (const p of pending.values()) p.rej(lost()); pending.clear(); };
+        const send = (method, params) => new Promise((res, rej) => {
+          if (ws.readyState !== WebSocket.OPEN) { rej(lost()); return; }
           const n = ++id;
-          pending.set(n, res);
+          pending.set(n, { res, rej });
           ws.send(JSON.stringify({ id: n, method, params }));
         });
         const ev = async (expr) => {
@@ -432,9 +437,11 @@ async function main() {
   ws.close();
 }
 
-main().catch((e) => { check("تشغيل الاختبار", false, e.stack || e.message); })
-  .finally(() => {
-    fs.writeFileSync(path.join(OUT, "result.json"), JSON.stringify({ failed, results }, null, 1));
-    console.log(failed ? `✘ ${failed} فشل` : `✔ ${results.length} نجح على الجهاز`);
-    process.exit(failed ? 1 : 0);
-  });
+function finish() {
+  fs.writeFileSync(path.join(OUT, "result.json"), JSON.stringify({ failed, results }, null, 1));
+  console.log(failed ? `✘ ${failed} فشل` : `✔ ${results.length} نجح على الجهاز`);
+  process.exit(failed ? 1 : 0);
+}
+// إن فرغت حلقة الأحداث والاختبار لم يكتمل (وعدٌ لا يُحسم) فهو فشل، لا نجاحٌ صامت
+process.on("beforeExit", () => { check("تشغيل الاختبار", false, "توقّف قبل أن يكتمل"); finish(); });
+main().catch((e) => { check("تشغيل الاختبار", false, e.stack || e.message); }).finally(finish);

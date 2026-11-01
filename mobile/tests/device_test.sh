@@ -25,6 +25,12 @@ PID=$(adb shell pidof com.jadeite.mobile | tr -d '\r')
 adb forward tcp:9222 "localabstract:webview_devtools_remote_$PID"
 node mobile/tests/device.mjs "$OUT"
 RC=$?
+# بلا نتيجةٍ مكتوبة فالتجربة لم تكتمل: فشلٌ لا نجاح
+if [ ! -s "$OUT/result.json" ]; then
+  echo "no result.json — the device test did not finish"
+  echo '{"failed":1,"results":[{"name":"لم تكتمل التجربة","ok":false}]}' > "$OUT/result.json"
+  RC=1
+fi
 adb logcat -d > "$OUT/logcat.txt"
 # الانهيار الحقيقي وحده — «I AndroidRuntime: VM exiting» سطرٌ عادي من أوامر adb
 grep -E "FATAL EXCEPTION| E AndroidRuntime" "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
