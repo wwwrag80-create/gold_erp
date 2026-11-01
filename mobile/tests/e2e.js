@@ -55,6 +55,9 @@ function check(name, cond, detail) {
   await page.goto(url);
   await page.waitForSelector("#tabs");
   check("الرئيسية تفتح فارغة", (await page.content()).includes("لا عمليات بعد"));
+  check("خمسة أزرار سفلية بأيقونات", (await page.locator("#tabs button .i svg").count()) === 5);
+  check("زر التحديث مخفيٌّ في المتصفح (يعمل في أندرويد)", !(await page.locator("#upd-btn").isVisible()));
+  check("لا شاشة ترحيب خارج أندرويد", !page.url().includes("welcome"));
   await shot("home_empty");
 
   // الإعدادات
@@ -185,9 +188,57 @@ function check(name, cond, detail) {
     (await page.locator(".list-item").count()) === 3 && (await page.content()).includes("الآن: عند «محل النخبة»"));
   await shot("wo_history");
 
+  // العملاء: الأرصدة ثم «المبيعات والسداد»
+  await tap("#tabs button[data-tab=customers]");
+  await page.waitForURL(/#\/customers/);
+  await page.waitForTimeout(200);
+  check("شاشة العملاء: محلان بصورة رمزية", (await page.locator(".list-item .avatar").count()) === 2);
+  await shot("customers");
+  await tap(".seg button:has-text('المبيعات والسداد')");
+  await page.waitForURL(/view=board/);
+  await page.waitForTimeout(200);
+  check("المبيعات والسداد: خمس بلاطات", (await page.locator(".stat").count()) === 5);
+  const amana = page.locator(".list-item.col", { hasText: "محل الأمانة" });
+  const at = (await amana.innerText()).replace(/\s+/g, " ");
+  // ذهب: صافي 33 − 12 = 21، سداد 7، باقي 14 → 33.3% «سيء»
+  check("الأمانة: صافي 21.00 وسداد 7.00 وباقي 14.00 — «سيء»",
+    at.includes("21.00") && at.includes("7.00") && at.includes("14.00") && at.includes("سيء"), at);
+  await shot("customers_board");
+  await tap(".seg.sm button:has-text('النقد')");
+  await page.waitForURL(/side=cash/);
+  await page.waitForTimeout(200);
+  const ct = (await page.locator(".list-item.col", { hasText: "محل الأمانة" }).innerText()).replace(/\s+/g, " ");
+  // نقد: صافي 654 − 240 = 414، سداد 500 → مسدَّد
+  check("والنقد: صافي 414.00 وسداد 500.00 — «مسدَّد»", ct.includes("414.00") && ct.includes("500.00") && ct.includes("مسدَّد"), ct);
+  await tap(".chip:has-text('هذا الشهر')");
+  await page.waitForTimeout(150);
+  check("فلتر الفترة يعمل", page.url().includes("from="));
+
+  // لوحة التحكم
+  await tap("#tabs button[data-tab=dashboard]");
+  await page.waitForURL(/#\/dashboard/);
+  await page.waitForTimeout(200);
+  check("لوحة التحكم: ثلاثة رسوم شهرية", (await page.locator("svg.chart").count()) === 3);
+  const dk = (await text(".kpis")).replace(/\s+/g, " ");
+  // ذهب: الأمانة 14 + النخبة 12 = 26 عليهم؛ نقد: النخبة 240 عليه والأمانة 86 له
+  check("لوحة التحكم: 26.00 جم و240.00 ريال على العملاء و86.00 لهم",
+    dk.includes("26.00") && dk.includes("240.00") && dk.includes("86.00"), dk);
+  await shot("dashboard");
+  await page.locator("svg.chart").first().locator(".hit").last().tap();
+  check("لمس العمود يُظهر قيمته", await page.locator(".chart-tip").first().isVisible());
+  await page.locator(".card button.link", { hasText: "جدول" }).first().click();
+  check("والرسم يتحوّل جدولاً بستة أشهر", (await page.locator(".mini-table").first().locator("tbody tr").count()) === 6);
+
+  // المزيد
+  await tap("#tabs button[data-tab=more]");
+  await page.waitForURL(/#\/more/);
+  await page.waitForTimeout(200);
+  check("المزيد: السجل والمعلّقات والإعدادات", (await page.content()).includes("سجل العمليات") &&
+    (await page.content()).includes("المعلّقات") && (await page.content()).includes("الإعدادات والحفظ"));
+
   // النسخة الاحتياطية
   await page.goto(url + "#/settings");
-  const [dl] = await Promise.all([page.waitForEvent("download"), tap("button:has-text('حفظ في التنزيلات')")]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), tap("button:has-text('حفظ ملف')")]);
   const bk = JSON.parse(fs.readFileSync(await dl.path(), "utf8"));
   check("النسخة الاحتياطية فيها كل شيء", bk.format === "jadeite-mobile-backup" && bk.invoices.length === 3 && bk.vouchers.length === 1);
 
@@ -200,9 +251,12 @@ function check(name, cond, detail) {
 
   // الوضع الليلي
   await page.evaluate(() => { App.state.settings.theme = "dark"; document.documentElement.setAttribute("data-theme", "dark"); });
-  await page.goto(url + "#/shops");
+  await page.goto(url + "#/customers");
   await page.waitForTimeout(200);
-  await shot("shops_dark");
+  await shot("customers_dark");
+  await page.goto(url + "#/dashboard");
+  await page.waitForTimeout(300);
+  await shot("dashboard_dark");
 
   check("بلا أي خطأ في الصفحة", !errors.length, errors.slice(0, 3).join(" | "));
   await browser.close();

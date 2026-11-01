@@ -23,6 +23,37 @@ function shot(name) {
   catch (e) { console.log("screencap failed", e.message); }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const PKG = "com.jadeite.mobile";
+
+// نوافذ النظام (اختيار المجلد، الإذن) تُلمس بنصّ أزرارها من شجرة الواجهة
+function uiNodes() {
+  adb("shell", "uiautomator", "dump", "/sdcard/ui.xml");
+  const xml = adb("shell", "cat", "/sdcard/ui.xml").toString();
+  const out = [];
+  for (const m of xml.matchAll(/<node [^>]*?text="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)) {
+    out.push({ text: m[1], x: Math.round((+m[2] + +m[4]) / 2), y: Math.round((+m[3] + +m[5]) / 2) });
+  }
+  return out;
+}
+async function tapText(re, tries = 12) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const n = uiNodes().find((x) => re.test(x.text));
+      if (n) { adb("shell", "input", "tap", String(n.x), String(n.y)); return true; }
+    } catch (e) { /* الشاشة لم تجهز */ }
+    await sleep(1000);
+  }
+  return false;
+}
+// يختار المجلد المفتوح (Documents) في نافذة النظام ويأذن للتطبيق به
+async function chooseFolder(tag) {
+  await sleep(2500);
+  shot(tag + "_picker");
+  const used = await tapText(/^use this folder$/i);
+  await sleep(1500);
+  const allowed = await tapText(/^allow$/i);
+  return used && allowed;
+}
 
 async function connect() {
   for (let i = 0; i < 30; i++) {
@@ -89,8 +120,37 @@ const HARNESS = `(() => {
     },
     text() { return document.body.innerText; },
   };
+  // أحداث الأصل تُجمع هنا ليقرأها الاختبار
+  window.__ev = {};
+  for (const e of ["update", "updateProgress", "backupFolder", "restore", "backupDone", "testInstall", "testPatch", "publish"]) {
+    Bridge.on(e, (d) => { (window.__ev[e] = window.__ev[e] || []).push(d); });
+  }
   return true;
 })()`;
+
+// ينتظر حدثاً جديداً من الأصل (بعد عددٍ سابق) ويعيده
+async function waitEv(ev, name, before, ms) {
+  for (let i = 0; i < ms / 250; i++) {
+    const list = await ev(`(window.__ev[${JSON.stringify(name)}] || [])`);
+    if (list.length > before) return list[list.length - 1];
+    await sleep(250);
+  }
+  return null;
+}
+const evCount = (ev, name) => ev(`(window.__ev[${JSON.stringify(name)}] || []).length`);
+
+async function relaunch() {
+  await sleep(500);
+  adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`);
+  await sleep(5000);
+  const pid = adb("shell", "pidof", PKG).toString().trim();
+  adb("forward", "--remove-all");
+  adb("forward", "tcp:9222", `localabstract:webview_devtools_remote_${pid}`);
+  const c = await connect();
+  for (let i = 0; i < 40; i++) { if (await c.ev("!!(window.App && App.state)")) break; await sleep(250); }
+  await c.ev(HARNESS);
+  return c;
+}
 
 const run = async (ev, body) => ev(`(async () => { const t = window.__t; ${body} })()`);
 
@@ -100,6 +160,32 @@ async function main() {
   check("التطبيق يفتح وتُحمَّل بياناته", await ev("!!(window.App && App.state)"));
   check("الخط العربي محمَّل", await ev("document.fonts.check('16px Plex')"));
   await ev(HARNESS);
+  await sleep(600);
+  check("أول تشغيل: شاشة الترحيب (مجلد الحفظ أو الاسترجاع)", (await ev("location.hash")) === "#/welcome");
+  shot("welcome");
+
+  // ══ التحديث: الإصدار، وقراءة القناة من GitHub، وصلاحية PATCH ══
+  const us = await ev("Bridge.updateState()");
+  check("الإصدار المثبّت 1.1.0 (2)", us.version === "1.1.0" && us.code === 2 && !us.unsupported, JSON.stringify(us));
+  check("إذن الإشعارات ممنوح", us.canNotify === true);
+  let n0 = await evCount(ev, "update");
+  await ev("Bridge.checkUpdate(), 1");
+  const u1 = await waitEv(ev, "update", n0, 25000);
+  check("قراءة قناة التحديث من GitHub", u1 && !u1.error && u1.lastCheck > 0 && u1.published, JSON.stringify(u1));
+  check("ولا تحديث أحدث من المثبّت الآن", u1 && u1.available === false);
+  n0 = await evCount(ev, "testPatch");
+  await ev("AndroidBridge._testPatch(), 1");
+  const tp = await waitEv(ev, "testPatch", n0, 25000);
+  check("طلب النشر (PATCH) يصل GitHub — ويُرفض بلا مفتاح", tp && [401, 403, 404].includes(tp.code), JSON.stringify(tp));
+
+  // ══ الترحيب: اختيار مجلد الحفظ التلقائي ══
+  n0 = await evCount(ev, "backupFolder");
+  await run(ev, `t.click("اختر مجلد الحفظ التلقائي");`);
+  const picked = await chooseFolder("folder");
+  const bf = await waitEv(ev, "backupFolder", n0, 15000);
+  check("اختيار مجلد الحفظ التلقائي (Documents)", picked && bf && bf.ok && bf.name === "Documents", JSON.stringify(bf));
+  await sleep(800);
+  check("ثم الرئيسية", (await ev("location.hash")) === "#/home");
   shot("home");
 
   await run(ev, `location.hash = "#/settings"; await t.sleep(300); t.fill("الاسم", "جاديت للذهب"); t.click("حفظ الإعدادات"); await t.sleep(300);`);
@@ -149,6 +235,22 @@ async function main() {
   check("كشف الحساب: 14.00 جم عليه و86.00 ريال له", kp.includes("14.00 جم عليه") && kp.includes("86.00 ريال له"), kp);
   shot("statement");
 
+  // الحفظ التلقائي في المجلد بعد كل عملية
+  await sleep(2500);
+  let saved = null;
+  try { saved = JSON.parse(adb("shell", "cat", "/sdcard/Documents/jadeite-data.json").toString()); } catch (e) { /* */ }
+  check("الحفظ التلقائي: jadeite-data.json في Documents بكل العمليات",
+    saved && saved.format === "jadeite-mobile-backup" && saved.invoices.length === 3 && saved.vouchers.length === 1,
+    saved ? `${saved.invoices.length}/${saved.vouchers.length}` : "no file");
+  const ls = adb("shell", "ls", "/sdcard/Documents").toString();
+  check("ونسخة اليوم معه", /jadeite-data-\d{4}-\d{2}-\d{2}\.json/.test(ls), ls);
+
+  await run(ev, `location.hash = "#/dashboard"; await t.sleep(700);`);
+  check("لوحة التحكم: ثلاثة رسوم", (await ev("document.querySelectorAll('svg.chart').length")) === 3);
+  shot("dashboard");
+  await run(ev, `location.hash = "#/customers?view=board"; await t.sleep(600);`);
+  shot("customers_board");
+
   // ══ الجسر الأصلي ══
   try { adb("shell", "run-as", "com.jadeite.mobile", "rm", "-rf", "cache/share"); } catch (e) { /* */ }
   await ev(`(() => { const inv = App.state.invoices.find((d) => d.no === "S-00001");
@@ -180,22 +282,64 @@ async function main() {
   adb("shell", "input", "keyevent", "4");
   await sleep(1500);
 
+  // ══ تنزيل تحديث، والتحقّق من بصمته، والإشعار، ونافذة التثبيت ══
+  const URL_ = process.env.UNSIGNED_URL, SHA = process.env.UNSIGNED_SHA;
+  if (URL_ && SHA) {
+    try { adb("shell", "appops", "set", PKG, "REQUEST_INSTALL_PACKAGES", "allow"); } catch (e) { /* */ }
+    n0 = await evCount(ev, "testInstall");
+    await ev(`AndroidBridge._testInstall(${JSON.stringify(URL_)}, ${JSON.stringify(SHA)}, "9.9.9"), 1`);
+    const ti = await waitEv(ev, "testInstall", n0, 120000);
+    check("تنزيل ملف التحديث من GitHub ومطابقة بصمته", ti && ti.ok, JSON.stringify(ti));
+    await sleep(5000);
+    shot("installer");
+    const act = adb("shell", "dumpsys", "activity", "activities").toString();
+    check("نافذة تثبيت أندرويد تُفتح", /packageinstaller/i.test(act));
+    const nt = adb("shell", "dumpsys", "notification", "--noredact").toString();
+    check("وإشعار «التحديث جاهز» يظهر", /pkg=com\.jadeite\.mobile[^\n]*id=7001/.test(nt));
+    adb("shell", "input", "keyevent", "4");
+    await sleep(1500);
+    adb("shell", "input", "keyevent", "4");
+    await sleep(1000);
+  } else {
+    check("تجربة التنزيل (يلزمها UNSIGNED_URL و UNSIGNED_SHA)", false, "missing env");
+  }
+
   // البيانات تبقى بعد إغلاق التطبيق
   ws.close();
-  adb("shell", "am", "force-stop", "com.jadeite.mobile");
-  await sleep(1500);
-  adb("shell", "am", "start", "-W", "-n", "com.jadeite.mobile/.MainActivity");
-  await sleep(5000);
-  const pid = adb("shell", "pidof", "com.jadeite.mobile").toString().trim();
-  adb("forward", "--remove-all");
-  adb("forward", "tcp:9222", `localabstract:webview_devtools_remote_${pid}`);
-  ({ ws, ev } = await connect());
-  for (let i = 0; i < 40; i++) { if (await ev("!!(window.App && App.state)")) break; await sleep(250); }
+  adb("shell", "am", "force-stop", PKG);
+  ({ ws, ev } = await relaunch());
   check("البيانات باقية بعد إغلاق التطبيق وفتحه", (await ev("App.state.invoices.length")) === 3 &&
     (await ev("App.state.vouchers.length")) === 1);
   await ev(`location.hash = "#/home"`);
   await sleep(800);
   shot("home_after");
+
+  // ══ حذف التطبيق ثم تثبيته من جديد: يعود كل شيء من المجلد ══
+  ws.close();
+  adb("uninstall", PKG);
+  await sleep(1500);
+  adb("install", "-r", process.env.APK || "mobile/android/app/build/outputs/apk/debug/app-debug.apk");
+  try { adb("shell", "pm", "grant", PKG, "android.permission.POST_NOTIFICATIONS"); } catch (e) { /* */ }
+  ({ ws, ev } = await relaunch());
+  await sleep(600);
+  check("بعد إعادة التثبيت: لا بيانات، وشاشة الترحيب", (await ev("App.state.invoices.length")) === 0 &&
+    (await ev("location.hash")) === "#/welcome");
+  n0 = await evCount(ev, "restore");
+  await run(ev, `t.click("عندي بيانات سابقة");`);
+  const picked2 = await chooseFolder("restore");
+  const rs = await waitEv(ev, "restore", n0, 15000);
+  check("المجلد نفسه يُقرأ: jadeite-data.json", picked2 && rs && rs.ok && rs.file === "jadeite-data.json",
+    JSON.stringify(rs && { ok: rs.ok, file: rs.file, error: rs.error }));
+  await sleep(800);
+  shot("restore_confirm");
+  await run(ev, `await t.confirm("استرجاع"); await t.sleep(800);`);
+  check("استُرجع كل شيء: 3 فواتير وسند ومحلان", (await ev("App.state.invoices.length")) === 3 &&
+    (await ev("App.state.vouchers.length")) === 1 && (await ev("App.state.shops.length")) === 2);
+  check("والحفظ التلقائي مستمرٌّ في المجلد نفسه", (await ev("Bridge.backupFolder()")) === "Documents");
+  await run(ev, `location.hash = "#/statement/" + App.state.shops.find((s) => s.name === "محل الأمانة").id; await t.sleep(600);`);
+  const kp2 = await ev("document.querySelector('.kpis').innerText");
+  check("وكشف الحساب كما كان: 14.00 جم عليه و86.00 ريال له", kp2.includes("14.00 جم عليه") && kp2.includes("86.00 ريال له"), kp2);
+  shot("restored_statement");
   ws.close();
 }
 

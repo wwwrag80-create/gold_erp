@@ -90,7 +90,7 @@ body.no-tabs main#view { padding-bottom: 110px; }
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card);
   padding: 12px; margin-bottom: 12px;
 }
-.card > h2, .sec-title {
+.card > h2, .card .spread > h2, .sec-title {
   margin: 0 0 10px; font-size: 15px; font-weight: 700; color: var(--goldDim);
   display: flex; align-items: center; gap: 6px;
 }
@@ -239,3 +239,141 @@ input.in[readonly] { background: var(--surface2); color: var(--muted); }
 }
 .quick button .i { font-size: 22px; }
 .quick button:active { background: var(--hover); }
+
+/* ══════════ 1.1 — أيقونات، لوحة التحكم، العملاء، التحديث (الألوان نفسها) ══════════ */
+.ic { display: inline-flex; align-items: center; justify-content: center; line-height: 0; flex: 0 0 auto; }
+.ic svg { display: block; }
+.btn .ic, .note-bar .ic, h2 .ic, h3 .ic, summary .ic { vertical-align: -4px; }
+.note-bar .ic { display: inline-flex; margin-inline-end: 2px; }
+.icon-btn { gap: 4px; font-size: 14px; font-weight: 600; transition: background .15s ease, transform .1s ease; }
+.icon-btn:active { transform: scale(.96); }
+.bar-logo { width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto; }
+.icon-btn.upd { position: relative; }
+.icon-btn.upd.dot { border-color: var(--gold); color: var(--goldDim); }
+.icon-btn.upd.dot::after {
+  content: ""; position: absolute; top: 6px; inset-inline-end: 6px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--red); box-shadow: 0 0 0 2px var(--surface);
+}
+.tap { cursor: pointer; }
+.link {
+  border: 0; background: transparent; color: var(--goldDim); font-weight: 700; font-size: 14px;
+  padding: 6px 4px; cursor: pointer;
+}
+.sec-title.spread { justify-content: space-between; margin-top: 4px; }
+
+/* الشريط السفلي بأيقونات */
+#tabs button { transition: color .15s ease; }
+#tabs button .i { display: flex; align-items: center; justify-content: center; height: 28px; width: 52px;
+  border-radius: 14px; transition: background .2s ease; }
+#tabs button.on .i { background: var(--goldSoft); }
+#tabs button .l { white-space: nowrap; }
+#tabs button.plus .i { width: 50px; height: 50px; border-radius: 50%; margin-top: -20px; background: var(--gold);
+  box-shadow: 0 3px 10px rgba(0,0,0,.25); transition: transform .12s ease; }
+#tabs button.plus:active .i { transform: scale(.94); }
+
+/* صورة رمزية دائرية في القوائم */
+.avatar {
+  width: 40px; height: 40px; border-radius: 50%; flex: 0 0 auto; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--goldSoft); color: var(--goldDim);
+  font-weight: 700; font-size: 17px;
+}
+.avatar.ret { background: var(--redSoft); color: var(--redText); }
+.list-item { transition: background .15s ease, transform .1s ease; }
+.list-item:active { transform: scale(.99); }
+.list-item .ic.muted { color: var(--line3); }
+.list-item.col { flex-direction: column; align-items: stretch; gap: 6px; }
+.list-item.col .grid3 b { display: block; text-align: right; }
+.card .spread > h2 { margin-bottom: 6px; }
+.quick button { transition: background .15s ease, transform .1s ease; }
+.quick button:active { transform: scale(.97); }
+.quick button .i { color: var(--goldDim); height: 26px; display: flex; align-items: center; }
+.act button { display: inline-flex; align-items: center; justify-content: center; }
+.kpi { transition: transform .1s ease; }
+.kpi.tap:active { transform: scale(.98); }
+.seg.sm button { min-height: 36px; font-size: 14px; }
+
+/* بلاطات الأرقام */
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+.stats.in-card { margin-bottom: 0; }
+.stat {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 1px; min-width: 0;
+}
+.stats.in-card .stat { background: var(--surface2); }
+.stat .l { font-size: 12px; color: var(--muted); }
+.stat .v { font-size: 18px; font-weight: 700; color: var(--ink); text-align: right; }
+.stat .u { font-size: 12px; color: var(--muted); }
+.stats > .stat:first-child:nth-last-child(odd) { grid-column: span 2; }
+.delta { font-size: 12px; font-weight: 600; margin-top: 2px; }
+.delta.up { color: var(--green); }
+.delta.down { color: var(--redText); }
+.badge.grade { background: var(--surface2); border: 1px solid var(--line2); }
+.badge.grade.good { color: var(--green); }
+.badge.grade.mid { color: var(--goldDim); }
+.badge.grade.fair { color: var(--goldHi); }
+.badge.grade.bad { color: var(--redText); }
+.badge.grade.none { color: var(--muted); }
+.meter { flex: 1; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.meter > span { display: block; height: 100%; border-radius: 4px; background: var(--gold); transition: width .5s ease; }
+.row-link { padding: 9px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.row-link:last-child { border-bottom: 0; }
+.row-link:active { background: var(--hover); }
+
+/* الرسم البياني: سلسلةٌ واحدة بلون الذهب، شبكةٌ خفيفة */
+.chart-wrap { position: relative; }
+/* الأرقام والمحاور بترتيبٍ لاتيني داخل الرسم — فلا يُقصّ رقم المحور يميناً */
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; direction: ltr; }
+svg.chart .grid { stroke: var(--line); stroke-width: 1; }
+svg.chart .base { stroke: var(--line3); stroke-width: 1; }
+svg.chart .tick { fill: var(--muted); font-size: 10px; font-family: Plex, sans-serif; }
+svg.chart .val { fill: var(--ink); font-size: 11px; font-weight: 700; font-family: Plex, sans-serif; }
+svg.chart .bar { fill: var(--gold); transition: opacity .15s ease; }
+svg.chart .bar.dim { opacity: .4; }
+svg.chart .hit { fill: transparent; outline: none; cursor: pointer; }
+.chart-tip {
+  display: none; position: absolute; top: -4px; width: 120px; background: var(--barBg); color: var(--barFg);
+  border-radius: 8px; padding: 6px 8px; font-size: 12px; text-align: center; pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,.25);
+}
+.chart-tip b { display: block; font-size: 13px; }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.mini-table th { text-align: right; font-weight: 600; color: var(--hdrFg); background: var(--hdrBg); padding: 6px 8px; }
+.mini-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.mini-table td.num { text-align: left; }
+
+/* التحديثات */
+.progress { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 10px; }
+.progress > span { display: block; height: 100%; width: 0; background: var(--gold); transition: width .25s ease; }
+.update-card {
+  background: var(--goldSoft2); border: 1px solid var(--goldRing); border-radius: var(--r-card);
+  padding: 12px; margin: 10px 0;
+}
+.update-card .ic { color: var(--goldDim); }
+.ok-line { display: flex; align-items: center; gap: 6px; color: var(--green); font-weight: 700; margin: 10px 0 4px; }
+.publish-card { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.publish-card > b { display: flex; align-items: center; gap: 6px; color: var(--goldDim); }
+details.card > summary { list-style: none; cursor: pointer; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card[open] > summary { margin-bottom: 4px; }
+.steps { margin: 8px 0 10px; padding-inline-start: 22px; line-height: 1.9; }
+.steps a { color: var(--goldDim); word-break: break-all; }
+
+/* الترحيب */
+.welcome { text-align: center; padding: 28px 8px 8px; display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.welcome-logo { width: 96px; height: 96px; border-radius: 24px; margin: 0 auto 4px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.welcome h2 { margin: 0; font-size: 21px; }
+.welcome p { margin: 0 0 8px; line-height: 1.8; }
+
+/* حركةٌ ناعمة: دخول الشاشة، ونافذةٌ سفلية تنزلق */
+main#view.enter { animation: view-in .22s ease-out; }
+@keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.sheet-wrap { animation: fade-in .18s ease-out; }
+.sheet { animation: sheet-up .24s cubic-bezier(.2,.8,.2,1); }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: .6; } to { transform: none; opacity: 1; } }
+#toast { animation: fade-in .18s ease-out; }
+.btn { transition: background .15s ease, transform .1s ease; }
+.btn:active { transform: scale(.98); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

@@ -11,15 +11,16 @@
   <header id="bar"></header>
   <main id="view"></main>
   <nav id="tabs">
-    <button data-tab="home"><span class="i">🏠</span>الرئيسية</button>
-    <button data-tab="shops"><span class="i">🏪</span>المحلات</button>
-    <button data-tab="plus" class="plus"><span class="i">＋</span>جديد</button>
-    <button data-tab="log"><span class="i">🧾</span>السجل</button>
-    <button data-tab="more"><span class="i">☰</span>المزيد</button>
+    <button data-tab="home" data-ic="home"><span class="i"></span><span class="l">الرئيسية</span></button>
+    <button data-tab="customers" data-ic="users"><span class="i"></span><span class="l">العملاء</span></button>
+    <button data-tab="plus" data-ic="plus" class="plus" aria-label="عملية جديدة"><span class="i"></span><span class="l">جديد</span></button>
+    <button data-tab="dashboard" data-ic="dashboard"><span class="i"></span><span class="l">لوحة التحكم</span></button>
+    <button data-tab="more" data-ic="menu"><span class="i"></span><span class="l">المزيد</span></button>
   </nav>
   <div id="sheet-root"></div>
   <div id="toast"></div>
   <script src="vendor/qrcode.js"></script>
+  <script src="js/icons.js"></script>
   <script src="js/num.js"></script>
   <script src="js/gold.js"></script>
   <script src="js/domain.js"></script>

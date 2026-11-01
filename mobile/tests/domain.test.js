@@ -115,5 +115,51 @@ check("الاسترجاع يعيد البيانات والأرصدة كما هي
   st2.invoices.length === st.invoices.length && D.balance(st2, a.id).gold18 === 16 && st2.seq.S === 2);
 check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /ليس نسخة/));
 
+// ── شاشة العملاء (المبيعات والسداد) ولوحة التحكم ──
+{
+  const t3 = D.newState();
+  const A = D.saveShop(t3, { name: "أ" });
+  const Bs = D.saveShop(t3, { name: "ب" });
+  const [prevM, curM] = D.monthsBack(2);
+  const ln = (wo, reg) => D.buildLine({ wo, karat: 18, gold: reg, reg, standing: reg, wage: 10 });
+  D.saveInvoice(t3, { kind: "sale", shopId: A.id, date: prevM + "-10", lines: [ln("X1", 10)] });
+  D.saveInvoice(t3, { kind: "sale", shopId: A.id, date: curM + "-01", lines: [ln("X2", 20)] });
+  const x1 = D.woLast(t3, "X1");
+  D.saveInvoice(t3, { kind: "sale_return", shopId: A.id, date: curM + "-01",
+    lines: [D.buildLine(D.lineToEntry(x1.line, 18))] });
+  D.saveVoucher(t3, { kind: "receipt", shopId: A.id, date: curM + "-01",
+    rows: [{ kind: "gold", weight: 15, karat: 18 }, { kind: "cash", amount: 100 }] });
+
+  const bm = D.board(t3, curM + "-01", null);
+  const ra = bm.rows.find((r) => r.id === A.id), rb = bm.rows.find((r) => r.id === Bs.id);
+  check("العملاء: الرصيد السابق 10 ومبيعات 20 ومرتجع 10 وسداد 15 — الباقي 5",
+    ra.gold.open === 10 && ra.gold.sales === 20 && ra.gold.returns === 10 && ra.gold.paid === 15 &&
+    ra.gold.net === 20 && ra.gold.remaining === 5, ra.gold);
+  check("نسبة السداد 75% فالتقدير «جيد»، ونسبة المرتجع 33.3%",
+    ra.gold.paidPct === 75 && ra.gold.grade === "جيد" && ra.gold.retPct === 33.3, ra.gold);
+  check("والنقد: سداد 50% فالتقدير «مقبول» والباقي 100",
+    ra.cash.paidPct === 50 && ra.cash.grade === "مقبول" && ra.cash.remaining === 100, ra.cash);
+  check("ومن لا حركة له يُخفى", D.hasMovement(ra) && !D.hasMovement(rb) && rb.gold.grade === "—");
+  check("الإجماليات = مجموع العملاء", bm.gold.paid === 15 && bm.gold.remaining === 5 && bm.cash.sales === 200, bm.gold);
+  const all = D.board(t3, null, null).rows.find((r) => r.id === A.id);
+  check("منذ البداية: لا رصيد سابق والمبيعات 30", all.gold.open === 0 && all.gold.sales === 30 && all.gold.remaining === 5, all.gold);
+  check("الأعلى سداداً أولاً", bm.rows[0].id === A.id);
+  check("التقدير بحدوده: 80 ممتاز · 60 جيد · 40 مقبول · دونها سيء · لا باقٍ مسدَّد",
+    D.grade(80, 1, true, 1) === "ممتاز" && D.grade(60, 1, true, 1) === "جيد" && D.grade(40, 1, true, 1) === "مقبول" &&
+    D.grade(39.9, 1, true, 1) === "سيء" && D.grade(100, 0, true, 5) === "مسدَّد");
+
+  const d = D.dashboard(t3, 6);
+  check("لوحة التحكم: ستة أشهر آخرها الشهر الحالي", d.months.length === 6 && d.cur === curM && d.prev === prevM);
+  check("هذا الشهر: مبيعات 20 ومرتجع 10 وأجور صافية 100 وفاتورة بيع واحدة",
+    d.per[curM].sales === 20 && d.per[curM].returns === 10 && d.per[curM].wages === 100 && d.per[curM].n === 1, d.per[curM]);
+  check("والتحصيل 15 جم و100 ريال، والشهر الماضي 10 جم",
+    d.per[curM].paidGold === 15 && d.per[curM].paidCash === 100 && d.per[prevM].sales === 10, d.per);
+  check("على العملاء 5 جم و100 ريال", d.goldOn === 5 && d.cashOn === 100 && d.goldFor === 0 && d.topGold[0].shop.id === A.id);
+  check("الأطقم: X2 عند العميل (20 جم) وX1 رجعت (10 جم)",
+    d.setsOut.n === 1 && d.setsOut.w18 === 20 && d.setsOut.byShop[A.id] === 1 && d.setsBack.n === 1 && d.setsBack.w18 === 10, d);
+  check("تحصيل الشهر 75% ذهباً", d.month.gold.paidPct === 75);
+  check("monthsBack تعبر السنة", D.monthsBack(3, "2026-02-10").join(",") === "2025-12,2026-01,2026-02");
+}
+
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);
 process.exit(fail ? 1 : 0);

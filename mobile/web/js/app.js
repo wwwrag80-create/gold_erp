@@ -53,10 +53,19 @@
       bar.appendChild(h("button", { class: "icon-btn", "aria-label": "رجوع",
         onclick: () => (history.length > 1 ? history.back() : go("home")) }, ico("back", 22)));
     }
+    if (o.logo) bar.appendChild(h("img", { class: "bar-logo", src: "img/icon.png", alt: "" }));
     bar.appendChild(h("h1", null, title, sub ? h("span", { class: "sub", text: sub }) : null));
     for (const a of o.actions || []) bar.appendChild(a);
     document.body.classList.toggle("no-tabs", !!o.noTabs);
     document.title = title;
+  }
+
+  // مستمعٌ لأحداث الأصل يخصّ الشاشة الحالية — يُزال تلقائياً عند الانتقال منها
+  let routeOffs = [];
+  function onRoute(ev, fn) {
+    const off = B.on(ev, fn);
+    routeOffs.push(off);
+    return off;
   }
 
   function setTab(name) {
@@ -119,10 +128,10 @@
     }
     v.append(
       h("div", { class: "kpis" },
-        h("div", { class: "kpi" }, h("b", null, "ذهب على المحلات"), h("span", { class: "v num" }, gw(gOn)), h("span", { class: "u" }, ` جم عيار ${vk()}`)),
-        h("div", { class: "kpi" }, h("b", null, "ذهب للمحلات"), h("span", { class: "v num" }, gw(gFor)), h("span", { class: "u" }, ` جم عيار ${vk()}`)),
-        h("div", { class: "kpi" }, h("b", null, "أجور ونقد على المحلات"), h("span", { class: "v num" }, f2(cOn)), h("span", { class: "u" }, " ريال")),
-        h("div", { class: "kpi" }, h("b", null, "نقد للمحلات"), h("span", { class: "v num" }, f2(cFor)), h("span", { class: "u" }, " ريال"))),
+        h("div", { class: "kpi" }, h("b", null, "ذهب على العملاء"), h("span", { class: "v num" }, gw(gOn)), h("span", { class: "u" }, ` جم عيار ${vk()}`)),
+        h("div", { class: "kpi" }, h("b", null, "ذهب للعملاء"), h("span", { class: "v num" }, gw(gFor)), h("span", { class: "u" }, ` جم عيار ${vk()}`)),
+        h("div", { class: "kpi" }, h("b", null, "أجور ونقد على العملاء"), h("span", { class: "v num" }, f2(cOn)), h("span", { class: "u" }, " ريال")),
+        h("div", { class: "kpi" }, h("b", null, "نقد للعملاء"), h("span", { class: "v num" }, f2(cFor)), h("span", { class: "u" }, " ريال"))),
       h("div", { class: "quick" },
         quickBtn("receipt", "فاتورة بيع", () => go("invoice/new?kind=sale")),
         quickBtn("return", "مرتجع بيع", () => go("invoice/new?kind=sale_return")),
@@ -1216,11 +1225,11 @@
       h("div", { class: "grid2" },
         h("button", { class: "btn" + (folder ? " ghost" : ""), onclick: () => B.pickBackupFolder() }, ico("folder", 18), folder ? "تغيير المجلد" : "اختيار المجلد"),
         h("button", { class: "btn ghost", onclick: () => B.restoreFromFolder() }, ico("history", 18), "استرجاع من المجلد")));
-    const offF = B.on("backupFolder", (r) => {
+    const offF = onRoute("backupFolder", (r) => {
       if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); scheduleAutoBackup(); offF(); offR(); replace("settings"); }
       else if (r.error) err(new Error(r.error));
     });
-    const offR = B.on("restore", async (r) => {
+    const offR = onRoute("restore", async (r) => {
       if (!r.ok) { if (r.error) err(new Error(r.error)); return; }
       try { if (await restoreText(r.text, r.file)) { offF(); offR(); replace("home"); } } catch (e) { err(e); }
     });
@@ -1284,7 +1293,8 @@
       ["هذه السنة", t.slice(0, 4) + "-01-01", ""]];
   }
   function gradeBadge(g) {
-    const cls = { "مسدَّد": "good", "ممتاز": "good", "جيد": "", "مقبول": "", "سيء": "bad" }[g];
+    // ألوان التقدير كما في شاشة العملاء في البرنامج
+    const cls = { "مسدَّد": "good", "ممتاز": "good", "جيد": "mid", "مقبول": "fair", "سيء": "bad" }[g];
     return h("span", { class: "badge grade " + (cls === undefined ? "none" : cls) }, g);
   }
   function meter(pctVal) {
@@ -1319,7 +1329,7 @@
     const T = b[side];
     const rows = hideIdle ? b.rows.filter(D.hasMovement) : b.rows;
     const tile = (label, val, sub) => h("div", { class: "stat" }, h("span", { class: "l" }, label),
-      h("span", { class: "v" }, val), sub ? h("span", { class: "u" }, sub) : null);
+      h("span", { class: "v num" }, val), sub ? h("span", { class: "u" }, sub) : null);
     v.append(h("div", { class: "stats" },
       tile("العملاء", String(rows.length)), tile("المبيعات", fmt(T.sales), unit), tile("المرتجع", fmt(T.returns),
         T.retPct === null ? unit : `${f2(T.retPct)}% · ${unit}`),
@@ -1335,8 +1345,10 @@
           h("div", null, h("span", { class: "muted" }, "الباقي"), h("b", { class: "num" }, fmt(x.remaining)))),
         h("div", { class: "row small", style: { marginTop: "6px" } }, meter(x.paidPct),
           h("span", { class: "muted num", style: { minWidth: "48px", textAlign: "left" } }, x.paidPct === null ? "—" : `${f2(x.paidPct)}%`)),
-        h("div", { class: "muted small" }, (r.lastPay ? `آخر سداد ${dmy(r.lastPay)}` : "لا سداد في الفترة") +
-          (r.lastSale ? ` · آخر بيع ${dmy(r.lastSale)}` : "") + (x.open ? ` · رصيد سابق ${fmt(x.open)}` : ""))));
+        h("div", { class: "muted small" },
+          r.lastPay ? ["آخر سداد ", h("span", { dir: "ltr", text: dmy(r.lastPay) })] : "لا سداد في الفترة",
+          r.lastSale ? [" · آخر بيع ", h("span", { dir: "ltr", text: dmy(r.lastSale) })] : null,
+          x.open ? [" · رصيد سابق ", h("span", { class: "num", text: fmt(x.open) })] : null)));
     }
   }
 
@@ -1421,13 +1433,13 @@
     const lbl = d.months.map((m) => MONTHS_AR[+m.slice(5, 7) - 1]);
     const cur = d.per[d.cur], prev = d.per[d.prev] || { sales: 0 };
     v.append(h("div", { class: "kpis" },
-      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "ذهب على العملاء"), h("span", { class: "v" }, gw(d.goldOn)), h("span", { class: "u" }, ` جم ${k}`)),
-      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "ذهب للعملاء"), h("span", { class: "v" }, gw(d.goldFor)), h("span", { class: "u" }, ` جم ${k}`)),
-      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "أجور ونقد على العملاء"), h("span", { class: "v" }, f2(d.cashOn)), h("span", { class: "u" }, " ريال")),
-      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "نقد للعملاء"), h("span", { class: "v" }, f2(d.cashFor)), h("span", { class: "u" }, " ريال"))));
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "ذهب على العملاء"), h("span", { class: "v num" }, gw(d.goldOn)), h("span", { class: "u" }, ` جم ${k}`)),
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "ذهب للعملاء"), h("span", { class: "v num" }, gw(d.goldFor)), h("span", { class: "u" }, ` جم ${k}`)),
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "أجور ونقد على العملاء"), h("span", { class: "v num" }, f2(d.cashOn)), h("span", { class: "u" }, " ريال")),
+      h("div", { class: "kpi tap", onclick: () => go("customers") }, h("b", null, "نقد للعملاء"), h("span", { class: "v num" }, f2(d.cashFor)), h("span", { class: "u" }, " ريال"))));
     const delta = cur.sales - prev.sales;
     const tile = (label, val, sub, extra) => h("div", { class: "stat" }, h("span", { class: "l" }, label),
-      h("span", { class: "v" }, val), sub ? h("span", { class: "u" }, sub) : null, extra || null);
+      h("span", { class: "v num" }, val), sub ? h("span", { class: "u" }, sub) : null, extra || null);
     v.append(h("div", { class: "card" }, h("h2", null, `هذا الشهر — ${MONTHS_AR[+d.cur.slice(5, 7) - 1]}`),
       h("div", { class: "stats in-card" },
         tile("المبيعات", gw(cur.sales), `جم ${k}`, h("span", { class: "delta " + (delta >= 0 ? "up" : "down") },
@@ -1574,8 +1586,8 @@
     setBar("أهلاً بك", "", { back: false, noTabs: true });
     const v = view();
     const done = () => { try { localStorage.setItem("welcomed", "1"); } catch (e) { /* */ } B.requestNotifications(); replace("home"); };
-    const waitFolder = B.on("backupFolder", (r) => { if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); waitFolder(); waitRestore(); done(); } });
-    const waitRestore = B.on("restore", async (r) => {
+    const waitFolder = onRoute("backupFolder", (r) => { if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); waitFolder(); waitRestore(); done(); } });
+    const waitRestore = onRoute("restore", async (r) => {
       if (!r.ok) { if (r.error) err(new Error(r.error)); return; }
       try { if (await restoreText(r.text, r.file)) { waitFolder(); waitRestore(); done(); } } catch (e) { err(e); }
     });
@@ -1620,8 +1632,13 @@
   function route() {
     const { parts, q } = parse();
     const v = view();
+    routeOffs.forEach((f) => f());
+    routeOffs = [];
     v.innerHTML = "";
     window.scrollTo(0, 0);
+    v.classList.remove("enter");
+    void v.offsetWidth;                       // يعيد حركة الدخول لكل شاشة
+    v.classList.add("enter");
     try {
       switch (parts[0]) {
         case "home": return home();
@@ -1654,18 +1671,48 @@
     else document.documentElement.setAttribute("data-theme", t);
   }
 
+  // فحص التحديث عند الفتح والعودة إلى التطبيق — مرةً كل 3 ساعات على الأكثر
+  function maybeCheckUpdate() {
+    const us = B.updateState();
+    if (us.unsupported) return;
+    if (Date.now() - (us.lastCheck || 0) > 3 * 3600 * 1000) B.checkUpdate();
+  }
+
+  function firstRun() {
+    const s = st();
+    if (!B.native || B.backupFolder()) return false;
+    if (s.shops.length + s.invoices.length + s.vouchers.length > 0) return false;
+    try { return !localStorage.getItem("welcomed"); } catch (e) { return false; }
+  }
+
   async function start() {
     App.state = await S.load();
     applyTheme();
     for (const b of document.querySelectorAll("#tabs button")) {
+      b.querySelector(".i").append(ico(b.dataset.ic, b.dataset.tab === "plus" ? 26 : 22));
       b.addEventListener("click", () => {
         const t = b.dataset.tab;
         if (t === "plus") newSheet(); else go(t);
       });
     }
+    // أحداث الأصل العامة: إشعار التحديث، ونتيجة الحفظ التلقائي
+    B.on("openUpdate", () => updateSheet());
+    B.on("update", (us) => refreshUpdateDot(us));
+    let lastBackupErr = 0;
+    B.on("backupDone", (r) => {
+      if (r.ok) {
+        try { localStorage.setItem("lastAutoBackup", String(r.at)); } catch (e) { /* */ }
+      } else if (Date.now() - lastBackupErr > 60000) {   // تنبيهٌ واحد في الدقيقة لا مع كل حفظ
+        lastBackupErr = Date.now();
+        toast("تعذّر الحفظ التلقائي في المجلد: " + (r.error || "") + "\nاختر المجلد من جديد في الإعدادات.", "err");
+      }
+    });
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) maybeCheckUpdate(); });
     window.addEventListener("hashchange", route);
-    if (!location.hash) location.replace("#/home");
+    if (firstRun()) location.replace("#/welcome");
+    else if (!location.hash) location.replace("#/home");
     route();
+    maybeCheckUpdate();
   }
 
   App.start = start;

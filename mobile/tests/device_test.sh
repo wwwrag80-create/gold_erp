@@ -9,6 +9,14 @@ if ! adb install -r "$APK" > "$OUT/install.txt" 2>&1; then
   cat "$OUT/install.txt"
   exit 1
 fi
+# إذن الإشعارات (أندرويد 13) يُمنح مسبقاً كما لو ضغط صاحبه «سماح»؛ ومجلد Documents
+# هو حيث تفتح نافذة اختيار مجلد الحفظ التلقائي
+adb shell pm grant com.jadeite.mobile android.permission.POST_NOTIFICATIONS || true
+adb shell mkdir -p /sdcard/Documents
+export APK
+# تجربة التنزيل: الملف غير الموقّع الذي نُشر للتوّ وبصمته
+export UNSIGNED_URL="https://github.com/${GITHUB_REPOSITORY:-wwwrag80-create/gold_erp}/releases/download/mobile-unsigned/jadeite-mobile-unsigned.apk"
+export UNSIGNED_SHA="$(cut -d' ' -f1 jadeite-mobile-unsigned.apk.sha256 2>/dev/null)"
 adb logcat -c
 adb shell am start -W -n com.jadeite.mobile/.MainActivity
 sleep 8

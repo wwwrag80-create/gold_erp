@@ -18,6 +18,7 @@ import android.os.Looper;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
+import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.util.Base64;
 import android.view.View;
@@ -346,6 +347,22 @@ public class MainActivity extends Activity {
         }, 450));
     }
 
+    /** نافذة اختيار مجلد — تفتح على «Documents» في ذاكرة الجوال (مكانٌ يبقى بعد حذف التطبيق). */
+    void openTree(int req, String event) {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        if (Build.VERSION.SDK_INT >= 26) {
+            i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(
+                    "com.android.externalstorage.documents", "primary:Documents"));
+        }
+        try {
+            startActivityForResult(i, req);
+        } catch (ActivityNotFoundException e) {
+            emit(event, obj("ok", false, "error", "لا يدعم الجهاز اختيار مجلد"));
+        }
+    }
+
     // ══ التحديث ══
     boolean canInstall() {
         return Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls();
@@ -453,30 +470,12 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void pickBackupFolder() {
-            ui.post(() -> {
-                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                try {
-                    startActivityForResult(i, REQ_TREE);
-                } catch (ActivityNotFoundException e) {
-                    emit("backupFolder", obj("ok", false, "error", "لا يدعم الجهاز اختيار مجلد"));
-                }
-            });
+            ui.post(() -> openTree(REQ_TREE, "backupFolder"));
         }
 
         @JavascriptInterface
         public void restoreFromFolder() {
-            ui.post(() -> {
-                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                try {
-                    startActivityForResult(i, REQ_RESTORE);
-                } catch (ActivityNotFoundException e) {
-                    emit("restore", obj("ok", false, "error", "لا يدعم الجهاز اختيار مجلد"));
-                }
-            });
+            ui.post(() -> openTree(REQ_RESTORE, "restore"));
         }
 
         @JavascriptInterface
