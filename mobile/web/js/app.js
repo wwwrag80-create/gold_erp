@@ -1598,7 +1598,7 @@
         "فإن حذفت التطبيق ثم ثبّته من جديد، اختر المجلد نفسه فيعود كل شيء كما كان."),
       h("button", { class: "btn block", onclick: () => B.pickBackupFolder() }, ico("folder", 20), "ابدأ — اختر مجلد الحفظ التلقائي"),
       h("button", { class: "btn ghost block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "عندي بيانات سابقة — استرجاعها"),
-      h("button", { class: "link", style: { marginTop: "12px" }, onclick: () => { waitFolder(); waitRestore(); done(); } }, "تخطٍّ الآن")));
+      h("button", { class: "link", style: { marginTop: "12px" }, onclick: () => { waitFolder(); waitRestore(); done(); } }, "تخطَّ الآن")));
   }
 
   // ══ «+ جديد» ══
