@@ -264,7 +264,7 @@ final class Updater {
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return;
         NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "تحديثات التطبيق",
                 NotificationManager.IMPORTANCE_DEFAULT);
-        ch.setDescription("إشعارٌ حين يجهز إصدارٌ جديد من جاديت للتثبيت");
+        ch.setDescription("إشعارٌ حين يجهز إصدارٌ جديد من التطبيق للتثبيت");
         nm.createNotificationChannel(ch);
     }
 
@@ -284,7 +284,7 @@ final class Updater {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(c, CHANNEL_ID) : new Notification.Builder(c);
         b.setSmallIcon(R.drawable.ic_stat_update)
-                .setContentTitle("تحديث جاديت " + p.optString("version") + " جاهز")
+                .setContentTitle("تحديث نظام الذهب " + p.optString("version") + " جاهز")
                 .setContentText("اضغط للتثبيت — بياناتك تبقى كما هي")
                 .setAutoCancel(true)
                 .setContentIntent(pi);
@@ -408,7 +408,7 @@ final class Updater {
             p.put("url", url);
             p.put("notes", notes != null && notes.trim().length() > 0 ? notes.trim() : e.optString("notes", ""));
             p.put("published", iso.format(new Date()));
-            String body = "قناة تحديثات تطبيق «جاديت للجوال»: يقرأ التطبيق هذا النص ليعرف آخر إصدارٍ منشور، "
+            String body = "قناة تحديثات تطبيق «نظام محاسبي للذهب» للجوال: يقرأ التطبيق هذا النص ليعرف آخر إصدارٍ منشور، "
                     + "فيُنزّله من ملفات المستودع (`mobile/dist`) ويعرض على صاحبه تثبيته.\n\n"
                     + "يكتب هذا النصَّ زرُّ «إرسال التحديث للجميع» في تطبيق الناشر — فلا تعدّله يدوياً ولا تُغلق هذه الصفحة.\n\n"
                     + MARK + "\n```json\n" + p.toString() + "\n```\n";

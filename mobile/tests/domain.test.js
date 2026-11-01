@@ -69,11 +69,11 @@ check("رقم تشغيل غير مسجّل لا حركة له", D.woLast(st, "X9
 const v1 = D.saveVoucher(st, { kind: "receipt", shopId: a.id, date: "2026-10-07",
   rows: [{ kind: "gold", weight: 6, karat: 21 }, { kind: "cash", amount: 500 }], discCash: 2.1 });
 check("ذهب 6 جم عيار 21 = 7 جم مكافئ 18", v1.rows[0].equiv === 7, v1.rows[0].equiv);
-check("رقم السند RV-00001", v1.no === "RV-00001");
+check("رقم التحصيل RV-00001", v1.no === "RV-00001");
 bal = D.balance(st, a.id);
 check("بعد القبض: ذهب 14 ونقد 10.00", bal.gold18 === 14 && bal.cash === 10, bal);
 check("الخصم في سند الصرف مرفوض",
-  throws(() => D.saveVoucher(st, { kind: "payment", shopId: a.id, rows: [{ kind: "cash", amount: 5 }], discCash: 1 }), /القبض فقط/));
+  throws(() => D.saveVoucher(st, { kind: "payment", shopId: a.id, rows: [{ kind: "cash", amount: 5 }], discCash: 1 }), /التحصيل فقط/));
 const p1 = D.saveVoucher(st, { kind: "payment", shopId: a.id, date: "2026-10-08",
   rows: [{ kind: "gold", weight: 2, karat: 18 }] });
 bal = D.balance(st, a.id);
@@ -120,7 +120,10 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   const t3 = D.newState();
   const A = D.saveShop(t3, { name: "أ" });
   const Bs = D.saveShop(t3, { name: "ب" });
-  const [prevM, curM] = D.monthsBack(2);
+  const t0 = D.today();
+  const curM = t0.slice(0, 7);
+  const pd = new Date(+t0.slice(0, 4), +t0.slice(5, 7) - 2, 1);
+  const prevM = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, "0")}`;
   const ln = (wo, reg) => D.buildLine({ wo, karat: 18, gold: reg, reg, standing: reg, wage: 10 });
   D.saveInvoice(t3, { kind: "sale", shopId: A.id, date: prevM + "-10", lines: [ln("X1", 10)] });
   D.saveInvoice(t3, { kind: "sale", shopId: A.id, date: curM + "-01", lines: [ln("X2", 20)] });
@@ -148,17 +151,75 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
     D.grade(80, 1, true, 1) === "ممتاز" && D.grade(60, 1, true, 1) === "جيد" && D.grade(40, 1, true, 1) === "مقبول" &&
     D.grade(39.9, 1, true, 1) === "سيء" && D.grade(100, 0, true, 5) === "مسدَّد");
 
-  const d = D.dashboard(t3, 6);
-  check("لوحة التحكم: ستة أشهر آخرها الشهر الحالي", d.months.length === 6 && d.cur === curM && d.prev === prevM);
-  check("هذا الشهر: مبيعات 20 ومرتجع 10 وأجور صافية 100 وفاتورة بيع واحدة",
-    d.per[curM].sales === 20 && d.per[curM].returns === 10 && d.per[curM].wages === 100 && d.per[curM].n === 1, d.per[curM]);
-  check("والتحصيل 15 جم و100 ريال، والشهر الماضي 10 جم",
-    d.per[curM].paidGold === 15 && d.per[curM].paidCash === 100 && d.per[prevM].sales === 10, d.per);
-  check("على العملاء 5 جم و100 ريال", d.goldOn === 5 && d.cashOn === 100 && d.goldFor === 0 && d.topGold[0].shop.id === A.id);
-  check("الأطقم: X2 عند العميل (20 جم) وX1 رجعت (10 جم)",
-    d.setsOut.n === 1 && d.setsOut.w18 === 20 && d.setsOut.byShop[A.id] === 1 && d.setsBack.n === 1 && d.setsBack.w18 === 10, d);
-  check("تحصيل الشهر 75% ذهباً", d.month.gold.paidPct === 75);
-  check("monthsBack تعبر السنة", D.monthsBack(3, "2026-02-10").join(",") === "2025-12,2026-01,2026-02");
+}
+
+// ══ المندوب: المصانع، البضاعة، التحصيل، الدفع، والممتلكات ══
+{
+  const t = D.newState();
+  const shopA = D.saveShop(t, { name: "محل السلام" });
+  const fac = D.saveShop(t, { name: "مصنع الريان", type: "factory", openGold18: -50, openCash: -1000, openDate: "2026-01-01" });
+  check("المصنع يُحفظ بنوعه", D.isFactory(fac) && !D.isFactory(shopA) && D.factoriesOnly(t).length === 1 && D.shopsOnly(t).length === 1);
+  check("ولا يتحوّل المحل مصنعاً", throws(() => D.saveShop(t, { ...shopA, type: "factory" }), /لا يتحوّل/));
+  check("رصيده الافتتاحي: عليّ 50 جم و1000 ريال", D.balance(t, fac.id).gold18 === -50 && D.balance(t, fac.id).cash === -1000);
+
+  // الطقم بلا اسم: الوزن وحده يكفي
+  const plain = D.buildLine({ karat: 21, reg: 10, standing: 10, wage: 10 });
+  check("سطرٌ بلا اسم طقم يُقبل (10 جم عيار 21)", plain.wo === "" && plain.reg18 === G.store(10, 21) && plain.lid);
+  check("وسطران بلا اسم في فاتورةٍ واحدة لا يُعدّان تكراراً", !throws(() => D.checkLines([plain, D.buildLine({ reg: 5, wage: 1 })])));
+  check("لكن الوزن لازم", throws(() => D.buildLine({ reg: 0, wage: 5 }), /أدخل الوزن/));
+
+  // بضاعة من المصنع: طقمان، أحدهما بلا اسم
+  const pin = D.saveInvoice(t, { kind: "purchase", shopId: fac.id, date: "2026-02-01",
+    lines: [D.buildLine({ wo: "T1", reg: 20, wage: 5 }), D.buildLine({ reg: 12, wage: 5 })] });
+  check("رقمها P-00001", pin.no === "P-00001", pin.no);
+  check("البضاعة تُرحَّل للمصنع على المحل؟ لا — المحل مرفوض", throws(() => D.saveInvoice(t, { kind: "purchase", shopId: shopA.id, lines: [plain] }), /اختر المصنع/));
+  check("والبيع لا يُرحَّل على مصنع", throws(() => D.saveInvoice(t, { kind: "sale", shopId: fac.id, lines: [plain] }), /اختر المحل/));
+  let fb = D.balance(t, fac.id);
+  check("عليّ للمصنع: 50 + 32 = 82 جم، و1000 + 160 = 1160 ريال", fb.gold18 === -82 && fb.cash === -1160, fb);
+  let hd = D.holdings(t);
+  check("الطقمان في يدي من المصنع", hd.pieces.length === 2 && hd.pieces.every((p) => p.party.id === fac.id) && hd.setsW18 === 32, hd.pieces.map((p) => p.name));
+
+  // بيع الطقم المسمّى بالاسم، وغير المسمّى باختياره من الممتلكات
+  const unnamed = hd.pieces.find((p) => !p.name);
+  const s1 = D.saveInvoice(t, { kind: "sale", shopId: shopA.id, date: "2026-02-02",
+    lines: [D.buildLine({ wo: "T1", reg: 20, wage: 12 }), D.buildLine({ reg: 12, wage: 12, src: unnamed.id })] });
+  hd = D.holdings(t);
+  check("بعد بيعهما لا طقم في يدي", hd.pieces.length === 0, hd.pieces);
+  check("والمحل عليه 32 جم و384 ريال", D.balance(t, shopA.id).gold18 === 32 && D.balance(t, shopA.id).cash === 384);
+  check("الطقم المختار لا يُضاف مرتين", throws(() => D.checkLines([D.buildLine({ reg: 1, src: "x" }), D.buildLine({ reg: 2, src: "x" })]), /مرتين/));
+
+  // مرتجعٌ من المحل يعود إلى يدي
+  D.saveInvoice(t, { kind: "sale_return", shopId: shopA.id, date: "2026-02-03", lines: [D.buildLine({ wo: "T1", reg: 20, wage: 12 })] });
+  hd = D.holdings(t);
+  check("المرتجع T1 في يدي، من «محل السلام»", hd.pieces.length === 1 && hd.pieces[0].name === "T1" && hd.pieces[0].party.id === shopA.id);
+  check("وحركته: بضاعة · بيع · مرتجع", D.woHistory(t, "T1").map((m) => m.kind).join(",") === "purchase,sale,sale_return");
+  // إرجاعه للمصنع يخرجه من يدي ويُنقص ما عليّ
+  const pr = D.saveInvoice(t, { kind: "purchase_return", shopId: fac.id, date: "2026-02-04", lines: [D.buildLine({ wo: "T1", reg: 20, wage: 5 })] });
+  hd = D.holdings(t);
+  fb = D.balance(t, fac.id);
+  check("إرجاع لمصنع PR-00001: خرج من يدي، وعليّ 62 جم و1060 ريال",
+    pr.no === "PR-00001" && hd.pieces.length === 0 && fb.gold18 === -62 && fb.cash === -1060, fb);
+
+  // التحصيل من المحل يملأ صناديقي، والدفع للمصنع يُنقصها
+  const rv = D.saveVoucher(t, { kind: "receipt", shopId: shopA.id, date: "2026-02-05",
+    rows: [{ kind: "gold", weight: 10, karat: 21 }, { kind: "gold", weight: 3, karat: 18 }, { kind: "cash", amount: 200 }] });
+  check("التحصيل رقمه RV-00001 ولا يكون من مصنع", rv.no === "RV-00001" &&
+    throws(() => D.saveVoucher(t, { kind: "receipt", shopId: fac.id, rows: [{ kind: "cash", amount: 1 }] }), /اختر المحل/));
+  hd = D.holdings(t);
+  const b21 = hd.boxes.find((b) => b.karat === 21), b18 = hd.boxes.find((b) => b.karat === 18);
+  check("صندوق 21: 10 جم من «محل السلام» بتاريخه", b21 && b21.weight === 10 && b21.moves[0].party.id === shopA.id && b21.moves[0].date === "2026-02-05");
+  check("صندوق 18: 3 جم، والنقد 200", b18 && b18.weight === 3 && hd.cash.amount === 200);
+  check("الصناديق مرتّبة بالعيار الأعلى أولاً", hd.boxes[0].karat === 21);
+  const pv = D.saveVoucher(t, { kind: "payment", shopId: fac.id, date: "2026-02-06",
+    rows: [{ kind: "gold", weight: 6, karat: 21 }, { kind: "cash", amount: 150 }] });
+  hd = D.holdings(t);
+  fb = D.balance(t, fac.id);
+  check("الدفع للمصنع PV-00001: صندوق 21 بقي 4 جم والنقد 50",
+    pv.no === "PV-00001" && hd.boxes.find((b) => b.karat === 21).weight === 4 && hd.cash.amount === 50, hd.cash);
+  check("وحركة الصندوق: دفعٌ لـ«مصنع الريان» أولاً ثم التحصيل", hd.boxes[0].moves[0].sign === -1 && hd.boxes[0].moves[0].party.id === fac.id);
+  check("ونقص ما عليّ للمصنع: 6 جم عيار 21 = 7 جم مكافئ 18 → 55 جم، و910 ريال", fb.gold18 === -55 && fb.cash === -910, fb);
+  check("ذهب الممتلكات بمكافئ 18: 4 × 21/18 + 3 = 7.667", hd.gold18 === 7.667, hd.gold18);
+  check("المبيعات والتحصيل للمحلات وحدها", D.board(t, null, null).rows.length === 1);
 }
 
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);

@@ -46,7 +46,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * جاديت للجوال: الواجهة كلها صفحاتٌ داخل التطبيق (assets/web) تُعرض في
+ * نظام محاسبي للذهب (الجوال): الواجهة كلها صفحاتٌ داخل التطبيق (assets/web) تُعرض في
  * WebView، وبياناتها في الجوال (IndexedDB). هذا الملف يضيف ما لا تقدر عليه
  * الصفحة وحدها: المشاركة صورةً، والطباعة وحفظ PDF، والنسخ الاحتياطي في
  * مجلدٍ خارج التطبيق (يبقى بعد حذفه)، والتحديث من GitHub.
@@ -258,7 +258,7 @@ public class MainActivity extends Activity {
                     String[] r = BackupFolder.readLatest(this, uri);
                     if (r == null) {
                         emit("restore", obj("ok", false, "error",
-                                "لا توجد نسخةٌ من بيانات جاديت في هذا المجلد", "name", BackupFolder.name(this)));
+                                "لا توجد نسخةٌ من بيانات التطبيق في هذا المجلد", "name", BackupFolder.name(this)));
                     } else {
                         emit("restore", obj("ok", true, "file", r[0], "text", r[1], "name", BackupFolder.name(this)));
                     }
@@ -380,7 +380,7 @@ public class MainActivity extends Activity {
         ui.post(() -> {
             if (!canInstall()) {
                 pendingInstall = f;
-                toast("اسمح لجاديت بتثبيت التحديثات، ثم ارجع");
+                toast("اسمح للتطبيق بتثبيت التحديثات، ثم ارجع");
                 try {
                     startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                             Uri.parse("package:" + getPackageName())));

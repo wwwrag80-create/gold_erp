@@ -1,18 +1,27 @@
-/* منطق الحسابات مع المحلات — بلا واجهة، فيُختبر وحده (`mobile/tests`).
+/* منطق حسابات المندوب — بلا واجهة، فيُختبر وحده (`mobile/tests`).
  *
- * الأثر على حساب المحل كما يرحّله البرنامج على الكمبيوتر
- * (`models/invoices.py` و`models/vouchers.py`)، والموجب «عليه»:
- *   فاتورة بيع   : ذهب + الوزن المقيد (مكافئ 18) · نقد + (الأجور + الضريبة)
- *   مرتجع بيع    : ذهب − الوزن المقيد            · نقد − (الأجور + الضريبة)
- *   سند قبض      : ذهب − مكافئ كل سطر ذهب − الخصم الوزني
- *                  نقد − النقد − الخصم النقدي، وفرق الصافي بإشارته
- *   سند صرف      : ذهب + مكافئ كل سطر ذهب      · نقد + النقد
- * والرصيد الجاري يُقرَّب كما يقرّبه كشف الحساب هناك: الذهب ثلاث منازل
- * والنقد منزلتان عند كل حركة.
+ * المندوب يأخذ البضاعة من **المصانع** ويبيعها **للمحلات**، يحصّل من المحلات
+ * ذهباً ونقداً، ثم يدفع للمصانع ما عليه. الطرفان في قائمةٍ واحدة (`shops`)
+ * ويميّزهما `type`: «shop» (الافتراضي) أو «factory».
  *
- * **الفرق المقصود عن البرنامج**: لا مخزون ولا «وارد من التصنيع». رقم
- * التشغيل يُكتب بأوزانه في الفاتورة ولو لم يُسجَّل قبلها، وإن كان قد
- * رجع بمرتجعٍ سابق تُعبَّأ أوزانه من ذلك المرتجع (`woLast`).
+ * الأثر على حساب الطرف، والموجب «عليه» (للمحل: عليه لي · للمصنع: الموجب له
+ * عندي نادر، والسالب ما عليّ له):
+ *   فاتورة بيع (محل)        : ذهب + الوزن المقيد (مكافئ 18) · نقد + (الأجور + الضريبة)
+ *   مرتجع (محل)             : ذهب − الوزن · نقد − الأجور
+ *   تحصيل (سند قبض، محل)    : ذهب − مكافئ كل سطر − الخصم الوزني · نقد − النقد − الخصم
+ *   بضاعة من مصنع           : ذهب − الوزن · نقد − الأجور   (صار عليّ للمصنع)
+ *   إرجاع لمصنع             : ذهب + الوزن · نقد + الأجور
+ *   دفع (سند صرف، لمصنع)    : ذهب + مكافئ كل سطر · نقد + النقد   (نقص ما عليّ)
+ * والفاتورة والسند كما يرحّلهما البرنامج على الكمبيوتر
+ * (`models/invoices.py` و`models/vouchers.py`)، والرصيد يُقرَّب عند كل حركة:
+ * الذهب ثلاث منازل والنقد منزلتان.
+ *
+ * **الممتلكات** (`holdings`): ما مع المندوب الآن — صندوقٌ لكل عيار من ذهب
+ * التحصيل ناقصاً ما دُفع للمصانع، وصندوق النقد، والأطقم التي في يده (من مصنعٍ
+ * أو مرتجعةً من محل) ما لم تُبَع أو تُرجَع.
+ *
+ * اسم الطقم اختياري: يُكتب الوزن ويُرحَّل. وإن كُتب اسمٌ سبق له حركة
+ * عُبّئت أوزانه منها (`woLast`).
  */
 (function (root) {
   "use strict";
@@ -21,10 +30,16 @@
   const R = Num.pyRound;
 
   const KIND_LABEL = {
-    sale: "فاتورة بيع", sale_return: "مرتجع بيع",
-    receipt: "سند قبض", payment: "سند صرف", opening: "رصيد افتتاحي",
+    sale: "فاتورة بيع", sale_return: "مرتجع",
+    purchase: "بضاعة من مصنع", purchase_return: "إرجاع لمصنع",
+    receipt: "تحصيل", payment: "دفع", opening: "رصيد افتتاحي",
   };
-  const PREFIX = { sale: "S", sale_return: "R", receipt: "RV", payment: "PV" };
+  const PREFIX = { sale: "S", sale_return: "R", purchase: "P", purchase_return: "PR", receipt: "RV", payment: "PV" };
+  // ما يدخل يد المندوب من أطقم وما يخرج منها
+  const IN_KINDS = ["sale_return", "purchase"];
+  const OUT_KINDS = ["sale", "purchase_return"];
+  const SHOP_KINDS = ["sale", "sale_return"];
+  const FACTORY_KINDS = ["purchase", "purchase_return"];
 
   function newState() {
     return {
@@ -33,7 +48,7 @@
         viewKarat: 18, stoneRate: Gold.STONE_DISCOUNT_RATE,
         showBalanceOnInvoice: true, theme: "auto", lastBackup: "",
       },
-      seq: { S: 0, R: 0, RV: 0, PV: 0 },
+      seq: { S: 0, R: 0, P: 0, PR: 0, RV: 0, PV: 0 },
       shops: [], invoices: [], vouchers: [], held: [],
     };
   }
@@ -57,15 +72,22 @@
     return `${p}-${String(st.seq[p]).padStart(5, "0")}`;
   }
 
-  // ══ المحلات ══
+  // ══ الأطراف: المحلات والمصانع ══
   function shopById(st, id) { return st.shops.find((s) => s.id === id) || null; }
+  function isFactory(p) { return !!p && p.type === "factory"; }
+  function shopsOnly(st) { return st.shops.filter((p) => !isFactory(p)); }
+  function factoriesOnly(st) { return st.shops.filter(isFactory); }
   function saveShop(st, data) {
+    const type = data.type === "factory" ? "factory" : "shop";
+    const word = type === "factory" ? "المصنع" : "المحل";
     const name = String(data.name || "").trim();
-    if (!name) throw new Error("اكتب اسم المحل");
+    if (!name) throw new Error(`اكتب اسم ${word}`);
     const dup = st.shops.find((s) => s.name.trim() === name && s.id !== data.id);
-    if (dup) throw new Error(`يوجد محلٌّ بالاسم نفسه: ${name}`);
+    if (dup) throw new Error(`يوجد ${isFactory(dup) ? "مصنعٌ" : "محلٌّ"} بالاسم نفسه: ${name}`);
+    const old = data.id ? shopById(st, data.id) : null;
+    if (old && (old.type || "shop") !== type) throw new Error("لا يتحوّل المحل مصنعاً ولا العكس");
     const rec = {
-      id: data.id || uid("sh_"),
+      id: data.id || uid(type === "factory" ? "fa_" : "sh_"), type,
       name, phone: String(data.phone || "").trim(),
       notes: String(data.notes || "").trim(),
       agreedWage18: Number(data.agreedWage18 || 0),
@@ -81,7 +103,7 @@
   function deleteShop(st, id) {
     const used = st.invoices.some((d) => d.shopId === id) ||
       st.vouchers.some((d) => d.shopId === id);
-    if (used) throw new Error("للمحل فواتير أو سندات — احذفها أولاً أو أبقِ المحل");
+    if (used) throw new Error("للحساب فواتير أو سندات — احذفها أولاً أو أبقِ الحساب");
     st.shops = st.shops.filter((s) => s.id !== id);
   }
 
@@ -94,12 +116,12 @@
       if (amount <= 0) throw new Error("أدخل مبلغ الأجر لسطر «أجر فقط»");
       return { wageOnly: true, amount, wages: amount, note: String(e.note || "").trim(),
         wo: "", model: "", karat: 0, reg18: 0, gold18: 0, small18: 0, big18: 0,
-        after18: 0, standing18: 0, diamond: 0, rate18: 0 };
+        after18: 0, standing18: 0, diamond: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
     }
+    // اسم الطقم اختياري — الوزن وحده يكفي
     const wo = String(e.wo || "").trim();
-    if (!wo) throw new Error("اكتب رقم التشغيل");
     const reg = Number(e.reg || 0);
-    if (!(reg > 0)) throw new Error(`أدخل وزن الطقم ${wo} — الوزن المقيد صفر`);
+    if (!(reg > 0)) throw new Error(wo ? `أدخل وزن الطقم ${wo}` : "أدخل الوزن");
     // الوزن المقترح (من مرتجعٍ أو بيعٍ سابق) يُعتمد بدقّته المخزَّنة ما دام
     // لم يُغيَّر — كـ`_reg_exact` في البرنامج: الخانة تعرض منزلتين، وعيار
     // 21 ذهاباً وإياباً كان يترك 0.001 جم من لا شيء
@@ -123,6 +145,8 @@
       stoneRate: e.stoneRate === undefined ? Gold.STONE_DISCOUNT_RATE : Number(e.stoneRate),
       rate18, wages: Gold.totalWages(rate18, reg18),
       note: String(e.note || "").trim(),
+      // رقم السطر الثابت، ومن أي طقمٍ في اليد جاء (للممتلكات)
+      lid: e.lid || uid("l"), src: String(e.src || ""),
     };
   }
 
@@ -158,9 +182,15 @@
   function checkLines(lines) {
     if (!lines.length) throw new Error("أضف طقماً واحداً على الأقل");
     const seen = new Set();
+    const srcs = new Set();
     for (const li of lines) {
       if (li.wageOnly) continue;
-      const key = li.wo.trim();
+      if (li.src) {
+        if (srcs.has(li.src)) throw new Error("الطقم نفسه مضافٌ مرتين في الفاتورة — احذف السطر المكرّر.");
+        srcs.add(li.src);
+      }
+      const key = (li.wo || "").trim();
+      if (!key) continue;
       if (seen.has(key)) {
         throw new Error(`الطقم ${key} مكرّر في الفاتورة — القطعة الواحدة لا تُباع ` +
           "مرتين في مستندٍ واحد. احذف السطر المكرّر.");
@@ -170,8 +200,10 @@
   }
 
   function saveInvoice(st, draft) {
-    if (!shopById(st, draft.shopId)) throw new Error("اختر المحل");
-    if (!["sale", "sale_return"].includes(draft.kind)) throw new Error("نوع الفاتورة غير صحيح");
+    const party = shopById(st, draft.shopId);
+    const forFactory = FACTORY_KINDS.includes(draft.kind);
+    if (!SHOP_KINDS.includes(draft.kind) && !forFactory) throw new Error("نوع الفاتورة غير صحيح");
+    if (!party || isFactory(party) !== forFactory) throw new Error(forFactory ? "اختر المصنع" : "اختر المحل");
     const lines = draft.lines || [];
     checkLines(lines);
     const t = totals(lines, !!draft.vat);
@@ -217,15 +249,18 @@
   }
 
   function saveVoucher(st, draft) {
-    if (!shopById(st, draft.shopId)) throw new Error("اختر المحل");
+    const party = shopById(st, draft.shopId);
     if (!["receipt", "payment"].includes(draft.kind)) throw new Error("نوع سند غير صحيح");
+    // التحصيل من المحلات، والدفع للمصانع (ودفعٌ قديم لمحلٍّ يبقى كما رُحّل)
+    if (draft.kind === "receipt" && (!party || isFactory(party))) throw new Error("اختر المحل");
+    if (draft.kind === "payment" && !party) throw new Error("اختر المصنع");
     const rows = voucherRows(draft.rows);
     const discCash = R(Number(draft.discCash || 0), 2);
     const discGold18 = R(Number(draft.discGold18 || 0), 3);
     const netDiff = R(Number(draft.netDiff || 0), 2);
     for (const v of [discCash, discGold18]) if (v < 0) throw new Error("الخصومات لا تقبل السالب");
     if (draft.kind === "payment" && (discCash || discGold18)) {
-      throw new Error("الخصومات المسموحة تخص سندات القبض فقط");
+      throw new Error("الخصومات المسموحة تخص التحصيل فقط");
     }
     if (!rows.length && !discCash && !discGold18 && !netDiff) {
       throw new Error("أضف سطراً واحداً على الأقل في السند");
@@ -255,6 +290,8 @@
   function effects(doc) {
     if (doc.kind === "sale") return { gd: doc.totalW18, gc: 0, cd: doc.grand, cc: 0 };
     if (doc.kind === "sale_return") return { gd: 0, gc: doc.totalW18, cd: 0, cc: doc.grand };
+    if (doc.kind === "purchase") return { gd: 0, gc: doc.totalW18, cd: 0, cc: doc.grand };
+    if (doc.kind === "purchase_return") return { gd: doc.totalW18, gc: 0, cd: doc.grand, cc: 0 };
     if (doc.kind === "receipt") {
       let gc = 0, cc = 0;
       for (const r of doc.rows) { gc += r.equiv; cc += r.amount; }
@@ -372,7 +409,7 @@
     if (!key) return out;
     for (const d of st.invoices) {
       d.lines.forEach((li, idx) => {
-        if (!li.wageOnly && li.wo.trim() === key) {
+        if (!li.wageOnly && (li.wo || "").trim() === key) {
           out.push({ inv: d, line: li, idx, kind: d.kind, date: d.date,
             createdAt: d.createdAt, shop: shopById(st, d.shopId) });
         }
@@ -417,7 +454,7 @@
   }
   function board(st, from, to) {
     const rows = [];
-    for (const shop of st.shops) {
+    for (const shop of shopsOnly(st)) {
       const g = { open: 0, sales: 0, returns: 0, paid: 0, other: 0 };
       const c = { open: 0, sales: 0, returns: 0, paid: 0, other: 0 };
       let nInv = 0, lastSale = "", lastPay = "";
@@ -452,70 +489,68 @@
       x.returns > 0.0005 || x.paid > 0.0005);
   }
 
-  // ══ لوحة التحكم ══
-  function monthKey(iso) { return iso.slice(0, 7); }
-  function monthsBack(n, ref) {
-    const t = ref || today();
-    let y = +t.slice(0, 4), m = +t.slice(5, 7);
-    const out = [];
-    for (let i = 0; i < n; i++) {
-      out.unshift(`${y}-${String(m).padStart(2, "0")}`);
-      m--; if (!m) { m = 12; y--; }
-    }
-    return out;
-  }
-  function dashboard(st, nMonths) {
-    const t = today();
-    const months = monthsBack(nMonths || 6, t);
-    const per = {};
-    for (const k of months) per[k] = { sales: 0, returns: 0, wages: 0, paidGold: 0, paidCash: 0, n: 0 };
-    for (const d of [...st.invoices, ...st.vouchers]) {
-      const m = per[monthKey(d.date)];
-      if (!m) continue;
-      const e = effects(d);
-      if (d.kind === "sale") { m.sales += d.totalW18; m.wages += d.wages; m.n++; }
-      else if (d.kind === "sale_return") { m.returns += d.totalW18; m.wages -= d.wages; }
-      else if (d.kind === "receipt") { m.paidGold += e.gc - e.gd; m.paidCash += e.cc - e.cd; }
-    }
-    for (const k of months) for (const f of Object.keys(per[k])) per[k][f] = R(per[k][f], f === "n" ? 0 : 3);
-    const bal = allBalances(st);
-    let goldOn = 0, goldFor = 0, cashOn = 0, cashFor = 0, owing = 0;
-    const list = [];
-    for (const s of st.shops) {
-      const b = bal[s.id];
-      if (b.gold18 > 0) goldOn += b.gold18; else goldFor -= b.gold18;
-      if (b.cash > 0) cashOn += b.cash; else cashFor -= b.cash;
-      if (b.gold18 > 0.0005 || b.cash > 0.005) owing++;
-      list.push({ shop: s, gold18: b.gold18, cash: b.cash });
-    }
-    // الأطقم عند المحلات: آخر حركةٍ للرقم بيع — وعندك: آخر حركته مرتجع
-    const last = {};
-    for (const inv of st.invoices) {
-      for (const li of inv.lines) {
-        if (li.wageOnly) continue;
-        const k = li.wo.trim();
-        const cur = last[k];
-        if (!cur || docOrder(cur.inv, inv) < 0) last[k] = { inv, line: li };
+  // ══ الممتلكات: ما مع المندوب الآن ══
+  function lineId(doc, li, idx) { return li.lid || `${doc.id}#${idx}`; }
+  function holdings(st) {
+    // صناديق الذهب بعيارها، وصندوق النقد — من التحصيل ناقصاً الدفع
+    const boxes = {};
+    const cash = { amount: 0, inSum: 0, outSum: 0, moves: [] };
+    for (const v of st.vouchers.slice().sort(docOrder)) {
+      const sg = v.kind === "receipt" ? 1 : v.kind === "payment" ? -1 : 0;
+      if (!sg) continue;
+      const party = shopById(st, v.shopId);
+      for (const r of v.rows) {
+        if (r.kind === "gold") {
+          const b = boxes[r.karat] = boxes[r.karat] || { karat: r.karat, weight: 0, inSum: 0, outSum: 0, moves: [] };
+          b.weight = R(b.weight + sg * r.weight, 3);
+          if (sg > 0) b.inSum = R(b.inSum + r.weight, 3); else b.outSum = R(b.outSum + r.weight, 3);
+          b.moves.push({ sign: sg, weight: r.weight, date: v.date, party, doc: v, notes: r.notes || "" });
+        } else {
+          cash.amount = R(cash.amount + sg * r.amount, 2);
+          if (sg > 0) cash.inSum = R(cash.inSum + r.amount, 2); else cash.outSum = R(cash.outSum + r.amount, 2);
+          cash.moves.push({ sign: sg, amount: r.amount, date: v.date, party, doc: v, notes: r.notes || "" });
+        }
       }
     }
-    let outN = 0, outW = 0, backN = 0, backW = 0;
-    const atShop = {};
-    for (const m of Object.values(last)) {
-      if (m.inv.kind === "sale") {
-        outN++; outW += m.line.reg18;
-        atShop[m.inv.shopId] = (atShop[m.inv.shopId] || 0) + 1;
-      } else { backN++; backW += m.line.reg18; }
+    // الأطقم في اليد: ما دخل (مرتجعٌ من محل · بضاعةٌ من مصنع) ولم يخرج
+    // (بيعٌ لمحل · إرجاعٌ لمصنع). الخارج يُطابق بطقمه المختار (`src`) أو باسمه
+    const pieces = new Map();
+    const byName = new Map();
+    for (const d of st.invoices.slice().sort(docOrder)) {
+      const isIn = IN_KINDS.includes(d.kind), isOut = OUT_KINDS.includes(d.kind);
+      d.lines.forEach((li, idx) => {
+        if (li.wageOnly) return;
+        const name = (li.wo || "").trim();
+        if (isIn) {
+          const id = lineId(d, li, idx);
+          if (name && byName.has(name)) pieces.delete(byName.get(name));
+          pieces.set(id, { id, name, karat: li.karat || 18, w18: li.reg18, rate18: li.rate18,
+            date: d.date, doc: d, line: li, party: shopById(st, d.shopId), fromKind: d.kind });
+          if (name) byName.set(name, id);
+        } else if (isOut) {
+          let id = li.src && pieces.has(li.src) ? li.src : null;
+          if (!id && name && byName.has(name)) id = byName.get(name);
+          if (id) {
+            const p = pieces.get(id);
+            pieces.delete(id);
+            if (p && p.name) byName.delete(p.name);
+          }
+        }
+      });
     }
-    const cur = months[months.length - 1], prev = months[months.length - 2];
-    const mb = board(st, cur + "-01", null);
-    return {
-      months, per, cur, prev,
-      goldOn: R(goldOn, 3), goldFor: R(goldFor, 3), cashOn: R(cashOn, 2), cashFor: R(cashFor, 2), owing,
-      topGold: list.filter((x) => x.gold18 > 0.0005).sort((a, b) => b.gold18 - a.gold18).slice(0, 5),
-      topCash: list.filter((x) => x.cash > 0.005).sort((a, b) => b.cash - a.cash).slice(0, 5),
-      setsOut: { n: outN, w18: R(outW, 3), byShop: atShop }, setsBack: { n: backN, w18: R(backW, 3) },
-      month: { gold: mb.gold, cash: mb.cash },
-    };
+    const list = [...pieces.values()].sort((x, y) => docOrder(y.doc, x.doc));
+    let setsW18 = 0;
+    for (const p of list) setsW18 = R(setsW18 + p.w18, 3);
+    const boxList = Object.values(boxes).filter((b) => b.moves.length)
+      .sort((x, y) => y.karat - x.karat);
+    for (const b of boxList) b.moves.reverse();
+    cash.moves.reverse();
+    let gold18 = 0;
+    for (const b of boxList) gold18 = R(gold18 + Gold.store(b.weight, b.karat), 3);
+    return { boxes: boxList, cash, pieces: list, setsW18, gold18 };
+  }
+  function pieceById(st, id) {
+    return holdings(st).pieces.find((p) => p.id === id) || null;
   }
 
   // ══ نسخة احتياطية ══
@@ -539,13 +574,13 @@
   }
 
   const api = {
-    KIND_LABEL, newState, uid, today, nextNo,
-    shopById, saveShop, deleteShop,
+    KIND_LABEL, IN_KINDS, OUT_KINDS, SHOP_KINDS, FACTORY_KINDS, newState, uid, today, nextNo,
+    shopById, isFactory, shopsOnly, factoriesOnly, saveShop, deleteShop,
     buildLine, lineToEntry, totals, checkLines, saveInvoice, deleteInvoice,
     voucherRows, saveVoucher, deleteVoucher,
     effects, docsOf, statement, balance, balanceAround, allBalances,
     woHistory, woLast, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
-    GRADES, grade, boardSide, board, hasMovement, dashboard, monthsBack,
+    GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

@@ -240,7 +240,7 @@ input.in[readonly] { background: var(--surface2); color: var(--muted); }
 .quick button .i { font-size: 22px; }
 .quick button:active { background: var(--hover); }
 
-/* ══════════ 1.1 — أيقونات، لوحة التحكم، العملاء، التحديث (الألوان نفسها) ══════════ */
+/* ══════════ أيقونات، الممتلكات، الحسابات، التحديث (الألوان نفسها) ══════════ */
 .ic { display: inline-flex; align-items: center; justify-content: center; line-height: 0; flex: 0 0 auto; }
 .ic svg { display: block; }
 .btn .ic, .note-bar .ic, h2 .ic, h3 .ic, summary .ic { vertical-align: -4px; }
@@ -319,28 +319,26 @@ input.in[readonly] { background: var(--surface2); color: var(--muted); }
 .row-link:last-child { border-bottom: 0; }
 .row-link:active { background: var(--hover); }
 
-/* الرسم البياني: سلسلةٌ واحدة بلون الذهب، شبكةٌ خفيفة */
-.chart-wrap { position: relative; }
-/* الأرقام والمحاور بترتيبٍ لاتيني داخل الرسم — فلا يُقصّ رقم المحور يميناً */
-svg.chart { width: 100%; height: auto; display: block; overflow: visible; direction: ltr; }
-svg.chart .grid { stroke: var(--line); stroke-width: 1; }
-svg.chart .base { stroke: var(--line3); stroke-width: 1; }
-svg.chart .tick { fill: var(--muted); font-size: 10px; font-family: Plex, sans-serif; }
-svg.chart .val { fill: var(--ink); font-size: 11px; font-weight: 700; font-family: Plex, sans-serif; }
-svg.chart .bar { fill: var(--gold); transition: opacity .15s ease; }
-svg.chart .bar.dim { opacity: .4; }
-svg.chart .hit { fill: transparent; outline: none; cursor: pointer; }
-.chart-tip {
-  display: none; position: absolute; top: -4px; width: 120px; background: var(--barBg); color: var(--barFg);
-  border-radius: 8px; padding: 6px 8px; font-size: 12px; text-align: center; pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0,0,0,.25);
+/* الممتلكات: صناديق تُلمس فتُفصَّل */
+.boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.box-tile {
+  text-align: start; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card);
+  padding: 12px; display: flex; flex-direction: column; gap: 3px; cursor: pointer;
+  transition: background .15s ease, transform .1s ease;
 }
-.chart-tip b { display: block; font-size: 13px; }
-.mini-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.mini-table th { text-align: right; font-weight: 600; color: var(--hdrFg); background: var(--hdrBg); padding: 6px 8px; }
-.mini-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
-.mini-table td.num { text-align: left; }
-
+.box-tile:active { background: var(--hover); transform: scale(.98); }
+.box-ic { width: 36px; height: 36px; border-radius: 10px; background: var(--goldSoft); color: var(--goldDim);
+  display: inline-flex; align-items: center; justify-content: center; }
+.box-t { font-weight: 700; font-size: 14px; margin-top: 4px; }
+.box-v { font-size: 22px; font-weight: 700; color: var(--ink); direction: rtl; }
+.box-v .u { font-size: 13px; font-weight: 400; color: var(--muted); }
+.box-v.bal-on, .box-v.bal-on .num { color: var(--red); }
+.boxes > .box-tile:last-child:nth-child(odd) { grid-column: span 2; }
+.avatar.fac { background: var(--hdrBg); color: var(--hdrFg); }
+.wages-row { margin-top: 8px; padding: 8px 10px; border-radius: var(--r-ctl); background: var(--sumBg); color: var(--sumInk); }
+.wages-row b { font-size: 16px; }
+.sheet h3 .ic { vertical-align: -4px; }
+.sheet .sec-title { margin-top: 6px; }
 /* التحديثات */
 .progress { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 10px; }
 .progress > span { display: block; height: 100%; width: 0; background: var(--gold); transition: width .25s ease; }

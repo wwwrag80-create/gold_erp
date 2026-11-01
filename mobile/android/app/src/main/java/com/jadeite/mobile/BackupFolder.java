@@ -20,13 +20,16 @@ import java.util.Locale;
 
 /**
  * الحفظ التلقائي في مجلدٍ يختاره صاحب الجهاز (خارج التطبيق) — فالبيانات تبقى
- * ولو حُذف التطبيق. بعد كل تغيير يُكتب `jadeite-data.json` (الأحدث) ونسخةُ
- * اليوم `jadeite-data-YYYY-MM-DD.json` (تبقى آخر 14). وعند تثبيت التطبيق من
+ * ولو حُذف التطبيق. بعد كل تغيير يُكتب `gold-data.json` (الأحدث) ونسخةُ
+ * اليوم `gold-data-YYYY-MM-DD.json` (تبقى آخر 14). وعند تثبيت التطبيق من
  * جديد يُختار المجلد نفسه فيُسترجع منه كل شيء.
  */
 final class BackupFolder {
     static final String PREFS = "backup";
-    static final String LATEST = "jadeite-data.json";
+    static final String LATEST = "gold-data.json";
+    static final String DAILY = "gold-data-";
+    // أسماء الإصدارات الأولى — يُسترجع منها أيضاً
+    static final String OLD_LATEST = "jadeite-data.json";
     static final int KEEP_DAYS = 14;
 
     private BackupFolder() { }
@@ -92,11 +95,11 @@ final class BackupFolder {
         byte[] data = json.getBytes(StandardCharsets.UTF_8);
         writeFile(c, d, LATEST, data);
         String day = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-        writeFile(c, d, "jadeite-data-" + day + ".json", data);
+        writeFile(c, d, DAILY + day + ".json", data);
         List<DocumentFile> daily = new ArrayList<>();
         for (DocumentFile f : d.listFiles()) {
             String n = f.getName();
-            if (n != null && n.startsWith("jadeite-data-") && n.endsWith(".json")) daily.add(f);
+            if (n != null && n.startsWith(DAILY) && n.endsWith(".json")) daily.add(f);
         }
         Collections.sort(daily, (a, b) -> String.valueOf(b.getName()).compareTo(String.valueOf(a.getName())));
         for (int i = KEEP_DAYS; i < daily.size(); i++) daily.get(i).delete();
@@ -110,11 +113,13 @@ final class BackupFolder {
         DocumentFile d = DocumentFile.fromTreeUri(c, t);
         if (d == null) return null;
         DocumentFile best = d.findFile(LATEST);
+        if (best == null) best = d.findFile(OLD_LATEST);
         if (best == null) {
             for (DocumentFile f : d.listFiles()) {
                 String n = f.getName();
                 if (n == null || !n.endsWith(".json")) continue;
-                if (!(n.startsWith("jadeite-data") || n.startsWith("jadeite-backup"))) continue;
+                if (!(n.startsWith("gold-data") || n.startsWith("gold-backup")
+                        || n.startsWith("jadeite-data") || n.startsWith("jadeite-backup"))) continue;
                 if (best == null || f.lastModified() > best.lastModified()) best = f;
             }
         }

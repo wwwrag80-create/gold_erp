@@ -36,7 +36,13 @@
   }
   function err(e) { toast((e && e.message) || String(e), "err"); }
 
+  // إغلاق نافذةٍ يرجع خطوةً في السجل (history.back) — وحدث الرجوع يصل بعد
+  // لحظة؛ فالنافذة التالية تنتظره، وإلا التقطته فأُغلقت فور فتحها
+  let backPending = null;
   function sheet(build) {
+    return (backPending || Promise.resolve()).then(() => openSheet(build));
+  }
+  function openSheet(build) {
     return new Promise((resolve) => {
       const wrap = h("div", { class: "sheet-wrap" });
       const box = h("div", { class: "sheet" });
@@ -56,8 +62,15 @@
       const closeBack = (v) => {
         if (done) return;
         window.removeEventListener("popstate", onPop);
+        if (history.state && history.state.sheet) {
+          backPending = new Promise((res) => {
+            const fin = () => { window.removeEventListener("popstate", fin); clearTimeout(t); backPending = null; res(); };
+            const t = setTimeout(fin, 400);
+            window.addEventListener("popstate", fin);
+          });
+          history.back();
+        }
         close(v);
-        if (history.state && history.state.sheet) history.back();
       };
       wrap.addEventListener("click", (e) => { if (e.target === wrap) closeBack(undefined); });
       build(box, closeBack);
@@ -153,5 +166,8 @@
     });
   }
 
-  root.UI = { h, toast, err, sheet, confirmSheet, pickSheet, numInput, field, enterChain };
+  // ينتظر رجوع السجل الذي يتبع إغلاق نافذة — قبل أي انتقالٍ بعدها
+  function idle() { return backPending || Promise.resolve(); }
+
+  root.UI = { h, toast, err, sheet, confirmSheet, pickSheet, numInput, field, enterChain, idle };
 })(window);
