@@ -163,7 +163,7 @@ class ColumnFitter(QtCore.QObject):
             self._busy = False
 
 
-def two_line_header(table, labels):
+def two_line_header(table, labels, pad=24):
     """عناوين الجدول كما تُعرض — والطويل منها سطران (5.0.5).
 
     رأس الجدول في Qt لا يكسر العنوان، فالعنوان الأطول من عموده يُقصّ
@@ -174,7 +174,7 @@ def two_line_header(table, labels):
     table.setHorizontalHeaderLabels(list(labels))
     hh = table.horizontalHeader()
     if any("\n" in (h or "") for h in labels):
-        two = 2 * QtGui.QFontMetrics(hh.font()).lineSpacing() + 24
+        two = 2 * QtGui.QFontMetrics(hh.font()).lineSpacing() + pad
         if hh.minimumHeight() != two:
             hh.setMinimumHeight(two)
 
@@ -208,6 +208,12 @@ def _content_need(t, shown, avail, sample=80):
         out = {}
         for c in shown:
             best = 0
+            # عمود أزرار الصف (✎ ✕): عرضُ الأزرار كاملةً — كان يأخذ
+            # نصيبه من الأوزان فيُقصّ أحد الزرّين عند حافّة الجدول
+            cw = t.cellWidget(rows[0], c) if rows else None
+            if cw is not None and cw.property("rowActions"):
+                out[c] = min(cap, cw.sizeHint().width() + 6)
+                continue
             for r in rows:
                 it = t.item(r, c)
                 if it is None:

@@ -498,7 +498,7 @@ class _NoteLabel(QtWidgets.QLabel):
 
 
 class _Panel(QtWidgets.QFrame):
-    """لوحةُ رقمٍ واحد: عنوانٌ صغير، ثم الرقم كبيراً، ثم سطرُ شرح.
+    """لوحةُ رقمٍ واحد في سطر: عنوانٌ صغير، ثم سطرُ شرح، ثم الرقم كبيراً.
 
     الأرقام التي يُسأل عنها بعد كل فاتورة (الوزن · الأجور · رصيد
     العميل) كانت سطراً نصياً واحداً تحت الجدول تقرؤه العين بجهد.
@@ -510,10 +510,13 @@ class _Panel(QtWidgets.QFrame):
         # والشاشة كلّها أمام العين بلا تمريرٍ صعوداً ونزولاً
         super().__init__()
         self.setObjectName("chip")
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setSpacing(0)
-        lay.setContentsMargins(10, 4, 10, 4)
-        row = QtWidgets.QHBoxLayout()
+        # 5.1.2: العنوان وتحته الشرح، والرقم بجانبهما بارتفاعهما — كان
+        # الشرح سطراً ثالثاً تحت الرقم. فاللوحات أقصر والجدول فوقها أطول،
+        # والشرح إن ضاق عنه المكان كاملٌ في التلميح
+        g = QtWidgets.QGridLayout(self)
+        g.setHorizontalSpacing(8)
+        g.setVerticalSpacing(0)
+        g.setContentsMargins(10, 2, 10, 2)
         t = QtWidgets.QLabel(title)
         t.setObjectName("chipTitle")
         # 5.0.5: العنوان ينكسر سطرين في الشاشة الضيّقة بدل أن يفرض عرضه
@@ -522,13 +525,17 @@ class _Panel(QtWidgets.QFrame):
         t.setMinimumWidth(70)
         self.value = QtWidgets.QLabel("—")
         self.value.setObjectName("chipValue")
-        # العنوان يأخذ المتاح كلّه فلا ينكسر إلا إن ضاق فعلاً
-        row.addWidget(t, 1)
-        row.addWidget(self.value, 0, QtCore.Qt.AlignVCenter)
-        lay.addLayout(row)
         self.sub = QtWidgets.QLabel(sub, self)
         self.sub.setObjectName("chipSub")
-        lay.addWidget(self.sub)
+        # الشرح لا يفرض عرضه على صفّ اللوحات (فلا يعود شريط السحب الأفقي)
+        self.sub.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                               QtWidgets.QSizePolicy.Preferred)
+        self.sub.setMinimumWidth(0)
+        self.sub.setToolTip(sub)
+        g.addWidget(t, 0, 0)
+        g.addWidget(self.sub, 1, 0)
+        g.addWidget(self.value, 0, 1, 2, 1, QtCore.Qt.AlignVCenter)
+        g.setColumnStretch(0, 1)
         self.sub.setVisible(bool(sub))
         self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
                            QtWidgets.QSizePolicy.Maximum)
@@ -537,6 +544,7 @@ class _Panel(QtWidgets.QFrame):
         self.value.setText(value)
         if sub is not None:
             self.sub.setText(sub)
+            self.sub.setToolTip(sub)
             self.sub.setVisible(bool(sub))
 
 
@@ -623,7 +631,9 @@ class SalesScreen(QtWidgets.QWidget):
                   "الأجرة (ريال)": "الأجرة\n(ريال)"}
     # أوزان العرض (مجموعها 100): عمود الأزرار يكفيه القليل
     COL_W = [5, 8, 7, 8, 6, 7, 7, 7, 7, 7, 8, 7, 7, 9]
-    C_PIC, PIC = 2, 46            # عمود الصورة ومقاس مصغّرتها
+    # عمود الصورة ومقاس مصغّرتها — 5.1.2: أصغر (كان 46) فيقصر الصفّ
+    # ويتّسع الجدول لصفوفٍ أكثر؛ والنقر على الموديل يكبّر الصورة
+    C_PIC, PIC = 2, 32
     C_DIA = 11                    # عمود الماس
     # خانتا الأجر — تُكتبان في مكانهما (4.59)
     C_WAGE, C_AMOUNT = 12, 13
@@ -655,7 +665,10 @@ class SalesScreen(QtWidgets.QWidget):
         # إعدادها ولم تُثبت: بلا قيدٍ ولا أثر حتى تُستكمل وتُرحَّل
         issue = QtWidgets.QWidget()
         il = QtWidgets.QVBoxLayout(issue)
-        il.setContentsMargins(0, 4, 0, 0)
+        # 5.1.2: الرأس والإدخال مدمجان فوق، والجدول يأخذ ما بقي كلّه —
+        # «أبغى الجدول يحمل صفوفاً كافية مش جدولاً صغيراً»
+        il.setContentsMargins(0, 2, 0, 0)
+        il.setSpacing(4)
         il.addWidget(self._build_header())
         il.addWidget(self._build_entry())
         il.addWidget(self._build_items(), 1)
@@ -679,6 +692,7 @@ class SalesScreen(QtWidgets.QWidget):
 
     def _build_header(self):
         box = QtWidgets.QGroupBox("① العملية والطرف")
+        box.setProperty("dense", True)
         self.kind = kit.ComboBox()
         self.kind.addItem("فاتورة بيع", "sale")
         self.kind.addItem("مرتجع بيع", "sale_return")
@@ -766,7 +780,9 @@ class SalesScreen(QtWidgets.QWidget):
         self.order_note.setVisible(False)
 
         g = QtWidgets.QGridLayout(box)
+        g.setContentsMargins(8, 4, 8, 4)
         g.setHorizontalSpacing(8)
+        g.setVerticalSpacing(4)
         g.addWidget(QtWidgets.QLabel("نوع العملية:"), 0, 0)
         g.addWidget(self.kind, 0, 1)
         g.addWidget(QtWidgets.QLabel("العميل:"), 0, 2)
@@ -815,6 +831,7 @@ class SalesScreen(QtWidgets.QWidget):
         # العنوان قصير — وشرح المفاتيح تلميحٌ عند الوقوف عليه لا سطرٌ
         # يزاحم الجدول
         box = QtWidgets.QGroupBox("② إدخال الطقم")
+        box.setProperty("dense", True)
         box.setToolTip("Enter ينتقل للخانة التالية · الأسهم ← → تتنقّل · "
                        "وعند خانة الأجر يقف: Enter مرةً ثانية يضيف السطر")
         # رقم الموديل أولاً: يُملأ تلقائياً من دليل الموديلات عند
@@ -888,6 +905,8 @@ class SalesScreen(QtWidgets.QWidget):
         # ويُضاف كذلك بكتابة المبلغ في خانة الأجر ورقمُ التشغيل فارغ.
         self.btn_wage_only = kit.PushButton("+ أجر فقط")
         self.btn_wage_only.setObjectName("ghost")
+        # مدمجٌ: يقف في صفّ العناوين فوق «+ إضافة سطر» فلا يرفعه
+        self.btn_wage_only.setProperty("dense", True)
         self.btn_wage_only.setToolTip(
             "سطر أجرٍ بلا طقم ولا ذهب — يُضاف إلى أجور العميل وحدها.\n"
             "أو: اكتب المبلغ في خانة الأجر ورقم التشغيل فارغ ثم Enter"
@@ -920,7 +939,7 @@ class SalesScreen(QtWidgets.QWidget):
             ("الأجر/جم", self.line_wage, 2),
         ]
         # 4.93: صورة الموديل بجانب رقمه — كشاشة الوارد من التصنيع
-        self.model_pic = ModelPic()
+        self.model_pic = ModelPic(size=(52, 36))
         self.model_pic.clicked.connect(self._open_model_pic)
         self._pic_timer = QtCore.QTimer(self)
         self._pic_timer.setSingleShot(True)
@@ -935,7 +954,9 @@ class SalesScreen(QtWidgets.QWidget):
         mb.addWidget(self.model_no, 1)
         mb.addWidget(self.model_pic)
         g = QtWidgets.QGridLayout(box)
+        g.setContentsMargins(8, 2, 8, 4)
         g.setHorizontalSpacing(5)
+        g.setVerticalSpacing(2)
         # 5.0.5: الشاشة كاملةً بلا سحبٍ أفقي — كانت كل خانةٍ لا تقلّ عن
         # 86 بكسلاً فزاد السطر عن عرض الشاشات الشائعة (1366، و1920 بتكبير
         # 150%) فظهر شريط السحب. الآن أدنى عرضٍ يكفي رقمه، والفائض من
@@ -1045,6 +1066,7 @@ class SalesScreen(QtWidgets.QWidget):
 
     def _build_items(self):
         box = QtWidgets.QGroupBox("③ بنود الفاتورة")
+        box.setProperty("dense", True)
         self.items_table = make_table()
         self.items_table.setProperty(
             "emptyText", "لا بنود بعد — أدخل الطقم في «إدخال الطقم» ثم "
@@ -1088,6 +1110,8 @@ class SalesScreen(QtWidgets.QWidget):
         self.edit_banner.setVisible(False)
 
         v = QtWidgets.QVBoxLayout(box)
+        v.setContentsMargins(8, 4, 8, 4)
+        v.setSpacing(5)
         v.addWidget(self.items_table, 1)
         v.addWidget(hint)
         panels = QtWidgets.QHBoxLayout()
@@ -1121,6 +1145,7 @@ class SalesScreen(QtWidgets.QWidget):
         keys.setObjectName("cardSub")
         keys.setWordWrap(True)
         v = QtWidgets.QVBoxLayout()
+        v.setSpacing(2)
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.btn_save, 1)
         row.addWidget(self.btn_hold)
@@ -2920,11 +2945,13 @@ class SalesScreen(QtWidgets.QWidget):
                          round(t["wages"], 2)))
         fill(self.items_table, self.COLS, rows)
         two_line_header(self.items_table,
-                        [self.HEAD_SHOWN.get(h, h) for h in self.COLS])
-        # صفوفٌ أعلى من جداول العرض: البنود تُراجَع رقماً رقماً قبل الترحيل
-        # — وبارتفاع صورة الموديل (4.93)
+                        [self.HEAD_SHOWN.get(h, h) for h in self.COLS],
+                        pad=12)
+        # بارتفاع صورة الموديل (4.93). 5.1.2: صفٌّ أقصر (كان 55 بكسلاً
+        # بزيادةٍ فوق الخط) — النصّ كاملٌ غير مقصوص، والجدول يتّسع
+        # لضعف الصفوف في الشاشة نفسها
         self.items_table.verticalHeader().setDefaultSectionSize(
-            max(row_height(self.items_table) + 12, self.PIC + 6))
+            max(row_height(self.items_table, tight=True) + 1, self.PIC + 6))
         fit_columns(self.items_table, self.COL_W)
         self._fill_pics()
         if rows:

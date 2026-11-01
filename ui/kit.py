@@ -829,6 +829,18 @@ if ACTIVE:
         return (f"QPushButton {{ border-radius: {_d_ctl()}px; "
                 "padding: 6px 14px 7px 14px; }")
 
+    def _dense_sheet(make):
+        """زرٌّ مدمج (`dense`): حشوٌ أقلّ فقط — لون دوره كما هو (5.1.2)."""
+        # محدِّدٌ بخاصيتين: حشو المكتبة على `[hasIcon=false]` أسبق من
+        # محدِّد النوع وحده
+        rule = ('QPushButton[dense="true"][hasIcon="false"], '
+                'QPushButton[dense="true"][hasIcon="true"] '
+                '{ padding: 2px 10px 3px 10px; min-height: 22px; }')
+
+        def f(t):
+            return make(t) + "\n" + rule
+        return f
+
     def _ghost_qss(t):
         return _shape_qss() + f"""
         QPushButton {{ color: {t['ink']}; background: {t['surface']};
@@ -915,7 +927,10 @@ if ACTIVE:
             if kind == "classic":
                 self._kit_detach()
                 return
-            _custom(self, self._SHEETS[kind])
+            make = self._SHEETS[kind]
+            if self.property("dense"):
+                make = _dense_sheet(make)
+            _custom(self, make)
 
         def _kit_detach(self):
             """يعيد الزرّ لنمط النظام وحده — خارج تحديثات Fluent."""

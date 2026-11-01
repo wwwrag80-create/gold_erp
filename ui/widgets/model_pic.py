@@ -57,8 +57,10 @@ class ModelPic(QtWidgets.QLabel):
     clicked = QtCore.pyqtSignal()
     W, H = 64, 48
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, size=None):
         super().__init__(parent)
+        if size:                      # مقاسٌ أصغر لسطرٍ مدمج (المبيعات)
+            self.W, self.H = size
         self.setFixedSize(self.W, self.H)
         self.setAlignment(QtCore.Qt.AlignCenter)
         self.setObjectName("modelPic")

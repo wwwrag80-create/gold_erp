@@ -460,6 +460,8 @@ def row_action_buttons(table, count, on_edit=None, on_delete=None,
         if r in skip:
             continue
         box = QtWidgets.QWidget()
+        # علامةٌ يقرؤها محجِّم الأعمدة: عمودُه بعرض أزراره كاملةً (5.1.2)
+        box.setProperty("rowActions", True)
         h = QtWidgets.QHBoxLayout(box)
         h.setContentsMargins(2, 0, 2, 0)
         h.setSpacing(3)

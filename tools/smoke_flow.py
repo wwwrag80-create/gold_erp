@@ -9876,6 +9876,88 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    # ══════════════════════════════════════════════════════════════
+    step("127) 5.1.2: جدول بنود المبيعات يأخذ الشاشة — والقسمان فوقه مدمجان")
+    try:
+        import time as _tm127
+        from PyQt5 import QtWidgets as _QW127
+        _app127 = _QW127.QApplication.instance() or _QW127.QApplication([])
+        from ui import sales_screen as _ssm127
+        from ui.widgets import draft_keeper as _dk127
+        from ui.widgets.common import row_action_buttons as _rab127
+        from ui.widgets.table_fit import fit_columns as _fit127
+
+        def _pump127(ms):
+            _end = _tm127.time() + ms / 1000
+            while _tm127.time() < _end:
+                _app127.processEvents()
+                _tm127.sleep(0.01)
+        from ui.widgets import declutter as _dc127
+        _s127 = _ssm127.SalesScreen({"id": 1, "username": "admin",
+                                     "role": "admin",
+                                     "role_local": "accountant"})
+        # الشاشة كما في النافذة الرئيسية: داخل مكدّس الشاشات بهامش الصفحة،
+        # وسطور الشرح مطويّةٌ في «ⓘ» (الوضع الافتراضي)
+        _host127 = _QW127.QWidget()
+        _host127.setObjectName("screenHost")
+        _hl127 = _QW127.QVBoxLayout(_host127)
+        _hl127.setContentsMargins(16, 12, 16, 12)
+        _hl127.addWidget(_s127)
+        try:
+            for _k in list(_dk127._KEEPERS):
+                _k.timer.stop()
+            _s127.refresh()
+            _s127.render_items()
+            # مساحة الشاشة في نافذة 1366×700 بعد رأس الصفحة (60)
+            _host127.resize(1366, 640)
+            _host127.show()
+            _pump127(200)
+            for _lb in _s127.findChildren(_QW127.QLabel):
+                if _dc127.foldable(_lb) and _lb.isVisible():
+                    _dc127.fold(_lb)
+            _pump127(300)
+            _t127 = _s127.items_table
+            _rh127 = _t127.verticalHeader().defaultSectionSize()
+            _boxes127 = [b for b in _s127.findChildren(_QW127.QGroupBox)
+                         if b.title()[:1] in "①②③"]
+            check("أقسام الفاتورة الثلاثة مدمجة (حشوٌ أقلّ — الإطار واللون "
+                  "كما هما)",
+                  len(_boxes127) == 3
+                  and all(b.property("dense") for b in _boxes127),
+                  str([(b.title(), b.property("dense")) for b in _boxes127]))
+            check("صفّ البند أقصر (كان 55 بكسلاً) والنصّ كاملٌ فيه",
+                  _rh127 <= 42 and _rh127 >= _t127.fontMetrics().height() + 8,
+                  str(_rh127))
+            check("الشاشة كاملةً في نافذة 1366×700 بلا تمريرٍ عمودي "
+                  "(الإجماليات وزر الترحيل ظاهران)",
+                  _s127.minimumSizeHint().height() <= 616,
+                  str(_s127.minimumSizeHint().height()))
+            check("والجدول يتّسع لأربعة صفوفٍ فأكثر فيها (كان صفّين)",
+                  _t127.viewport().height() >= 4 * _rh127,
+                  f"{_t127.viewport().height()} / {_rh127}")
+            _host127.resize(1920, 940)
+            _pump127(300)
+            check("وفي 1920×1000 لعشرة صفوفٍ فأكثر (كانت خمسة)",
+                  _t127.viewport().height() >= 10 * _rh127,
+                  f"{_t127.viewport().height()} / {_rh127}")
+        finally:
+            _s127.close()
+            _host127.close()
+        _tb127 = _QW127.QTableWidget(3, 6)
+        _tb127.resize(700, 300)
+        _tb127.show()
+        _rab127(_tb127, 3, on_edit=lambda i: None, on_delete=lambda i: None)
+        _fit127(_tb127, [1, 9, 9, 9, 9, 9])
+        _pump127(300)
+        check("عمود أزرار الصف (✎ ✕) بعرض زرّيه كاملين — كان يُقصّ أحدهما",
+              _tb127.columnWidth(0)
+              >= _tb127.cellWidget(0, 0).sizeHint().width(),
+              f"{_tb127.columnWidth(0)} ≥ "
+              f"{_tb127.cellWidget(0, 0).sizeHint().width()}")
+        _tb127.close()
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

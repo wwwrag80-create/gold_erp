@@ -45,6 +45,9 @@ QGroupBox { border: 1px solid @line; border-radius: @rCard;
 QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top right;
                    right: 16px; padding: 0 @sp_sm; color: @goldDim;
                    background: transparent; }
+/* حاويةٌ مدمجة (`dense`): حشوٌ أقلّ لتُترك المساحة لجدولٍ تحتها —
+   الإطار والعنوان ولونهما كما هما (المبيعات 5.1.2). */
+QGroupBox[dense="true"] { padding: 2px 4px 2px 4px; }
 
 /* ══ الأزرار ══
    الأساسي ذهبي ممتلئ، والثانوي محدّد بإطار، والخفيف بلا لون —
@@ -61,6 +64,7 @@ QPushButton#ghost { background: @surface; color: @ink;
 QPushButton#ghost:hover { background: @hover; border-color: @line3; }
 QPushButton#danger, QPushButton#dangerBtn { background: @red; }
 QPushButton#danger:hover, QPushButton#dangerBtn:hover { background: @redHi; }
+QPushButton[dense="true"] { padding: 2px 10px 3px 10px; }
 QToolButton { background: @surface; color: @ink; border: 1px solid @line2;
               border-radius: @rCtl; padding: 7px 12px; font-weight: bold; }
 QToolButton:hover { background: @hover; border-color: @line3; }
