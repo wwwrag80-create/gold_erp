@@ -286,12 +286,14 @@ class _ClickGuard:
         return self._kit_g_release(self._kit_g_base("keyReleaseEvent"), e)
 
     def _kit_g_base(self, name):
+        # الصنف التالي في السلسلة الذي يعرّف الدالة — مأخوذةً بـ`getattr`:
+        # دوالّ أصناف Qt في `__dict__` واصفاتٌ (sip.methoddescriptor) لا
+        # تُستدعى مباشرةً، و`getattr` يعيدها دالّةً قابلة للاستدعاء (5.1.1)
         mro = type(self).__mro__
         i = mro.index(_ClickGuard)
         for k in mro[i + 1:]:
-            fn = k.__dict__.get(name)
-            if fn is not None:
-                return fn
+            if name in k.__dict__:
+                return getattr(k, name)
         return getattr(QtWidgets.QPushButton, name)
 
 
@@ -988,6 +990,12 @@ if ACTIVE:
         def completer(self):
             return QtWidgets.QLineEdit.completer(self)
 
+        def _showCompleterMenu(self):
+            # قائمة إكمال المكتبة **معطّلة** (5.1.1): الإكمال هنا إكمال Qt
+            # نفسه، والمكتبة كانت ترى إكمالاً فتبني قائمتها على إكمالها هي
+            # (وهو فارغ) فيسقط الإجراء مع كل حرف: «'NoneType' … 'activated'»
+            return None
+
         def contextMenuEvent(self, e):
             _edit_menu(self, e.globalPos())
 
@@ -1001,6 +1009,9 @@ if ACTIVE:
 
         def completer(self):
             return QtWidgets.QLineEdit.completer(self)
+
+        def _showCompleterMenu(self):
+            return None              # كما في `LineEdit` أعلاه (5.1.1)
 
     class PasswordLineEdit(_RtlTextMargins, qf.PasswordLineEdit):
         def __init__(self, *args, **kwargs):

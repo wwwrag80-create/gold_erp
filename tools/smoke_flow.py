@@ -9806,6 +9806,76 @@ def main():
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
+    step("126) 5.1.1: لا خطأ عند الكتابة في حقلٍ بإكمال، ولا عند مفتاحٍ على زر")
+    try:
+        import sys as _sys126
+        import time as _tm126
+        from PyQt5 import QtCore as _QC126, QtTest as _QT126, \
+            QtWidgets as _QW126
+        _app126 = _QW126.QApplication.instance() or _QW126.QApplication([])
+        from ui import kit as _kit126
+        _errs126 = []
+        _old_hook126 = _sys126.excepthook
+        _sys126.excepthook = lambda t, v, tb: _errs126.append(
+            f"{t.__name__}: {v}")
+
+        def _pump126(ms):
+            _end = _tm126.time() + ms / 1000
+            while _tm126.time() < _end:
+                _app126.processEvents()
+                _tm126.sleep(0.01)
+        try:
+            _le126 = _kit126.LineEdit()
+            _cp126 = _QW126.QCompleter(["alpha", "alpine", "beta"], _le126)
+            _le126.setCompleter(_cp126)
+            _le126.show()
+            _le126.setFocus()
+            _QT126.QTest.keyClicks(_le126, "al")
+            _pump126(200)
+            check("الكتابة في حقلٍ له إكمالٌ تلقائي (اسم الجهة · رقم الموديل)"
+                  " بلا خطأ — والإكمال يعمل كما كان",
+                  not _errs126 and _le126.completer() is _cp126,
+                  str(_errs126[:2]))
+            _w126 = _QW126.QWidget()
+            _l126 = _QW126.QHBoxLayout(_w126)
+            _bs126 = [_kit126.PushButton("✔ ترحيل الفاتورة"),
+                      _kit126.PushButton("موافق"),
+                      _kit126.PushButton("+ إضافة سطر")]
+            for _b in _bs126:
+                _l126.addWidget(_b)
+            _w126.resize(900, 600)          # تُغطّى برسالة Fluent لا بالكلاسيكية
+            _w126.show()
+            _pump126(50)
+            for _b in _bs126:
+                for _k in (_QC126.Qt.Key_A, _QC126.Qt.Key_Tab,
+                           _QC126.Qt.Key_Escape):
+                    _QT126.QTest.keyClick(_b, _k)
+            check("ومفتاحٌ على أي زرّ (Enter · Tab · حرف) بلا خطأ — كانت "
+                  "رسالة «sip.methoddescriptor» تظهر في كل الشاشات",
+                  not _errs126, str(_errs126[:2]))
+            _res126 = {}
+
+            def _enter126():
+                _f = _QW126.QApplication.focusWidget()
+                if _f is not None:
+                    _QT126.QTest.keyClick(_f, _QC126.Qt.Key_Return)
+            _QC126.QTimer.singleShot(300, _enter126)
+            _QC126.QTimer.singleShot(4000, lambda: [
+                _d.reject() for _d in _app126.topLevelWidgets()
+                if isinstance(_d, _QW126.QDialog) and _d.isVisible()])
+            _res126["ok"] = _kit126.message(
+                _w126, "فحص", "رسالة", "question",
+                buttons=(("yes", "نعم", "primary"), ("no", "لا", "secondary")),
+                default="none")
+            check("وEnter في رسالة النظام يختار زرّها المحدَّد ويغلقها",
+                  not _errs126 and _res126["ok"] in ("yes", "none"),
+                  f"{_res126} {_errs126[:2]}")
+            _w126.close()
+        finally:
+            _sys126.excepthook = _old_hook126
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
