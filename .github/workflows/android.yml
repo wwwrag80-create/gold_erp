@@ -1,8 +1,9 @@
 name: تطبيق الجوال (أندرويد)
 
 # يبني تطبيق «جاديت للجوال» من mobile/ : يفحص معادلاته مقابل البرنامج
-# (بايثون) أولاً، ثم يبني ملف التثبيت. الملف يُنشر **غير موقّع** —
-# التوقيع بمفتاح المالك يتمّ خارج المستودع، فلا مفتاح ولا سرّ هنا.
+# (بايثون) أولاً، ثم يبني ملف التثبيت، ثم يجرّبه على محاكي أندرويد حقيقي.
+# الملف يُنشر **غير موقّع** — التوقيع بمفتاح المالك يتمّ خارج المستودع،
+# فلا مفتاح ولا سرّ هنا. ونتائج التجربة وصورها تُرفق بالإصدار نفسه.
 on:
   push:
     branches: ["claude/gold-accounting-system-9o1vmw"]
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -29,7 +30,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: معادلات الجوال تطابق البرنامج
         run: |
@@ -46,9 +47,9 @@ jobs:
         with:
           gradle-version: "8.5"
 
-      - name: بناء ملف التثبيت
+      - name: بناء ملف التثبيت (والنسخة التجريبية للمحاكي)
         working-directory: mobile/android
-        run: gradle --no-daemon --stacktrace assembleRelease
+        run: gradle --no-daemon --stacktrace assembleRelease assembleDebug
 
       - name: نشر الملف (غير موقّع)
         env:
@@ -61,4 +62,41 @@ jobs:
           gh release create mobile-unsigned jadeite-mobile-unsigned.apk jadeite-mobile-unsigned.apk.sha256 \
             --prerelease --target "$GITHUB_SHA" \
             --title "Jadeite mobile $V — unsigned build" \
-            --notes "Unsigned build of mobile/ at ${GITHUB_SHA::7}. Not installable as is: it is signed with the owner's key outside this repository."
+            --notes "Unsigned build of mobile/ at ${GITHUB_SHA::7}. Not installable as is: it is signed with the owner's key outside this repository. Device test results are attached when the emulator run finishes."
+
+      - name: تمكين KVM للمحاكي
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: التجربة على جهاز أندرويد (محاكٍ)
+        id: device
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          OUT: device-out
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash mobile/tests/device_test.sh
+
+      - name: إرفاق نتائج التجربة بالإصدار
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -d device-out ]; then
+            cd device-out && zip -q -r ../device-test.zip . && cd ..
+            gh release upload mobile-unsigned device-test.zip --clobber || true
+            cat device-out/result.json || true
+          fi
+
+      - name: نتيجة التجربة على الجهاز
+        if: steps.device.outcome != 'success'
+        run: |
+          echo "فشلت التجربة على المحاكي — التفاصيل في device-test.zip"
+          exit 1

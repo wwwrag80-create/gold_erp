@@ -622,7 +622,7 @@
             h("div", null, li.wageOnly ? h("b", null, "أجر فقط") : h("span", { class: "wo", text: li.wo }),
               li.model ? h("span", { class: "muted small" }, "  · موديل " + li.model) : null,
               li.wageOnly && li.note ? h("span", { class: "muted small" }, "  · " + li.note) : null,
-              li.wageOnly ? null : h("span", { class: "badge", style: { marginInlineStart: "6px" } }, `عيار ${lk}`)),
+              li.wageOnly ? null : h("span", { class: "badge", style: { marginRight: "6px" } }, `عيار ${lk}`)),
             h("div", { class: "act" },
               h("button", { onclick: () => editLine(i), "aria-label": "تعديل" }, "✎"),
               h("button", { class: "del", "aria-label": "حذف", onclick: async () => {

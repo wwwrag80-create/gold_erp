@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -61,6 +62,10 @@ public class MainActivity extends Activity {
         // لالتقاط صفحة المستند كاملةً صورةً — قبل إنشاء أي WebView
         WebView.enableSlowWholeDocumentDraw();
         super.onCreate(state);
+        // نسخة الاختبار وحدها (debuggable) تُفحص صفحاتها آلياً من الحاسب
+        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
         loader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();

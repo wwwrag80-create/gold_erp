@@ -42,7 +42,7 @@
   .box b{display:block;font-size:13px;color:#5A3806}
   .box span{font-size:19px;font-weight:700}
   .note{border-top:1px dashed #D6CFC0;padding-top:8px;color:#4A443A;font-size:13px}
-  .qr{float:left;margin-inline-start:12px}
+  .qr{float:left;margin-right:12px}
   .foot{margin-top:18px;color:#4A443A;font-size:12px;text-align:center}
   @page{size:A4;margin:10mm}
   `;
