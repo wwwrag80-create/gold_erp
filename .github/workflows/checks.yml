@@ -6,6 +6,8 @@ name: فحوص النظام
 on:
   push:
     branches: ["**"]
+    # ملف إعلانات الجوال يحرّره سير عملٍ في main — لا علاقة له بفحوص البرنامج
+    paths-ignore: ["mobile/promo/**"]
   pull_request:
   workflow_dispatch:
 

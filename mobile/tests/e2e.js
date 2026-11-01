@@ -55,6 +55,13 @@ function check(name, cond, detail) {
   const confirm = async (text) => { await page.locator(".sheet .btn", { hasText: text }).first().click(); };
   const text = async (sel) => (await page.locator(sel).first().innerText()).trim();
 
+  // ملف الرعاة التجريبي (بدل GitHub)
+  const PROMO = { channel: "jadeite-promo", footer: "أُنشئ بتطبيق «نظام محاسبي للذهب» — 0559876543",
+    contact: { phone: "0559876543", whatsapp: "966559876543", text: "" },
+    items: [{ id: "ad-1", title: "مصنع الريان للذهب", text: "أطقم عيار 21 بأسعار المصنع", phone: "0501234567",
+      whatsapp: "966501234567", link: "javascript:alert(1)", until: "2099-01-01" },
+    { id: "ad-old", title: "إعلانٌ منتهٍ", until: "2000-01-01" }] };
+  await page.route("https://raw.githubusercontent.com/**/promo.json*", (r) => r.fulfill({ json: PROMO }));
   await page.goto(url);
   await page.waitForSelector("#tabs");
   const tiles = await page.locator(".op-tile .op-t").allInnerTexts();
@@ -138,13 +145,13 @@ function check(name, cond, detail) {
   await tap("#tabs button[data-tab=holdings]");
   await page.waitForURL(/#\/holdings/);
   await page.waitForTimeout(200);
-  check("الممتلكات: صندوق الطقوم فيه 2", (await page.locator(".box-tile", { hasText: "الطقوم" }).innerText()).includes("2"));
-  await page.locator(".box-tile", { hasText: "الطقوم" }).click();
+  check("لا لوحة «الطقوم» في الممتلكات", (await page.locator(".box-tile", { hasText: "الطقوم" }).count()) === 0);
+  const ft = (await text(".wide-tile.fac")).replace(/\s+/g, " ");
+  check("ذهب المصانع عندي: 82.00 (50 سابق + 32 بضاعة)", ft.includes("ذهب المصانع عندي") && ft.includes("82.00"), ft);
+  await page.locator(".wide-tile.fac").click();
   await page.waitForSelector(".sheet");
-  const ps = await text(".sheet");
-  check("وتفصيلها: T1 وطقمٌ بلا اسم، من «مصنع الريان»", ps.includes("T1") && ps.includes("طقمٌ بلا اسم") && ps.includes("مصنع الريان"), ps);
-  check("وT1 بصورته", (await page.locator(".sheet .list-item", { hasText: "T1" }).locator("img.thumb").count()) === 1);
-  await page.keyboard.press("Escape");
+  const fs1 = (await text(".sheet")).replace(/\s+/g, " ");
+  check("ولكل مصنع: أخذتُ 32.00 · وعليّ 82.00", fs1.includes("مصنع الريان") && fs1.includes("أخذتُ 32.00") && fs1.includes("82.00 جم عليّ"), fs1);
   await page.goBack();
   await page.waitForTimeout(200);
 
@@ -239,7 +246,19 @@ function check(name, cond, detail) {
   const b21 = await page.locator(".box-tile", { hasText: "عيار 21" }).innerText();
   check("صندوق عيار 21: 2.00 جم (حصّلت 6 · دفعت 4)", b21.includes("2.00") && b21.includes("حصّلت 6.00") && b21.includes("دفعت 4.00"), b21);
   check("صندوق النقد: 100.00", (await page.locator(".box-tile", { hasText: "الأجور والنقد" }).innerText()).includes("100.00"));
-  check("والطقوم 2: T1 والمرتجع", (await page.locator(".box-tile", { hasText: "الطقوم" }).innerText()).includes("2"));
+  const ct = (await text(".wide-tile.cus")).replace(/\s+/g, " ");
+  // الأمانة: 25 − 5 − 7 = 13 ذهباً، و500 − 100 − 300 = 100 أجوراً
+  check("ذهبي عند العملاء: 13.00 وأجور 100.00", ct.includes("ذهبي عند العملاء") && ct.includes("13.00") && ct.includes("100.00"), ct);
+  check("وذهب المصانع عندي بعد السداد: 77.33 ونقد 56.00", (await text(".wide-tile.fac")).includes("77.33") && (await text(".wide-tile.fac")).includes("56.00"));
+  await page.locator(".wide-tile.cus").click();
+  await page.waitForSelector(".sheet");
+  const cs1 = (await text(".sheet")).replace(/\s+/g, " ");
+  check("ولكل عميل كم عنده: الأمانة 13.00 جم عليه", cs1.includes("محل الأمانة") && cs1.includes("13.00 جم عليه"), cs1);
+  await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
+  await page.waitForURL(/#\/statement\//);
+  check("واللمس يفتح كشفه", true);
+  await page.goto(url + "#/holdings");
+  await page.waitForTimeout(250);
   await shot("holdings");
   await page.locator(".box-tile", { hasText: "عيار 21" }).click();
   await page.waitForSelector(".sheet");
@@ -250,17 +269,17 @@ function check(name, cond, detail) {
   await page.goBack();
   await page.waitForTimeout(150);
 
-  // بيع T1 من الممتلكات مباشرة
-  await page.locator(".box-tile", { hasText: "الطقوم" }).click();
-  await page.waitForSelector(".sheet");
-  await page.locator(".sheet .list-item", { hasText: "T1" }).click();
-  await page.waitForTimeout(150);
-  await tap(".sheet button:has-text('بيعه لمحل')");
-  await page.waitForURL(/kind=sale&piece=/);
+  // بيع T1 من «الطقوم التي معي»
+  await page.goto(url + "#/invoice/new?kind=sale");
   await page.waitForSelector(".sheet");
   await page.locator(".sheet .list-item", { hasText: "محل النخبة" }).click();
-  await page.waitForTimeout(150);
-  check("بيعه من الممتلكات يعبّئ اسمه ووزنه",
+  await page.waitForTimeout(200);
+  await tap("button:has-text('اختر من الطقوم التي معي')");
+  await page.waitForSelector(".sheet");
+  check("الطقوم التي معي: T1 بصورته", (await page.locator(".sheet .list-item", { hasText: "T1" }).locator("img.thumb").count()) === 1);
+  await page.locator(".sheet .list-item", { hasText: "T1" }).click();
+  await page.waitForTimeout(200);
+  check("اختياره يعبّئ اسمه ووزنه",
     (await page.locator("label.f", { hasText: "الطقم" }).locator("input").inputValue()) === "T1" &&
     (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "12.00");
   check("ويحمل ماسه 0.50 وصورته", (await page.locator("label.f", { hasText: "الماس" }).locator("input").inputValue()) === "0.50" &&
@@ -294,6 +313,14 @@ function check(name, cond, detail) {
     (await page.locator(".preview.fluid iframe").count()) === 1 &&
     (await page.evaluate(() => document.querySelector(".preview.fluid iframe").srcdoc.includes("<!--page-width:720-->"))));
   await shot("statement_preview");
+  check("مستندات الكشف الثلاثة (بيع · مرتجع · تحصيل)، لكلٍّ «معاينة»", (await page.locator(".op-row .prev-btn").count()) === 3 &&
+    (await text(".sec-title:has-text('مستندات الكشف')")).includes("(3)"));
+  await page.locator(".op-row", { hasText: "R-00001" }).locator(".prev-btn").click();
+  await page.waitForSelector(".sheet .preview iframe");
+  await page.waitForTimeout(300);
+  check("ومعاينتها تُظهر المرتجع R-00001", await page.evaluate(() => document.querySelector(".sheet .preview iframe").srcdoc.includes("R-00001")));
+  await page.goBack();
+  await page.waitForTimeout(200);
   const kp = await text(".kpis");
   // ذهب 25 − 5 − 7 = 13 عليه · أجور 500 − 100 − 300 = 100 عليه
   check("كشف المحل: 13.00 جم و100.00 ريال عليه", kp.includes("13.00 جم عليه") && kp.includes("100.00 ريال عليه"), kp);
@@ -337,7 +364,26 @@ function check(name, cond, detail) {
   await tap("#tabs button[data-tab=home]");
   await page.waitForTimeout(250);
   check("عمليات اليوم (6)", (await text(".wide-tile.today")).includes("عمليات اليوم (6)"), await text(".wide-tile.today"));
+  await page.waitForSelector(".sponsor");
+  const sp = (await text(".sponsor")).replace(/\s+/g, " ");
+  check("بطاقة الراعي في أسفل الرئيسية: «مصنع الريان للذهب» بواتساب واتصال", sp.includes("راعٍ") && sp.includes("مصنع الريان للذهب") &&
+    sp.includes("واتساب") && sp.includes("اتصال"), sp);
+  check("والرابط غير https لا يظهر، والإعلان المنتهي لا يظهر", !sp.includes("التفاصيل") && (await page.locator(".sponsor").count()) === 1);
+  check("وهي بعد لوحات العمليات", await page.evaluate(() => {
+    const a = document.querySelector(".wide-tile.today"), b = document.querySelector(".sponsor");
+    return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); }));
   await shot("home");
+  await tap(".sponsor .sp-x");
+  await page.waitForTimeout(200);
+  check("وتُغلق بلمسة", (await page.locator(".sponsor").count()) === 0);
+  await page.goto(url + "#/more");
+  await page.waitForTimeout(200);
+  await tap(".list-item:has-text('أعلن في التطبيق')");
+  await page.waitForSelector(".sheet");
+  check("«أعلن في التطبيق» بواتساب صاحب التطبيق", (await text(".sheet")).includes("أعلن في التطبيق") && (await text(".sheet")).includes("واتساب"));
+  await page.goBack();
+  await page.goto(url + "#/home");
+  await page.waitForTimeout(250);
   await tap(".wide-tile.today");
   await page.waitForURL(/#\/today/);
   await page.waitForTimeout(250);
@@ -346,7 +392,8 @@ function check(name, cond, detail) {
   await page.locator(".op-row", { hasText: "S-00002" }).locator(".prev-btn").click();
   await page.waitForSelector(".sheet .preview iframe");
   await page.waitForTimeout(400);
-  check("والمعاينة تُظهر الفاتورة", await page.evaluate(() => document.querySelector(".sheet .preview iframe").srcdoc.includes("S-00002")));
+  check("والمعاينة تُظهر الفاتورة، وأسفلها سطر التعريف", await page.evaluate(() => {
+    const x = document.querySelector(".sheet .preview iframe").srcdoc; return x.includes("S-00002") && x.includes("أُنشئ بتطبيق «نظام محاسبي للذهب» — 0559876543"); }));
   await shot("today_preview");
   await page.goBack();
   await page.waitForTimeout(200);

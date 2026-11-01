@@ -565,6 +565,36 @@
     for (const b of boxList) gold18 = R(gold18 + Gold.store(b.weight, b.karat), 3);
     return { boxes: boxList, cash, pieces: list, setsW18, gold18 };
   }
+  // ذهب المصانع الذي عندي (ما عليّ لكل مصنع: أخذتُ − أرجعتُ − سدّدتُ، ومعه
+  // الدَّين السابق)، وذهبي عند العملاء (ما على كل عميل) — بالأرصدة نفسها
+  function exposure(st) {
+    const bal = allBalances(st);
+    const factories = [], customers = [];
+    let facGold18 = 0, facCash = 0, cusGold18 = 0, cusCash = 0;
+    for (const p of st.shops) {
+      const b = bal[p.id];
+      if (isFactory(p)) {
+        let took = 0, back = 0, paid = 0;
+        for (const d of st.invoices) {
+          if (d.shopId !== p.id) continue;
+          if (d.kind === "purchase") took += d.totalW18; else if (d.kind === "purchase_return") back += d.totalW18;
+        }
+        for (const v of st.vouchers) if (v.shopId === p.id && v.kind === "payment") paid += v.gold18;
+        const owe18 = R(-b.gold18, 3), oweCash = R(-b.cash, 2);
+        if (owe18 > 0) facGold18 += owe18;
+        if (oweCash > 0) facCash += oweCash;
+        factories.push({ party: p, owe18, oweCash, took18: R(took, 3), back18: R(back, 3), paid18: R(paid, 3) });
+      } else {
+        if (b.gold18 > 0) cusGold18 += b.gold18;
+        if (b.cash > 0) cusCash += b.cash;
+        customers.push({ party: p, gold18: b.gold18, cash: b.cash });
+      }
+    }
+    factories.sort((a, b) => (b.owe18 - a.owe18) || (b.oweCash - a.oweCash));
+    customers.sort((a, b) => (b.gold18 - a.gold18) || (b.cash - a.cash));
+    return { factories, customers, facGold18: R(facGold18, 3), facCash: R(facCash, 2),
+      cusGold18: R(cusGold18, 3), cusCash: R(cusCash, 2) };
+  }
   function pieceById(st, id) {
     return holdings(st).pieces.find((p) => p.id === id) || null;
   }
@@ -640,7 +670,7 @@
     effects, docsOf, statement, balance, balanceAround, allBalances,
     woHistory, woLast, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
-    diamondOf, diamondStatement, backupPhotos,
+    diamondOf, diamondStatement, backupPhotos, exposure,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

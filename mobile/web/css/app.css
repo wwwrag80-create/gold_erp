@@ -433,3 +433,23 @@ main#view.enter { animation: view-in .22s ease-out; }
 details.opts { margin-top: 10px; border-top: 1px dashed var(--line2); padding-top: 6px; }
 details.opts > summary { cursor: pointer; color: var(--goldDim); font-weight: 600; font-size: 14px; padding: 6px 0; }
 details.opts .in { margin-top: 6px; }
+
+/* ══ الممتلكات: ذهب المصانع عندي · ذهبي عند العملاء ══ */
+.wide-tile.big { align-items: flex-start; padding: 16px 12px; }
+.wide-tile.big .big-v { display: block; font-size: 24px; font-weight: 700; margin: 2px 0; }
+.wide-tile.big .big-v .u { font-size: 13px; font-weight: 400; color: var(--muted); }
+.wide-tile.big.fac .op-ic { background: var(--goldDim); color: var(--onGold); }
+.wide-tile.big.cus .op-ic { background: var(--gold); color: var(--onGold); }
+
+/* ══ بطاقة الراعي: هادئة، تُغلق بلمسة ══ */
+.sponsor {
+  border: 1px dashed var(--line3); border-radius: 16px; padding: 12px; margin-top: 6px; margin-bottom: 12px;
+  background: var(--surface2);
+}
+.sp-tag { font-size: 11px; font-weight: 700; color: var(--goldDim); background: var(--goldSoft); border-radius: 6px; padding: 1px 8px; }
+.sp-x { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px; display: inline-flex; }
+.sp-t { font-size: 16px; font-weight: 700; margin-top: 6px; }
+.sp-d { font-size: 14px; color: var(--muted); margin-top: 2px; line-height: 1.7; }
+.sp-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.amts { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; justify-content: flex-end; }
+.amts .amt { white-space: nowrap; }

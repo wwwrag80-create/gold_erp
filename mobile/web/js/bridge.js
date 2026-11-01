@@ -71,6 +71,11 @@
       browserDownload(name, text, mime);
     },
     dial(phone) { location.href = "tel:" + phone; },
+    // رابطٌ خارجي (واتساب · اتصال · موقع): التطبيق يفتحه في تطبيقه
+    openUrl(url) {
+      if (A) { location.href = url; return; }
+      window.open(url, "_blank");
+    },
     appVersion() { return A && A.appVersion ? A.appVersion() : "web"; },
 
     // ── الحفظ التلقائي في مجلدٍ خارج التطبيق (يبقى بعد حذفه) ──

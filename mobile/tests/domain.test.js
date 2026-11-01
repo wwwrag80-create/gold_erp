@@ -269,5 +269,28 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("والحساب: 3 جم و75 ريال عليه", D.balance(t, sh.id).gold18 === 3 && D.balance(t, sh.id).cash === 75);
 }
 
+// ══ الممتلكات: ذهب المصانع عندي، وذهبي عند العملاء ══
+{
+  const t = D.newState();
+  const f1 = D.saveShop(t, { name: "مصنع أ", type: "factory", openGold18: -10, openDate: "2026-01-01" });
+  const f2_ = D.saveShop(t, { name: "مصنع ب", type: "factory" });
+  const c1 = D.saveShop(t, { name: "عميل أ" });
+  const c2 = D.saveShop(t, { name: "عميل ب" });
+  D.saveInvoice(t, { kind: "purchase", shopId: f1.id, date: "2026-02-01", lines: [D.buildLine({ reg: 30, wages: 90 })] });
+  D.saveInvoice(t, { kind: "purchase_return", shopId: f1.id, date: "2026-02-02", lines: [D.buildLine({ reg: 5, wages: 15 })] });
+  D.saveInvoice(t, { kind: "purchase", shopId: f2_.id, date: "2026-02-01", lines: [D.buildLine({ reg: 8, wages: 0 })] });
+  D.saveVoucher(t, { kind: "payment", shopId: f1.id, date: "2026-02-03", rows: [{ kind: "gold", weight: 6, karat: 18 }, { kind: "cash", amount: 50 }] });
+  D.saveInvoice(t, { kind: "sale", shopId: c1.id, date: "2026-02-04", lines: [D.buildLine({ reg: 20, wages: 200 })] });
+  D.saveInvoice(t, { kind: "sale", shopId: c2.id, date: "2026-02-04", lines: [D.buildLine({ reg: 4, wages: 40 })] });
+  D.saveVoucher(t, { kind: "receipt", shopId: c2.id, date: "2026-02-05", rows: [{ kind: "gold", weight: 6, karat: 18 }] });
+  const ex = D.exposure(t);
+  const a = ex.factories.find((x) => x.party.id === f1.id);
+  check("مصنع أ: أخذتُ 30 · أرجعتُ 5 · سدّدتُ 6 — وعليّ 10 + 30 − 5 − 6 = 29", a.took18 === 30 && a.back18 === 5 && a.paid18 === 6 && a.owe18 === 29, a);
+  check("وعليّ له نقداً 90 − 15 − 50 = 25", a.oweCash === 25, a.oweCash);
+  check("ذهب المصانع عندي: 29 + 8 = 37 — الأكثر أولاً", ex.facGold18 === 37 && ex.factories[0].party.id === f1.id && ex.facCash === 25);
+  const b = ex.customers.find((x) => x.party.id === c2.id);
+  check("عميل ب دفع أكثر مما أخذ: له 2 — فلا يُحسب في «عند العملاء»", b.gold18 === -2 && ex.cusGold18 === 20 && ex.cusCash === 240, ex);
+}
+
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);
 process.exit(fail ? 1 : 0);

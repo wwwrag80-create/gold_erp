@@ -1,0 +1,89 @@
+name: إعلانات التطبيق (الرعاة)
+
+# يضيف إعلان راعٍ (مصنع · مورّد) يظهر في رئيسية تطبيق الجوال لكل المستخدمين،
+# أو يحذفه، أو يضبط سطر التعريف أسفل المستندات ورقم «أعلن في التطبيق».
+# يكتب `mobile/promo/promo.json` في main، ويقرؤه التطبيق كل 6 ساعات —
+# بلا تحديثٍ للتطبيق. يُشغَّل من Actions ← «إعلانات التطبيق» ← Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "الإجراء"
+        type: choice
+        options:
+          - "إضافة إعلان راعٍ"
+          - "حذف إعلان"
+          - "حذف كل الإعلانات"
+          - "بيانات التواصل وسطر التعريف"
+      title:
+        description: "عنوان الإعلان (اسم المصنع أو النشاط)"
+        required: false
+        default: ""
+      text:
+        description: "نص الإعلان (سطر أو سطران)"
+        required: false
+        default: ""
+      phone:
+        description: "جوال الراعي (05xxxxxxxx) — للاتصال وواتساب"
+        required: false
+        default: ""
+      link:
+        description: "رابط (اختياري، يبدأ بـ https://)"
+        required: false
+        default: ""
+      days:
+        description: "مدة الإعلان بالأيام"
+        required: false
+        default: "30"
+      ad_id:
+        description: "رقم الإعلان للحذف (من صفحة النتيجة)"
+        required: false
+        default: ""
+      footer:
+        description: "سطر التعريف أسفل المستندات («-» لإخفائه)"
+        required: false
+        default: ""
+      contact:
+        description: "جوالك لـ«أعلن في التطبيق» («-» لإخفائه)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-promo
+  cancel-in-progress: false
+
+jobs:
+  promo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: تحديث الإعلانات
+        env:
+          ACTION: ${{ inputs.action }}
+          TITLE: ${{ inputs.title }}
+          TEXT: ${{ inputs.text }}
+          PHONE: ${{ inputs.phone }}
+          LINK: ${{ inputs.link }}
+          DAYS: ${{ inputs.days }}
+          AD_ID: ${{ inputs.ad_id }}
+          FOOTER: ${{ inputs.footer }}
+          CONTACT: ${{ inputs.contact }}
+        run: python3 mobile/tools/promo_channel.py
+
+      - name: الحفظ في المستودع
+        env:
+          ACTION: ${{ inputs.action }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mobile/promo/promo.json
+          if git diff --cached --quiet; then echo "لا تغيير"; exit 0; fi
+          git commit -m "Mobile promo: $ACTION"
+          git push origin HEAD:main

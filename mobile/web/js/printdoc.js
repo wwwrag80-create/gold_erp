@@ -46,6 +46,7 @@
   .foot{margin-top:18px;color:#4A443A;font-size:12px;text-align:center}
   td.ph{padding:3px;width:66px}
   td.ph img{width:60px;height:60px;object-fit:cover;border-radius:6px;display:block;margin:0 auto}
+  .brand{margin-top:10px;text-align:center;color:#7C7566;font-size:11px}
   @page{size:A4;margin:10mm}
   `;
   // صفحةٌ بعرض الجوال (كشف الحساب): تُقرأ في المعاينة كما هي، وتُلتقط صورةً
@@ -68,10 +69,16 @@
   .box span{font-size:16px}
   `;
 
+  // سطر التعريف بالتطبيق أسفل المستند (يضبطه صاحب التطبيق من GitHub)
+  function brand() {
+    const t = root.Promo ? root.Promo.footer() : "";
+    return t ? `<div class="brand">${esc(t)}</div>` : "";
+  }
+
   function page(title, body, narrow) {
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">${narrow ? `<!--page-width:${NARROW}-->` : ""}
 <base href="${esc(base())}"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><style>${CSS}${narrow ? CSS_NARROW : ""}</style></head><body><div class="page">${body}</div></body></html>`;
+<title>${esc(title)}</title><style>${CSS}${narrow ? CSS_NARROW : ""}</style></head><body><div class="page">${body}${brand()}</div></body></html>`;
   }
 
   function header(st, title, no, date) {
