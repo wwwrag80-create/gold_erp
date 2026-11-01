@@ -1,6 +1,7 @@
 package com.jadeite.mobile;
 
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -191,6 +192,9 @@ public class MainActivity extends Activity {
         Intent i = new Intent(Intent.ACTION_SEND);
         i.setType(mime);
         i.putExtra(Intent.EXTRA_STREAM, uri);
+        // ClipData مع الإذن: نافذة المشاركة نفسها تقرأ الملف فتعرض معاينته،
+        // والتطبيق المستقبِل (واتساب…) يقرؤه كذلك
+        i.setClipData(ClipData.newRawUri(f.getName(), uri));
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivity(Intent.createChooser(i, title));
     }

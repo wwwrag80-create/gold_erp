@@ -18,7 +18,10 @@ adb forward tcp:9222 "localabstract:webview_devtools_remote_$PID"
 node mobile/tests/device.mjs "$OUT"
 RC=$?
 adb logcat -d > "$OUT/logcat.txt"
-grep -E "FATAL EXCEPTION|AndroidRuntime: " "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
+# الانهيار الحقيقي وحده — «I AndroidRuntime: VM exiting» سطرٌ عادي من أوامر adb
+grep -E "FATAL EXCEPTION| E AndroidRuntime" "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
+grep -E "SecurityException.*com\.jadeite" "$OUT/logcat.txt" > "$OUT/security.txt" || true
 grep -E "chromium.*(Uncaught|ERROR:CONSOLE)" "$OUT/logcat.txt" > "$OUT/js_errors.txt" || true
 if [ -s "$OUT/crashes.txt" ]; then echo "crash in logcat"; RC=1; fi
+if [ -s "$OUT/security.txt" ]; then echo "permission denial in logcat"; cat "$OUT/security.txt"; RC=1; fi
 exit $RC
