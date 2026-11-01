@@ -453,3 +453,58 @@ details.opts .in { margin-top: 6px; }
 .sp-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .amts { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; justify-content: flex-end; }
 .amts .amt { white-space: nowrap; }
+
+/* ══ صور الطقم: أكثر من صورة في الخانة نفسها ══ */
+.photo-add { min-height: 44px; display: flex; align-items: center; }
+.photo-pick { flex-wrap: wrap; gap: 8px; margin-top: 8px; min-height: 0; }
+.ph-item { position: relative; display: inline-block; }
+.ph-x {
+  position: absolute; top: -6px; inset-inline-start: -6px; width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid var(--line2); background: var(--surface); color: var(--redText); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+.thumb-wrap { position: relative; display: inline-block; flex: 0 0 auto; cursor: zoom-in; }
+.thumb-n {
+  position: absolute; bottom: -4px; inset-inline-end: -4px; font-size: 11px; font-weight: 700; line-height: 1;
+  background: var(--gold); color: var(--onGold); border-radius: 999px; padding: 3px 5px;
+}
+.photo-fig { margin: 10px 0 0; cursor: zoom-in; }
+.photo-fig figcaption { margin-top: 4px; text-align: center; }
+.pc-prev { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.no-ph { flex: 0 0 auto; }
+.sheet .actions.doc-acts { margin: 4px 0 10px; }
+.wide-tile.big.sets .op-ic { background: var(--goldSoft); color: var(--goldDim); }
+
+/* ══ كشف الحساب: جدولٌ واحد بسيط ══ */
+.st-filters { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.st-filters .seg { flex: 0 0 auto; }
+.st-filters .seg button { padding: 0 14px; }
+.st-period { display: inline-flex; align-items: center; gap: 5px; flex: 1 1 auto; min-width: 0; font: inherit; font-size: 14px; }
+.st-period span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips.wrap { flex-wrap: wrap; overflow: visible; }
+.st-bal {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 10px 12px; margin-bottom: 10px;
+  border-radius: var(--r-card); background: var(--sumBg); border: 1px solid var(--sumEdge); font-size: 15px;
+}
+.st-table {
+  width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden;
+}
+.st-table th {
+  background: var(--hdrBg); color: var(--hdrFg); font-size: 12px; font-weight: 700; padding: 8px 4px; text-align: start;
+}
+.st-table td { padding: 8px 4px; border-top: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+.st-table th:first-child, .st-table td.d { width: 46px; }
+.st-table td.d { white-space: nowrap; color: var(--muted); font-size: 12px; }
+.st-table td.d small, .st-table td.op small { display: block; font-size: 11px; color: var(--muted); }
+.st-table td.op { overflow-wrap: anywhere; }
+.st-table td.op small.no { color: var(--goldDim); }
+.st-table td.m { white-space: nowrap; }
+.st-table td.m .mv { display: block; font-size: 12px; color: var(--muted); }
+.st-table td.m b { font-size: 14px; }
+.st-table td.m .w { font-size: 11px; color: var(--muted); margin-inline-start: 3px; }
+.st-table.dia th:last-child { width: 34%; }
+.st-table tr.tap { cursor: pointer; }
+.st-table tr.tap:active td { background: var(--hover); }
+.st-hint { text-align: center; margin: 8px 0 4px; }
+.nowrap { white-space: nowrap; }

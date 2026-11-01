@@ -152,6 +152,7 @@
       wages = wagesAmt;
       rate18 = reg18 > 0 ? R(wagesAmt / reg18, 6) : 0;     // للعلم فقط — الأجور هي المكتوبة
     }
+    const photos = cleanPhotos(e.photos !== undefined ? e.photos : e.photo);
     return {
       wageOnly: false, wo, model: String(e.model || "").trim(), karat: k,
       gold18: st18("gold18", e.gold), small18: st18("small18", e.small),
@@ -161,9 +162,34 @@
       stoneRate: e.stoneRate === undefined ? Gold.STONE_DISCOUNT_RATE : Number(e.stoneRate),
       rate18, wages,
       note: String(e.note || "").trim(),
-      // رقم السطر الثابت، ومن أي طقمٍ في اليد جاء (للممتلكات)، وصورته
-      lid: e.lid || uid("l"), src: String(e.src || ""), photo: String(e.photo || ""),
+      // رقم السطر الثابت، ومن أي طقمٍ في اليد جاء (للممتلكات)، وصوره —
+      // `photo` الأولى منها، كما كانت قبل تعدّد الصور
+      lid: e.lid || uid("l"), src: String(e.src || ""), photo: photos[0] || "", photos,
     };
+  }
+
+  // صور السطر: قائمةٌ بلا تكرار (حتى 10)، ومن السطور القديمة صورتها الواحدة
+  const MAX_PHOTOS = 10;
+  function cleanPhotos(x) {
+    const list = Array.isArray(x) ? x : x ? [x] : [];
+    const out = [];
+    for (const id of list) {
+      const s = String(id || "").trim();
+      if (s && !out.includes(s) && out.length < MAX_PHOTOS) out.push(s);
+    }
+    return out;
+  }
+  function linePhotos(li) {
+    if (!li || li.wageOnly) return [];
+    return cleanPhotos(Array.isArray(li.photos) && li.photos.length ? li.photos : li.photo);
+  }
+  // كل صور الفاتورة: لكل صورةٍ سطرها (اسم الطقم ورقمه) — للمعاينة صورةً صورة
+  function docPhotos(doc) {
+    const out = [];
+    (doc && doc.lines || []).forEach((li, i) => {
+      for (const id of linePhotos(li)) out.push({ id, wo: (li.wo || "").trim(), n: i + 1 });
+    });
+    return out;
   }
 
   // السطر المحفوظ ← سطر الإدخال بعيار k (للتعديل والتعبئة التلقائية)
@@ -176,7 +202,7 @@
       big: Gold.g(li.big18, k), after: Gold.g(li.after18, k),
       standing: Gold.g(li.standing18, k), reg: Gold.g(li.reg18, k),
       diamond: li.diamond, stoneRate: li.stoneRate,
-      wage: Gold.wageView(li.rate18, k), note: li.note, photo: li.photo || "",
+      wage: Gold.wageView(li.rate18, k), note: li.note, photos: linePhotos(li),
       exact18: { gold18: li.gold18, small18: li.small18, big18: li.big18,
         after18: li.after18, standing18: li.standing18, reg18: li.reg18 },
     };
@@ -225,7 +251,7 @@
     const t = totals(lines, !!draft.vat);
     const old = draft.id ? st.invoices.find((d) => d.id === draft.id) : null;
     if (old && old.kind !== draft.kind) {
-      throw new Error("لا يتغيّر نوع الفاتورة بعد ترحيلها — احذفها وأصدر الصحيح");
+      throw new Error("لا يتغيّر نوع الفاتورة بعد حفظها — احذفها وأصدر الصحيح");
     }
     const rec = {
       id: old ? old.id : uid("in_"),
@@ -283,7 +309,7 @@
     }
     const old = draft.id ? st.vouchers.find((d) => d.id === draft.id) : null;
     if (old && old.kind !== draft.kind) {
-      throw new Error("لا يتغيّر نوع السند بعد ترحيله — احذفه وأصدر الصحيح");
+      throw new Error("لا يتغيّر نوع السند بعد حفظه — احذفه وأصدر الصحيح");
     }
     let eq = 0, cash = 0;
     for (const r of rows) { eq += r.equiv; cash += r.amount; }
@@ -670,7 +696,7 @@
     effects, docsOf, statement, balance, balanceAround, allBalances,
     woHistory, woLast, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
-    diamondOf, diamondStatement, backupPhotos, exposure,
+    diamondOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

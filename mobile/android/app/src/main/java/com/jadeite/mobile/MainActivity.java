@@ -44,6 +44,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -128,6 +129,10 @@ public class MainActivity extends Activity {
                 Intent i = new Intent(Intent.ACTION_GET_CONTENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
                 i.setType(image ? "image/*" : "*/*");
+                // صور الطقم: أكثر من صورةٍ من المعرض في مرّةٍ واحدة
+                if (image && params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                    i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
                 Intent chooser = Intent.createChooser(i, image ? "صورة الطقم" : "اختر ملف النسخة الاحتياطية");
                 if (image) {
                     // الكاميرا بجانب المعرض: الصورة تُكتب في ملفٍ مؤقت داخل التطبيق
@@ -256,8 +261,18 @@ public class MainActivity extends Activity {
             if (pickCallback != null) {
                 Uri[] got = null;
                 if (res == RESULT_OK) {
-                    if (uri != null) got = new Uri[]{uri};
-                    else if (cameraUri != null) got = new Uri[]{cameraUri};   // صورة الكاميرا
+                    // عدة صور من المعرض تأتي في ClipData، والواحدة في getData
+                    ArrayList<Uri> list = new ArrayList<>();
+                    ClipData clip = data == null ? null : data.getClipData();
+                    if (clip != null) {
+                        for (int k = 0; k < clip.getItemCount() && list.size() < 10; k++) {
+                            Uri u = clip.getItemAt(k).getUri();
+                            if (u != null && !list.contains(u)) list.add(u);
+                        }
+                    }
+                    if (list.isEmpty() && uri != null) list.add(uri);
+                    if (list.isEmpty() && cameraUri != null) list.add(cameraUri);   // صورة الكاميرا
+                    if (!list.isEmpty()) got = list.toArray(new Uri[0]);
                 }
                 pickCallback.onReceiveValue(got);
                 pickCallback = null;

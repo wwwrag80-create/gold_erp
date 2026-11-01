@@ -46,6 +46,16 @@
     return nativeAppend.apply(this, nodes.filter((n) => n !== null && n !== undefined && n !== false));
   };
 
+  // النوافذ المفتوحة بعضها فوق بعض (صورةٌ فوق قائمة): زرّ الرجوع يُغلق العليا
+  // وحدها. وإغلاق نافذةٍ بزرٍّ يرجع خطوةً بنفسه — فحدث رجوعها يُتجاوز
+  const stack = [];
+  let skipPops = 0;
+  window.addEventListener("popstate", () => {
+    if (skipPops > 0) { skipPops--; return; }
+    const top = stack[stack.length - 1];
+    if (top) top(undefined);
+  });
+
   function sheet(build) {
     return (backPending || Promise.resolve()).then(() => openSheet(build));
   }
@@ -59,17 +69,17 @@
         if (done) return;
         done = true;
         wrap.remove();
-        window.removeEventListener("popstate", onPop);
+        const i = stack.indexOf(close);
+        if (i >= 0) stack.splice(i, 1);
         resolve(v);
       };
       // زرّ الرجوع في الجوال يُغلق النافذة لا الشاشة
-      const onPop = () => close(undefined);
       history.pushState({ sheet: 1 }, "");
-      window.addEventListener("popstate", onPop);
+      stack.push(close);
       const closeBack = (v) => {
         if (done) return;
-        window.removeEventListener("popstate", onPop);
         if (history.state && history.state.sheet) {
+          skipPops++;
           backPending = new Promise((res) => {
             const fin = () => { window.removeEventListener("popstate", fin); clearTimeout(t); backPending = null; res(); };
             const t = setTimeout(fin, 400);
@@ -98,7 +108,8 @@
     }).then((v) => !!v);
   }
 
-  // قائمة اختيارٍ ببحث — `items`: [{id, title, sub}]
+  // قائمة اختيارٍ ببحث — `items`: [{id, title, sub, subNode?, badge?}]
+  // (`sub` نصٌّ للبحث، و`subNode` إن وُجد يُعرض بدله)
   function pickSheet(title, items, opts) {
     const o = opts || {};
     return sheet((box, close) => {
@@ -111,7 +122,7 @@
         for (const it of hits.slice(0, 200)) {
           list.appendChild(h("div", { class: "list-item", onclick: () => close(it) },
             h("div", { class: "grow" }, h("div", { class: "t", text: it.title }),
-              it.sub ? h("div", { class: "muted small", text: it.sub }) : null),
+              it.subNode ? h("div", { class: "muted small" }, it.subNode) : it.sub ? h("div", { class: "muted small", text: it.sub }) : null),
             it.badge || null));
         }
         if (!hits.length) list.appendChild(h("div", { class: "empty", text: o.empty || "لا نتائج" }));

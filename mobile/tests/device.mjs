@@ -239,8 +239,8 @@ async function main() {
     t.fill("الوزن (جم)", "20"); t.click("+ إضافة"); await t.sleep(250);`);
   check("لا خانة موديل ولا فصوص", await run(ev, `const x = document.body.innerHTML; return !x.includes("رقم الموديل") && !x.includes("الفصوص");`));
   shot("purchase_editor");
-  await run(ev, `t.click("ترحيل"); await t.confirm("ترحيل"); await t.sleep(800);`);
-  check("رُحّلت البضاعة P-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("P-00001"));
+  await run(ev, `t.click("حفظ الفاتورة"); await t.confirm("حفظ الفاتورة"); await t.sleep(800);`);
+  check("حُفظت البضاعة P-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("P-00001"));
 
   // بيعٌ للأمانة: T1 باسمه (يُعبّأ من البضاعة) + 5 جم بلا اسم
   await run(ev, `location.hash = "#/invoice/new?kind=sale"; await t.sleep(400); await t.pick("محل الأمانة");
@@ -249,8 +249,8 @@ async function main() {
   await run(ev, `t.click("+ إضافة"); await t.sleep(250); t.fill("الوزن (جم)", "5"); t.click("+ إضافة"); await t.sleep(300);`);
   shot("invoice_editor");
   check("الإجماليات 17.00 جم و340.00", await run(ev, `const x = document.querySelector(".totals").innerText; return x.includes("17.00") && x.includes("340.00");`));
-  await run(ev, `t.click("ترحيل"); await t.confirm("ترحيل"); await t.sleep(800);`);
-  check("رُحّلت S-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("S-00001"));
+  await run(ev, `t.click("حفظ الفاتورة"); await t.confirm("حفظ الفاتورة"); await t.sleep(800);`);
+  check("حُفظت S-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("S-00001"));
   await sleep(1200);
   shot("invoice_doc");
 
@@ -258,35 +258,39 @@ async function main() {
   await run(ev, `location.hash = "#/invoice/new?kind=sale_return"; await t.pick("محل الأمانة"); await t.sleep(200);
     t.fill("الطقم", "T1"); await t.sleep(250);`);
   check("المرتجع يُعبّأ من البيع (12.00 بأجور 240)", (await ev("__t.val('الوزن (جم)')")) === "12.00" && (await ev("__t.val('الأجور')")) === "240.00");
-  await run(ev, `t.click("+ إضافة"); await t.sleep(200); t.click("ترحيل"); await t.confirm("ترحيل"); await t.sleep(800);`);
-  check("رُحّل R-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("R-00001"));
+  // بلا «+ إضافة»: ما كُتب في خانات الطقم يُحفظ مع الفاتورة
+  await run(ev, `t.click("حفظ الفاتورة"); await t.confirm("حفظ الفاتورة"); await t.sleep(800);`);
+  check("حُفظ R-00001 بالطقم المكتوب دون «+ إضافة»", (await ev("document.querySelector('#bar h1').innerText")).includes("R-00001") &&
+    (await ev("App.state.invoices.find((d) => d.no === 'R-00001').lines.length")) === 1);
 
   // بيع T1 للنخبة — من المرتجع
   await run(ev, `location.hash = "#/invoice/new?kind=sale"; await t.sleep(400); await t.pick("محل النخبة");
     t.fill("الطقم", "T1"); await t.sleep(250);`);
   check("بيع المرتجع يُعبّأ منه", (await ev("__t.val('الوزن (جم)')")) === "12.00" && (await ev("__t.text().includes('مرتجع R-00001')")));
   shot("resale_autofill");
-  await run(ev, `t.click("+ إضافة"); await t.sleep(200); t.click("ترحيل"); await t.confirm("ترحيل"); await t.sleep(800);`);
+  await run(ev, `t.click("+ إضافة"); await t.sleep(200); t.click("حفظ الفاتورة"); await t.confirm("حفظ الفاتورة"); await t.sleep(800);`);
 
   // تحصيل من الأمانة: 3 جم عيار 21 + 50 ريالاً
   await run(ev, `location.hash = "#/voucher/new?kind=receipt"; await t.sleep(400); await t.pick("محل الأمانة");
     t.fill("الوزن (جم)", "3"); t.fill("العيار", "21"); t.click("+ نقد"); await t.sleep(200); t.fill("المبلغ", "50");
-    await t.sleep(200); t.click("ترحيل"); await t.confirm("ترحيل"); await t.sleep(800);`);
-  check("رُحّل التحصيل RV-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("RV-00001"));
+    await t.sleep(200); t.click("حفظ السند"); await t.confirm("حفظ السند"); await t.sleep(800);`);
+  check("حُفظ التحصيل RV-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("RV-00001"));
 
   // دفعٌ للمصنع من الصناديق: 2 جم عيار 21 + 30 ريالاً
   await run(ev, `location.hash = "#/voucher/new?kind=payment"; await t.sleep(400); await t.pick("مصنع الريان");
     t.fill("العيار", "21"); t.fill("الوزن (جم)", "2"); t.click("+ نقد"); await t.sleep(200); t.fill("المبلغ", "30");
     await t.sleep(200);`);
   check("يذكر ما في صندوق عيار 21 (3.00)", await ev("__t.text().includes('معك في صندوق عيار 21: 3.00 جم')"));
-  await run(ev, `t.click("ترحيل"); await t.confirm("ترحيل"); await t.sleep(800);`);
-  check("رُحّل الدفع PV-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("PV-00001"));
+  await run(ev, `t.click("حفظ السند"); await t.confirm("حفظ السند"); await t.sleep(800);`);
+  check("حُفظ الدفع PV-00001", (await ev("document.querySelector('#bar h1').innerText")).includes("PV-00001"));
 
   const sid = await ev("App.state.shops.find((s) => s.name === 'محل الأمانة').id");
   await run(ev, `location.hash = "#/statement/${sid}"; await t.sleep(600);`);
-  const kp = await ev("document.querySelector('.kpis').innerText");
+  const kp = await ev("document.querySelector('.st-bal').innerText");
   // ذهب 17 − 12 − 3.5 = 1.50 عليه · أجور 340 − 240 − 50 = 50.00 عليه
   check("كشف الحساب: 1.50 جم و50.00 ريال عليه", kp.includes("1.50 جم عليه") && kp.includes("50.00 ريال عليه"), kp);
+  check("وجدولٌ بعملياته الثلاث (بيع · مرتجع · تحصيل)",
+    (await ev("document.querySelectorAll('.st-table tbody tr.tap').length")) === 3, String(await ev("document.querySelectorAll('.st-table tbody tr.tap').length")));
   shot("statement");
 
   // الحفظ التلقائي في المجلد بعد كل عملية
@@ -319,8 +323,9 @@ async function main() {
   const hd = await ev("(() => { const h = Domain.holdings(App.state); return { b21: (h.boxes.find((b) => b.karat === 21) || {}).weight, cash: h.cash.amount, n: h.pieces.length }; })()");
   // الطقم بلا اسم من البضاعة لم يُبع (السطر 5 جم كُتب بوزنه لا باختياره)
   check("الممتلكات: صندوق 21 فيه 1.00 جم، والنقد 20، وطقمٌ واحد معي", hd.b21 === 1 && hd.cash === 20 && hd.n === 1, JSON.stringify(hd));
-  check("وصناديقها على الشاشة، ثم ذهب المصانع عندي وذهبي عند العملاء", (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
-    (await ev("document.querySelectorAll('.wide-tile.big').length")) === 2);
+  check("وصناديقها على الشاشة، ثم ذهب المصانع · ذهبي عند العملاء · الأطقم التي معي", (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
+    (await ev("document.querySelectorAll('.wide-tile.big').length")) === 3 &&
+    (await ev("document.querySelector('.wide-tile.sets').innerText")).includes("الأطقم التي معي (1)"));
   // التطبيق يقرأ الملف من main؛ والتجربة تقرؤه بالطريق نفسه من النسخة المُختبَرة
   // (فالملف الجديد لا يصل إلى main إلا بعد نجاحها)
   const promoMain = await ev("Promo.url");
@@ -421,7 +426,7 @@ async function main() {
   await sleep(800);
   check("وصورة الطقم استُرجعت من المجلد", pd && pd.n === 1 && (await ev(`Store.getPhoto(${JSON.stringify(phId)}).then((d) => !!d)`)), JSON.stringify(pd));
   await run(ev, `location.hash = "#/statement/" + App.state.shops.find((s) => s.name === "محل الأمانة").id; await t.sleep(600);`);
-  const kp2 = await ev("document.querySelector('.kpis').innerText");
+  const kp2 = await ev("document.querySelector('.st-bal').innerText");
   check("وكشف الحساب كما كان: 1.50 جم و50.00 ريال عليه", kp2.includes("1.50 جم عليه") && kp2.includes("50.00 ريال عليه"), kp2);
   shot("restored_statement");
   ws.close();

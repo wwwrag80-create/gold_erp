@@ -229,7 +229,16 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   const fa = D.saveShop(t, { name: "مصنع الماس", type: "factory" });
   const li = D.buildLine({ wo: "D1", reg: 10, wage: 5, diamond: 0.5, photo: "ph_abc" });
   check("السطر يحمل صورته وماسه", li.photo === "ph_abc" && li.diamond === 0.5);
-  check("والتعبئة منه تنقل الصورة", D.lineToEntry(li, 18).photo === "ph_abc");
+  check("والتعبئة منه تنقل الصورة", D.lineToEntry(li, 18).photos.join() === "ph_abc");
+  // أكثر من صورة للطقم: بلا تكرار، والأولى في `photo` كما كانت
+  const lm = D.buildLine({ wo: "D3", reg: 5, wages: 10, photos: ["ph_1", "ph_2", "ph_1", "", "ph_3"] });
+  check("صورٌ عدة للطقم: ph_1 · ph_2 · ph_3 بلا تكرار، والأولى صورته", lm.photos.join() === "ph_1,ph_2,ph_3" && lm.photo === "ph_1");
+  check("والتعبئة منه تنقلها كلها", D.lineToEntry(lm, 18).photos.join() === "ph_1,ph_2,ph_3");
+  check("سطرٌ قديم بصورةٍ واحدة يُقرأ صوراً", D.linePhotos({ wo: "Q", reg18: 1, photo: "ph_old" }).join() === "ph_old" &&
+    D.linePhotos({ wageOnly: true, photo: "x" }).length === 0 && D.linePhotos({ reg18: 1 }).length === 0);
+  check("حتى 10 صور للطقم", D.buildLine({ reg: 1, wages: 1, photos: Array.from({ length: 14 }, (_, i) => "p" + i) }).photos.length === D.MAX_PHOTOS);
+  const dph = D.docPhotos({ lines: [lm, D.buildLine({ reg: 2, wages: 1 }), D.buildLine({ wo: "D4", reg: 1, wages: 1, photo: "ph_9" })] });
+  check("صور الفاتورة كلٌّ بطقمه: D3 ×3 ثم D4 (السطر 3)", dph.map((x) => `${x.wo}:${x.id}:${x.n}`).join() === "D3:ph_1:1,D3:ph_2:1,D3:ph_3:1,D4:ph_9:3");
   D.saveInvoice(t, { kind: "purchase", shopId: fa.id, date: "2026-03-01", lines: [D.buildLine({ wo: "D1", reg: 10, wage: 5, diamond: 0.5 }),
     D.buildLine({ wo: "D2", reg: 8, wage: 5, diamond: 0.25 })] });
   D.saveInvoice(t, { kind: "sale", shopId: sh.id, date: "2026-03-02", lines: [D.buildLine({ wo: "D1", reg: 10, wage: 9, diamond: 0.5 }),

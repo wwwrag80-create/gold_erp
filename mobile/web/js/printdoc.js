@@ -46,6 +46,8 @@
   .foot{margin-top:18px;color:#4A443A;font-size:12px;text-align:center}
   td.ph{padding:3px;width:66px}
   td.ph img{width:60px;height:60px;object-fit:cover;border-radius:6px;display:block;margin:0 auto}
+  td.ph .phs{display:grid;grid-template-columns:repeat(2,30px);gap:3px;justify-content:center}
+  td.ph .phs img{width:30px;height:30px;border-radius:4px}
   .brand{margin-top:10px;text-align:center;color:#7C7566;font-size:11px}
   @page{size:A4;margin:10mm}
   `;
@@ -122,7 +124,15 @@
 
   function invoiceHtml(st, inv, photos) {
     const ph = photos || {};
-    const anyPh = inv.lines.some((l) => l.photo && ph[l.photo]);
+    // صور السطر (واحدةٌ أو أكثر) — ما وُجد منها
+    const linePh = (l) => D.linePhotos(l).filter((id) => ph[id]);
+    const anyPh = inv.lines.some((l) => linePh(l).length);
+    const phCell = (l) => {
+      const ids = linePh(l);
+      if (!ids.length) return `<td class="ph"></td>`;
+      if (ids.length === 1) return `<td class="ph"><img src="${ph[ids[0]]}" alt=""></td>`;
+      return `<td class="ph"><div class="phs">${ids.slice(0, 4).map((id) => `<img src="${ph[id]}" alt="">`).join("")}</div>${ids.length > 4 ? `<small>+${ids.length - 4}</small>` : ""}</td>`;
+    };
     const k = st.settings.viewKarat || 18;
     const shop = D.shopById(st, inv.shopId) || { name: "—" };
     const title = (INV_TITLE[inv.kind] || "فاتورة") + (inv.vat ? " ضريبية" : "");
@@ -136,7 +146,7 @@
         continue;
       }
       const lk = li.karat || 18;
-      rows += `<tr><td>${n}</td>${anyPh ? `<td class="ph">${li.photo && ph[li.photo] ? `<img src="${ph[li.photo]}" alt="">` : ""}</td>` : ""}<td>${li.wo ? `<span dir="auto">${esc(li.wo)}</span>` : "—"}</td>
+      rows += `<tr><td>${n}</td>${anyPh ? phCell(li) : ""}<td>${li.wo ? `<span dir="auto">${esc(li.wo)}</span>` : "—"}</td>
         <td>${li.reg18 > 0 ? lk : "—"}</td><td>${li.reg18 > 0 ? f2(G.g(li.standing18, lk)) : "—"}</td><td><b>${li.reg18 > 0 ? f2(G.g(li.reg18, lk)) : "—"}</b></td>
         ${anyDia ? `<td>${li.diamond ? f2(li.diamond) : "—"}</td>` : ""}
         <td>${f2(li.wages)}</td></tr>`;
