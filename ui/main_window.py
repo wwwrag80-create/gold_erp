@@ -395,8 +395,38 @@ class MainWindow(QtWidgets.QMainWindow):
         subbar.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
                              QtWidgets.QSizePolicy.Fixed)
         sb = QtWidgets.QHBoxLayout(subbar)
-        sb.setContentsMargins(16, 6, 16, 6)
-        sb.addWidget(self.crumb)
+        sb.setContentsMargins(16, 7, 16, 7)
+        sb.setSpacing(10)
+        # ══ رأس الصفحة (5.1) ══
+        # «☰» يفتح القائمة من داخل أي شاشة (Ctrl+B) دون الرجوع للرئيسية،
+        # ثم أيقونة الشاشة، ثم مسارها (الرئيسية ‹ القسم) صغيراً فوق عنوانها
+        # الكبير — فيُعرف المكان من نظرة.
+        self.btn_nav = QtWidgets.QToolButton()
+        self.btn_nav.setObjectName("navToggle")
+        self.btn_nav.setText("☰")
+        self.btn_nav.setCheckable(True)
+        self.btn_nav.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_nav.setToolTip("القائمة — تنقّلٌ إلى أي شاشة من هنا (Ctrl+B)")
+        self.btn_nav.toggled.connect(self._toggle_nav)
+        self.btn_nav.setVisible(False)
+        _sc_nav = QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+B"), self)
+        _sc_nav.setContext(QtCore.Qt.WindowShortcut)
+        _sc_nav.activated.connect(
+            lambda: self.btn_nav.isVisible() and self.btn_nav.toggle())
+        self.page_icon = QtWidgets.QLabel()
+        self.page_icon.setObjectName("pageIcon")
+        self.page_icon.setVisible(False)
+        self.page_path = QtWidgets.QLabel("")
+        self.page_path.setObjectName("pagePath")
+        self.page_path.setVisible(False)
+        title_box = QtWidgets.QVBoxLayout()
+        title_box.setContentsMargins(0, 0, 0, 0)
+        title_box.setSpacing(0)
+        title_box.addWidget(self.page_path)
+        title_box.addWidget(self.crumb)
+        sb.addWidget(self.btn_nav)
+        sb.addWidget(self.page_icon)
+        sb.addLayout(title_box)
         # «ⓘ» — شرح الشاشة المطويّ، يظهر عند الطلب لا فوق الجدول
         self.btn_notes = QtWidgets.QToolButton()
         self.btn_notes.setObjectName("notesBtn")
@@ -490,6 +520,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sidebar.model().rowsMoved.connect(
             lambda *_: self._save_nav_layout())
         self._restore_nav_layout()
+        self._apply_nav_icons()
         self._items[self.welcome] = None
         self.switch(0)
 
@@ -811,6 +842,59 @@ class MainWindow(QtWidgets.QMainWindow):
     PREBUILD_IDLE = 4.0
     PREBUILD_SLOW = 0.8
 
+    # ══════════ رأس الصفحة والقائمة (5.1) ══════════
+    def _set_page_head(self, node):
+        """مسار الشاشة (الرئيسية ‹ قسمها) وأيقونتها فوق عنوانها."""
+        path = getattr(self, "page_path", None)
+        icon = getattr(self, "page_icon", None)
+        if path is None or icon is None:
+            return
+        if node is None:
+            path.setVisible(False)
+            icon.setVisible(False)
+            return
+        parent = node.parent()
+        trail = ["الرئيسية"]
+        if parent is not None and parent.text(0):
+            trail.append(parent.text(0))
+        path.setText("  ‹  ".join(trail))
+        path.setVisible(True)
+        try:
+            from ui.widgets.nav_icons import icon_for
+            ic = icon_for(node.data(0, NAV_KEY_ROLE))
+            px = 22
+            pm = ic.pixmap(px, px) if not ic.isNull() else None
+        except Exception:
+            pm = None
+        if pm is not None and not pm.isNull():
+            icon.setPixmap(pm)
+            icon.setVisible(True)
+        else:
+            icon.setVisible(False)
+
+    def _apply_nav_icons(self):
+        """أيقونةٌ لكل بندٍ في القائمة بلون الهوية — وتُعاد مع تبديل المظهر."""
+        try:
+            from ui.widgets import nav_icons
+            nav_icons.clear()
+            self.sidebar.setIconSize(QtCore.QSize(20, 20))
+            for it, _parent in self._iter_nav():
+                it.setIcon(0, nav_icons.icon_for(it.data(0, NAV_KEY_ROLE)))
+        except Exception:
+            pass
+
+    def _toggle_nav(self, on):
+        """«☰»: القائمة الجانبية داخل الشاشة — وتُطوى مع فتح أي شاشة."""
+        panel = getattr(self, "side_panel", None)
+        if panel is None or getattr(self, "_current_row", 0) == 0:
+            return
+        panel.setVisible(bool(on))
+        if on:
+            try:
+                self.sidebar.setFocus()
+            except Exception:
+                pass
+
     def _close_screen(self):
         """«رجوع»: إلى الشاشة السابقة كما تُركت، وإلا إلى الرئيسية."""
         hist = getattr(self, "_history", [])
@@ -1114,6 +1198,7 @@ class MainWindow(QtWidgets.QMainWindow):
         node = self._items.get(screen)
         self.crumb.setText(
             node.text(0) if node is not None else config.COMPANY_NAME)
+        self._set_page_head(node)
         # إخفاء الشريط الجانبي تماماً عند فتح أي شاشة فرعية لتتوسّع
         # لكامل عرض النافذة، وإظهاره عند العودة لشاشة الترحيب.
         is_sub = row != 0
@@ -1131,6 +1216,12 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._panel_visible = not is_sub
         self.btn_close.setVisible(is_sub)      # زر الرجوع في كل شاشة فرعية
+        nav = getattr(self, "btn_nav", None)
+        if nav is not None:
+            nav.blockSignals(True)
+            nav.setChecked(False)              # كل شاشةٍ تُفتح بعرضها كاملاً
+            nav.blockSignals(False)
+            nav.setVisible(is_sub)
         if is_sub and hasattr(self, "_items"):
             self._update_back_btn()
         # ══ الشريط الأسود العلوي في الرئيسية وحدها (4.31) ══
@@ -2021,6 +2112,9 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             theme.set_theme(name, self.user.get("username"))
             theme.apply(QtWidgets.QApplication.instance(), theme=name)
+            self._apply_nav_icons()
+            self._set_page_head(self._items.get(
+                self.screens[getattr(self, "_current_row", 0)]))
             # ألوانٌ تُرسم بالشيفرة (صفّ الإجمالي، الدرجات) تُقرأ من
             # المظهر لحظة العرض — فتُعاد قراءة الشاشة لتأخذ ألوانه
             self._refresh_current()

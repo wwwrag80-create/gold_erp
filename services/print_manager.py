@@ -235,6 +235,53 @@ def cells(*items):
     return "".join(seq)
 
 
+# ══ رأس الجدول على كل صفحة (5.1) ══
+# كشفٌ من ثلاث صفحات كانت صفحتاه الثانية والثالثة أرقاماً بلا عناوين
+# أعمدة. القوالب تكتب صفّ العناوين صفّاً عادياً (`<tr><th>…`)؛ فيُعلَّم هنا
+# — بعد بناء المستند ومن غير مسّ أيّ قالب — رأساً (`<thead>`) لكل جدول
+# بيانات، فيكرّره المتصفح أعلى كل صفحة. صفّان من العناوين (رأسٌ بطابقين)
+# يُعلَّمان معاً.
+import re as _re_head
+_ITEMS_OPEN = _re_head.compile(r'<table\s+class="items[^"]*"[^>]*>', _re_head.I)
+
+
+def _head_rows(rest):
+    """طول صفوف العناوين في أول الجدول (صفٌّ فيه th ولا td) — أو 0."""
+    pos, n = 0, 0
+    while n < 2:
+        m = _re_head.match(r'\s*<tr\b[^>]*>', rest[pos:], _re_head.I)
+        if not m:
+            break
+        end = rest.find("</tr>", pos + m.end())
+        if end < 0:
+            break
+        row = rest[pos + m.start():end]
+        if "<th" not in row.lower() or "<td" in row.lower():
+            break
+        pos, n = end + len("</tr>"), n + 1
+    return pos
+
+
+def mark_table_heads(html):
+    """يلفّ صفوف عناوين كل جدول بيانات في `<thead>` — مرةً واحدة."""
+    if not html or "<thead" in html:
+        return html
+    out, i = [], 0
+    for m in _ITEMS_OPEN.finditer(html):
+        if m.start() < i:
+            continue
+        out.append(html[i:m.end()])
+        rest = html[m.end():]
+        n = _head_rows(rest)
+        if n:
+            out.append("<thead>" + rest[:n] + "</thead>")
+            i = m.end() + n
+        else:
+            i = m.end()
+    out.append(html[i:])
+    return "".join(out)
+
+
 # جدول بيانات: العرض الكامل يأتي من CSS (محرك Qt يطبّقه من هناك فقط)
 TBL = '<table class="items" width="100%" cellspacing="0" cellpadding="4">'
 TBL_PLAIN = '<table class="plain" width="100%" cellspacing="0" cellpadding="0">'
@@ -4997,7 +5044,7 @@ def build_html(doc_type, doc_id, **kw):
     framed = (
         '<table class="frame" width="100%" height="100%" cellspacing="0"'
         ' cellpadding="8"><tr><td class="framecell" width="100%" valign="top">'
-        f'{en(html)}</td></tr></table>')
+        f'{mark_table_heads(en(html))}</td></tr></table>')
     # محرك Qt يعرف الخط المرفق بعد تسجيله في التطبيق — فالاسم يكفيه
     from services import print_fonts
     css = BASE_CSS.replace("@FAMILY@", print_fonts.family_css())

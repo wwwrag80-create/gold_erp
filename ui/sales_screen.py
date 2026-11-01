@@ -1046,6 +1046,9 @@ class SalesScreen(QtWidgets.QWidget):
     def _build_items(self):
         box = QtWidgets.QGroupBox("③ بنود الفاتورة")
         self.items_table = make_table()
+        self.items_table.setProperty(
+            "emptyText", "لا بنود بعد — أدخل الطقم في «إدخال الطقم» ثم "
+            "«+ إضافة سطر»")
         self.items_table.cellClicked.connect(guard_click(self._model_clicked, 0.3))
         self.items_table.setToolTip(
             "انقر خانة الموديل لعرض صورته المحفوظة في دليل الموديلات\n"

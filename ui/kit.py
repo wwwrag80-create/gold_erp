@@ -222,6 +222,122 @@ def _arabize_calendar(view):
 THEME_GOLD = {"light": "#9A7B22", "dark": "#B08E2A"}
 
 
+# ══ لا ترحيلَ مرتين بنقرةٍ متكرّرة (5.1) ══
+# الترحيل يأخذ ثانيةً أو اثنتين على خيط الواجهة، وما يُنقر أثناءها يصطفّ
+# في ويندوز ويُسلَّم بعدها — فتصل «ترحيل» الثانية والفاتورة قد رُحّلت.
+# زرُّ الفعل الحسّاس (ترحيل · اعتماد · حفظ · صرف · تنفيذ) يُسقط النقر
+# الذي يصل وهو يعمل أو بعد انتهائه بأقلّ من `GUARD_MS`. لا يمسّ منطق الحفظ
+# ولا التأكيد: النقرة المقصودة تُنفَّذ مرة كما كانت.
+GUARD_WORDS = ("ترحيل", "اعتماد", "حفظ", "صرف", "تنفيذ")
+GUARD_MS = 800
+
+
+class _ClickGuard:
+    """يُمزج في صنف الزر قبل صنف Qt."""
+
+    _kit_g_busy = False
+    _kit_g_end = 0.0
+
+    def _kit_guarded(self):
+        flag = self.property("guardClick")
+        if flag is not None:
+            return bool(flag)
+        t = self.text() or ""
+        return any(w in t for w in GUARD_WORDS)
+
+    def _kit_g_drop(self):
+        """هل تُسقط هذه الضغطة؟ — والزر يعمل أو انتهى لتوّه."""
+        import time as _t
+        return self._kit_guarded() and (
+            self._kit_g_busy
+            or (_t.monotonic() - self._kit_g_end) * 1000 < GUARD_MS)
+
+    def _kit_g_release(self, base, e):
+        # النقرة تُنفَّذ عند الإفلات: يُعلَّم الزرّ عاملاً حتى ينتهي ما
+        # رُبط به، ثم يُحفظ وقت الانتهاء — والضغط الذي يصل بعده يُسقط
+        import time as _t
+        if not self._kit_guarded():
+            return base(self, e)
+        self._kit_g_busy = True
+        try:
+            return base(self, e)
+        finally:
+            self._kit_g_busy = False
+            self._kit_g_end = _t.monotonic()
+
+    # الضغط يُسقط لا الإفلات: الزرّ الذي لم يُضغط لا يبقى «منخفضاً»
+    def mousePressEvent(self, e):
+        if self._kit_g_drop():
+            e.accept()
+            return None
+        return self._kit_g_base("mousePressEvent")(self, e)
+
+    def keyPressEvent(self, e):
+        if e.key() in (QtCore.Qt.Key_Space, QtCore.Qt.Key_Select) and \
+                self._kit_g_drop():
+            e.accept()
+            return None
+        return self._kit_g_base("keyPressEvent")(self, e)
+
+    def mouseReleaseEvent(self, e):
+        return self._kit_g_release(self._kit_g_base("mouseReleaseEvent"), e)
+
+    def keyReleaseEvent(self, e):
+        return self._kit_g_release(self._kit_g_base("keyReleaseEvent"), e)
+
+    def _kit_g_base(self, name):
+        mro = type(self).__mro__
+        i = mro.index(_ClickGuard)
+        for k in mro[i + 1:]:
+            fn = k.__dict__.get(name)
+            if fn is not None:
+                return fn
+        return getattr(QtWidgets.QPushButton, name)
+
+
+# ══ حالة «لا بيانات» في كل جدول (5.1) ══
+# جدولٌ فارغ كان مستطيلاً أبيض صامتاً: لا يُعرف أهو فارغٌ فعلاً، أم لم
+# يُحمَّل، أم ينتظر اختياراً («اختر الحساب ثم عرض»). الآن تُكتب في وسطه
+# جملةٌ هادئة بلون النصّ الثانوي — من خاصية الجدول `emptyText` إن ضبطتها
+# الشاشة، وإلا الجملة العامة. لا تُرسم والجدول فيه صفّ واحد.
+EMPTY_TEXT = "لا توجد بيانات للعرض"
+
+
+def paint_empty(view):
+    """يكتب رسالة «لا بيانات» في وسط جدولٍ بلا صفوف."""
+    try:
+        model = view.model()
+        if model is None or model.rowCount() > 0:
+            return
+        vp = view.viewport()
+        if vp.height() < 48 or vp.width() < 120:
+            return
+        text = view.property("emptyText")
+        if text is None:
+            text = EMPTY_TEXT
+        text = str(text or "")
+        if not text:
+            return
+        from ui import theme as _theme
+        pal = _theme.palette("dark" if _STATE["dark"] else "light")
+        p = QtGui.QPainter(vp)
+        p.setRenderHint(QtGui.QPainter.TextAntialiasing)
+        f = QtGui.QFont(view.font())
+        f.setPixelSize(max(13, int(round(16 * _STATE["scale"]))))
+        f.setWeight(QtGui.QFont.Medium)
+        p.setFont(f)
+        p.setPen(QtGui.QColor(pal.get("muted", "#4A443A")))
+        r = vp.rect()
+        # في الثلث الأعلى: قريبٌ من موضع أول سطرٍ كان سيظهر
+        top = r.top() + max(18, min(r.height() // 4, 120))
+        box = QtCore.QRect(r.left() + 32, top, r.width() - 64, 120)
+        p.drawText(box, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop
+                   | QtCore.Qt.TextWordWrap, text)
+        p.end()
+    except Exception:
+        pass
+
+
 def _refresh_roots():
     """تُستبدل بالفعلية حين تتوفّر المكتبة."""
 
@@ -407,9 +523,20 @@ if ACTIVE:
                                 ("DateEdit",), "QAbstractSpinBox"))
         return "\n".join(parts)
 
+    _FIELDS = ("LineEdit", "SearchLineEdit", "PasswordLineEdit",
+               "SpinBox", "DoubleSpinBox", "DateEdit", "TextEdit",
+               "PlainTextEdit")
+
+    def _root_shape():
+        """زاوية الحقول من سلّم التصميم — كالأزرار (5.1). قاعدةٌ واحدة على
+        النافذة لا ورقةٌ لكل خانة: لا كلفة على فتح الشاشات."""
+        from ui import design as _d
+        return (", ".join(_FIELDS)
+                + f" {{ border-radius: {_d.RADIUS['ctl']}px; }}")
+
     def _root_qss():
         base = "\n".join(_ss.getStyleSheet(src) for src in _ROOT_SOURCES)
-        return base + "\n" + _root_extra()
+        return base + "\n" + _root_extra() + "\n" + _root_shape()
 
     def install_root(widget):
         """يجعل النافذة حاملةً أوراق المكتبة لكل ما فيها."""
@@ -690,11 +817,21 @@ if ACTIVE:
             pass
         return menu
 
+    # ══ شكلٌ واحد لكل الأزرار (5.1) ══ زاويةٌ وحشوٌ وارتفاعٌ من سلّم
+    # التصميم (`ui.design`) لكل الأدوار — اللون يبقى لون كل دورٍ كما كان
+    def _d_ctl():
+        from ui import design as _d
+        return _d.RADIUS["ctl"]
+
+    def _shape_qss():
+        return (f"QPushButton {{ border-radius: {_d_ctl()}px; "
+                "padding: 6px 14px 7px 14px; }")
+
     def _ghost_qss(t):
-        return f"""
+        return _shape_qss() + f"""
         QPushButton {{ color: {t['ink']}; background: {t['surface']};
             border: 1px solid {t['line2']}; border-bottom: 1px solid {t['line3']};
-            border-radius: 6px; }}
+            border-radius: {_d_ctl()}px; }}
         QPushButton:hover {{ background: {t['hover']}; border-color: {t['line3']}; }}
         QPushButton:pressed {{ background: {t['goldSoft2']}; color: {t['muted']}; }}
         QPushButton:disabled {{ color: {t['disFg']}; background: {t['disField']};
@@ -706,7 +843,7 @@ if ACTIVE:
         return f"""
         QPushButton {{ color: #1A1305; background-color: {t['gold']};
             border: 1px solid {t['goldHi']}; border-bottom: 1px solid #7A5F14;
-            border-radius: 6px; }}
+            border-radius: {_d_ctl()}px; }}
         QPushButton:hover {{ background-color: {t['goldHi']}; }}
         QPushButton:pressed {{ background-color: #A8861F;
             color: rgba(26,19,5,0.75); }}
@@ -715,17 +852,18 @@ if ACTIVE:
 
     def _primary_qss(t):
         # الفاتح يبقى ذهب Fluent نفسه (لون الفعل = ذهب النظام)؛ والليلي يُصحَّح
-        return _primary_dark_qss(t) if t is _tokens()[1] else ""
+        return _shape_qss() + (_primary_dark_qss(t) if t is _tokens()[1]
+                               else "")
 
     def _danger_qss(t):
-        return f"""
+        return _shape_qss() + f"""
         QPushButton {{ color: #FFFFFF; background: {t['red']};
             border: 1px solid {t['redHi']}; border-bottom: 1px solid #6E1F1F;
-            border-radius: 6px; }}
+            border-radius: {_d_ctl()}px; }}
         QPushButton:hover {{ background: {t['redHi']}; }}
         QPushButton:pressed {{ background: #7E2424; color: rgba(255,255,255,0.75); }}"""
 
-    class PushButton(qf.PrimaryPushButton):
+    class PushButton(_ClickGuard, qf.PrimaryPushButton):
         """زرّ Fluent يقرأ دوره من اسمه كما كان النمط يقرؤه.
 
         بلا اسم ⇒ زرّ الفعل الأساسي (ذهبيّ ممتلئ). `ghost` ⇒ الزرّ
@@ -1347,12 +1485,13 @@ if ACTIVE:
     # المزروعة في الخلايا (✕ حذف · العدد) تأخذ مساحة الخلية ناقصاً حشوها —
     # فحشوٌ أعرض كان يقصّ «✕» إلى نقطة في عمودٍ ضيّق.
     def _header_qss(t):
+        # 5.1: رأسٌ أعلى (38) بحشوٍ أوسع — عناوين الأعمدة تُقرأ بلا تحديق
         return f"""
         QHeaderView::section {{ color: {t['hdrFg']}; font-weight: bold;
             font-size: {_px(15)}px; background-color: {t['hdrBg']};
             border: none; border-bottom: 2px solid {t['hdrLine']};
-            border-left: 1px solid {t['hdrLine2']}; padding: 6px 8px; }}
-        QHeaderView::section:horizontal {{ height: {_px(34)}px; }}
+            border-left: 1px solid {t['hdrLine2']}; padding: 7px 10px; }}
+        QHeaderView::section:horizontal {{ height: {_px(38)}px; }}
         QHeaderView::section:hover {{ background-color: {t['goldSoft2']}; }}
         QTableView {{ background: {t['surface']}; border-radius: 10px;
             font-size: {_px(17)}px; font-weight: 500; }}
@@ -1492,6 +1631,10 @@ if ACTIVE:
             # شبكة الخطوط تقطع الصفوف المستديرة؛ الفصل بتناوب الألوان
             QtWidgets.QTableView.setShowGrid(self, False)
 
+        def paintEvent(self, e):
+            super().paintEvent(e)
+            paint_empty(self)
+
     class TableWidget(_TableKit, qf.TableWidget):
         """`QTableWidget` بصفوف Fluent: تمريرٌ ناعم وتظليلٌ عند المرور
         وشريط تحديد ذهبي — وكل واجهة `QTableWidget` كما هي."""
@@ -1528,15 +1671,27 @@ if ACTIVE:
             self._kit_watch()
 
 else:
-    PushButton = QtWidgets.QPushButton
+    class TableWidget(QtWidgets.QTableWidget):
+        """الجدول الكلاسيكي — برسالة «لا بيانات» نفسها (5.1)."""
+
+        def paintEvent(self, e):
+            super().paintEvent(e)
+            paint_empty(self)
+
+    class TableView(QtWidgets.QTableView):
+        def paintEvent(self, e):
+            super().paintEvent(e)
+            paint_empty(self)
+
+    class PushButton(_ClickGuard, QtWidgets.QPushButton):
+        pass
+
     LineEdit = QtWidgets.QLineEdit
     SpinBox = QtWidgets.QSpinBox
     DoubleSpinBox = QtWidgets.QDoubleSpinBox
     CheckBox = QtWidgets.QCheckBox
     RadioButton = QtWidgets.QRadioButton
     ComboBox = QtWidgets.QComboBox
-    TableWidget = QtWidgets.QTableWidget
-    TableView = QtWidgets.QTableView
     RowDelegate = None
 
     class SearchLineEdit(QtWidgets.QLineEdit):
@@ -1649,6 +1804,10 @@ if ACTIVE:
             body.setWordWrap(True)
             body.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             body.setMinimumWidth(380)
+            # 5.1: سطرٌ مقروء — الرسالة الطويلة تلتفّ على عرضٍ مريح لا على
+            # عرض النافذة كلّه، وبين الأسطر متنفّس
+            body.setMaximumWidth(640)
+            body.setContentsMargins(0, 4, 0, 4)
             self.viewLayout.addWidget(body)
             if detail:
                 d = qf.CaptionLabel(str(detail), self.widget)

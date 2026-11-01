@@ -7438,6 +7438,26 @@ def main():
               and _w88._prebuild_costs()[_k88] < 5.0
               and _w88.PREBUILD_IDLE >= 3,
               f"{_k88} built={_w88.screens[_r88].built}")
+        # 5.1: أيقونةٌ لكل شاشة في القائمة، ورأس الصفحة بمسارها
+        from ui.widgets import nav_icons as _ni88
+        _miss88 = sorted(k for k in _w88._screen_keys.values()
+                         if k not in _ni88.ICONS)
+        _w88.switch(_gl)
+        _QW88.QApplication.processEvents()
+        check("5.1: لكل شاشةٍ في القائمة أيقونتها، ورأس الصفحة يقول المسار"
+              " (الرئيسية ‹ القسم) فوق عنوانها، و«☰» يفتح القائمة من داخلها",
+              not _miss88 and _w88.page_path.text().startswith("الرئيسية")
+              and _w88.btn_nav.isVisibleTo(_w88)
+              and _w88._screen_key(_gl) in _w88.crumb.text(),
+              f"بلا أيقونة: {_miss88} · {_w88.page_path.text()}")
+        _w88.btn_nav.setChecked(True)
+        _QW88.QApplication.processEvents()
+        _open88 = _w88.side_panel.isVisibleTo(_w88)
+        _w88.switch(_sa)
+        _QW88.QApplication.processEvents()
+        check("والقائمة المفتوحة داخل الشاشة تُطوى مع فتح شاشةٍ أخرى",
+              _open88 and not _w88.side_panel.isVisibleTo(_w88)
+              and not _w88.btn_nav.isChecked())
         _w88.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
@@ -9695,6 +9715,92 @@ def main():
     check("واسترجاعُ نسخةٍ أقدم من آخر فاتورةٍ إلكترونية رسمية يُنبَّه عليه"
           " قبله (العدّاد والأرقام تعود للوراء)",
           _rb == (3, 1) and "einvoice_rollback" in _bk124, str(_rb))
+
+    step("125) 5.1: نظام تصميمٍ واحد بالألوان نفسها")
+    import hashlib as _hl125
+    import json as _js125
+    import re as _re125
+    from ui import design as _ds125, styles as _sty125, theme as _th125
+    # بصمة اللوحتين كما كانتا منذ سنة — أيّ تغييرٍ في لونٍ واحد يُسقط الفحص
+    _fp125 = {n: _hl125.sha256(_js125.dumps(sorted(p.items())).encode())
+              .hexdigest()[:16] for n, p in (("light", _th125.LIGHT),
+                                             ("dark", _th125.DARK))}
+    check("ألوان النظام كما هي تماماً (الفاتح والليلي) — لم يتغيّر لونٌ ولم"
+          " يُضَف لون",
+          _fp125 == {"light": "18f577bfc2fd3797", "dark": "d999d2d3990da587"},
+          str(_fp125))
+    _built125 = _th125.build(_sty125.TEMPLATE, _th125.LIGHT, 1.0)
+    _hex125 = set(_re125.findall(r"#[0-9A-Fa-f]{6}\b", _sty125.TEMPLATE))
+    check("ورقة الأنماط بلا رمزٍ معلّق، ولا لون فيها من خارج اللوحة"
+          " (سوى الأبيض والأسود كما كانا)",
+          not _re125.findall(r"@[A-Za-z][A-Za-z0-9_]*", _built125)
+          and _hex125 <= {"#FFFFFF", "#000000"}
+          and "border-radius: 12px" in _built125
+          and all(k in _ds125.tokens() for k in ("rCard", "fsTitle",
+                                                 "sp_md", "hCtl")),
+          str(_hex125))
+    from services import print_manager as _pm125
+    _hd125 = _pm125.mark_table_heads(
+        '<table class="items" width="100%"><tr><th>أ</th></tr>'
+        '<tr><td>1</td></tr></table><table class="items"><tr><td>م</td>'
+        '</tr></table>')
+    check("الطباعة: عناوين أعمدة كل جدول تتكرّر أعلى كل صفحة (رأس الجدول)"
+          " — وجدول «عنوان: قيمة» يبقى كما هو",
+          _hd125.count("<thead>") == 1
+          and "<thead><tr><th>أ</th></tr></thead>" in _hd125
+          and "thead { display: table-header-group; }"
+          in __import__("services.browser_print",
+                         fromlist=["x"]).PRINT_CSS)
+    try:
+        from PyQt5 import QtCore as _QC125, QtTest as _QT125, \
+            QtWidgets as _QW125
+        _QW125.QApplication.instance() or _QW125.QApplication([])
+        from ui import kit as _kit125
+        from ui.widgets.common import make_table as _mt125
+        from ui.widgets.lazy_screen import LazyScreen as _Lz125
+        _n125 = {"p": 0, "a": 0}
+        _w125 = _QW125.QWidget()
+        _l125 = _QW125.QHBoxLayout(_w125)
+        _bp125 = _kit125.PushButton("✔ ترحيل السند")
+        _ba125 = _kit125.PushButton("+ إضافة سطر")
+
+        def _slow125():
+            _n125["p"] += 1
+            __import__("time").sleep(0.2)
+        _bp125.clicked.connect(_slow125)
+        _ba125.clicked.connect(lambda: _n125.__setitem__("a",
+                                                          _n125["a"] + 1))
+        _l125.addWidget(_bp125)
+        _l125.addWidget(_ba125)
+        _w125.show()
+        for _b125 in (_bp125, _ba125):
+            for _ in range(3):
+                _QT125.QTest.mouseClick(_b125, _QC125.Qt.LeftButton)
+        check("نقرٌ متلاحق على «ترحيل» يرحّل مرةً واحدة (والزرّ لا يعلق"
+              " منخفضاً) — وأزرار الإضافة تبقى سريعةً كما هي",
+              _n125 == {"p": 1, "a": 3} and not _bp125.isDown(),
+              str(_n125))
+        _w125.close()
+        _t125 = _mt125()
+        _t125.setProperty("emptyText", "اختر الحساب")
+        check("الجدول الفارغ يقول ما ينتظره (رسالةٌ في وسطه) بدل مستطيلٍ"
+              " صامت", callable(_kit125.paint_empty)
+              and _t125.rowCount() == 0
+              and _t125.property("emptyText") == "اختر الحساب"
+              and hasattr(type(_t125), "paintEvent"))
+
+        class _Scr125(_QW125.QWidget):
+            def __init__(self):
+                super().__init__()
+                _lay = _QW125.QVBoxLayout(self)
+                _lay.setContentsMargins(6, 4, 6, 4)
+        _lz125 = _Lz125(_Scr125, "فحص")
+        _m125 = _lz125.ensure().layout().contentsMargins()
+        check("هامش الصفحة واحدٌ في كل الشاشات (16 جانباً · 12 أعلى وأسفل)",
+              (_m125.left(), _m125.top(), _m125.right(), _m125.bottom())
+              == (16, 12, 16, 12))
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

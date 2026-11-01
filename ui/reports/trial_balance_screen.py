@@ -102,6 +102,8 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         head.addStretch(1)
 
         self.table = make_table()
+        self.table.setProperty(
+            "emptyText", "اختر الفترة ثم اضغط «إعداد الميزان»")
         _enhance(self.table, key="trial_balance_std")
         self.table.doubleClicked.connect(guard_click(lambda *_: self.show_movement()))
         self.status = big_label()

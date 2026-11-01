@@ -42,6 +42,7 @@ class KhazinaReportScreen(QtWidgets.QWidget):
         self.tiles_layout = tiles
         self.summary = big_label()
         self.table = make_table()
+        self.table.setProperty("emptyText", "اختر الفترة ثم اضغط «إعداد التقرير»")
         _enhance(self.table, key="khazina")
 
         lay = QtWidgets.QVBoxLayout(self)

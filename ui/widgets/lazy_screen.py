@@ -14,6 +14,24 @@
 from PyQt5 import QtCore, QtWidgets
 
 
+def page_margins(widget):
+    """هامش الصفحة واحدٌ في كل الشاشات (5.1).
+
+    كانت كل شاشةٍ تضبط هامشها على هواها: 6×4 في ثماني عشرة شاشة، و9 أو 11
+    بحسب نمط ويندوز في غيرها، وصفرٌ في بعضها — فيتغيّر بُعد الجدول عن حافة
+    النافذة بين شاشةٍ وأخرى. هنا هامشٌ واحد من سلّم التصميم يُضبط مرةً عند
+    بناء الشاشة (التخطيط الجذري وحده؛ ما بداخله كما صمّمته الشاشة)."""
+    try:
+        from ui import design as _d
+        lay = widget.layout()
+        if lay is None:
+            return
+        sp = _d.SPACE
+        lay.setContentsMargins(sp["lg"], sp["md"], sp["lg"], sp["md"])
+    except Exception:
+        pass
+
+
 class LazyScreen(QtWidgets.QWidget):
     """غلاف يؤجّل بناء الشاشة الحقيقية حتى أول فتح.
 
@@ -48,6 +66,7 @@ class LazyScreen(QtWidgets.QWidget):
         self._lay.removeWidget(self._placeholder)
         self._placeholder.setParent(None)
         self._lay.addWidget(self._real)
+        page_margins(self._real)
         return self._real
 
     @property

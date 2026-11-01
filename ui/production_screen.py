@@ -459,6 +459,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
     def _build_batch(self):
         box = QtWidgets.QGroupBox("③ الدفعة الحالية — قبل الترحيل")
         self.grid = make_table()
+        self.grid.setProperty(
+            "emptyText", "الدفعة فارغة — أدخل الطقم في «إدخال الطقم» ثم "
+            "«+ إضافة»")
         hint = QtWidgets.QLabel(
             "✎ يفتح السطر كاملاً للتصحيح   ·   ✕ يحذفه من الدفعة "
             "  ·   كلاهما في أول عمودٍ من الجدول")

@@ -73,6 +73,8 @@ class VatReturnScreen(QtWidgets.QWidget):
             cards.addWidget(c)
 
         self.table = make_table()
+
+        self.table.setProperty("emptyText", "اختر الفترة الضريبية ثم اضغط «إعداد الإقرار»")
         _enhance(self.table, key="vat_return")
         self.status = big_label()
 

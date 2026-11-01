@@ -99,6 +99,9 @@ class ItemHistoryScreen(QtWidgets.QWidget):
 
         self.info = big_label()
         self.table = make_table()
+        self.table.setProperty(
+            "emptyText", "اكتب رقم التشغيل ثم اضغط «بحث» أو Enter — تظهر "
+            "حركة الطقم كاملةً")
 
         hist = QtWidgets.QWidget()
         hl = QtWidgets.QVBoxLayout(hist)

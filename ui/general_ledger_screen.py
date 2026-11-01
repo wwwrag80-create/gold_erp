@@ -100,6 +100,9 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.summary = big_label()
         self.summary.setVisible(False)
         self.table = make_table()
+        # 5.1: الجدول الفارغ يقول ما ينتظره بدل مستطيلٍ أبيض صامت
+        self.table.setProperty(
+            "emptyText", "اختر الحساب والفترة ثم اضغط «عرض»")
         # تحديد أكثر من صف (Ctrl/Shift) — لدمج الفواتير (4.95)
         self.table.setSelectionMode(
             QtWidgets.QAbstractItemView.ExtendedSelection)

@@ -159,8 +159,16 @@ def build(template, tokens, scale=1.0):
     اسمٌ غير معروف يُترك كما هو بدل أن يكسر النمط كله — فخطأ مطبعي
     في لونٍ واحد لا يُفقد النظام هويته البصرية.
     """
+    # المقاسات والمسافات من نظام التصميم (`ui.design`)، والألوان من اللوحة
+    # كما هي — اللون يغلب إن تشابه اسمان (لا تشابه؛ ضمانةٌ لا أكثر)
+    try:
+        from ui import design as _design
+        merged = dict(_design.tokens())
+    except Exception:
+        merged = {}
+    merged.update(tokens)
     out = _TOKEN.sub(
-        lambda m: tokens.get(m.group(1), m.group(0)), template)
+        lambda m: merged.get(m.group(1), m.group(0)), template)
     s = float(scale or 1.0)
     if abs(s - 1.0) > 0.001:
         def _fix(m):
@@ -176,6 +184,56 @@ def build(template, tokens, scale=1.0):
             return f"{m.group(1)}{val:.1f}{m.group(3)}"
         out = _FSIZE.sub(_fix, out)
     return out
+
+
+# ══ مسافاتٌ واحدة على كل جهاز (5.1) ══
+# هوامش التخطيط والمسافة بين العناصر كانت من «نمط ويندوز» على كل جهاز:
+# 9 و6 في نمطٍ و11 و7 في آخر — فتبدو الشاشة نفسها أضيق على جهازٍ وأرحب
+# على غيره. نمطٌ وسيط رفيع يثبّتها من سلّم التصميم (12 · 8) للتخطيطات التي
+# لم تضبط مسافاتها بنفسها، وكل ما سواها يمرّ إلى نمط النظام كما هو.
+_STYLE = [None]
+
+
+def _jade_style():
+    from PyQt5 import QtWidgets as _W
+    from ui import design as _d
+
+    margins = {_W.QStyle.PM_LayoutLeftMargin, _W.QStyle.PM_LayoutTopMargin,
+               _W.QStyle.PM_LayoutRightMargin,
+               _W.QStyle.PM_LayoutBottomMargin}
+    spacing = {_W.QStyle.PM_LayoutHorizontalSpacing,
+               _W.QStyle.PM_LayoutVerticalSpacing}
+
+    class JadeStyle(_W.QProxyStyle):
+        def pixelMetric(self, m, opt=None, w=None):
+            if m in margins:
+                return _d.SPACE["md"]
+            if m in spacing:
+                return _d.SPACE["sm"]
+            return super().pixelMetric(m, opt, w)
+
+    return JadeStyle()
+
+
+def install_style(app):
+    """يُركَّب مرةً واحدة **قبل بناء أي نافذة** — والإقلاع يطبّق المظهر
+    قبل البوابة. تبديل نمط التطبيق والنوافذ قائمة يعيد تهيئة كل عنصرٍ فيها
+    دفعةً واحدة (وقد يُسقط البرنامج)؛ فإن وُجدت نوافذ يُترك النمط كما هو."""
+    if _STYLE[0] is not None or app is None:
+        return _STYLE[0]
+    try:
+        from PyQt5 import QtWidgets as _W
+        if _W.QApplication.topLevelWidgets():
+            return None
+    except Exception:
+        return None
+    try:
+        st = _jade_style()
+        app.setStyle(st)
+        _STYLE[0] = st
+    except Exception:
+        _STYLE[0] = False
+    return _STYLE[0]
 
 
 def apply(app, theme=None, scale=None):
@@ -204,6 +262,7 @@ def apply(app, theme=None, scale=None):
     except Exception:
         pass
     s = min(2.0, max(0.7, s))
+    install_style(app)
     tk = palette(name)
     app.setLayoutDirection(QtCore.Qt.RightToLeft)
     # شكل الأرقام إنجليزي دائماً — تفصيلٌ محاسبي لا تجميلي، شرحه في

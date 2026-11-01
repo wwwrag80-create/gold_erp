@@ -49,6 +49,7 @@ class YearEndScreen(QtWidgets.QWidget):
 
         self.summary = big_label()
         self.table = make_table()
+        self.table.setProperty("emptyText", "اختر السنة المالية ثم اضغط «معاينة نتيجة السنة»")
         _enhance(self.table, key="year_end")
 
         # ══ قفل الفترات ══

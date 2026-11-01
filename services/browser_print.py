@@ -86,6 +86,9 @@ PRINT_CSS = """
     vertical-align: middle;
     word-wrap: break-word;
   }
+  /* 5.1: رأس الجدول يتكرّر أعلى كل صفحة، والسطر لا ينشطر بين صفحتين */
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
   table.items th, table.titlebar td, .lbl, th {
     background: #F1ECE0;
     font-weight: bold;
@@ -239,6 +242,8 @@ def build_page(doc_type, doc_id, auto_print=True, viewer=False, **kw):
         inner = print_manager.build_body(doc_type, doc_id, **kw)
     finally:
         print_manager.RTL_ORDER_OVERRIDE = prev
+    # 5.1: عناوين أعمدة كل جدول تتكرّر أعلى كل صفحة مطبوعة
+    inner = print_manager.mark_table_heads(inner)
     setup = _page_setup(doc_type)
     if doc_type == "screen_view":
         # صورة الشاشة (5.0.1): الجدول العريض أفقيٌّ كما على الشاشة
