@@ -79,11 +79,19 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project AUR.xcodeproj -scheme AUR -configuration Release -sdk iphoneos \
-            -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            -destination "generic/platform=iOS" -derivedDataPath "$RUNNER_TEMP/dd-release" \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 \
             | tee "$RUNNER_TEMP/release.log" | grep -E "error:|\*\* BUILD" || true
           cp "$RUNNER_TEMP/release.log" ../../ios-out/ || true
           grep -E "error:" "$RUNNER_TEMP/release.log" | head -40 > ../../ios-out/release-errors.txt || true
           grep -q "BUILD SUCCEEDED" "$RUNNER_TEMP/release.log"
+          # ملف IPA غير موقّع — للتجربة على آيفون المالك من ويندوز (Sideloadly يوقّعه بحساب
+          # Apple المجاني عند التثبيت). ليس للمتجر: المتجر عبر ios-release.yml.
+          V=$(python3 -c "import json;print(json.load(open('../web/version.json'))['name'])")
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$RUNNER_TEMP/dd-release/Build/Products/Release-iphoneos/AUR.app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/AUR-$V-unsigned.ipa" Payload)
+          ls -la "$GITHUB_WORKSPACE"/AUR-*-unsigned.ipa
 
       - name: إرفاق النتائج
         if: always()
@@ -92,9 +100,10 @@ jobs:
         run: |
           cd ios-out && zip -q -r ../ios-test.zip . && cd ..
           gh release delete ios-test --yes --cleanup-tag || true
-          gh release create ios-test ios-test.zip --prerelease --target "$GITHUB_SHA" \
+          IPA=$(ls AUR-*-unsigned.ipa 2>/dev/null || true)
+          gh release create ios-test ios-test.zip $IPA --prerelease --target "$GITHUB_SHA" \
             --title "ÀUR iOS — simulator test ${GITHUB_SHA::7}" \
-            --notes "iOS simulator UI test screenshots and logs for ${GITHUB_SHA::7}. Not an installable build."
+            --notes "iOS simulator UI test screenshots and logs for ${GITHUB_SHA::7}. The .ipa is unsigned: for sideloading on the owner's own iPhone (Sideloadly signs it with a free Apple ID), not for the App Store."
 
       - name: النتيجة
         if: steps.test.outcome != 'success' || steps.release.outcome != 'success'

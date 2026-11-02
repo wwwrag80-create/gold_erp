@@ -18,9 +18,11 @@
 1. admob.google.com ← **Apps ← Add app** مرتين: Android ثم iOS (التطبيق «غير منشورٍ بعد» أول مرة).
 2. لكل تطبيق **Ad units ← Banner** (اترك الحجم تكيّفياً).
 3. انسخ المعرّفات إلى:
-   - Android: `mobile/android/admob.properties` ← `ADMOB_APP_ID` و`ADMOB_BANNER_ID`
-   - iPhone: `mobile/ios/AUR/Config.xcconfig` ← `ADMOB_APP_ID` و`ADMOB_BANNER_ID`
+   - Android: `mobile/android/admob.properties` ← `ADMOB_APP_ID` و`ADMOB_BANNER_ID` — **تمّ (1.7.1)**
+   - iPhone: `mobile/ios/AUR/Config.xcconfig` ← `ADMOB_APP_ID` و`ADMOB_BANNER_ID` — بانتظار تطبيق iOS في الحساب
    (حتى ذلك: معرّفات Google التجريبية — ونسخ الإصدار لا تعرض بها إعلاناً أبداً.)
+   نسخة التطوير والمحاكي تستخدم معرّفات Google التجريبية دائماً — لا يُطلب إعلانٌ حقيقي أثناء التجربة.
+   **لا تلمس إعلانات تطبيقك بنفسك** (سياسة AdMob تعدّها نقراتٍ غير صالحة وقد تُوقف الحساب).
 4. **Privacy & messaging**: أنشئ رسالة GDPR (أوروبا) — ورسالة IDFA للآيفون إن أردت إعلاناتٍ مخصّصة.
 5. بعد النشر في المتجر: **App settings ← Link to store** لكل تطبيق — بدونه تبقى الإعلانات محدودة جداً.
 6. **app-ads.txt**: موقعٌ إلكتروني للمطوّر (يُكتب في صفحة المتجر) وعليه الملف الذي يعطيه AdMob.
