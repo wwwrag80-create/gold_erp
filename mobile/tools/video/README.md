@@ -24,14 +24,16 @@
 
 ## النسختان القصيرتان
 
-من لقطات الدليل الكامل نفسها: تبدآن بشعار النظام واسمه، ثم لوحة «ماذا تستفيد من النظام؟»،
-ثم الدخول، ولوحات الرئيسية لوحةً لوحة، ثم كل عمليةٍ بطريقتيها: البضاعة (بالوزن والأجور مع صورة
-فاتورة المصنع، أو باسم الطقم)، والبيع والمرتجع (بالوزن مباشرة، أو طقمٌ من الأطقم التي معك).
+من لقطات الدليل الكامل نفسها: تبدآن بشعار النظام واسمه (تطبيقٌ لهواتف أندرويد)، ثم لوحة
+«ماذا تستفيد من النظام؟»، ثم الدخول، ولوحات الرئيسية لوحةً لوحة. ولكل عمليةٍ تظهر لوحتها في
+الرئيسية أولاً، ثم خطواتها بطريقتيها: البضاعة (بالوزن والأجور مع صورة فاتورة المصنع، أو باسم
+الطقم)، والبيع والمرتجع (بالوزن مباشرة، أو طقمٌ من الأطقم التي معك)؛ ومن كشف الحساب معاينة
+أي فاتورةٍ كما سُجّلت.
 
     python3 mobile/tools/video/shorts.py $S/shots $S/silent $S/voice      # الخطوات ونصوصها
     TTS_STYLE=natural python3 mobile/tools/video/tts.py $S/voice VOICE_DIR
-    node mobile/tools/video/render.js $S/silent $S/out_s/video.mp4 --jobs 4 --fps 25   # ≈ دقيقتان
-    node mobile/tools/video/render.js $S/voice  $S/out_v/video.mp4 --jobs 4 --fps 25   # ≈ دقيقتان ونصف
+    node mobile/tools/video/render.js $S/silent $S/out_s/video.mp4 --jobs 4 --fps 25   # ≈ دقيقتان ونصف
+    node mobile/tools/video/render.js $S/voice  $S/out_v/video.mp4 --jobs 4 --fps 25   # ≈ ثلاث دقائق
     python3 mobile/tools/video/music.py $S/out_s ; python3 mobile/tools/video/music.py $S/out_v
 
 - `TTS_STYLE`: بلا قيمة = هادئ (الدليل الكامل)، `lively` = مفعم، `natural` = إيقاعٌ وتنغيمٌ أقرب
