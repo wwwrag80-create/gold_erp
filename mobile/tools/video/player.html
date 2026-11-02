@@ -289,7 +289,7 @@ window.renderAt = async function (t) {
   $("card").style.opacity = cv ? win(p, 0, .5, D, .45) : 0;
   if (cv) {
     $("cnum").textContent = AR(sg.n);
-    $("cof").textContent = `الفصل ${AR(sg.n)} من ${AR(TL.chapters)}`;
+    $("cof").textContent = `الدرس ${AR(sg.n)} من ${AR(TL.chapters)}`;
     $("ctitle").textContent = sg.title;
     $("cdesc").textContent = sg.desc;
     $("cnum").style.transform = `scale(${.86 + .14 * out(p / .8)})`;
@@ -356,7 +356,7 @@ window.renderAt = async function (t) {
   const hv = shotMode ? phoneV * (1 - (sg._zk || 0)) : 0;
   $("head").style.opacity = hv;
   if (head) {
-    $("chipt").textContent = `الفصل ${AR(head.chapter)} · الخطوة ${AR(head.step)} من ${AR(head.steps)}`;
+    $("chipt").textContent = `الدرس ${AR(head.chapter)} · الخطوة ${AR(head.step)} من ${AR(head.steps)}`;
     $("htitle").textContent = head.chapterTitle;
     $("hline").style.transform = `scaleX(${head.firstInChapter ? out((t - head.start - .2) / .9) : 1})`;
   }
