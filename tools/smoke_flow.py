@@ -3094,17 +3094,27 @@ def main():
                   - 20.0 * _sal["overtime_rate"]) < 0.011,
           f"إضافية {_sal['overtime_hours']} × {_sal['overtime_rate']}"
           f" = {_sal['overtime']}")
-    # 5.1.4: المفترض = التارجت × ساعاته الفعلية ÷ ساعات الشهر الأساسية،
-    # من النسبة الدقيقة لا من «تارجت/ساعة» المقرَّب؛ والحوافز = الفعلي − المفترض
+    # 5.1.5: المفترض = «تارجت/ساعة» كما يُطبع (منزلتان) × إضافية/شهر —
+    # فضربُ العمودين المطبوعين بالآلة يُعطي الرقم نفسه؛ والحوافز = الفعلي − المفترض
+    _tu = _mc2.compute_target_row({
+        "month_days": 26, "hours": 10, "overtime_hours": 100,
+        "absence": 0, "target_amount": 750, "actual_output": 170.67})
+    check("مثال صاحب النظام: تارجت 750 · 26 يوماً × 10 ساعات + 100 إضافية "
+          "⇒ 2.88 × 360 = 1,036.80",
+          _tu["target_per_hour"] == 2.88 and _tu["overtime_month"] == 360.0
+          and _tu["expected_output"] == 1036.80,
+          f"{_tu['target_per_hour']} × {_tu['overtime_month']}"
+          f" = {_tu['expected_output']}")
     _tr = _mc2.compute_target_row({
         "month_days": 26, "hours": 8, "overtime_hours": 12,
         "absence": 2.5, "target_amount": 125000.5,
         "actual_output": 131250.75})
-    check("المفترض = التارجت × (أيام×ساعات + إضافية − غياب×ساعات) "
-          "÷ (أيام×ساعات)",
+    check("المفترض = تارجت/ساعة المطبوع × (أيام×ساعات + إضافية − غياب×ساعات)",
           _tr["overtime_month"] == 200.0
-          and _tr["expected_output"] == round(125000.5 * 200 / 208, 2),
-          f"{_tr['overtime_month']} · {_tr['expected_output']}")
+          and _tr["target_per_hour"] == 600.96
+          and _tr["expected_output"] == 120192.0,
+          f"{_tr['target_per_hour']} × {_tr['overtime_month']}"
+          f" = {_tr['expected_output']}")
     check("والحوافز = الفعلي − المفترض",
           _tr["difference"] == round(131250.75 - _tr["expected_output"], 2),
           f"{_tr['difference']}")
