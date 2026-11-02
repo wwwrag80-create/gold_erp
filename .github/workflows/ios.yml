@@ -90,6 +90,8 @@ jobs:
           V=$(python3 -c "import json;print(json.load(open('../web/version.json'))['name'])")
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$RUNNER_TEMP/dd-release/Build/Products/Release-iphoneos/AUR.app" "$RUNNER_TEMP/ipa/Payload/"
+          # معرّفٌ مستقل للتجربة (لا يحجز com.jadeite.mobile عند حساب Apple المجاني قبل نسخة المتجر)
+          plutil -replace CFBundleIdentifier -string com.jadeite.mobile.sideload "$RUNNER_TEMP/ipa/Payload/AUR.app/Info.plist"
           (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/AUR-$V-unsigned.ipa" Payload)
           ls -la "$GITHUB_WORKSPACE"/AUR-*-unsigned.ipa
 
