@@ -232,6 +232,8 @@ async function main() {
     ad.enabled === true && ad.testIds === true && ad.wanted === true, JSON.stringify(ad));
   // الموافقة ثم التهيئة ثم التحميل — حتى 45 ثانية في المحاكي
   for (let i = 0; i < 90 && !(ad.loaded || /(^|\b)(2|3) /.test(ad.error || "")); i++) { await sleep(500); ad = await ev("Bridge.adsState()"); }
+  // وصل الإعلان: يُعطى الشريط لحظةً ليُرسم قبل قياس ارتفاعه
+  for (let i = 0; i < 10 && ad.loaded && !(ad.height > 0); i++) { await sleep(300); ad = await ev("Bridge.adsState()"); }
   // بلا مخزونٍ أو شبكةٍ في المحاكي (2 · 3) يبقى الشريط مطويّاً — وهذا سلوكٌ صحيح
   check("إعلانٌ تجريبي يصل فيظهر شريطاً أسفل الصفحة (أو يبقى مطويّاً بلا إعلان)",
     ad.started === true && ((ad.loaded && ad.visible && ad.height > 0) || (!ad.loaded && !ad.visible && /(^|\b)(2|3) /.test(ad.error || ""))),
