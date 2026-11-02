@@ -65,6 +65,8 @@ jobs:
           cp "$RUNNER_TEMP/test.log" ios-out/ 2>/dev/null || true
           grep -E "error:" "$RUNNER_TEMP/test.log" | head -40 > ios-out/errors.txt || true
           # سجلّ التطبيق في المحاكي (نسخة التطوير): أخطاء الصفحة ونقراتها وانتقالاتها
+          xcrun simctl boot "${SIM:-booted}" 2>/dev/null || true
+          sleep 8
           xcrun simctl spawn "${SIM:-booted}" log show --last 30m --style compact \
             --predicate 'eventMessage CONTAINS "AUR-"' > ios-out/app-log.txt 2>&1 || true
           tail -60 ios-out/app-log.txt || true

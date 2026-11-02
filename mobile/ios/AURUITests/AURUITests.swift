@@ -49,24 +49,36 @@ final class AURUITests: XCTestCase {
         XCTAssertTrue(button("اختر مجلد الحفظ").exists, "زرّ مجلد الحفظ التلقائي")
         snap("01_welcome")
         button("تخط").tap()
-        Thread.sleep(forTimeInterval: 2)
-        snap("01b_after_skip")
 
-        // الرئيسية: لوحات العمليات وكشف الحساب والبحث
+        // الرئيسية: لوحات العمليات وكشف الحساب والبحث (لمسةٌ ثانية إن ضاعت الأولى — وتُسجَّل صورتها)
+        if !button("بيع للعميل").waitForExistence(timeout: 8) {
+            snap("01b_skip_again")
+            button("تخط").tap()
+        }
         XCTAssertTrue(button("بيع للعميل").waitForExistence(timeout: 15), "لوحة «بيع للعميل»")
         XCTAssertTrue(button("تحصيل من العميل").exists)
         XCTAssertTrue(button("كشف حساب").exists)
         XCTAssertTrue(button("بحث عن طقم").exists)
         snap("02_home")
 
-        // البحث عن طقم: الخانة جاهزة، ورقمٌ بلا أطقمٍ بعدُ ⇒ «لا طقم»
-        button("بحث عن طقم").tap()
-        let field = app.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 10), "خانة البحث")
-        field.tap()
-        field.typeText("12")
+        // «المزيد»: القائمة، ومنها خيارات خصوصية الإعلانات حيث يلزمها القانون
+        button("المزيد").tap()
+        XCTAssertTrue(anyText("سجل العمليات").waitForExistence(timeout: 10), "المزيد")
+        snap("03_more")
+
+        // البحث عن طقم (من القائمة — لوحته في الرئيسية تحت الشريط السفلي على هذا الجوال):
+        // الخانة جاهزة، ورقمٌ بلا أطقمٍ بعدُ ⇒ «لا طقم»
+        app.staticTexts.matching(NSPredicate(format: "label == %@", "بحث عن طقم")).firstMatch.tap()
+        let tf = app.textFields.firstMatch, sf = app.searchFields.firstMatch
+        var found: XCUIElement?
+        for _ in 0..<24 where found == nil {
+            if tf.exists { found = tf } else if sf.exists { found = sf } else { Thread.sleep(forTimeInterval: 0.5) }
+        }
+        guard let input = found else { snap("04_search_missing"); return XCTFail("خانة البحث") }
+        input.tap()
+        input.typeText("12")
         XCTAssertTrue(anyText("لا طقم").waitForExistence(timeout: 5), "لا نتائج قبل أي بضاعة")
-        snap("03_search")
+        snap("04_search")
 
         // تُغلق لوحة المفاتيح (زرّ «تم» فوقها) فيظهر الشريط السفلي
         let done = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "تم"])).firstMatch
@@ -76,9 +88,9 @@ final class AURUITests: XCTestCase {
         let accounts = button("الحسابات")
         XCTAssertTrue(accounts.waitForExistence(timeout: 10))
         accounts.tap()
-        snap("04_accounts")
+        snap("05_accounts")
         button("الممتلكات").tap()
         XCTAssertTrue(anyText("الأطقم التي معي").waitForExistence(timeout: 10), "الممتلكات")
-        snap("05_holdings")
+        snap("06_holdings")
     }
 }
