@@ -144,8 +144,28 @@ final class Ads {
 
     void destroy() { if (view != null) view.destroy(); }
 
+    /** حيث يلزم القانون (أوروبا وبريطانيا): زرٌّ في «المزيد» لتغيير موافقة الإعلانات. */
+    boolean privacyRequired() {
+        try {
+            return enabled() && UserMessagingPlatform.getConsentInformation(a).getPrivacyOptionsRequirementStatus()
+                    == ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    void showPrivacy() {
+        try {
+            UserMessagingPlatform.showPrivacyOptionsForm(a, err -> {
+                if (err != null) error = "privacy: " + err.getMessage();
+            });
+        } catch (Throwable t) {
+            error = "privacy: " + t.getMessage();
+        }
+    }
+
     JSONObject state() {
-        return MainActivity.obj("enabled", enabled(), "testIds", BuildConfig.ADMOB_TEST_IDS,
+        return MainActivity.obj("enabled", enabled(), "testIds", BuildConfig.ADMOB_TEST_IDS, "privacy", privacyRequired(),
                 "started", started.get(), "wanted", wanted, "loaded", loaded,
                 "visible", bar.getVisibility() == View.VISIBLE, "height", bar.getHeight(), "error", error);
     }

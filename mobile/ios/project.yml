@@ -1,0 +1,95 @@
+# ÀUR للآيفون — مشروع Xcode يُولَّد من هذا الملف (XcodeGen) على macOS:
+#   cd mobile/ios && xcodegen generate && open AUR.xcodeproj
+# الواجهة هي نفسها صفحات mobile/web (تُنسخ داخل التطبيق كمجلد «web»)، والغلاف
+# الأصلي بـ Swift يضيف ما لا تقدر عليه الصفحة: المشاركة صورةً، والطباعة، وحفظ
+# الملفات، ومجلد الحفظ التلقائي، والإعلان (AdMob) — كما يفعل غلاف أندرويد.
+name: AUR
+options:
+  bundleIdPrefix: com.jadeite
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: ar
+configFiles:
+  Debug: AUR/Config.xcconfig
+  Release: AUR/Config.xcconfig
+packages:
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads
+    majorVersion: 11.0.0
+  GoogleUserMessagingPlatform:
+    url: https://github.com/googleads/swift-package-manager-google-user-messaging-platform
+    majorVersion: 2.1.0
+targets:
+  AUR:
+    type: application
+    platform: iOS
+    sources:
+      - path: AUR
+        excludes:
+          - "Config.xcconfig"
+      - path: ../web
+        type: folder
+        buildPhase: resources
+    info:
+      path: AUR/Info.plist
+      properties:
+        CFBundleDisplayName: ÀUR
+        CFBundleName: ÀUR
+        CFBundleDevelopmentRegion: ar
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UILaunchScreen:
+          UIColorName: Background
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: true
+        # AdMob: معرّف التطبيق ووحدة الشريط من Config.xcconfig
+        GADApplicationIdentifier: $(ADMOB_APP_ID)
+        AURBannerUnitID: $(ADMOB_BANNER_ID)
+        GADDelayAppMeasurementInit: true
+        SKAdNetworkItems:
+          - SKAdNetworkIdentifier: cstr6suwn9.skadnetwork
+        # نصوص الأذونات (تظهر للمستخدم عند الحاجة وحدها)
+        NSCameraUsageDescription: لالتقاط صورة الطقم وإرفاقها بالفاتورة.
+        NSPhotoLibraryUsageDescription: لاختيار صور الأطقم من معرض الصور.
+        NSPhotoLibraryAddUsageDescription: لحفظ صورة الفاتورة أو كشف الحساب في معرض الصور عند اختيارك ذلك.
+        NSUserTrackingUsageDescription: يُستخدم لعرض إعلاناتٍ أنسب لك فقط — ولا يؤثّر رفضك في عمل التطبيق.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jadeite.mobile
+        PRODUCT_NAME: AUR
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_VERSION: "5.0"
+        OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: GoogleMobileAds
+      - package: GoogleUserMessagingPlatform
+  AURUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: AURUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jadeite.mobile.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: AUR
+schemes:
+  AUR:
+    build:
+      targets:
+        AUR: all
+        AURUITests: [test]
+    test:
+      targets:
+        - AURUITests

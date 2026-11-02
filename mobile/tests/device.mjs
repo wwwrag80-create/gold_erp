@@ -166,11 +166,21 @@ function front() {
   try { adb("shell", "am", "start", "-n", `${PKG}/.MainActivity`); } catch (e) { /* */ }
 }
 
+const pidOf = () => { try { return adb("shell", "pidof", PKG).toString().trim(); } catch (e) { return ""; } };
+
+// يفتح التطبيق وينتظر أن تستقرّ عمليته. على المحاكي قد تُحدّث خدمات Google وحداتها فتُعيد
+// تشغيل نفسها، ويُغلق أندرويد معها كل تطبيقٍ يستخدمها (مكتبة الإعلانات منها) — فيُفتح من جديد.
 async function relaunch() {
   await sleep(500);
-  adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`);
-  await sleep(5000);
-  const pid = adb("shell", "pidof", PKG).toString().trim();
+  let pid = "";
+  for (let attempt = 0; attempt < 3 && !pid; attempt++) {
+    adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`);
+    await sleep(5000);
+    pid = pidOf();
+    if (pid) { await sleep(1500); if (pidOf() !== pid) pid = ""; }
+    if (!pid) console.log("  … التطبيق أُغلق أثناء الفتح (خدمات Google)، يُفتح من جديد");
+  }
+  if (!pid) throw new Error("app process not running after 3 launches");
   adb("forward", "--remove-all");
   adb("forward", "tcp:9222", `localabstract:webview_devtools_remote_${pid}`);
   const c = await connect();

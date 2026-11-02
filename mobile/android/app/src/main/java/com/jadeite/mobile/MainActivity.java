@@ -535,6 +535,12 @@ public class MainActivity extends Activity {
             return ads.state().toString();
         }
 
+        /** «خيارات الخصوصية للإعلانات» (من «المزيد»، حيث يلزمها القانون) */
+        @JavascriptInterface
+        public void adsPrivacy() {
+            ui.post(() -> ads.showPrivacy());
+        }
+
         @JavascriptInterface
         public void shareText(String text) {
             ui.post(() -> {

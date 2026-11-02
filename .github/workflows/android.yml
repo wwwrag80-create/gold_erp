@@ -7,7 +7,7 @@ name: تطبيق الجوال (أندرويد)
 on:
   push:
     branches: ["claude/gold-accounting-system-9o1vmw"]
-    paths: ["mobile/**", ".github/workflows/android.yml", "!mobile/dist/**"]
+    paths: ["mobile/**", ".github/workflows/android.yml", "!mobile/dist/**", "!mobile/ios/**", "!mobile/store/**"]
   workflow_dispatch:
 
 permissions:

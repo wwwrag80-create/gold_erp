@@ -1,0 +1,96 @@
+name: تطبيق الآيفون (iOS)
+
+# يبني ÀUR للآيفون من mobile/ios (غلاف Swift) وصفحات mobile/web نفسها، على جهاز Mac
+# سحابي من GitHub — بلا Mac عند المالك: يولّد مشروع Xcode (XcodeGen)، ويجرّب التطبيق
+# على محاكي آيفون (تجربة واجهة بصور)، ويبني نسخة الإصدار للأجهزة بلا توقيع للتحقّق.
+# التوقيع والرفع إلى App Store: ios-release.yml (يحتاج حساب Apple Developer).
+on:
+  push:
+    branches: ["claude/gold-accounting-system-9o1vmw"]
+    paths: ["mobile/ios/**", "mobile/web/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode و XcodeGen
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+
+      - name: توليد المشروع (الإصدار من version.json)
+        working-directory: mobile/ios
+        run: |
+          V=$(python3 -c "import json;print(json.load(open('../web/version.json'))['name'])")
+          C=$(python3 -c "import json;print(json.load(open('../web/version.json'))['code'])")
+          sed -i '' "s/^MARKETING_VERSION = .*/MARKETING_VERSION = $V/; s/^CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = $C/" AUR/Config.xcconfig
+          xcodegen generate
+          echo "VERSION=$V ($C)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: التجربة على محاكي آيفون
+        id: test
+        continue-on-error: true
+        working-directory: mobile/ios
+        run: |
+          SIM=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['devices']
+          names=[x['name'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')]
+          pref=[n for n in names if n in ('iPhone 16','iPhone 16 Pro','iPhone 15')]
+          print((pref or names)[0])")
+          echo "simulator: $SIM"
+          set -o pipefail
+          xcodebuild -project AUR.xcodeproj -scheme AUR -configuration Debug \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            -resultBundlePath "$RUNNER_TEMP/aur-test.xcresult" test 2>&1 | tee "$RUNNER_TEMP/test.log" | grep -E "error:|warning: .*AUR|Test Case|TEST (SUCCEEDED|FAILED)|\*\* " || true
+          grep -q "TEST SUCCEEDED" "$RUNNER_TEMP/test.log"
+
+      - name: صور التجربة
+        if: always()
+        run: |
+          mkdir -p ios-out
+          xcrun xcresulttool export attachments --path "$RUNNER_TEMP/aur-test.xcresult" --output-path ios-out 2>/dev/null || true
+          cp "$RUNNER_TEMP/test.log" ios-out/ 2>/dev/null || true
+          grep -E "error:" "$RUNNER_TEMP/test.log" | head -40 > ios-out/errors.txt || true
+          ls -la ios-out
+
+      - name: بناء نسخة الإصدار للأجهزة (بلا توقيع — للتحقّق)
+        id: release
+        continue-on-error: true
+        working-directory: mobile/ios
+        run: |
+          set -o pipefail
+          xcodebuild -project AUR.xcodeproj -scheme AUR -configuration Release -sdk iphoneos \
+            -destination "generic/platform=iOS" CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | tee "$RUNNER_TEMP/release.log" | grep -E "error:|\*\* BUILD" || true
+          cp "$RUNNER_TEMP/release.log" ../../ios-out/ || true
+          grep -E "error:" "$RUNNER_TEMP/release.log" | head -40 > ../../ios-out/release-errors.txt || true
+          grep -q "BUILD SUCCEEDED" "$RUNNER_TEMP/release.log"
+
+      - name: إرفاق النتائج
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd ios-out && zip -q -r ../ios-test.zip . && cd ..
+          gh release delete ios-test --yes --cleanup-tag || true
+          gh release create ios-test ios-test.zip --prerelease --target "$GITHUB_SHA" \
+            --title "ÀUR iOS — simulator test ${GITHUB_SHA::7}" \
+            --notes "iOS simulator UI test screenshots and logs for ${GITHUB_SHA::7}. Not an installable build."
+
+      - name: النتيجة
+        if: steps.test.outcome != 'success' || steps.release.outcome != 'success'
+        run: |
+          echo "فشل بناء الآيفون أو تجربته — التفاصيل في ios-test.zip"
+          exit 1

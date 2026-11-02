@@ -103,6 +103,7 @@
       Bridge.adsWanted = !!on;
       if (A && A.setAds) A.setAds(!!on);
     },
+    adsPrivacy() { if (A && A.adsPrivacy) A.adsPrivacy(); },
     adsState() {
       if (!A || !A.adsState) return { unsupported: true, wanted: Bridge.adsWanted };
       try { return JSON.parse(A.adsState()); } catch (e) { return { unsupported: true }; }

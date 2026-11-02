@@ -12,9 +12,18 @@ const results = [];
 const check = (name, ok, detail = "") => { results.push({ name, ok: !!ok, detail: String(detail) }); console.log(ok ? "  ✔" : "  ✘", name, detail); };
 const shot = (n) => fs.writeFileSync(path.join(OUT, `${n}.png`), adb("exec-out", "screencap", "-p"));
 
+// صفحة التطبيق نفسها (appassets) — لا WebView الإعلان الذي يظهر في القائمة أيضاً
 async function connect() {
-  const list = await (await fetch("http://127.0.0.1:9223/json")).json();
-  const ws = new WebSocket(list.find((t) => t.type === "page").webSocketDebuggerUrl);
+  let t;
+  for (let i = 0; i < 40 && !t; i++) {
+    try {
+      const list = await (await fetch("http://127.0.0.1:9223/json")).json();
+      t = list.find((x) => (x.url || "").includes("appassets"));
+    } catch (e) { /* */ }
+    if (!t) await sleep(500);
+  }
+  if (!t) throw new Error("app page not found in devtools list");
+  const ws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
   let id = 0;
   const wait = new Map();
@@ -27,12 +36,13 @@ async function connect() {
   };
 }
 
-// حدود WebView على الشاشة (بكسل) من شجرة الواجهة
+// حدود WebView التطبيق على الشاشة (بكسل) من شجرة الواجهة — الأطول بينها (الإعلان WebView صغيرٌ أيضاً)
 function webBounds() {
   adb("shell", "uiautomator", "dump", "/sdcard/ui.xml");
   const xml = adb("shell", "cat", "/sdcard/ui.xml").toString();
-  const m = xml.match(/class="android\.webkit\.WebView"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
-  return m ? { l: +m[1], t: +m[2], r: +m[3], b: +m[4] } : null;
+  const all = [...xml.matchAll(/class="android\.webkit\.WebView"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)]
+    .map((m) => ({ l: +m[1], t: +m[2], r: +m[3], b: +m[4] }));
+  return all.sort((a, b) => (b.b - b.t) - (a.b - a.t))[0] || null;
 }
 
 (async () => {
@@ -49,9 +59,10 @@ function webBounds() {
   // لوحة المفاتيح: خانةٌ في الإعدادات تُلمس فتظهر — والصفحة تقصر بقدرها
   await ev(`location.hash = "#/settings"; 1`);
   await sleep(900);
-  const r = await ev(`(() => { const i = document.querySelector("#view input"); const b = i.getBoundingClientRect();
+  const r = await ev(`(() => { const i = document.querySelector("#view input.in"); if (!i) return null; const b = i.getBoundingClientRect();
     return { x: b.left + b.width / 2, y: b.top + b.height / 2, dpr: devicePixelRatio }; })()`);
-  adb("shell", "input", "tap", String(Math.round(w.l + r.x * r.dpr)), String(Math.round(w.t + r.y * r.dpr)));
+  check("شاشة الإعدادات فيها خانة كتابة", r && w, await ev("location.hash"));
+  if (r && w) adb("shell", "input", "tap", String(Math.round(w.l + r.x * r.dpr)), String(Math.round(w.t + r.y * r.dpr)));
   await sleep(1800);
   shot("03_keyboard");
   const k = webBounds();
@@ -67,4 +78,8 @@ function webBounds() {
   fs.writeFileSync(path.join(OUT, "result.json"), JSON.stringify({ failed, results }, null, 1));
   console.log(failed ? `✘ ${failed} فشل` : "✔ الحواف سليمة");
   process.exit(failed ? 1 : 0);
-})().catch((e) => { console.error(e); fs.writeFileSync(path.join(OUT, "result.json"), JSON.stringify({ failed: 1, error: String(e) })); process.exit(1); });
+})().catch((e) => {
+  console.error(e);
+  fs.writeFileSync(path.join(OUT, "result.json"), JSON.stringify({ failed: 1, error: String(e && e.stack || e), results }, null, 1));
+  process.exit(1);
+});

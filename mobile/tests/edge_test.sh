@@ -8,10 +8,15 @@ mkdir -p "$OUT"
 APK=mobile/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk
 adb install -r "$APK" > "$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; exit 1; }
 adb logcat -c
-adb shell am start -W -n com.jadeite.mobile/.MainActivity
-sleep 8
+# يُفتح التطبيق (ومن جديد إن أغلقه أندرويد مع إعادة تشغيل خدمات Google على المحاكي)
+PID=""
+for i in 1 2 3; do
+  adb shell am start -W -n com.jadeite.mobile/.MainActivity
+  sleep 8
+  PID=$(adb shell pidof com.jadeite.mobile | tr -d '\r')
+  [ -n "$PID" ] && break
+done
 adb exec-out screencap -p > "$OUT/01_launch.png"
-PID=$(adb shell pidof com.jadeite.mobile | tr -d '\r')
 [ -n "$PID" ] || { echo "app not running"; exit 1; }
 adb forward tcp:9223 "localabstract:webview_devtools_remote_$PID"
 node mobile/tests/edge.mjs "$OUT"

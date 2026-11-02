@@ -114,6 +114,25 @@ def main():
         "info": {"author": "xcode", "version": 1}}, indent=2), encoding="utf-8")
     (ios.parent / "Contents.json").write_text(json.dumps({"info": {"author": "xcode", "version": 1}}, indent=2),
                                              encoding="utf-8")
+    # شعار شاشة الإقلاع، وألوان التطبيق نفسها (لوحة النظام: الخلفية bg والشريط surface)
+    ll = ios.parent / "LaunchLogo.imageset"
+    ll.mkdir(exist_ok=True)
+    save(rounded(tile, int(N * 0.18)), ll / "launch-logo.png", 360)
+    (ll / "Contents.json").write_text(json.dumps({
+        "images": [{"filename": "launch-logo.png", "idiom": "universal", "scale": "3x"}],
+        "info": {"author": "xcode", "version": 1}}, indent=2), encoding="utf-8")
+
+    def colorset(name, light, dark):
+        c = lambda hx: {"color-space": "srgb", "components": {"red": f"0x{hx[0:2]}", "green": f"0x{hx[2:4]}",
+                                                               "blue": f"0x{hx[4:6]}", "alpha": "1.000"}}
+        d = ios.parent / f"{name}.colorset"
+        d.mkdir(exist_ok=True)
+        (d / "Contents.json").write_text(json.dumps({"colors": [
+            {"idiom": "universal", "color": c(light)},
+            {"idiom": "universal", "appearances": [{"appearance": "luminosity", "value": "dark"}], "color": c(dark)}],
+            "info": {"author": "xcode", "version": 1}}, indent=2), encoding="utf-8")
+    colorset("Background", "F7F5F0", "15130F")
+    colorset("Surface", "FFFFFF", "1E1C17")
     print("✔ icons", BLACK)
 
 

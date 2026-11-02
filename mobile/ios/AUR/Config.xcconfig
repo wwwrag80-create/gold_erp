@@ -1,0 +1,14 @@
+// إصدار التطبيق (من mobile/web/version.json — يُحدَّث عند البناء في CI)
+MARKETING_VERSION = 1.7.0
+CURRENT_PROJECT_VERSION = 9
+
+// فريق Apple Developer (Team ID من developer.apple.com ← Membership) — يُملأ عند التوقيع
+DEVELOPMENT_TEAM =
+
+// معرّفات AdMob للآيفون — من حساب المالك في admob.google.com (تطبيق iOS منفصل عن أندرويد):
+//   ADMOB_APP_ID    = App ID لتطبيق iOS      (ca-app-pub-…~…)
+//   ADMOB_BANNER_ID = وحدة Banner لتطبيق iOS  (ca-app-pub-…/…)
+// حتى تُستبدل: معرّفات Google التجريبية الرسمية لـ iOS — لا أرباح منها، ولا تعرض شيئاً
+// في نسخة الإصدار (Release)؛ في نسخة التطوير (Debug) وحدها.
+ADMOB_APP_ID = ca-app-pub-3940256099942544~1458002511
+ADMOB_BANNER_ID = ca-app-pub-3940256099942544/2435281174

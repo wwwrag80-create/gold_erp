@@ -1,0 +1,5 @@
+# يولّدهما XcodeGen من project.yml (على macOS)
+AUR.xcodeproj/
+AUR/Info.plist
+build/
+DerivedData/

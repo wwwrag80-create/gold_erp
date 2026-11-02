@@ -1571,6 +1571,8 @@
       item("book", "كشف حساب", "محل أو مصنع", pickPartyThen(null, (id) => go(`statement/${id}`))),
       us.unsupported ? null : item("update", "التحديثات", us.available ? "يوجد إصدارٌ جديد" : `الإصدار ${us.version}`, updateSheet),
       item("settings", "الإعدادات والحفظ", "اسم النشاط · العيار · المظهر · الحفظ التلقائي", () => go("settings")),
+      // حيث يلزم القانون (أوروبا وبريطانيا) وحده: تغيير موافقة الإعلانات
+      B.adsState().privacy === true ? item("shield", "خيارات الخصوصية للإعلانات", "موافقتك على الإعلانات — غيّرها متى شئت", () => B.adsPrivacy()) : null,
       root.Promo && root.Promo.contact() ? item("megaphone", "أعلن في التطبيق", "اعرض نشاطك لكل المستخدمين", advertiseSheet) : null);
   }
 
