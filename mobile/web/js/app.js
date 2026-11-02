@@ -1,4 +1,4 @@
-/* نظام محاسبي للذهب (الجوال) — الشاشات والتنقّل.
+/* ÀUR — تطبيق حسابات الذهب للمندوب (الجوال): الشاشات والتنقّل.
  * المنطق كلّه في domain.js والمعادلات في gold.js؛ هنا الواجهة وحدها.
  */
 (function (root) {
@@ -33,7 +33,7 @@
   }
   function goldBal(w18, fac) { return balSpan(G.g(w18, vk()), "جم", fac); }
   function cashBal(c, fac) { return balSpan(c, "ريال", fac); }
-  const APP_NAME = "نظام محاسبي للذهب";
+  const APP_NAME = "ÀUR";
 
   // الانتقال بعد أن يكتمل رجوع السجل الذي يتبع إغلاق نافذةٍ سفلية — وإلا ألغاه
   function go(path) { root.UI.idle().then(() => { location.hash = "#/" + path; }); }

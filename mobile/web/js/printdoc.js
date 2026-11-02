@@ -93,7 +93,7 @@
       <div class="muted" style="text-align:left">${ltr(dmy(date))}</div></div></div>`;
   }
 
-  const APP = "نظام محاسبي للذهب";
+  const APP = "ÀUR";
   const INV_TITLE = { sale: "فاتورة بيع", sale_return: "مرتجع", purchase: "بضاعة من مصنع", purchase_return: "إرجاع للمصنع" };
   const PARTY_WORD = { sale: "العميل", sale_return: "من", purchase: "المصنع", purchase_return: "إلى" };
 

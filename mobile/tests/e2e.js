@@ -69,7 +69,7 @@ function check(name, cond, detail) {
     "بيع للعميل،مرتجع للعميل،بضاعة من مصنع،إرجاع للمصنع،تحصيل من العميل،سداد للمصنع", tiles.join("،"));
   check("ثم «كشف حساب» ثم «بحث عن طقم» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
     "كشف حساب،بحث عن طقم،عمليات اليوم (0)" && (await page.locator(".kpis").count()) === 0);
-  check("الاسم: نظام محاسبي للذهب، والشعار في الشريط", (await text("#bar h1")).includes("نظام محاسبي للذهب") &&
+  check("الاسم: ÀUR، والشعار في الشريط", (await text("#bar h1")).includes("ÀUR") &&
     (await page.locator("#bar img.bar-logo").count()) === 1);
   check("خمسة أزرار سفلية بأيقونات: الحسابات والممتلكات", (await page.locator("#tabs button .i svg").count()) === 5 &&
     (await text("#tabs")).includes("الحسابات") && (await text("#tabs")).includes("الممتلكات") && !(await text("#tabs")).includes("لوحة التحكم"));

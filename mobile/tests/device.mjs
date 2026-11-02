@@ -189,7 +189,7 @@ async function main() {
   await ev(HARNESS);
   await sleep(600);
   check("أول تشغيل: شاشة الترحيب (مجلد الحفظ أو الاسترجاع)", (await ev("location.hash")) === "#/welcome");
-  check("الاسم والشعار: نظام محاسبي للذهب", (await ev("document.title")) === "أهلاً بك" && (await ev("__t.text().includes('نظام محاسبي للذهب')")));
+  check("الاسم والشعار: ÀUR", (await ev("document.title")) === "أهلاً بك" && (await ev("__t.text().includes('ÀUR')")));
   shot("welcome");
 
   // ══ التحديث: الإصدار، وقراءة القناة من GitHub، وصلاحية PATCH ══

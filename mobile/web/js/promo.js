@@ -14,7 +14,7 @@
   const URL_ = "https://raw.githubusercontent.com/wwwrag80-create/gold_erp/main/mobile/promo/promo.json";
   const KEY = "promo_cache", HIDE = "promo_hidden";
   const EVERY = 6 * 3600 * 1000;
-  const DEFAULT_FOOTER = "أُنشئ بتطبيق «نظام محاسبي للذهب»";
+  const DEFAULT_FOOTER = "أُنشئ بتطبيق «ÀUR»";
 
   const str = (x, n) => String(x == null ? "" : x).replace(/\s+/g, " ").trim().slice(0, n);
   const digits = (x) => String(x == null ? "" : x).replace(/\D/g, "").slice(0, 15);
