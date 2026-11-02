@@ -1,4 +1,4 @@
-"""فيديو تعليمي — الخطوة 3: موسيقى هادئة ومؤثرات مُركَّبة (بلا ملفات خارجية).
+"""فيديو تعليمي — الخطوة 3: موسيقى هادئة ومؤثرات مُركَّبة، ومعها الصوت الشارح.
 
     python3 mobile/tools/video/music.py OUT_DIR
 
@@ -153,6 +153,33 @@ L *= fade
 R *= fade
 peak = max(np.max(np.abs(L)), np.max(np.abs(R)))
 L, R = L / peak * 0.89, R / peak * 0.89
+
+# ── الصوت الشارح (إن وُجد): فوق الموسيقى، والموسيقى تنخفض وهو يتكلّم ──
+voices = TL.get("voices") or []
+if voices:
+    L, R = L * 0.55, R * 0.55
+    vo = np.zeros(N)
+    on = np.zeros(N)
+    for v in voices:
+        with wave.open(v["file"]) as w:
+            sr = w.getframerate()
+            x = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float64) / 32768
+        if w.getnchannels() == 2:
+            x = x.reshape(-1, 2).mean(axis=1)
+        y = np.interp(np.arange(int(len(x) * SR / sr)) * sr / SR, np.arange(len(x)), x)
+        rms = math.sqrt(float(np.mean(y ** 2))) or 1.0
+        y *= 0.16 / rms                                   # كل مقطعٍ بالعلوّ نفسه تقريباً
+        add(vo, v["at"], y)
+        i, j = int(max(0, v["at"] - 0.25) * SR), int(min(T, v["at"] + v["dur"] + 0.45) * SR)
+        on[i:j] = 1
+    k = int(0.35 * SR)
+    win = np.hanning(k)
+    duck = np.convolve(on, win / win.sum(), mode="same")
+    g = 1 - 0.62 * duck                                   # نحو −8 dB تحت الكلام
+    L, R = L * g + vo, R * g + vo
+    peak = max(np.max(np.abs(L)), np.max(np.abs(R)))
+    if peak > 0.97:
+        L, R = L / peak * 0.97, R / peak * 0.97
 
 data = (np.stack([L, R], axis=1) * 32767).astype("<i2").tobytes()
 with wave.open(str(OUT / "music.wav"), "wb") as w:

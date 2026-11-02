@@ -16,32 +16,46 @@ const JOBS = Number(opt("jobs", 3));
 const PREVIEW = opt("preview", "");
 
 const SC = 517 / 393;   // نقاط الشاشة ← بكسل شاشة الجوال في المسرح
-function timeline(m) {
-  const segs = [];
+const strip = (t) => String(t || "").replace(/[\u064B-\u0652\u0670\u0640]/g, "");   // النص المشكول ← نصّ الشاشة
+
+// الخطّ الزمني على قدر الصوت: كل مشهدٍ يبقى حتى يُتمّ الشرح، ثم اللمسة (إن كانت)
+function timeline(m, V) {
+  const segs = [], voices = [];
   let t = 0;
-  const add = (o, d) => { segs.push(Object.assign(o, { start: +t.toFixed(3), end: +(t + d).toFixed(3) })); t += d; };
-  add({ type: "intro" }, 5.0);
+  const dur = (k) => (V[k] ? V[k].dur : 0);
+  const add = (o, d, vk, vs) => {
+    if (vk && V[vk]) voices.push({ file: V[vk].file, at: +(t + vs).toFixed(3), dur: V[vk].dur });
+    segs.push(Object.assign(o, { start: +t.toFixed(3), end: +(t + d).toFixed(3) }));
+    t += d;
+  };
+  add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
   const items = m.shots;
   const chapters = items.filter((x) => x.type === "chapter");
   let ch = null, step = 0, prevIdx = null, idx = 0;
   items.forEach((it, i) => {
-    if (it.type === "chapter") { ch = it; step = 0; prevIdx = null; add({ type: "chapter", n: it.n, title: it.title, desc: it.desc }, 2.4); return; }
+    if (it.type === "chapter") {
+      ch = it; step = 0; prevIdx = null;
+      add({ type: "chapter", n: it.n, title: it.title, desc: it.desc }, Math.max(2.6, 0.35 + dur("ch" + it.n) + 0.7), "ch" + it.n, 0.35);
+      return;
+    }
     step++;
     const steps = items.filter((x) => x.type === "shot" && x.chapter === it.chapter).length;
-    const len = (it.title + " " + it.sub).length;
-    let d = Math.min(5.6, Math.max(3.2, 2.2 + 0.038 * len));
-    if (it.tap) d += 0.85;
+    const key = it.file.slice(0, -4), vs = 0.45, vd = dur(key);
+    const press = !!(it.tap && it.press);
+    const tapAt = press ? vs + vd + 0.25 : null;
+    const d = press ? tapAt + 1.0 : Math.max(3.4, vs + vd + 0.9);
     const next = items[i + 1];
-    add({ type: "shot", idx, file: "file://" + path.join(SHOTS, it.file), title: it.title, sub: it.sub, tap: it.tap,
-      tapAt: it.tap ? +(d - 0.9).toFixed(3) : null,
+    add({ type: "shot", idx, file: "file://" + path.join(SHOTS, it.file), title: it.title, sub: strip(it.say), tap: it.tap, press,
+      tapAt: press ? +tapAt.toFixed(3) : null,
       // تقريبٌ هادئ بعد لحظةٍ من ظهور الشاشة كاملة، ثم إبعادٌ قبل الانتقال
-      zoom: it.focus ? { fx: it.focus.x * SC, fy: it.focus.y * SC, s: it.focus.s, at: it.tap ? Math.max(0.7, d - 0.9 - 2.3) : 0.9 } : null, chapter: it.chapter, chapterTitle: ch.title, step, steps,
+      zoom: it.focus ? { fx: it.focus.x * SC, fy: it.focus.y * SC, s: it.focus.s, at: 0.7 } : null,
+      chapter: it.chapter, chapterTitle: ch.title, step, steps,
       firstInChapter: step === 1, lastInChapter: !next || next.type !== "shot", nextSameChapter: !!(next && next.type === "shot"),
-      prevIdx }, d);
+      prevIdx }, d, key, vs);
     prevIdx = idx++;
   });
-  add({ type: "outro" }, 6.5);
-  return { total: +t.toFixed(3), chapters: chapters.length, segments: segs };
+  add({ type: "outro" }, Math.max(6.5, 0.6 + dur("outro") + 2.2), "outro", 0.6);
+  return { total: +t.toFixed(3), chapters: chapters.length, segments: segs, voices };
 }
 
 async function openStage(browser, tl) {
@@ -71,7 +85,8 @@ async function renderRange(browser, tl, from, to, file) {
 
 (async () => {
   const m = JSON.parse(fs.readFileSync(path.join(SHOTS, "manifest.json"), "utf8"));
-  const tl = timeline(m);
+  const vf = path.join(SHOTS, "voice.json");
+  const tl = timeline(m, fs.existsSync(vf) ? JSON.parse(fs.readFileSync(vf, "utf8")) : {});
   fs.writeFileSync(path.join(path.dirname(OUT), "timeline.json"), JSON.stringify(tl, null, 1));
   console.log(`المدة ${tl.total.toFixed(1)} ث · ${tl.segments.length} مقطعاً`);
   const browser = await chromium.launch();
