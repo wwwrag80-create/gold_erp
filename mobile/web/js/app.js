@@ -40,13 +40,106 @@
   function replace(path) { root.UI.idle().then(() => location.replace("#/" + path)); }
 
   async function persist(ops) {
-    try { await S.write(ops); scheduleAutoBackup(); return true; }
+    try { await S.write(ops); scheduleAutoBackup(); markWebChange(); return true; }
     catch (e) { err(new Error("تعذّر الحفظ في الجوال: " + ((e && e.message) || e))); return false; }
   }
 
   // نسخةٌ في مجلد الحفظ التلقائي (خارج التطبيق) بعد كل تغيير — بتأنٍّ يسير
   // فتُجمع التغييرات المتتابعة في كتابةٍ واحدة
   let backupTimer = null;
+  // ══ نسخة الويب (الآيفون عبر الرابط) ══
+  // بياناتك تُحفظ في الجوال فوراً بعد كل عملية. أما نسخةٌ خارج التطبيق (الملفات · iCloud) فلا
+  // يكتبها المتصفح وحده (قاعدة Apple)؛ فبعد كل تغييرٍ بثوانٍ — وعند الفتح — يظهر «احفظ نسخة»:
+  // لمسةٌ تحفظ الملف جاهزاً. وبه تُسترجع البيانات إن حُذفت الأيقونة أو تغيّر الجوال.
+  const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { /* */ } return null; };
+  const isWeb = () => !B.native;
+  const webDirty = () => +(ls("webChangedAt") || 0) > Math.max(+(ls("webBackupAt") || 0), +(ls("webBarHidden") || 0));
+  let bkTimer = null, bkBar = null, bkFile = null;
+  function markWebChange() {
+    if (!isWeb()) return;
+    ls("webChangedAt", String(Date.now()));
+    clearTimeout(bkTimer);
+    bkTimer = setTimeout(showBackupBar, 2500);
+  }
+  function hideBackupBar() { if (bkBar) { bkBar.remove(); bkBar = null; } }
+  async function showBackupBar() {
+    if (!isWeb() || !webDirty() || !AD_SCREENS.has(parse().parts[0] || "home")) return;
+    const s = st();
+    if (s.shops.length + s.invoices.length + s.vouchers.length === 0) return;
+    // الملف جاهزٌ قبل اللمس: المشاركة في الآيفون تُطلب في اللمسة نفسها
+    const text = JSON.stringify(D.toBackup(s, await S.allPhotos()));
+    const name = `AUR-${D.today()}.json`;
+    bkFile = { name, text, file: typeof File === "function" ? new File([text], name, { type: "application/json" }) : null };
+    if (bkBar) return;
+    bkBar = h("div", { class: "note-bar info web-bk" },
+      ico("cloud", 20),
+      h("span", { class: "grow small" }, "احفظ نسخةً من بياناتك في «الملفات» (iCloud) — لمسةٌ واحدة"),
+      h("button", { class: "btn sm", onclick: () => webBackupNow() }, ico("save", 16), "حفظ"),
+      h("button", { class: "x", "aria-label": "لاحقاً", onclick: () => { ls("webBarHidden", String(Date.now())); hideBackupBar(); } }, ico("x", 16)));
+    document.body.append(bkBar);
+  }
+  function webBackupNow() {
+    const f = bkFile;
+    if (!f) return;
+    const done = () => { ls("webBackupAt", String(Date.now())); hideBackupBar(); toast("حُفظت النسخة"); };
+    try {
+      if (f.file && navigator.canShare && navigator.canShare({ files: [f.file] })) {
+        navigator.share({ files: [f.file], title: "ÀUR — نسخة احتياطية" }).then(done).catch((e) => {
+          if (!e || e.name !== "AbortError") { B.saveFile(f.name, f.text); done(); }
+        });
+        return;
+      }
+    } catch (e) { /* التنزيل بدلاً منها */ }
+    B.saveFile(f.name, f.text);
+    done();
+  }
+  // استرجاعٌ من ملف (أول فتحٍ على جوالٍ جديد، أو بعد حذف الأيقونة)
+  function pickRestoreFile() {
+    const inp = h("input", { type: "file", accept: ".json,application/json", style: { display: "none" } });
+    inp.addEventListener("change", async () => {
+      const f = inp.files && inp.files[0];
+      inp.remove();
+      if (!f) return;
+      try { if (await restoreText(await f.text(), f.name)) { ls("webBackupAt", String(Date.now())); route(); } } catch (e) { err(e); }
+    });
+    document.body.append(inp);
+    inp.click();
+  }
+  const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const standalone = () => navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  // يعمل بلا إنترنت، وتحديثٌ جديد ينتظر «حدّث الآن»
+  function webSetup() {
+    if (!isWeb()) return;
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    if (!("serviceWorker" in navigator) || !(location.protocol === "https:" || location.hostname === "localhost")) return;
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController && !reloading) { reloading = true; location.reload(); }
+    });
+    // يُراقَب التسجيل ولو فُتح التطبيق بلا إنترنت (يفشل التسجيل حينها فيُؤخذ القائم)
+    const watch = (reg) => {
+      if (!reg || reg.__aur) return;
+      reg.__aur = true;
+      const waiting = () => { if (reg.waiting && navigator.serviceWorker.controller) { webWaiting = reg.waiting; maybeUpdatePop(); } };
+      waiting();
+      reg.addEventListener("updatefound", () => {
+        const w = reg.installing;
+        if (w) w.addEventListener("statechange", () => { if (w.state === "installed") waiting(); });
+      });
+    };
+    const attach = () => navigator.serviceWorker.register("sw.js").then(watch)
+      .catch(() => navigator.serviceWorker.getRegistration().then(watch).catch(() => {}));
+    attach();
+    window.addEventListener("online", attach);
+    // عند العودة إلى التطبيق: هل نُشر إصدارٌ جديد؟
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      navigator.serviceWorker.getRegistration().then((r) => { watch(r); if (r) r.update().catch(() => {}); }).catch(() => {});
+    });
+  }
+  let webWaiting = null;
+
   function scheduleAutoBackup() {
     if (!B.native || !B.backupFolder()) return;
     clearTimeout(backupTimer);
@@ -244,10 +337,22 @@
         v.append(h("div", { class: "note-bar warn tap", style: { marginBottom: "12px" }, onclick: () => go("settings") },
           ico("folder", 18), " فعّل الحفظ التلقائي في مجلدٍ على الجوال — فتبقى بياناتك ولو حُذف التطبيق."));
       }
-    } else if (hasData && (!last || D.daysBetween(last.slice(0, 10), t) >= 7)) {
-      v.append(h("div", { class: "note-bar warn tap", style: { marginBottom: "12px" }, onclick: () => go("settings") },
-        last ? `آخر نسخة احتياطية قبل ${D.daysBetween(last.slice(0, 10), t)} يوماً — احفظ نسخةً جديدة.`
-          : "لم تُحفظ نسخة احتياطية بعد — اضغط هنا لحفظ نسخة."));
+    } else {
+      // نسخة الويب: تثبيتها على الشاشة الرئيسية، والاسترجاع من ملفٍ في أول فتح
+      if (!standalone()) {
+        v.append(h("div", { class: "note-bar info install-card", style: { marginBottom: "12px" } },
+          h("b", null, ico("sparkles", 18), ` ثبّت ${APP_NAME} على جوالك كتطبيق`),
+          isIOS()
+            ? h("ol", { class: "small" },
+                h("li", null, "اضغط زرّ المشاركة ", ico("upload", 15), " أسفل سفاري"),
+                h("li", null, "اختر «إضافة إلى الشاشة الرئيسية» ثم «إضافة»"),
+                h("li", null, `افتح ${APP_NAME} من أيقونته — يعمل بلا إنترنت`))
+            : h("div", { class: "small", style: { marginTop: "4px" } }, "من قائمة المتصفح ⋮ اختر «إضافة إلى الشاشة الرئيسية» أو «تثبيت التطبيق».")));
+      }
+      if (!hasData && s.shops.length === 0) {
+        v.append(h("div", { class: "note-bar info tap", style: { marginBottom: "12px" }, onclick: pickRestoreFile },
+          ico("history", 18), " عندك نسخة سابقة من بياناتك؟ اضغط هنا لاسترجاعها من ملف"));
+      }
     }
     // اللوحات: العميل يميناً والمصنع يساراً، صفّاً صفّاً
     const tile = (icon, label, hint, to, fac) => h("button", { class: "op-tile" + (fac ? " fac" : ""), onclick: () => go(to) },
@@ -1611,6 +1716,8 @@
       if (share) B.shareFile(backupName(), text); else B.saveFile(backupName(), text);
       s.settings.lastBackup = new Date().toISOString();
       await persist(S.meta(s));
+      ls("webBackupAt", String(Date.now()));
+      hideBackupBar();
       toast(share ? "اختر أين تحفظ النسخة (واتساب · درايف · …)" : "حُفظت النسخة في «التنزيلات»");
     };
     const fileIn = h("input", { type: "file", accept: ".json,application/json", style: { display: "none" } });
@@ -1926,14 +2033,22 @@
   //    ويثبّت مباشرة. مرةً في كل فتحٍ للتطبيق، وفي شاشات التصفّح وحدها (لا يقطع فاتورةً تُكتب) ══
   let popShown = "";
   function maybeUpdatePop(us) {
-    if (!B.native) return;
+    if (!B.native) {
+      if (webWaiting && popShown !== "web" && AD_SCREENS.has(parse().parts[0] || "home")) {
+        popShown = "web";
+        const w = webWaiting;
+        fetch("version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}))
+          .then((vj) => updatePop({ published: { version: vj.name || "" } }, () => w.postMessage("skipWaiting")));
+      }
+      return;
+    }
     us = us || B.updateState();
     if (!us || us.unsupported || !us.available || !us.published || !us.published.version || updateOpen) return;
     if (popShown === us.published.version || !AD_SCREENS.has(parse().parts[0] || "home")) return;
     popShown = us.published.version;
     updatePop(us);
   }
-  function updatePop(us) {
+  function updatePop(us, webGo) {
     const pub = us.published;
     const offs = [];
     sheet((box, close) => {
@@ -1943,6 +2058,7 @@
       const note = h("div", { class: "muted small pop-note" });
       const go = h("button", { class: "btn block big", onclick: () => {
         go.disabled = true;
+        if (webGo) { note.textContent = "جارٍ التحديث…"; webGo(); return; }
         note.textContent = "جارٍ التنزيل…";
         prog.style.display = "";
         B.installUpdate();
@@ -1950,7 +2066,7 @@
       box.append(
         h("img", { src: "img/icon.png", alt: "", class: "pop-logo" }),
         h("h3", null, "يوجد تحديث جديد"),
-        h("div", { class: "muted" }, `الإصدار ${pub.version}`),
+        pub.version ? h("div", { class: "muted" }, `الإصدار ${pub.version}`) : null,
         pub.notes ? h("div", { class: "small pop-notes" }, pub.notes) : null,
         go, prog, note,
         h("button", { class: "btn ghost block sm", onclick: () => close() }, "لاحقاً"));
@@ -2152,6 +2268,7 @@
     // ولا البحث ولا الترحيب، فلا يُلمس خطأً ولا يزاحم لوحة المفاتيح
     B.setAds(AD_SCREENS.has(parts[0] || "home"));
     setTimeout(() => maybeUpdatePop(), 700);
+    if (isWeb()) { if (AD_SCREENS.has(parts[0] || "home")) setTimeout(showBackupBar, 900); else hideBackupBar(); }
     try {
       switch (parts[0]) {
         case "home": return home();
@@ -2237,6 +2354,7 @@
     setTimeout(promo, 1500);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) { maybeCheckUpdate(); promo(); } });
     window.addEventListener("hashchange", route);
+    webSetup();
     // مجلد «ÀUR» من تثبيتٍ سابق، والتطبيق ليس في أول تشغيله (فيه بيانات): الحفظ فيه من الآن
     if (B.native && !firstRun() && B.backupInfo().mode === "found") B.startAuto();
     if (firstRun()) location.replace("#/welcome");

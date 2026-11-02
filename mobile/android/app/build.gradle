@@ -76,6 +76,8 @@ android {
 tasks.register('copyWeb', Copy) {
     from '../../web'
     into "$buildDir/webassets/web"
+    // ملفات نسخة الويب وحدها (الآيفون عبر الرابط) — لا يحتاجها التطبيق
+    exclude 'sw.js', 'manifest.webmanifest', 'img/app-*.png', 'img/apple-touch-icon.png'
 }
 preBuild.dependsOn copyWeb
 

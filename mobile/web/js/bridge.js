@@ -112,9 +112,11 @@
     setAds(on) {
       Bridge.adsWanted = !!on;
       if (A && A.setAds) A.setAds(!!on);
+      else if (!A && root.WebAds) root.WebAds.set(!!on);     // نسخة الويب: AdSense
     },
     adsPrivacy() { if (A && A.adsPrivacy) A.adsPrivacy(); },
     adsState() {
+      if (!A && root.WebAds) return root.WebAds.state();
       if (!A || !A.adsState) return { unsupported: true, wanted: Bridge.adsWanted };
       try { return JSON.parse(A.adsState()); } catch (e) { return { unsupported: true }; }
     },

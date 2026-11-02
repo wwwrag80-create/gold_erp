@@ -370,7 +370,9 @@ function check(name, cond, detail) {
   check("ولا إعلان في الفاتورة والسند ونموذج المحل والإعدادات",
     (await adOn("#/invoice/new?kind=sale")) === false && (await adOn("#/voucher/new?kind=receipt")) === false &&
     (await adOn("#/shop-form")) === false && (await adOn("#/settings")) === false);
-  check("وفي المتصفح لا جسر إعلان: adsState «غير مدعوم»", (await page.evaluate(() => Bridge.adsState().unsupported)) === true);
+  check("وفي المتصفح إعلان الويب (AdSense) مطفأٌ بلا رقم وحدة — ولا يُحمَّل شيءٌ من Google",
+    await page.evaluate(() => { const a = Bridge.adsState(); return a.web === true && a.enabled === false && a.visible === false &&
+      !document.querySelector('script[src*="googlesyndication"]') && !document.getElementById("webad"); }));
 
   // كشف حساب المصنع
   const facId = await page.evaluate(() => App.state.shops.find((s) => s.type === "factory").id);
