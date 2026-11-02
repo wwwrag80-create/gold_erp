@@ -29,6 +29,12 @@ final class AURUITests: XCTestCase {
     /// أول تشغيل: رسالة موافقة الإعلانات من Google (UMP) ثم سؤال iOS عن التتبّع — حيث يُعدّها
     /// حساب AdMob، وتصل من الشبكة في أي لحظةٍ من أول التشغيل. «متابعة» (حين تصير قابلةً للّمس،
     /// ويُتأكَّد أنها أُغلقت) ثم «اطلب من التطبيق عدم التتبّع»؛ والتطبيق يعمل في الحالين.
+    /// ينتظر اختفاء عنصرٍ — بلا فشلٍ إن اختفى بين سؤالين
+    func gone(_ e: XCUIElement, within t: TimeInterval) -> Bool {
+        let x = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: e)
+        return XCTWaiter().wait(for: [x], timeout: t) == .completed
+    }
+
     func clearConsent(wait: TimeInterval) {
         let cont = app.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "متابعة"])).firstMatch
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -37,9 +43,14 @@ final class AURUITests: XCTestCase {
         if deny.exists { snap("00_tracking"); deny.tap() }
         guard cont.waitForExistence(timeout: wait) else { return }
         snap("00_consent")
-        for _ in 0..<6 where cont.exists {
-            Thread.sleep(forTimeInterval: 1.5)
-            if cont.exists && cont.isHittable { cont.tap() }
+        // النافذة تظهر بحركة: لمسةٌ في مكان الزرّ على الشاشة بعد أن تستقرّ، ثم انتظار اختفائها
+        // (لا سؤال «قابلٌ للّمس؟» عن زرٍّ قد يختفي في اللحظة نفسها)
+        for _ in 0..<4 {
+            Thread.sleep(forTimeInterval: 2)
+            let frame = cont.exists ? cont.frame : .zero
+            if frame == .zero { break }
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            if gone(cont, within: 8) { break }
         }
         if deny.waitForExistence(timeout: 15) {
             snap("00_tracking")
