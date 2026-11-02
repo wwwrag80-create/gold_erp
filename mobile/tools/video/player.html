@@ -94,7 +94,7 @@
   #olist div { font-size: 46px; line-height: 1.5; margin: 18px 0; display: flex; gap: 22px; align-items: baseline; }
   #olist .b { color: var(--ring); font-size: 40px; }
   #obrand { margin-top: 110px; display: flex; align-items: center; gap: 26px; font-size: 44px; font-weight: 700; }
-  #obrand svg { width: 110px; height: 110px; }
+  #obrand svg, #ologo { width: 110px; height: 110px; display: block; }
 
   /* لوحة «ماذا تستفيد من النظام؟» */
   #ben { inset: 0; padding: 0 64px 110px; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; }
@@ -154,9 +154,9 @@
   <div id="intro" class="full abs">
     <div id="halo"></div>
     <div id="ilogo"></div>
-    <div id="ititle" class="shine">نظام محاسبي للذهب</div>
+    <div id="ititle" class="shine">ÀUR</div>
     <div id="isub">دليل المندوب — خطوةً بخطوة</div>
-    <div id="ichip">تطبيق أندرويد · مجاني</div>
+    <div id="ichip">أندرويد وآيفون · مجاني</div>
   </div>
 
   <div id="outro" class="full abs">
@@ -166,7 +166,7 @@
       <div><span class="b">✦</span><span>سجّل البضاعة، وبِع من الأطقم التي معك</span></div>
       <div><span class="b">✦</span><span>حصّل وسدّد، وأرسل الكشف صورةً</span></div>
     </div>
-    <div id="obrand"><span id="ologo"></span><span>نظام محاسبي للذهب</span></div>
+    <div id="obrand"><span id="ologo"></span><span>ÀUR — حسابات الذهب</span></div>
   </div>
 
   <div id="ben" class="abs">
@@ -176,30 +176,15 @@
   </div>
 
   <div id="prog" class="abs"><div id="progf"></div></div>
-  <div id="brand" class="abs">نظام محاسبي للذهب · دليل المندوب</div>
+  <div id="brand" class="abs">ÀUR · دليل المندوب</div>
   <div id="fade" class="abs"></div>
 </div>
 
 <script>
-// شعار الجوهرة (كأيقونة التطبيق) — مرسومٌ متّجهاً ليبقى حادّاً بأي حجم
+// شعار التطبيق ÀUR — أيقونته نفسها (صورة المتجر 1024، تبقى حادّةً بأي حجم)
 function logoSvg() {
-  return `<svg viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="lg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F0D77E"/><stop offset="1" stop-color="#C9A227"/></linearGradient>
-    <linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C9A227"/><stop offset="1" stop-color="#7A600F"/></linearGradient></defs>
-    <rect x="4" y="4" width="184" height="184" rx="40" fill="#2B2723"/>
-    <rect x="4.5" y="4.5" width="183" height="183" rx="39.5" fill="none" stroke="#E4C665" stroke-opacity=".25"/>
-    <g stroke="#2B2723" stroke-width="3" stroke-linejoin="round">
-      <polygon points="62,58 130,58 156,84 36,84" fill="url(#lg1)"/>
-      <polygon points="62,58 80,84 36,84" fill="#E4C665"/>
-      <polygon points="130,58 112,84 156,84" fill="#B08E2A"/>
-      <polygon points="80,84 96,58 112,84" fill="#F3E9CE" fill-opacity=".55"/>
-      <polygon points="36,84 156,84 96,154" fill="url(#lg2)"/>
-      <polygon points="36,84 80,84 96,154" fill="#C9A227"/>
-      <polygon points="80,84 112,84 96,154" fill="#9A7B22"/>
-      <polygon points="112,84 156,84 96,154" fill="#5E4A0C"/>
-    </g>
-    <path d="M150 30 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 z" fill="#F3EEE2"/>
-    <circle cx="134" cy="40" r="3" fill="#F3EEE2"/></svg>`;
+  return `<img src="../../store/app-store-icon-1024.png" alt="" style="display:block;width:100%;height:100%;border-radius:22%;
+    box-shadow:0 0 0 2px rgba(228,198,101,.35)">`;
 }
 document.getElementById("ilogo").innerHTML = `<div class="logo">${logoSvg()}</div>`;
 document.getElementById("ologo").innerHTML = logoSvg();
