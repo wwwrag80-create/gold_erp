@@ -476,9 +476,28 @@ async function main() {
   check(`والحفظ التلقائي مستمرٌّ في ملف ÀUR نفسه (${bi2.readable ? "مباشرةً بلا نافذة" : "عبر نافذة المجلد"})`,
     (await ev("Bridge.backupFolder()")) === "ÀUR" && ["tree", "auto"].includes(await ev("Bridge.backupInfo().mode")),
     await ev("JSON.stringify(Bridge.backupInfo())"));
-  const pd = await waitEv(ev, "photosDone", 0, 20000);
+  let pd = await waitEv(ev, "photosDone", 0, 20000);
   await sleep(800);
-  check("وصورة الطقم استُرجعت من المجلد", pd && pd.n === 1 && (await ev(`Store.getPhoto(${JSON.stringify(phId)}).then((d) => !!d)`)), JSON.stringify(pd));
+  let via = "مباشرةً";
+  if (pd && pd.n === 0 && bi2.readable) {
+    // أندرويد أبقى ملف البيانات للتطبيق وأخفى صور التثبيت السابق: يُطلب المجلد مرّةً للصور وحدها
+    let asked = false;
+    for (let i = 0; i < 40 && !asked; i++) {
+      asked = await ev("!!document.querySelector('.sheet') && document.body.innerText.includes('استرجاع الصور')");
+      if (!asked) await sleep(250);
+    }
+    check("الصور مخفيّة عن التطبيق ⇒ يُعرض «استرجاع الصور»", asked);
+    shot("photos_ask");
+    const n1 = await evCount(ev, "photosDone");
+    const inv1 = await ev("App.state.invoices.length");
+    await run(ev, `await t.confirm("استرجاع الصور");`);
+    const picked3 = await chooseFolder("photos");
+    pd = await waitEv(ev, "photosDone", n1, 20000);
+    await sleep(800);
+    check("والبيانات لا تُستورد ثانيةً", picked3 && (await ev("App.state.invoices.length")) === inv1);
+    via = "عبر نافذة المجلد";
+  }
+  check(`وصورة الطقم استُرجعت من المجلد (${via})`, pd && pd.n === 1 && (await ev(`Store.getPhoto(${JSON.stringify(phId)}).then((d) => !!d)`)), JSON.stringify(pd));
   await run(ev, `location.hash = "#/statement/" + App.state.shops.find((s) => s.name === "محل الأمانة").id; await t.sleep(600);`);
   const kp2 = await ev("document.querySelector('.st-bal').innerText");
   check("وكشف الحساب كما كان: 1.50 جم و50.00 ريال عليه", kp2.includes("1.50 جم عليه") && kp2.includes("50.00 ريال عليه"), kp2);

@@ -313,6 +313,32 @@
     if (!B.native || !B.backupFolder()) return;
     B.syncPhotos(JSON.stringify(await S.photoIds()));
   }
+  // بعد الاسترجاع المباشر من ملف «ÀUR» (بلا نافذة مجلد): أندرويد قد يُبقي ملف البيانات مقروءاً للتطبيق
+  // ويُخفي صور التثبيت السابق — فإن بقيت صورٌ تذكرها البيانات ولم تُسترجع، يُطلب إذن المجلد مرّةً
+  // لقراءتها منه (والبيانات نفسها لا تُستورد ثانيةً)
+  async function missingPhotos() {
+    const refs = new Set((JSON.stringify(st()).match(/"ph_[\w-]{1,60}"/g) || []).map((s) => s.slice(1, -1)));
+    const have = new Set(await S.photoIds());
+    return [...refs].filter((id) => !have.has(id));
+  }
+  function restorePhotosChecked() {
+    const off = B.on("photosDone", () => {
+      off();
+      setTimeout(async () => {
+        const miss = await missingPhotos();
+        if (!miss.length || B.backupInfo().mode !== "auto") return;
+        const ok = await confirmSheet(`استُرجعت بياناتك ✔\n\nوبقيت ${miss.length} صورة للأطقم في ملف «${APP_NAME}».` +
+          `\nاضغط «استرجاع الصور»، ثم «استخدام هذا المجلد» و«سماح».`, "استرجاع الصور");
+        if (!ok) return;
+        const offR = B.on("restore", (r) => {
+          offR();
+          if (r.ok) B.restorePhotos(); else if (r.error) err(new Error(r.error));
+        });
+        B.restoreFromFolder();
+      }, 1500);
+    });
+    B.restorePhotos();
+  }
   async function importPhotos(map) {
     let n = 0;
     for (const [id, data] of Object.entries(map || {})) { await S.putPhoto(id, data); n++; }
@@ -2179,7 +2205,7 @@
       try {
         if (await restoreText(r.text, r.file)) {
           B.startAuto();          // الحفظ مستمرٌّ في ملف «ÀUR» نفسه (أو المجلد المختار)
-          B.restorePhotos(); waitFolder(); waitRestore(); done();
+          restorePhotosChecked(); waitFolder(); waitRestore(); done();
         }
       } catch (e) { err(e); }
     });
