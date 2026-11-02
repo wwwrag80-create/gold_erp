@@ -47,9 +47,10 @@ jobs:
         with:
           gradle-version: "8.13"
 
-      - name: بناء ملف التثبيت (والنسخة التجريبية للمحاكي) وحزمة Google Play
+      # و«play» ملف APK أيضاً: لمتاجر تطلب APK (متجر شاومي GetApps…) — بلا تحديثٍ ذاتي ولا إذن تثبيت
+      - name: بناء ملف التثبيت (والنسخة التجريبية للمحاكي) وحزمة Google Play وملف المتاجر
         working-directory: mobile/android
-        run: gradle --no-daemon --stacktrace assembleDirectRelease assembleDirectDebug bundlePlayRelease
+        run: gradle --no-daemon --stacktrace assembleDirectRelease assembleDirectDebug bundlePlayRelease assemblePlayRelease
 
       # حزمة المتجر: تُفحص قبل أي رفع — API 36، وبلا أذونات التحديث الذاتي
       - name: فحص حزمة Google Play (AAB)
@@ -63,6 +64,13 @@ jobs:
           ! grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/play-manifest.xml"
           grep -q "com.google.android.gms.ads.APPLICATION_ID" "$RUNNER_TEMP/play-manifest.xml"
           echo "AAB ok"
+          # ملف المتاجر (APK) من النسخة نفسها: لا إذن تثبيت فيه
+          APK=mobile/android/app/build/outputs/apk/play/release/app-play-release-unsigned.apk
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          "$AAPT" dump permissions "$APK" | tee "$RUNNER_TEMP/play-apk-perms.txt"
+          ! grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/play-apk-perms.txt"
+          "$AAPT" dump badging "$APK" | grep -E "^package:|targetSdkVersion"
+          echo "store APK ok"
 
       - name: نشر الملف (غير موقّع)
         env:
@@ -73,9 +81,12 @@ jobs:
           sha256sum jadeite-mobile-unsigned.apk | tee jadeite-mobile-unsigned.apk.sha256
           cp mobile/android/app/build/outputs/bundle/playRelease/app-play-release.aab jadeite-mobile-play-unsigned.aab
           sha256sum jadeite-mobile-play-unsigned.aab | tee jadeite-mobile-play-unsigned.aab.sha256
+          cp mobile/android/app/build/outputs/apk/play/release/app-play-release-unsigned.apk jadeite-mobile-play-unsigned.apk
+          sha256sum jadeite-mobile-play-unsigned.apk | tee jadeite-mobile-play-unsigned.apk.sha256
           gh release delete mobile-unsigned --yes --cleanup-tag || true
           gh release create mobile-unsigned jadeite-mobile-unsigned.apk jadeite-mobile-unsigned.apk.sha256 \
             jadeite-mobile-play-unsigned.aab jadeite-mobile-play-unsigned.aab.sha256 \
+            jadeite-mobile-play-unsigned.apk jadeite-mobile-play-unsigned.apk.sha256 \
             --prerelease --target "$GITHUB_SHA" \
             --title "Jadeite mobile $V — unsigned build" \
             --notes "Unsigned build of mobile/ at ${GITHUB_SHA::7}. Not installable as is: it is signed with the owner's key outside this repository. Device test results are attached when the emulator run finishes."

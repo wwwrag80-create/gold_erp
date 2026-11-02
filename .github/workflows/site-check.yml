@@ -41,7 +41,15 @@ jobs:
           S1=$(python3 -c "import json;print(json.load(open('mobile/dist/versions.json'))[-1]['sha256'])")
           S2=$(curl -sS -L "$SITE/AUR.apk" | sha256sum | cut -d' ' -f1)
           [ "$S1" = "$S2" ] && echo "✔ AUR.apk = $F (البصمة نفسها)" || { echo "✘ AUR.apk ليس آخر إصدار ($S2 ≠ $S1)"; fail=1; }
+          # صفحاتنا لا تذكر Netlify أبداً — فأي ذكرٍ لها في الصفحة المُرسَلة أضافه Netlify (الشعار)
+          badge=0
+          for p in / /privacy.html /app/; do
+            m=$(curl -sS "$SITE$p" | grep -io ".\{0,60\}netlify.\{0,60\}" | head -3)
+            if [ -n "$m" ]; then echo "✘ $p: إضافةٌ من Netlify في الصفحة:"; echo "$m"; badge=1; fi
+          done
+          [ "$badge" = 0 ] && echo "✔ لا إضافة من Netlify في الصفحات"
           echo "FAIL=$fail" >> "$GITHUB_ENV"
+          echo "BADGE=$badge" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -65,6 +73,22 @@ jobs:
           await ctx.setOffline(true); await p.reload(); await p.waitForTimeout(2500);
           const off = await p.evaluate(() => location.hash === "#/home" && !!document.querySelector(".op-tile"));
           console.log("offline:", off, "errors:", errs.length ? errs : "none");
+          await ctx.setOffline(false);
+          // شعار «Powered by Netlify»: نصّه الظاهر (getByText يرى داخل shadow DOM المفتوح) أو عنصرٌ/سكربتٌ باسمه
+          let badge = 0;
+          for (const path of ["/", "/app/"]) {
+            const q = await ctx.newPage();
+            await q.goto(SITE + path); await q.waitForTimeout(4000);
+            const txt = await q.getByText(/powered by netlify/i).count();
+            const els = await q.evaluate(() => [...document.querySelectorAll("script[src],iframe,link[href],[id],[class]")]
+              .map((e) => [e.tagName, e.getAttribute("src") || e.getAttribute("href") || "", e.id, e.getAttribute("class") || ""].join(" "))
+              .filter((s) => /netlify/i.test(s)));
+            console.log(`badge ${path}:`, txt ? `«Powered by Netlify» ×${txt}` : "no text", els.length ? els : "");
+            if (txt || els.length) badge = 1;
+            await q.close();
+          }
+          console.log(badge ? "✘ شعار Netlify ظاهر — يُطفأ من حساب Netlify: Project configuration ← General ← Powered by Netlify badge" : "✔ لا شعار Netlify");
+          if (badge) (await import("node:fs")).appendFileSync(process.env.GITHUB_ENV, "BADGE=1\n");
           await b.close();
           const ok = r.hash === "#/home" && r.title === "ÀUR" && r.install && r.sw && off && !errs.length;
           console.log(ok ? "✔ التطبيق يفتح، ويُثبَّت، ويعمل بلا إنترنت" : "✘ التطبيق");
@@ -72,4 +96,6 @@ jobs:
           JS
           node ./site-t.mjs || echo "FAIL=1" >> "$GITHUB_ENV"
       - name: النتيجة
-        run: '[ "$FAIL" = "0" ] && echo "✔ الموقع سليم" || { echo "✘ في الموقع مشكلة — التفاصيل أعلاه"; exit 1; }'
+        run: |
+          [ "$BADGE" = "0" ] || echo "::error::شعار «Powered by Netlify» ظاهر — يُطفأ من حساب Netlify: Project configuration ← General ← Powered by Netlify badge (بلا رسوم وبلا إعادة نشر)"
+          [ "$FAIL" = "0" ] && [ "$BADGE" = "0" ] && echo "✔ الموقع سليم" || { echo "✘ في الموقع مشكلة — التفاصيل أعلاه"; exit 1; }
