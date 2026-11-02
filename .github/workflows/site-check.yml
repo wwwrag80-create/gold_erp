@@ -1,0 +1,74 @@
+name: فحص موقع ÀUR (رابط الآيفون)
+
+# يفحص الموقع المنشور على Netlify كما يراه المستخدم: الصفحات، وملف أندرويد (بصمته = آخر إصدارٍ
+# منشور)، وعامل العمل بلا إنترنت، ثم يفتح التطبيق في متصفحٍ حقيقي بمقاس آيفون.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "رابط الموقع"
+        required: false
+        default: "https://deluxe-chebakia-749799.netlify.app"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: الصفحات والملفات
+        env:
+          SITE: ${{ inputs.url }}
+        run: |
+          set -u
+          fail=0
+          for p in / /privacy.html /ads.txt /app-ads.txt /app/ /app/manifest.webmanifest /app/sw.js /app/version.json /app/img/apple-touch-icon.png /AUR.apk; do
+            r=$(curl -sS -L -o /tmp/f -w "%{http_code} %{content_type} %{size_download}" "$SITE$p")
+            echo "$p → $r"
+            case "$r" in 200*) ;; *) fail=1;; esac
+          done
+          curl -sS "$SITE/" | grep -q "<h1>ÀUR</h1>" && echo "✔ صفحة التثبيت: ÀUR" || { echo "✘ صفحة التثبيت"; fail=1; }
+          curl -sS "$SITE/" | grep -q 'href="AUR.apk"' && echo "✔ رابط أندرويد من الموقع نفسه" || { echo "✘ رابط أندرويد"; fail=1; }
+          curl -sS "$SITE/" | grep -qi "wwwrag80" && { echo "✘ اسم الحساب ظاهر في الصفحة"; fail=1; } || echo "✔ لا اسم حسابٍ في الصفحة"
+          V=$(curl -sS "$SITE/app/sw.js" | grep -o 'const VERSION = "[^"]*"')
+          echo "sw: $V"; echo "$V" | grep -q '"dev"' && { echo "✘ عامل الخدمة بلا إصدار"; fail=1; }
+          curl -sS "$SITE/ads.txt" | grep -q "pub-2600352063526857" && echo "✔ ads.txt" || { echo "✘ ads.txt"; fail=1; }
+          F=$(python3 -c "import json;print(json.load(open('mobile/dist/versions.json'))[-1]['file'])")
+          S1=$(python3 -c "import json;print(json.load(open('mobile/dist/versions.json'))[-1]['sha256'])")
+          S2=$(curl -sS -L "$SITE/AUR.apk" | sha256sum | cut -d' ' -f1)
+          [ "$S1" = "$S2" ] && echo "✔ AUR.apk = $F (البصمة نفسها)" || { echo "✘ AUR.apk ليس آخر إصدار ($S2 ≠ $S1)"; fail=1; }
+          echo "FAIL=$fail" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: التطبيق في متصفحٍ بمقاس آيفون
+        env:
+          SITE: ${{ inputs.url }}
+        run: |
+          npm i --no-save playwright@1.48.2 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1
+          cat > ./site-t.mjs <<'JS'
+          import { chromium, devices } from "playwright";
+          const SITE = process.env.SITE;
+          const b = await chromium.launch();
+          const ctx = await b.newContext({ ...devices["iPhone 13"], locale: "ar" });
+          const p = await ctx.newPage();
+          const errs = []; p.on("pageerror", (e) => errs.push(e.message));
+          await p.goto(SITE + "/app/"); await p.waitForTimeout(4000);
+          const r = await p.evaluate(async () => ({ hash: location.hash, title: document.title,
+            install: document.body.innerText.includes("إضافة إلى الشاشة الرئيسية"),
+            sw: !!(await navigator.serviceWorker.ready.then((x) => x.active).catch(() => null)) }));
+          console.log(JSON.stringify(r));
+          await ctx.setOffline(true); await p.reload(); await p.waitForTimeout(2500);
+          const off = await p.evaluate(() => location.hash === "#/home" && !!document.querySelector(".op-tile"));
+          console.log("offline:", off, "errors:", errs.length ? errs : "none");
+          await b.close();
+          const ok = r.hash === "#/home" && r.title === "ÀUR" && r.install && r.sw && off && !errs.length;
+          console.log(ok ? "✔ التطبيق يفتح، ويُثبَّت، ويعمل بلا إنترنت" : "✘ التطبيق");
+          process.exit(ok ? 0 : 1);
+          JS
+          node ./site-t.mjs || echo "FAIL=1" >> "$GITHUB_ENV"
+      - name: النتيجة
+        run: '[ "$FAIL" = "0" ] && echo "✔ الموقع سليم" || { echo "✘ في الموقع مشكلة — التفاصيل أعلاه"; exit 1; }'
