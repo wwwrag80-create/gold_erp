@@ -50,6 +50,7 @@ jobs:
           pref=[n for n in names if n in ('iPhone 16','iPhone 16 Pro','iPhone 15')]
           print((pref or names)[0])")
           echo "simulator: $SIM"
+          echo "SIM=$SIM" >> "$GITHUB_ENV"
           set -o pipefail
           xcodebuild -project AUR.xcodeproj -scheme AUR -configuration Debug \
             -destination "platform=iOS Simulator,name=$SIM" \
@@ -63,6 +64,10 @@ jobs:
           xcrun xcresulttool export attachments --path "$RUNNER_TEMP/aur-test.xcresult" --output-path ios-out 2>/dev/null || true
           cp "$RUNNER_TEMP/test.log" ios-out/ 2>/dev/null || true
           grep -E "error:" "$RUNNER_TEMP/test.log" | head -40 > ios-out/errors.txt || true
+          # سجلّ التطبيق في المحاكي (نسخة التطوير): أخطاء الصفحة ونقراتها وانتقالاتها
+          xcrun simctl spawn "${SIM:-booted}" log show --last 30m --style compact \
+            --predicate 'eventMessage CONTAINS "AUR-"' > ios-out/app-log.txt 2>&1 || true
+          tail -60 ios-out/app-log.txt || true
           ls -la ios-out
 
       - name: بناء نسخة الإصدار للأجهزة (بلا توقيع — للتحقّق)

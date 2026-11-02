@@ -27,6 +27,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         let cfg = pageConfig()
         let ucc = cfg.userContentController
         ucc.addUserScript(WKUserScript(source: shim(), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        #if DEBUG
+        ucc.addUserScript(WKUserScript(source: Self.debugScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        #endif
         ucc.add(WeakHandler(self), name: "aur")
         web = WKWebView(frame: .zero, configuration: cfg)
         web.navigationDelegate = self
@@ -105,6 +108,27 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         """
     }
 
+    #if DEBUG
+    /// نسخة التطوير وحدها: أخطاء الصفحة ونقراتها وانتقالاتها إلى سجلّ الجهاز (AUR-JS) — لتجربة المحاكي
+    static let debugScript = """
+    (function () {
+      var log = function () {
+        try { window.webkit.messageHandlers.aur.postMessage({ fn: "log", args: [Array.prototype.map.call(arguments, String).join(" ")] }); } catch (e) {}
+      };
+      window.addEventListener("error", function (e) { log("error", e.message, (e.filename || "") + ":" + e.lineno); });
+      window.addEventListener("unhandledrejection", function (e) { log("rejection", e.reason && (e.reason.stack || e.reason)); });
+      window.addEventListener("hashchange", function () { log("hash", location.hash); });
+      document.addEventListener("click", function (e) { log("click", e.target && (e.target.textContent || "").trim().slice(0, 40)); }, true);
+      document.addEventListener("DOMContentLoaded", function () {
+        var ls = "?"; try { localStorage.setItem("__t", "1"); ls = localStorage.getItem("__t"); } catch (e) { ls = "x " + e; }
+        log("loaded", location.href, "localStorage=" + ls, "indexedDB=" + (typeof indexedDB), "hash=" + location.hash);
+      });
+      var ce = console.error;
+      console.error = function () { log.apply(null, ["console.error"].concat([].slice.call(arguments))); ce.apply(console, arguments); };
+    })();
+    """
+    #endif
+
     func jsonString(_ s: String) -> String {
         let d = try? JSONSerialization.data(withJSONObject: [s])
         let a = d.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
@@ -145,6 +169,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case "syncPhotos": syncPhotos(s(0))
         case "restorePhotos": restorePhotos()
         case "autoBackup": autoBackup(s(0))
+        case "log": NSLog("AUR-JS %@", s(0))
         default: break
         }
     }
@@ -153,6 +178,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = action.request.url else { return decisionHandler(.cancel) }
+        #if DEBUG
+        NSLog("AUR-NAV %@ type=%ld main=%ld", url.absoluteString, action.navigationType.rawValue, action.targetFrame?.isMainFrame == true ? 1 : 0)
+        #endif
         if url.scheme == AssetHandler.scheme || url.scheme == "about" || url.scheme == "data" {
             return decisionHandler(.allow)
         }
@@ -161,6 +189,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        #if DEBUG
+        NSLog("AUR-NAV finished %@", webView.url?.absoluteString ?? "-")
+        #endif
         if let done = hiddenDone.removeValue(forKey: ObjectIdentifier(webView)) { done() }
     }
 

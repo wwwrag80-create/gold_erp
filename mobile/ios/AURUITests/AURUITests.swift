@@ -49,6 +49,8 @@ final class AURUITests: XCTestCase {
         XCTAssertTrue(button("اختر مجلد الحفظ").exists, "زرّ مجلد الحفظ التلقائي")
         snap("01_welcome")
         button("تخط").tap()
+        Thread.sleep(forTimeInterval: 2)
+        snap("01b_after_skip")
 
         // الرئيسية: لوحات العمليات وكشف الحساب والبحث
         XCTAssertTrue(button("بيع للعميل").waitForExistence(timeout: 15), "لوحة «بيع للعميل»")
