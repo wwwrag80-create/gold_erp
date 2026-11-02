@@ -125,7 +125,8 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash mobile/tests/edge_test.sh
+          # ثم نسخة المتاجر (play): تُثبَّت وتفتح بلا انهيار — بلا شبكة (فلا طلب إعلانٍ حقيقي)
+          script: bash mobile/tests/edge_test.sh; E=$?; bash mobile/tests/store_smoke.sh; S=$?; exit $((E | S))
 
       - name: إرفاق نتائج التجربة بالإصدار
         if: always()
