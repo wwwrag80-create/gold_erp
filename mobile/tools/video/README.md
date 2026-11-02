@@ -21,3 +21,20 @@
   sherpa-onnx على GitHub: `tts-models/vits-piper-ar_JO-kareem-medium.tar.bz2`.
 - `player.html`: المسرح وحركته (`renderAt(t)`)؛ الألوان من لوحة التطبيق.
 - `render.js --preview 3.5,40` يرسم لحظاتٍ بعينها صوراً للمراجعة قبل الإنتاج الكامل.
+
+## النسختان القصيرتان
+
+من لقطات الدليل الكامل نفسها: تبدآن بلوحة «ماذا تستفيد من النظام؟» ثم يظهر اسم النظام،
+ثم الدخول، ولوحات الرئيسية لوحةً لوحة، والبيع والمرتجع بطريقتيهما (بالوزن مباشرة، وباسم الطقم).
+
+    python3 mobile/tools/video/shorts.py $S/shots $S/silent $S/voice      # الخطوات ونصوصها
+    TTS_STYLE=natural python3 mobile/tools/video/tts.py $S/voice VOICE_DIR
+    node mobile/tools/video/render.js $S/silent $S/out_s/video.mp4 --jobs 4 --fps 25   # ≈ دقيقة ونصف
+    node mobile/tools/video/render.js $S/voice  $S/out_v/video.mp4 --jobs 4 --fps 25   # ≈ دقيقتان
+    python3 mobile/tools/video/music.py $S/out_s ; python3 mobile/tools/video/music.py $S/out_v
+
+- `TTS_STYLE`: بلا قيمة = هادئ (الدليل الكامل)، `lively` = مفعم، `natural` = إيقاعٌ وتنغيمٌ أقرب
+  للكلام البشري مع قصّ الصمت الزائد. `TTS_LENGTH` يضبط السرعة، و`TTS_TAG=x` يكتب صوتاً بديلاً
+  في `voice_x/` للمقارنة.
+- الأصوات المولَّدة محلياً تبقى آلية بعض الشيء؛ أفضل نتيجة: تسجيلٌ بشري للنصوص نفسها
+  (`say` في shorts.py) بأسماء ملفات `voice/<المفتاح>.wav`، ثم كتابة `voice.json` بالمدد.

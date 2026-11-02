@@ -314,7 +314,8 @@ window.renderAt = async function (t) {
 
   // المقدّمة
   const iv = sg.type === "intro" ? 1 : 0;
-  $("intro").style.opacity = iv ? (1 - ease((p - (D - .6)) / .6)) : 0;
+  // (في القصير تأتي بعد لوحة الفوائد، فتظهر تدريجاً)
+  $("intro").style.opacity = iv ? Math.min(sg.start > 0 ? out(p / .6) : 1, 1 - ease((p - (D - .6)) / .6)) : 0;
   if (iv) {
     const lg = $("ilogo").firstChild;
     lg.style.transform = `scale(${.82 + .18 * out(p / 1.4)}) translateY(${40 * (1 - out(p / 1.4))}px)`;

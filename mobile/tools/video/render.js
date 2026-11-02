@@ -29,31 +29,38 @@ function timeline(m, V) {
     t += d;
   };
   // «قصير»: بلا بطاقات فصول، والجوال متّصل، ومشاهد أسرع. «صامت»: المدة على قدر النص
+  // ويبدأ القصير بلوحة «ماذا تستفيد؟» ثم يظهر اسم النظام
   const M = m.meta || {}, SHORT = !!M.short, SILENT = !!M.silent;
-  if (SHORT) add({ type: "intro" }, Math.max(3.8, 1.0 + dur("intro") + 0.5), "intro", 1.0);
-  else add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
-  // لوحة «ماذا تستفيد من النظام؟»: كل فائدةٍ تظهر مع صوتها، ثم خاتمتها
+  const intro = () => {
+    if (SILENT) add({ type: "intro" }, 4.0, null, 0);
+    else if (SHORT) add({ type: "intro" }, Math.max(4.2, 1.0 + dur("intro") + 0.7), "intro", 1.0);
+    else add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
+  };
   const B = m.meta && m.meta.benefits;
+  if (!(SHORT && B)) intro();
+  // لوحة «ماذا تستفيد من النظام؟»: كل فائدةٍ تظهر مع صوتها (أو بقدر قراءتها بلا صوت)، ثم خاتمتها
   if (B) {
     const st = t;
     let p = 0.6;
     const vpush = (k, at) => { if (V[k]) voices.push({ file: V[k].file, at: +(st + at).toFixed(3), dur: V[k].dur }); };
+    const read = (s, a, b) => Math.min(b, Math.max(a, 1.6 + 0.045 * s.length));
     const qAt = p;
     vpush("benefits_q", p);
-    p += dur("benefits_q") + 0.5;
+    p += SILENT ? 1.6 : dur("benefits_q") + 0.5;
     const list = B.items.map((it, i) => {
       const at = p;
       vpush(`benefit_${i + 1}`, at);
-      p += dur(`benefit_${i + 1}`) + 0.6;
+      p += SILENT ? read(it.title + it.detail, 2.9, 3.6) : dur(`benefit_${i + 1}`) + 0.6;
       return { title: it.title, detail: it.detail, at: +at.toFixed(3) };
     });
     const finAt = p;
     vpush("benefits_end", finAt);
-    p += dur("benefits_end") + 1.4;
+    p += SILENT ? 3.0 : dur("benefits_end") + 1.4;
     segs.push({ type: "benefits", title: B.title, qAt, items: list, fin: { text: B.end.text, at: +finAt.toFixed(3) },
       start: +st.toFixed(3), end: +(st + p).toFixed(3) });
     t += p;
   }
+  if (SHORT && B) intro();
   const items = m.shots;
   const chapters = items.filter((x) => x.type === "chapter");
   let ch = null, step = 0, prevIdx = null, idx = 0;
@@ -72,8 +79,9 @@ function timeline(m, V) {
     const press = !!(it.tap && it.press);
     let tapAt = null, d;
     if (SILENT) {
-      d = Math.min(4.4, Math.max(2.8, 1.4 + 0.05 * it.title.length + 0.035 * (it.sub || "").length));
-      if (press) { d += 0.7; tapAt = d - 0.8; }
+      // وقتٌ مريح للقراءة: العنوان ثم السطر الثاني، ثم اللمسة إن كانت
+      d = Math.min(4.6, Math.max(3.0, 1.7 + 0.05 * it.title.length + 0.04 * (it.sub || "").length));
+      if (press) { d += 0.8; tapAt = d - 0.8; }
     } else if (SHORT) {
       tapAt = press ? vs + vd + 0.15 : null;
       d = press ? tapAt + 0.8 : Math.max(2.6, vs + vd + 0.55);
@@ -94,7 +102,8 @@ function timeline(m, V) {
       prevIdx }, d, key, vs);
     prevIdx = idx++;
   });
-  if (SHORT) add({ type: "outro" }, Math.max(4.8, 0.5 + dur("outro") + 1.9), "outro", 0.5);
+  if (SILENT) add({ type: "outro" }, 4.8, null, 0);
+  else if (SHORT) add({ type: "outro" }, Math.max(4.8, 0.5 + dur("outro") + 1.9), "outro", 0.5);
   else add({ type: "outro" }, Math.max(6.5, 0.6 + dur("outro") + 2.2), "outro", 0.6);
   return { total: +t.toFixed(3), chapters: SHORT ? 0 : chapters.length, segments: segs, voices,
     short: SHORT, silent: SILENT, bpm: M.bpm || 72, introSub: M.introSub, introChip: M.introChip,
