@@ -93,3 +93,22 @@ Mac/Xcode يلزم فقط لمن أراد فتح المشروع وتعديله �
   يُرسَل رقم الوحدة (data-ad-slot) فيوضع في `mobile/web/js/webads.js` (`slot`). أبقِ **Auto ads مطفأة** (الإعلان شريطٌ
   واحد أسفل شاشات التصفّح فقط). وفعّل رسالة الموافقة (Privacy & messaging ← GDPR) لأوروبا.
   ملاحظة صادقة: قبول AdSense لموقعٍ هو «تطبيق» غير مضمون — قد يُطلب محتوى أكثر.
+- **شعار «Powered by Netlify»**: يضعه Netlify وحده في كل صفحة (سكربت `/.netlify/scripts/hud`) لمواقع الخطة المجانية
+  التي أُنشئت منذ 19 أغسطس 2026، وليس من ملفاتنا. يُطفأ مجاناً بلا إعادة نشر: app.netlify.com ← الموقع ←
+  Project configuration ← General ← **Powered by Netlify badge** ← Off. و«فحص موقع ÀUR» يفشل ما دام ظاهراً.
+
+## 7) متجر شاومي (Xiaomi GetApps) — ملف APK
+- مجاني للمطوّر، ويقبله AdMob متجراً (ربطه يرفع «الإعلانات المحدودة»). التسجيل: global.developer.mi.com ←
+  مطوّر **فرد** (Individual) بتوثيق الهوية — شرطٌ منذ 30 سبتمبر 2026 — والمراجعة يوم إلى يومي عمل؛ ومراجعة التطبيق
+  عادةً حتى 3 أيام عمل.
+- الملف: نسخة **play** نفسها (بلا تحديثٍ ذاتي ولا إذن تثبيت) بصيغة APK — يبنيها `android.yml`
+  (`jadeite-mobile-play-unsigned.apk` في إصدار `mobile-unsigned`) ويجرّبها على أندرويد 15 (`tests/store_smoke.sh`،
+  بلا شبكة فلا طلب إعلانٍ حقيقي). التوقيع بمفتاح التطبيق نفسه، v1 وv2:
+  `python3 mobile/tools/sign_apk.py --key DIR --v1 jadeite-mobile-play-unsigned.apk com.jadeite.mobile.apk`
+  (اسم الملف = رقم الحزمة، فبعض لوحات شاومي ترفض اسماً مختلفاً).
+- الصفحة: التصنيف Business · العمر 3+ · يحتوي إعلانات: نعم · سياسة الخصوصية من الموقع · صور 1080×1920 ·
+  أيقونة 512 · العربية والإنجليزية.
+- بعد النشر: AdMob ← Apps ← ÀUR (Android) ← App settings ← App store details ← Add ← **Xiaomi GetApps** ←
+  `com.jadeite.mobile`.
+- التحديثات: كل إصدارٍ جديد يُرفع يدوياً من لوحة شاومي (Update). والمفتاح واحد، فنسخة الرابط ونسخة المتجر
+  تتحدّث إحداهما فوق الأخرى بلا فقد بيانات.
