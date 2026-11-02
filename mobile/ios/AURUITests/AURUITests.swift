@@ -8,6 +8,7 @@ final class AURUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.launchArguments += ["-AURUITesting"]   // بلا نافذة موافقة الإعلانات أثناء التجربة الآلية
         app.launch()
     }
 
@@ -62,7 +63,7 @@ final class AURUITests: XCTestCase {
     func testLaunchHomeSearchAndTabs() throws {
         // أول تشغيل: شاشة الترحيب باسم التطبيق وزرّي مجلد الحفظ
         XCTAssertTrue(anyText("ÀUR").waitForExistence(timeout: 30), "الترحيب باسم ÀUR")
-        clearConsent(wait: 40)
+        clearConsent(wait: 3)
         XCTAssertTrue(button("اختر مجلد الحفظ").exists, "زرّ مجلد الحفظ التلقائي")
         snap("01_welcome")
         button("تخط").tap()

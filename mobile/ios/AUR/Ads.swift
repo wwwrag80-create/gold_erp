@@ -29,9 +29,20 @@ final class Ads: NSObject, GADBannerViewDelegate {
         #endif
     }
 
+    /// تجربة الواجهة الآلية (نسخة التطوير وحدها): بلا نافذة موافقة — توقيتها من الشبكة يجعل
+    /// التجربة متقلّبة؛ والإعلان التجريبي يُحمَّل كالعادة. المستخدمون لا يمرّرون هذا أبداً.
+    var uiTesting: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-AURUITesting")
+        #else
+        return false
+        #endif
+    }
+
     func start() {
         push()
         guard enabled, !started else { return }
+        if uiTesting { return initSDK() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { self.initSDK() }
         let info = UMPConsentInformation.sharedInstance
         info.requestConsentInfoUpdate(with: UMPRequestParameters()) { [weak self] err in
