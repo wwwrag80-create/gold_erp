@@ -47,7 +47,8 @@ CHORDS = [
     ["C3", "G3", "C4", "D4", "E4", "G4"],
     ["E2", "B2", "E3", "G3", "B3", "D4"],
 ]
-CH_LEN = 6.6
+BPM = float(TL.get("bpm") or 72)
+CH_LEN = 8 * 60 / BPM
 pad = np.zeros(N)
 bass = np.zeros(N)
 nchords = int(T / CH_LEN) + 2
@@ -82,7 +83,7 @@ def pluck(f, dur=1.6, decay=0.55, amp=1.0):
 
 
 ARP = [0, 2, 3, 5, 3, 2, 4, 2]
-BEAT = 60 / 72 / 2
+BEAT = 60 / BPM / 2
 intro_end = next(s["end"] for s in TL["segments"] if s["type"] == "intro")
 outro_start = next(s["start"] for s in TL["segments"] if s["type"] == "outro")
 k = 0
@@ -98,6 +99,25 @@ while x < T - 3.0:
     add(R, x, sig * (1 + pan))
     k += 1
     x += BEAT
+
+# ── نبضٌ خفيف (للنسخ القصيرة الأسرع): ضربةٌ منخفضة على الأولى والثالثة، وهمسٌ بينهما ──
+if BPM >= 90:
+    x = intro_end - 0.2
+    k = 0
+    while x < outro_start + 2.0:
+        if k % 4 in (0, 2):
+            n = int(0.25 * SR)
+            tt = np.arange(n) / SR
+            kick = 0.09 * np.exp(-tt / 0.09) * np.sin(2 * np.pi * (48 + 40 * np.exp(-tt / 0.03)) * tt)
+            add(L, x, kick)
+            add(R, x, kick)
+        else:
+            n = int(0.06 * SR)
+            hat = 0.012 * np.exp(-np.arange(n) / SR / 0.012) * rng.standard_normal(n)
+            add(L, x, hat * 0.8)
+            add(R, x, hat * 1.2)
+        k += 1
+        x += 60 / BPM
 
 # ── لمعةٌ في المقدّمة والختام ──
 for start in (0.5, outro_start + 0.2):

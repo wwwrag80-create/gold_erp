@@ -28,7 +28,10 @@ function timeline(m, V) {
     segs.push(Object.assign(o, { start: +t.toFixed(3), end: +(t + d).toFixed(3) }));
     t += d;
   };
-  add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
+  // «قصير»: بلا بطاقات فصول، والجوال متّصل، ومشاهد أسرع. «صامت»: المدة على قدر النص
+  const M = m.meta || {}, SHORT = !!M.short, SILENT = !!M.silent;
+  if (SHORT) add({ type: "intro" }, Math.max(3.8, 1.0 + dur("intro") + 0.5), "intro", 1.0);
+  else add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
   // لوحة «ماذا تستفيد من النظام؟»: كل فائدةٍ تظهر مع صوتها، ثم خاتمتها
   const B = m.meta && m.meta.benefits;
   if (B) {
@@ -56,28 +59,46 @@ function timeline(m, V) {
   let ch = null, step = 0, prevIdx = null, idx = 0;
   items.forEach((it, i) => {
     if (it.type === "chapter") {
-      ch = it; step = 0; prevIdx = null;
+      ch = it;
+      if (SHORT) return;
+      step = 0; prevIdx = null;
       add({ type: "chapter", n: it.n, title: it.title, desc: it.desc }, Math.max(2.6, 0.35 + dur("ch" + it.n) + 0.7), "ch" + it.n, 0.35);
       return;
     }
     step++;
-    const steps = items.filter((x) => x.type === "shot" && x.chapter === it.chapter).length;
-    const key = it.file.slice(0, -4), vs = 0.45, vd = dur(key);
+    const steps = items.filter((x) => x.type === "shot" && (SHORT || x.chapter === it.chapter)).length;
+    const key = it.file.slice(0, -4), vd = dur(key);
+    const vs = SHORT ? 0.3 : 0.45;
     const press = !!(it.tap && it.press);
-    const tapAt = press ? vs + vd + 0.25 : null;
-    const d = press ? tapAt + 1.0 : Math.max(3.4, vs + vd + 0.9);
+    let tapAt = null, d;
+    if (SILENT) {
+      d = Math.min(4.4, Math.max(2.8, 1.4 + 0.05 * it.title.length + 0.035 * (it.sub || "").length));
+      if (press) { d += 0.7; tapAt = d - 0.8; }
+    } else if (SHORT) {
+      tapAt = press ? vs + vd + 0.15 : null;
+      d = press ? tapAt + 0.8 : Math.max(2.6, vs + vd + 0.55);
+    } else {
+      tapAt = press ? vs + vd + 0.25 : null;
+      d = press ? tapAt + 1.0 : Math.max(3.4, vs + vd + 0.9);
+    }
     const next = items[i + 1];
-    add({ type: "shot", idx, file: "file://" + path.join(SHOTS, it.file), title: it.title, sub: strip(it.say), tap: it.tap, press,
+    const moreShots = items.slice(i + 1).some((x) => x.type === "shot");
+    add({ type: "shot", idx, file: "file://" + path.join(SHOTS, it.file), title: it.title, sub: SILENT ? (it.sub || "") : strip(it.say), tap: it.tap, press,
       tapAt: press ? +tapAt.toFixed(3) : null,
       // تقريبٌ هادئ بعد لحظةٍ من ظهور الشاشة كاملة، ثم إبعادٌ قبل الانتقال
-      zoom: it.focus ? { fx: it.focus.x * SC, fy: it.focus.y * SC, s: it.focus.s, at: 0.7 } : null,
+      zoom: it.focus ? { fx: it.focus.x * SC, fy: it.focus.y * SC, s: it.focus.s, at: SHORT ? 0.45 : 0.7 } : null,
       chapter: it.chapter, chapterTitle: ch.title, step, steps,
-      firstInChapter: step === 1, lastInChapter: !next || next.type !== "shot", nextSameChapter: !!(next && next.type === "shot"),
+      firstInChapter: SHORT ? idx === 0 : step === 1,
+      lastInChapter: SHORT ? !moreShots : !next || next.type !== "shot",
+      nextSameChapter: SHORT ? moreShots : !!(next && next.type === "shot"),
       prevIdx }, d, key, vs);
     prevIdx = idx++;
   });
-  add({ type: "outro" }, Math.max(6.5, 0.6 + dur("outro") + 2.2), "outro", 0.6);
-  return { total: +t.toFixed(3), chapters: chapters.length, segments: segs, voices };
+  if (SHORT) add({ type: "outro" }, Math.max(4.8, 0.5 + dur("outro") + 1.9), "outro", 0.5);
+  else add({ type: "outro" }, Math.max(6.5, 0.6 + dur("outro") + 2.2), "outro", 0.6);
+  return { total: +t.toFixed(3), chapters: SHORT ? 0 : chapters.length, segments: segs, voices,
+    short: SHORT, silent: SILENT, bpm: M.bpm || 72, introSub: M.introSub, introChip: M.introChip,
+    outroTitle: M.outroTitle, outroLines: M.outroLines };
 }
 
 async function openStage(browser, tl) {

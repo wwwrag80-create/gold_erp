@@ -112,6 +112,10 @@
   .bd { font-size: 34px; color: var(--muted); line-height: 1.55; margin-top: 8px; }
   #bfin { margin-top: 54px; font-size: 46px; font-weight: 700; text-align: center; line-height: 1.4; }
 
+  /* النسخة الصامتة: الشرح بخطٍّ أكبر */
+  body.silent #ct { font-size: 60px; }
+  body.silent #cs { font-size: 40px; }
+
   /* شريط التقدّم والعلامة */
   #prog { left: 120px; right: 120px; top: 1858px; height: 8px; border-radius: 8px; background: rgba(243,238,226,.10); overflow: hidden; }
   #progf { position: absolute; top: 0; bottom: 0; right: 0; width: 0; border-radius: 8px;
@@ -222,6 +226,20 @@ window.setup = async function (tl) {
     imgs[sg.idx] = im;
   }
   await document.fonts.ready;
+  // نصوص المقدّمة والختام إن خُصِّصت، وخطٌّ أكبر للنسخة الصامتة
+  if (TL.introSub) $("isub").textContent = TL.introSub;
+  if (TL.introChip) $("ichip").textContent = TL.introChip;
+  if (TL.outroTitle) $("otitle").textContent = TL.outroTitle;
+  if (TL.outroLines) {
+    $("olist").innerHTML = "";
+    for (const l of TL.outroLines) {
+      const d = document.createElement("div");
+      d.innerHTML = `<span class="b">✦</span><span></span>`;
+      d.lastChild.textContent = l;
+      $("olist").appendChild(d);
+    }
+  }
+  if (TL.silent) document.body.classList.add("silent");
   // بطاقات لوحة الفوائد
   const bs = TL.segments.find((x) => x.type === "benefits");
   if (bs) {
@@ -411,7 +429,8 @@ window.renderAt = async function (t) {
   const hv = shotMode ? phoneV * (1 - (sg._zk || 0)) : 0;
   $("head").style.opacity = hv;
   if (head) {
-    $("chipt").textContent = `الدرس ${AR(head.chapter)} · الخطوة ${AR(head.step)} من ${AR(head.steps)}`;
+    $("chipt").textContent = TL.short ? `الخطوة ${AR(head.step)} من ${AR(head.steps)}`
+      : `الدرس ${AR(head.chapter)} · الخطوة ${AR(head.step)} من ${AR(head.steps)}`;
     $("htitle").textContent = head.chapterTitle;
     $("hline").style.transform = `scaleX(${head.firstInChapter ? out((t - head.start - .2) / .9) : 1})`;
   }
