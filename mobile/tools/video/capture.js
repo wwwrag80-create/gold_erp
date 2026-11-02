@@ -91,215 +91,366 @@ function earrings() {
   };
   const shots = [];
   let chapter = null;
-  const chap = (title, desc) => { chapter = shots.filter((s) => s.type === "chapter").length + 1; shots.push({ type: "chapter", n: chapter, title, desc }); };
-  // لقطة الشاشة كما هي، ومكان اللمسة التالية (إن وُجدت) — ثم اللمسة نفسها
-  async function snap(id, title, sub, tap, opts) {
+  // الفصل: عنوانه ووصفه، وما يقوله الصوت عند بطاقته (مشكولاً)
+  const chap = (title, desc, say) => {
+    chapter = shots.filter((s) => s.type === "chapter").length + 1;
+    shots.push({ type: "chapter", n: chapter, title, desc, say });
+  };
+  // لقطة الشاشة كما هي مع ما يُشرح فيها: `target` يُبرَز (خانةٌ أو زرّ)، ثم يُلمس
+  // إن كان زرّاً (`press`). `say` نصّ الصوت مشكولاً، ويُكتب تحته بلا تشكيل.
+  async function snap(id, title, say, target, opts) {
     const o = opts || {};
     await page.evaluate(() => { const t = document.getElementById("toast"); if (t) t.style.display = "none"; });
+    if (o.blur !== false) await page.evaluate(() => document.activeElement && document.activeElement.blur && document.activeElement.blur());
     let box = null;
-    if (tap) {
-      await tap.scrollIntoViewIfNeeded();
+    if (target) {
+      await target.scrollIntoViewIfNeeded();
       await wait(250);
-      box = await tap.boundingBox();
+      box = await target.boundingBox();
     }
     await wait(o.settle || 350);
     const file = `${String(shots.length + 1).padStart(2, "0")}_${id}.png`;
     await page.screenshot({ path: path.join(OUT, file) });
-    // تقريب الكاميرا: إلى اللمسة تلقائياً، أو إلى `focus` (بنقاط الشاشة)، أو لا تقريب
-    shots.push({ type: "shot", id, file, title, sub: sub || "", tap: box, chapter,
-      focus: o.zoom === false ? null : o.focus || (box ? { x: box.x + box.width / 2, y: box.y + box.height / 2, s: 1.4 } : null) });
-    if (tap && !o.noClick) { await tap.click(); await wait(o.after || 450); }
+    // تقريب الكاميرا: إلى ما يُشرح تلقائياً، أو إلى `focus` (بنقاط الشاشة)، أو لا تقريب
+    shots.push({ type: "shot", id, file, title, say, tap: box, press: !!(target && o.press), chapter,
+      focus: o.zoom === false ? null : o.focus || (box ? { x: box.x + box.width / 2, y: box.y + box.height / 2, s: o.s || 1.4 } : null) });
+    if (target && o.press) { await target.click(); await wait(o.after || 500); }
     console.log("  ✔", file);
   }
+  const press = { press: true };
+  const field = (label) => page.locator("label.f", { hasText: label }).first().locator("input,select").first();
   const sheetItem = (t) => page.locator(".sheet .list-item", { hasText: t }).first();
   const footerBtn = (t) => page.locator(".footer-bar .btn", { hasText: t }).first();
   const sheetBtn = (t) => page.locator(".sheet .btn", { hasText: t }).first();
   const tile = (t) => page.locator(".op-tile", { hasText: t }).first();
+  const tab = (t) => page.locator(`#tabs button[data-tab=${t}]`);
+  const btn = (t) => page.locator("button", { hasText: t }).first();
+  const homeNow = async () => { await page.goto(url + "#/home"); await wait(500); };
+  const setPhotos = async (list, n) => {
+    await page.locator('input[type=file][accept="image/*"]').setInputFiles(list.map((k) => ({ name: k + ".png", mimeType: "image/png", buffer: photos[k] })));
+    await page.waitForFunction((m) => [...document.querySelectorAll(".photo-pick img.thumb")].filter((x) => (x.src || "").startsWith("data:")).length === m, n);
+  };
 
   await page.goto(url);
   await page.waitForSelector("#tabs");
+  const meta = {
+    intro: "أَهْلًا بِكَ فِي نِظَامٍ مُحَاسَبِيٍّ لِلذَّهَبِ. فِي هَذَا الْفِيدْيُو نَشْرَحُ لَكَ خُطْوَةً بِخُطْوَةٍ: كَيْفَ تَبْدَأُ، وَكَيْفَ تُسَجِّلُ الْبِضَاعَةَ، وَتَبِيعُ لِعُمَلَائِكَ، وَتُحَصِّلُ مِنْهُمْ، وَتُسَدِّدُ لِلْمَصْنَعِ.",
+    outro: "أَنْتَ الْآنَ جَاهِزٌ. أَضِفِ الْمَصْنَعَ وَعُمَلَاءَكَ، وَسَجِّلِ الْبِضَاعَةَ، وَبِعْ بِثِقَةٍ. بِالتَّوْفِيقِ.",
+  };
 
   // ══ 1. البداية ══
-  chap("البداية", "أول تشغيلٍ في دقيقة");
+  chap("البداية", "أول تشغيلٍ وإعدادٌ بسيط", "الْفَصْلُ الْأَوَّلُ: الْبِدَايَةُ.");
   await page.goto(url + "#/welcome");
   await wait(500);
-  await snap("welcome", "اضغط «ابدأ» واختر مجلد الحفظ", "يُحفظ فيه كل شيء تلقائياً — ولو حذفت التطبيق وثبّته من جديد يعود كما كان",
-    page.locator("button", { hasText: "ابدأ — اختر مجلد الحفظ التلقائي" }), { noClick: true });
-  await page.goto(url + "#/home");
-  await wait(500);
-  await snap("home", "هذه الرئيسية", "ست لوحات لكل عملياتك: بيع · مرتجع · بضاعة · إرجاع · تحصيل · سداد",
-    page.locator("#tabs button[data-tab=more]"), { zoom: false });
-  await page.locator(".list-item", { hasText: "الإعدادات والحفظ" }).click();
-  await wait(400);
+  await snap("welcome", "اضغط «ابدأ» واختر مجلداً",
+    "عِنْدَ فَتْحِ التَّطْبِيقِ أَوَّلَ مَرَّةٍ، اِضْغَطْ زِرَّ «اِبْدَأْ»، ثُمَّ اخْتَرْ مُجَلَّدًا فِي جَوَّالِكَ، مِثْلَ مُجَلَّدِ الْمُسْتَنَدَاتِ، وَاضْغَطْ «اِسْتِخْدَامَ هَذَا الْمُجَلَّدِ». بَعْدَهَا يُحْفَظُ كُلُّ شَيْءٍ تِلْقَائِيًّا.",
+    btn("ابدأ — اختر مجلد الحفظ التلقائي"));
+  await snap("welcome_restore", "حذفت التطبيق؟ استرجع بياناتك",
+    "وَإِذَا حَذَفْتَ التَّطْبِيقَ ثُمَّ ثَبَّتَّهُ مِنْ جَدِيدٍ، اِضْغَطْ «عِنْدِي بَيَانَاتٌ سَابِقَةٌ»، وَاخْتَرِ الْمُجَلَّدَ نَفْسَهُ، فَيَعُودُ كُلُّ شَيْءٍ كَمَا كَانَ.",
+    btn("عندي بيانات سابقة"));
+  await homeNow();
+  await snap("home", "الشاشة الرئيسية: ست لوحات",
+    "هَذِهِ هِيَ الشَّاشَةُ الرَّئِيسِيَّةُ. فِيهَا سِتُّ لَوْحَاتٍ: بَيْعٌ لِلْعَمِيلِ، وَمُرْتَجَعٌ لِلْعَمِيلِ، وَبِضَاعَةٌ مِنْ مَصْنَعٍ، وَإِرْجَاعٌ لِلْمَصْنَعِ، وَتَحْصِيلٌ مِنَ الْعَمِيلِ، وَسَدَادٌ لِلْمَصْنَعِ.",
+    page.locator(".op-grid"), { s: 1.15 });
+  await snap("home_more", "اضغط «المزيد»",
+    "أَوَّلًا، اُكْتُبِ اسْمَكَ أَوِ اسْمَ مُؤَسَّسَتِكَ. اِضْغَطْ «الْمَزِيدَ» فِي أَسْفَلِ الشَّاشَةِ.", tab("more"), press);
+  await snap("more_settings", "ثم «الإعدادات والحفظ»", "ثُمَّ اضْغَطْ «الْإِعْدَادَاتِ وَالْحِفْظَ».",
+    page.locator(".list-item", { hasText: "الإعدادات والحفظ" }), press);
   await fill("الاسم", "مؤسسة الذهب");
   await fill("الجوال", "0551234567");
-  await snap("settings", "اكتب اسمك أو اسم مؤسستك", "من «المزيد» ← «الإعدادات» — ويظهر في رأس كل فاتورة",
-    page.locator("button", { hasText: "حفظ الإعدادات" }));
+  await snap("settings_name", "اكتب اسمك وجوالك",
+    "اُكْتُبِ اسْمَكَ أَوِ اسْمَ مُؤَسَّسَتِكَ فِي خَانَةِ «الِاسْمِ»، وَرَقْمَ جَوَّالِكَ فِي خَانَةِ «الْجَوَّالِ». تَظْهَرُ هَذِهِ الْبَيَانَاتُ فِي رَأْسِ كُلِّ فَاتُورَةٍ.",
+    field("الاسم"));
+  await snap("settings_save", "اضغط «حفظ الإعدادات»", "ثُمَّ اضْغَطْ «حِفْظَ الْإِعْدَادَاتِ».", btn("حفظ الإعدادات"), press);
 
   // ══ 2. العملاء والمصانع ══
-  chap("العملاء والمصانع", "أضفهم مرةً واحدة");
-  await page.goto(url + "#/shop-form");
-  await wait(400);
+  chap("العملاء والمصانع", "أضفهم مرةً واحدة", "الْفَصْلُ الثَّانِي: الْعُمَلَاءُ وَالْمَصَانِعُ.");
+  await homeNow();
+  await snap("tab_accounts", "اضغط «الحسابات»", "لِإِضَافَةِ عَمِيلٍ جَدِيدٍ، اِضْغَطْ «الْحِسَابَاتِ» فِي أَسْفَلِ الشَّاشَةِ.", tab("customers"), press);
+  await snap("add_shop", "اضغط «+ محل»", "ثُمَّ اضْغَطْ زِرَّ «زَائِدْ مَحَلّ» فِي الْأَعْلَى.",
+    page.locator("#bar .icon-btn[aria-label='محل جديد']"), press);
   await fill("اسم المحل", "محل الأمانة للمجوهرات");
   await fill("الجوال", "0501112233");
+  await snap("shop_name", "اسم المحل وجواله",
+    "اُكْتُبِ اسْمَ الْمَحَلِّ فِي خَانَةِ «اسْمِ الْمَحَلِّ»، وَرَقْمَ جَوَّالِهِ فِي خَانَةِ «الْجَوَّالِ».", field("اسم المحل"));
   await fill("الأجرة المتفق عليها", "25");
-  await snap("shop_form", "أضف العميل (المحل)", "الاسم والجوال — والأجرة المتفق عليها إن وُجدت", footerBtn("حفظ"), { after: 600 });
+  await snap("shop_wage", "الأجرة المتفق عليها",
+    "وَإِذَا كَانَ بَيْنَكَ وَبَيْنَهُ أُجْرَةٌ مُتَّفَقٌ عَلَيْهَا لِكُلِّ جِرَامٍ، اُكْتُبْهَا هُنَا. عِنْدَهَا يَحْسُبُ التَّطْبِيقُ الْأُجُورَ تِلْقَائِيًّا عِنْدَ الْبَيْعِ لَهُ.",
+    field("الأجرة المتفق عليها"));
+  await snap("shop_opening", "رصيدٌ سابق؟ (اختياري)",
+    "وَإِذَا كَانَ عَلَيْهِ ذَهَبٌ أَوْ نَقْدٌ مِنْ قَبْلُ، اُكْتُبْهُ فِي «الرَّصِيدِ الِافْتِتَاحِيِّ». وَهَذَا اخْتِيَارِيٌّ.",
+    page.locator(".card", { hasText: "رصيد افتتاحي" }).first(), { s: 1.25 });
+  await snap("shop_save", "اضغط «حفظ»", "ثُمَّ اضْغَطْ «حِفْظ».", footerBtn("حفظ"), { press: true, after: 700 });
   await page.goto(url + "#/shop-form");
   await wait(400);
   await fill("اسم المحل", "مجوهرات النخبة");
   await footerBtn("حفظ").click();
   await wait(500);
-  await page.goto(url + "#/shop-form?type=factory");
-  await wait(400);
+  await page.goto(url + "#/customers");
+  await wait(500);
+  await snap("seg_factories", "ثم «المصانع» ← «+ مصنع»",
+    "وَبِالطَّرِيقَةِ نَفْسِهَا أَضِفِ الْمَصْنَعَ الَّذِي تَأْخُذُ مِنْهُ الْبِضَاعَةَ: اِضْغَطْ «الْمَصَانِعَ»، ثُمَّ «زَائِدْ مَصْنَع».",
+    page.locator(".seg button", { hasText: "المصانع" }), press);
+  await page.locator("#bar .icon-btn[aria-label='مصنع جديد']").click();
+  await wait(500);
   await fill("اسم المصنع", "مصنع الريان للذهب");
   await fill("الجوال", "0509998877");
   await fill("أجرة المصنع", "20");
-  await snap("factory_form", "وأضف المصنع الذي تأخذ منه", "ويُكتب ما عليك له من قبل — إن وُجد", footerBtn("حفظ"), { after: 600 });
-  await page.goto(url + "#/customers");
-  await wait(500);
-  await snap("accounts", "كل حساباتك في «الحسابات»", "المحلات والمصانع — اضغط أي اسمٍ لترى رصيده وكشفه",
-    page.locator(".seg button", { hasText: "المصانع" }), { after: 500 });
+  await snap("factory_wage", "اسم المصنع وأجرته",
+    "اُكْتُبِ اسْمَ الْمَصْنَعِ وَجَوَّالَهُ، وَأُجْرَةَ الْمَصْنَعِ الْمُتَّفَقَ عَلَيْهَا لِكُلِّ جِرَامٍ. وَإِنْ كَانَ عَلَيْكَ لَهُ دَيْنٌ سَابِقٌ، اُكْتُبْهُ فِي «الدَّيْنِ السَّابِقِ».",
+    field("أجرة المصنع"));
+  await snap("factory_save", "اضغط «حفظ»", "ثُمَّ اضْغَطْ «حِفْظ».", footerBtn("حفظ"), { press: true, after: 700 });
 
   // ══ 3. بضاعة من المصنع ══
-  chap("بضاعة من المصنع", "سجّل ما استلمته");
-  await page.goto(url + "#/home");
-  await wait(500);
-  await snap("home_purchase", "من الرئيسية: «بضاعة من مصنع»", "", tile("بضاعة من مصنع"), { after: 600 });
+  chap("بضاعة من المصنع", "سجّل ما استلمته", "الْفَصْلُ الثَّالِثُ: الْبِضَاعَةُ مِنَ الْمَصْنَعِ.");
+  await homeNow();
+  await snap("home_purchase", "اضغط «بضاعة من مصنع»",
+    "عِنْدَمَا تَسْتَلِمُ بِضَاعَةً مِنَ الْمَصْنَعِ، اِضْغَطْ «بِضَاعَةٌ مِنْ مَصْنَعٍ» فِي الشَّاشَةِ الرَّئِيسِيَّةِ.", tile("بضاعة من مصنع"), { press: true, after: 700 });
   await page.waitForSelector(".sheet");
-  await snap("pick_factory", "اختر المصنع", "يظهر اسمه وتاريخ اليوم في أعلى الفاتورة", sheetItem("مصنع الريان"), { after: 500 });
+  await snap("pick_factory", "اختر المصنع",
+    "اِخْتَرِ الْمَصْنَعَ مِنَ الْقَائِمَةِ. يَظْهَرُ اسْمُهُ وَتَارِيخُ الْيَوْمِ فِي أَعْلَى الْفَاتُورَةِ، وَتَسْتَطِيعُ تَغْيِيرَهُمَا بِلَمْسَةٍ.",
+    sheetItem("مصنع الريان"), press);
   await fill("الطقم", "ط-101");
-  await page.locator("label.f", { hasText: "الطقم" }).first().locator("input").press("Enter");
+  await field("الطقم").press("Enter");
+  await snap("p_set", "خانة «الطقم»",
+    "فِي خَانَةِ «الطَّقْمِ» اُكْتُبِ اسْمَ الطَّقْمِ أَوْ رَقْمَهُ. وَهَذِهِ الْخَانَةُ اخْتِيَارِيَّةٌ.", field("الطقم"));
+  await snap("p_karat", "خانة «العيار»",
+    "وَمِنْ خَانَةِ «الْعِيَارِ» اِخْتَرْ عِيَارَ الطَّقْمِ، مِثْلَ ثَمَانِيَةَ عَشَرَ، أَوْ وَاحِدٍ وَعِشْرِينَ.", field("العيار"));
   await fill("الوزن (جم)", "24.5");
+  await snap("p_weight", "خانة «الوزن»", "وَفِي خَانَةِ «الْوَزْنِ» اُكْتُبْ وَزْنَ الطَّقْمِ بِالْجِرَامِ.", field("الوزن (جم)"));
   await fill("الأجور", "490");
-  await page.locator('input[type=file][accept="image/*"]').setInputFiles([
-    { name: "necklace.png", mimeType: "image/png", buffer: photos.necklace },
-    { name: "earrings.png", mimeType: "image/png", buffer: photos.earrings }]);
-  await page.waitForFunction(() => [...document.querySelectorAll(".photo-pick img.thumb")].filter((x) => (x.src || "").startsWith("data:")).length === 2);
-  await snap("set1", "اكتب الطقم: اسمه ووزنه وأجوره", "وأضف صورةً أو أكثر من الكاميرا أو المعرض", page.locator("button", { hasText: "+ إضافة" }), { after: 500 });
+  await snap("p_wages", "خانة «الأجور»",
+    "وَفِي خَانَةِ «الْأُجُورِ» اُكْتُبْ أُجُورَ الطَّقْمِ بِالرِّيَالِ. وَإِذَا كَانَتْ لِلْمَصْنَعِ أُجْرَةٌ مُتَّفَقٌ عَلَيْهَا، تَظْهَرُ الْأُجُورُ تِلْقَائِيًّا.",
+    field("الأجور"));
+  await snap("p_diamond", "خانة «الماس» (اختيارية)",
+    "وَإِذَا كَانَ فِي الطَّقْمِ أَلْمَاسٌ، اُكْتُبْ وَزْنَهُ فِي خَانَةِ «الْأَلْمَاسِ». وَإِلَّا فَاتْرُكْهَا فَارِغَةً.", field("الماس"));
+  await snap("p_photo_btn", "صور الطقم",
+    "وَلِإِضَافَةِ صُورَةِ الطَّقْمِ، اِضْغَطْ «صُورَة»، وَاخْتَرْ مِنَ الْكَامِيرَا أَوْ مِنْ مَعْرِضِ الصُّوَرِ. وَتَسْتَطِيعُ إِضَافَةَ أَكْثَرَ مِنْ صُورَةٍ.",
+    page.locator(".photo-add button"));
+  await setPhotos(["necklace", "earrings"], 2);
+  await snap("p_photos", "الصور في الخانة نفسها",
+    "تَظْهَرُ الصُّوَرُ هُنَا. وَلِحَذْفِ صُورَةٍ، اِضْغَطْ عَلَامَةَ الْإِغْلَاقِ فَوْقَهَا.", page.locator(".photo-pick"), { s: 1.5 });
+  await snap("p_add", "طقمٌ آخر؟ اضغط «+ إضافة»",
+    "إِذَا كَانَ مَعَكَ طَقْمٌ آخَرُ فِي الْفَاتُورَةِ نَفْسِهَا، اِضْغَطْ «زَائِدْ إِضَافَة»، ثُمَّ اُكْتُبِ الطَّقْمَ التَّالِيَ بِالطَّرِيقَةِ نَفْسِهَا.",
+    btn("+ إضافة"), press);
   await fill("الطقم", "ط-102");
-  await page.locator("label.f", { hasText: "الطقم" }).first().locator("input").press("Enter");
+  await field("الطقم").press("Enter");
   await fill("الوزن (جم)", "18.75");
   await fill("الأجور", "375");
-  await page.locator('input[type=file][accept="image/*"]').setInputFiles([{ name: "ring.png", mimeType: "image/png", buffer: photos.ring }]);
-  await page.waitForFunction(() => [...document.querySelectorAll(".photo-pick img.thumb")].filter((x) => (x.src || "").startsWith("data:")).length === 1);
-  await snap("set2", "آخر طقم؟ اضغط «حفظ الفاتورة» مباشرة", "يُحفظ معها دون «+ إضافة»", footerBtn("حفظ الفاتورة"), { after: 600 });
+  await setPhotos(["ring"], 1);
+  await snap("p_lines", "الطقم الأول في «البنود»",
+    "يَظْهَرُ الطَّقْمُ الْأَوَّلُ فِي «الْبُنُودِ» أَسْفَلَ الشَّاشَةِ، وَتَحْتَهُ الْإِجْمَالِيُّ.", page.locator(".line").first());
+  await snap("p_save", "آخر طقم؟ «حفظ الفاتورة» مباشرة",
+    "وَبَعْدَ آخِرِ طَقْمٍ، اِضْغَطْ «حِفْظَ الْفَاتُورَةِ» مُبَاشَرَةً، وَلَا تَحْتَاجُ إِلَى «زَائِدْ إِضَافَة».",
+    footerBtn("حفظ الفاتورة"), { press: true, after: 700 });
   await page.waitForSelector(".sheet .btn");
-  await snap("confirm_purchase", "راجع الإجمالي ثم احفظ", "طقمان · 43.25 جم · أجور 865 ريال", sheetBtn("حفظ الفاتورة"), { after: 700 });
+  await snap("p_confirm", "راجع ثم احفظ",
+    "تَظْهَرُ لَكَ مُرَاجَعَةٌ: عَدَدُ الْأَطْقُمِ، وَالْوَزْنُ، وَالْأُجُورُ. اِضْغَطْ «حِفْظَ الْفَاتُورَةِ» لِلتَّأْكِيدِ.",
+    sheetBtn("حفظ الفاتورة"), { press: true, after: 800 });
   await page.waitForURL(/#\/doc\/inv\//);
   await page.waitForFunction(() => (document.querySelector(".preview iframe") || {}).srcdoc && document.querySelector(".preview iframe").srcdoc.includes("data:image"));
   await wait(700);
-  await snap("purchase_doc", "فاتورتك جاهزة", "شاركها صورةً، أو اطبعها PDF، أو عدّلها — وتحتها صور الأطقم", null,
-    { focus: { x: 196, y: 330, s: 1.3 } });
+  await snap("p_doc", "حُفظت الفاتورة",
+    "تَمَّ حِفْظُ الْفَاتُورَةِ. وَمِنْ هُنَا تَسْتَطِيعُ مُشَارَكَتَهَا صُورَةً، أَوْ طِبَاعَتَهَا، أَوْ تَعْدِيلَهَا.", page.locator(".quick").first(), { s: 1.25 });
 
   // ══ 4. الأطقم التي معي ══
-  chap("الأطقم التي معي", "كل طقمٍ ووزنه وصوره");
-  await page.locator("#tabs button[data-tab=holdings]").click();
-  await wait(600);
-  await snap("holdings_sets", "في «الممتلكات»: الأطقم التي معي", "عددها ووزنها الإجمالي — اضغط لترى كل طقم", page.locator(".wide-tile.sets"), { after: 600 });
+  chap("الأطقم التي معي", "كل طقمٍ ووزنه وصوره", "الْفَصْلُ الرَّابِعُ: الْأَطْقُمُ الَّتِي مَعَكَ.");
+  await snap("tab_holdings", "اضغط «الممتلكات»",
+    "لِتَرَى الْأَطْقُمَ الَّتِي مَعَكَ، اِضْغَطْ «الْمُمْتَلَكَاتِ» فِي أَسْفَلِ الشَّاشَةِ.", tab("holdings"), { press: true, after: 700 });
+  await snap("sets_tile", "«الأطقم التي معي»",
+    "فِي لَوْحَةِ «الْأَطْقُمِ الَّتِي مَعِي» تَرَى عَدَدَ الْأَطْقُمِ، وَوَزْنَهَا الْإِجْمَالِيَّ. اِضْغَطْهَا.", page.locator(".wide-tile.sets"), { press: true, after: 700 });
   await page.waitForSelector(".sheet .pc-row");
-  await snap("pieces", "كل طقم: وزنه ومن أين جاء", "و«معاينة» تفتح صوره",
-    page.locator(".sheet .pc-row", { hasText: "ط-101" }).locator(".prev-btn"), { after: 700 });
+  await snap("pieces", "«معاينة» لصور الطقم",
+    "تَظْهَرُ كُلُّ الْأَطْقُمِ: اسْمُ الطَّقْمِ، وَوَزْنُهُ، وَمِنْ أَيْنَ جَاءَ. وَلِرُؤْيَةِ صُوَرِهِ، اِضْغَطْ «مُعَايَنَهْ».",
+    page.locator(".sheet .pc-row", { hasText: "ط-101" }).locator(".prev-btn"), { press: true, after: 800 });
   await page.waitForFunction(() => [...document.querySelectorAll(".sheet .photo-fig img")].filter((x) => (x.src || "").startsWith("data:")).length >= 2);
-  await snap("set_photos", "كل صورةٍ وحدها كاملة", "اضغط الصورة لتكبيرها", null, { settle: 600 });
+  await snap("set_photos", "كل صورةٍ وحدها كاملة",
+    "تَظْهَرُ كُلُّ صُورَةٍ وَحْدَهَا كَامِلَةً. وَلِتَكْبِيرِ الصُّورَةِ، اِضْغَطْ عَلَيْهَا.", null, { settle: 600 });
   await page.goBack(); await wait(300); await page.goBack(); await wait(400);
 
   // ══ 5. البيع للعميل ══
-  chap("البيع للعميل", "من الطقوم التي معك");
-  await page.goto(url + "#/home");
-  await wait(400);
-  await tile("بيع للعميل").click();
+  chap("البيع للعميل", "من الأطقم التي معك، أو بالوزن مباشرة", "الْفَصْلُ الْخَامِسُ: الْبَيْعُ لِلْعَمِيلِ.");
+  await homeNow();
+  await snap("home_sale", "اضغط «بيع للعميل»",
+    "لِلْبَيْعِ لِعَمِيلٍ، اِضْغَطْ «بَيْعٌ لِلْعَمِيلِ» فِي الشَّاشَةِ الرَّئِيسِيَّةِ.", tile("بيع للعميل"), { press: true, after: 700 });
   await page.waitForSelector(".sheet");
-  await wait(300);
-  await snap("pick_shop", "«بيع للعميل» ثم اختر العميل", "", sheetItem("محل الأمانة"), { after: 500 });
-  await snap("sale_editor", "اختر من الطقوم التي معك", "فيُعبّأ وزنه وصوره تلقائياً",
-    page.locator("button", { hasText: "اختر من الطقوم التي معي" }), { after: 500 });
+  await snap("pick_shop", "اختر العميل",
+    "اِخْتَرِ الْعَمِيلَ مِنَ الْقَائِمَةِ. وَإِذَا كَانَ عَمِيلًا جَدِيدًا، اِضْغَطْ «زَائِدْ عَمِيلٌ جَدِيدٌ».", sheetItem("محل الأمانة"), press);
+  await snap("sale_header", "فاتورة البيع: طريقتان",
+    "هَذِهِ فَاتُورَةُ الْبَيْعِ. فِي الْأَعْلَى اسْمُ الْعَمِيلِ وَالتَّارِيخُ. وَلِلْبَيْعِ طَرِيقَتَانِ.", page.locator("#bar .bar-chips"), { s: 1.3 });
+  await snap("sale_pick_btn", "١) من الأطقم التي معك",
+    "الطَّرِيقَةُ الْأُولَى: إِذَا كُنْتَ تَبِيعُ طَقْمًا مِنَ الْأَطْقُمِ الَّتِي مَعَكَ، اِضْغَطْ «اِخْتَرْ مِنَ الْأَطْقُمِ الَّتِي مَعِي».",
+    btn("اختر من الطقوم التي معي"), press);
   await page.waitForSelector(".sheet .list-item");
-  await snap("picker", "اضغط الطقم لاختياره", "أو «معاينة» لترى صوره أولاً", sheetItem("ط-101").locator(".grow"), { after: 600 });
-  await snap("sale_filled", "الأجور المتفق عليها تظهر تلقائياً", "اكتب غيرها إن أردت — ثم «حفظ الفاتورة»", footerBtn("حفظ الفاتورة"), { after: 600 });
+  await snap("picker_preview", "«معاينة» قبل الاختيار",
+    "تَظْهَرُ الْأَطْقُمُ الَّتِي مَعَكَ بِأَوْزَانِهَا. اِضْغَطْ «مُعَايَنَهْ» لِرُؤْيَةِ صُوَرِ الطَّقْمِ قَبْلَ اخْتِيَارِهِ.",
+    sheetItem("ط-101").locator(".prev-btn"));
+  await snap("picker_pick", "اضغط الطقم لاختياره", "ثُمَّ اضْغَطْ عَلَى الطَّقْمِ نَفْسِهِ لِاخْتِيَارِهِ.",
+    sheetItem("ط-101").locator(".grow"), { press: true, after: 700 });
+  await snap("sale_filled", "يُعبّأ الطقم ووزنه وصوره",
+    "يُعَبِّئُ التَّطْبِيقُ اسْمَ الطَّقْمِ، وَوَزْنَهُ، وَعِيَارَهُ، وَصُوَرَهُ تِلْقَائِيًّا.", field("الوزن (جم)"));
+  await snap("sale_wages_auto", "الأجور المتفق عليها تلقائياً",
+    "وَفِي خَانَةِ «الْأُجُورِ» تَظْهَرُ أُجْرَةُ الْعَمِيلِ الْمُتَّفَقُ عَلَيْهَا تِلْقَائِيًّا. اُتْرُكْهَا كَمَا هِيَ، أَوِ اكْتُبْ مَبْلَغًا آخَرَ.",
+    field("الأجور"));
+  await snap("sale_add", "سطرٌ آخر؟ «+ إضافة»",
+    "وَلِإِضَافَةِ سَطْرٍ آخَرَ فِي الْفَاتُورَةِ نَفْسِهَا، اِضْغَطْ «زَائِدْ إِضَافَة».", btn("+ إضافة"), press);
+  await snap("direct_set", "٢) بالوزن مباشرة: «الطقم» فارغ",
+    "الطَّرِيقَةُ الثَّانِيَةُ: الْبَيْعُ بِالْوَزْنِ مُبَاشَرَةً. اُتْرُكْ خَانَةَ «الطَّقْمِ» فَارِغَةً.", field("الطقم"));
+  await fill("الوزن (جم)", "10");
+  await snap("direct_weight", "اكتب الوزن", "وَاكْتُبِ الْوَزْنَ بِالْجِرَامِ فِي خَانَةِ «الْوَزْنِ».", field("الوزن (جم)"));
+  await fill("الأجور", "250");
+  await snap("direct_wages", "واكتب الأجور", "وَاكْتُبِ الْأُجُورَ بِالرِّيَالِ فِي خَانَةِ «الْأُجُورِ».", field("الأجور"));
+  await snap("sale_save", "اضغط «حفظ الفاتورة»",
+    "ثُمَّ اضْغَطْ «حِفْظَ الْفَاتُورَةِ». يُحْفَظُ السَّطْرُ الْأَخِيرُ مَعَهَا تِلْقَائِيًّا.", footerBtn("حفظ الفاتورة"), { press: true, after: 700 });
   await page.waitForSelector(".sheet .btn");
-  await sheetBtn("حفظ الفاتورة").click();
+  await snap("sale_confirm", "راجع ثم احفظ", "رَاجِعِ الْإِجْمَالِيَّ، ثُمَّ اضْغَطْ «حِفْظَ الْفَاتُورَةِ».",
+    sheetBtn("حفظ الفاتورة"), { press: true, after: 800 });
   await page.waitForURL(/#\/doc\/inv\//);
-  await wait(600);
-  // المرتجع: اسم الطقم يكفي (لقطةٌ للتعريف فقط — لا يُحفظ)
+  await wait(900);
+  await snap("sale_share", "أرسل الفاتورة للعميل",
+    "فَاتُورَةُ الْبَيْعِ جَاهِزَةٌ. وَلِإِرْسَالِهَا لِلْعَمِيلِ، اِضْغَطْ «مُشَارَكَةَ صُورَةٍ»، وَاخْتَرْ وَاتْسَابْ.",
+    page.locator(".quick button", { hasText: "مشاركة صورة" }));
+
+  // ══ 6. المرتجع ══
+  chap("المرتجع من العميل", "باسم الطقم، أو بالوزن", "الْفَصْلُ السَّادِسُ: الْمُرْتَجَعُ مِنَ الْعَمِيلِ.");
+  await homeNow();
+  await snap("home_return", "اضغط «مرتجع للعميل»",
+    "إِذَا أَرْجَعَ الْعَمِيلُ بِضَاعَةً، اِضْغَطْ «مُرْتَجَعٌ لِلْعَمِيلِ»، ثُمَّ اخْتَرِ الْعَمِيلَ.", tile("مرتجع للعميل"), { press: true, after: 700 });
+  await page.waitForSelector(".sheet");
+  await sheetItem("محل الأمانة").click();
+  await wait(500);
+  await fill("الطقم", "ط-101");
+  await field("الطقم").press("Enter");
+  await wait(300);
+  await snap("ret_named", "١) باسم الطقم",
+    "إِذَا أَرْجَعَ طَقْمًا بِعَيْنِهِ، اُكْتُبِ اسْمَهُ فِي خَانَةِ «الطَّقْمِ»، فَيُعَبِّئُ التَّطْبِيقُ وَزْنَهُ وَأُجُورَهُ مِنْ فَاتُورَةِ الْبَيْعِ.",
+    field("الطقم"), { s: 1.3 });
+  // المرتجع بالوزن: فاتورةٌ جديدة (المسودة السابقة لا تُحفظ)
+  await page.evaluate(() => { try { localStorage.removeItem("draft_inv_sale_return"); } catch (e) { /* */ } });
+  await homeNow();
   await page.goto(url + "#/invoice/new?kind=sale_return");
   await page.waitForSelector(".sheet");
   await sheetItem("محل الأمانة").click();
-  await wait(400);
-  await fill("الطقم", "ط-101");
-  await page.locator("label.f", { hasText: "الطقم" }).first().locator("input").press("Enter");
-  await page.locator("label.f", { hasText: "الطقم" }).first().locator("input").blur();
-  await page.evaluate(() => document.activeElement && document.activeElement.blur());
   await wait(500);
-  await snap("return", "والمرتجع: اكتب اسم الطقم فقط", "يُعبّأ وزنه وأجوره من فاتورة البيع", null,
-    { focus: { x: 196, y: 330, s: 1.35 } });
-  await page.evaluate(() => { try { localStorage.removeItem("draft_inv_sale_return"); } catch (e) { /* */ } });
+  await fill("الوزن (جم)", "5");
+  await snap("ret_weight", "٢) بالوزن مباشرة",
+    "وَإِذَا كَانَ الْمُرْتَجَعُ بِالْوَزْنِ فَقَطْ، اُتْرُكْ خَانَةَ «الطَّقْمِ» فَارِغَةً، وَاكْتُبِ الْوَزْنَ فِي خَانَةِ «الْوَزْنِ».", field("الوزن (جم)"));
+  await fill("الأجور", "125");
+  await snap("ret_wages", "واكتب الأجور", "وَاكْتُبْ أُجُورَهُ فِي خَانَةِ «الْأُجُورِ».", field("الأجور"));
+  await snap("ret_save", "اضغط «حفظ الفاتورة»",
+    "ثُمَّ اضْغَطْ «حِفْظَ الْفَاتُورَةِ»، وَأَكِّدِ الْحِفْظَ. يَنْقُصُ الْمُرْتَجَعُ مِنْ رَصِيدِ الْعَمِيلِ.", footerBtn("حفظ الفاتورة"), { press: true, after: 700 });
+  await page.waitForSelector(".sheet .btn");
+  await sheetBtn("حفظ الفاتورة").click();
+  await page.waitForURL(/#\/doc\/inv\//);
+  await wait(500);
 
-  // ══ 6. التحصيل والسداد ══
-  chap("التحصيل والسداد", "ذهبٌ بعياره، أو نقد");
-  await page.goto(url + "#/voucher/new?kind=receipt");
+  // ══ 7. التحصيل من العميل ══
+  chap("التحصيل من العميل", "ذهبٌ بعياره، أو نقد", "الْفَصْلُ السَّابِعُ: التَّحْصِيلُ مِنَ الْعَمِيلِ.");
+  await homeNow();
+  await snap("home_receipt", "اضغط «تحصيل من العميل»",
+    "عِنْدَمَا تَسْتَلِمُ مِنْ عَمِيلٍ ذَهَبًا أَوْ نَقْدًا، اِضْغَطْ «تَحْصِيلٌ مِنَ الْعَمِيلِ»، ثُمَّ اخْتَرِ الْعَمِيلَ.",
+    tile("تحصيل من العميل"), { press: true, after: 700 });
   await page.waitForSelector(".sheet");
   await sheetItem("محل الأمانة").click();
-  await wait(400);
-  await page.locator("label.f", { hasText: "العيار" }).locator("select").selectOption("21");
+  await wait(500);
   await fill("الوزن (جم)", "10");
-  await page.locator("button", { hasText: "+ نقد" }).click();
+  await snap("rv_weight", "الذهب: اكتب وزنه",
+    "إِذَا اسْتَلَمْتَ ذَهَبًا، اُكْتُبْ وَزْنَهُ بِالْجِرَامِ فِي خَانَةِ «الْوَزْنِ».", field("الوزن (جم)"));
+  await field("العيار").selectOption("21");
+  await wait(250);
+  await snap("rv_karat", "واختر عياره",
+    "وَاخْتَرْ عِيَارَهُ مِنْ خَانَةِ «الْعِيَارِ». يَحْسُبُ التَّطْبِيقُ مَا يُعَادِلُهُ بِعِيَارِ ثَمَانِيَةَ عَشَرَ.", field("العيار"));
+  await snap("rv_cash_btn", "النقد: اضغط «+ نقد»", "وَإِذَا اسْتَلَمْتَ نَقْدًا، اِضْغَطْ «زَائِدْ نَقْد».", btn("+ نقد"), press);
   await fill("المبلغ", "500");
-  await wait(300);
-  await snap("receipt", "«تحصيل من العميل»", "ذهبٌ بعياره (يُحسب مكافئه بعيار 18) أو نقد — ويدخل صندوقك", footerBtn("حفظ السند"), { after: 600 });
+  await snap("rv_amount", "اكتب المبلغ", "وَاكْتُبِ الْمَبْلَغَ بِالرِّيَالِ فِي خَانَةِ «الْمَبْلَغِ».", field("المبلغ"));
+  await snap("rv_totals", "الرصيد قبل وبعد",
+    "وَفِي الْأَسْفَلِ تَرَى رَصِيدَ الْعَمِيلِ قَبْلَ التَّحْصِيلِ وَبَعْدَهُ.", page.locator(".totals").first(), { s: 1.3 });
+  await snap("rv_save", "اضغط «حفظ السند»",
+    "ثُمَّ اضْغَطْ «حِفْظَ السَّنَدِ»، وَأَكِّدِ الْحِفْظَ. يَدْخُلُ الذَّهَبُ وَالنَّقْدُ إِلَى صَنَادِيقِكَ.", footerBtn("حفظ السند"), { press: true, after: 700 });
+  await page.waitForSelector(".sheet .btn");
   await sheetBtn("حفظ السند").click();
   await page.waitForURL(/#\/doc\/vo\//);
-  await wait(400);
-  await page.goto(url + "#/voucher/new?kind=payment");
+  await wait(500);
+
+  // ══ 8. السداد للمصنع ══
+  chap("السداد للمصنع", "من صناديقك", "الْفَصْلُ الثَّامِنُ: السَّدَادُ لِلْمَصْنَعِ.");
+  await homeNow();
+  await snap("home_payment", "اضغط «سداد للمصنع»",
+    "وَعِنْدَمَا تُسَدِّدُ لِلْمَصْنَعِ، اِضْغَطْ «سَدَادٌ لِلْمَصْنَعِ»، ثُمَّ اخْتَرِ الْمَصْنَعَ.", tile("سداد للمصنع"), { press: true, after: 700 });
   await page.waitForSelector(".sheet");
   await sheetItem("مصنع الريان").click();
-  await wait(400);
-  await page.locator("label.f", { hasText: "العيار" }).locator("select").selectOption("21");
+  await wait(500);
+  await field("العيار").selectOption("21");
   await fill("الوزن (جم)", "8");
-  await page.locator("button", { hasText: "+ نقد" }).click();
-  await fill("المبلغ", "300");
   await wait(300);
-  await snap("payment", "«سداد للمصنع» من صناديقك", "ويخبرك كم معك في كل صندوق", footerBtn("حفظ السند"), { after: 600 });
+  await snap("pv_box", "كم معك في الصندوق",
+    "اِخْتَرِ الْعِيَارَ وَاكْتُبِ الْوَزْنَ. يُخْبِرُكَ التَّطْبِيقُ كَمْ مَعَكَ فِي صُنْدُوقِ هَذَا الْعِيَارِ.",
+    page.locator(".small", { hasText: "معك في صندوق" }).first(), { s: 1.5 });
+  await btn("+ نقد").click();
+  await fill("المبلغ", "300");
+  await snap("pv_cash", "والنقد: «+ نقد» ثم المبلغ", "وَلِلنَّقْدِ اِضْغَطْ «زَائِدْ نَقْد»، وَاكْتُبِ الْمَبْلَغَ.", field("المبلغ"));
+  await snap("pv_save", "اضغط «حفظ السند»",
+    "ثُمَّ اضْغَطْ «حِفْظَ السَّنَدِ». يُخْصَمُ مَا سَدَّدْتَهُ مِنْ صَنَادِيقِكَ، وَيَنْقُصُ مِنْ دَيْنِ الْمَصْنَعِ.", footerBtn("حفظ السند"), { press: true, after: 700 });
+  await page.waitForSelector(".sheet .btn");
   await sheetBtn("حفظ السند").click();
   await page.waitForURL(/#\/doc\/vo\//);
-  await wait(400);
-
-  // ══ 7. كشف الحساب ══
-  chap("كشف الحساب", "بسيطٌ وواضح");
-  await page.goto(url + "#/home");
   await wait(500);
-  await snap("home_statement", "«كشف حساب» من الرئيسية", "ثم اختر العميل أو المصنع", page.locator(".wide-tile", { hasText: "كشف حساب" }), { after: 500 });
+
+  // ══ 9. كشف الحساب ══
+  chap("كشف الحساب", "بسيطٌ وواضح", "الْفَصْلُ التَّاسِعُ: كَشْفُ الْحِسَابِ.");
+  await homeNow();
+  await snap("home_statement", "اضغط «كشف حساب»",
+    "لِكَشْفِ حِسَابِ عَمِيلٍ أَوْ مَصْنَعٍ، اِضْغَطْ «كَشْفَ حِسَابٍ» فِي الشَّاشَةِ الرَّئِيسِيَّةِ، ثُمَّ اخْتَرِ الْحِسَابَ.",
+    page.locator(".wide-tile", { hasText: "كشف حساب" }), { press: true, after: 600 });
   await page.waitForSelector(".sheet");
   await sheetItem("محل الأمانة").click();
   await page.waitForURL(/#\/statement\//);
   await wait(600);
-  await snap("statement", "جدولٌ واحد: كل عمليةٍ ورصيدها", "«عليه» ما على العميل لك — و«له» ما لَه عندك", null,
-    { focus: { x: 196, y: 250, s: 1.5 } });
-  await snap("statement_tap", "اضغط أي عمليةٍ لمعاينتها", "", page.locator(".st-table tr.tap", { hasText: "S-00001" }), { after: 900 });
+  await snap("st_bal", "الرصيد: «عليه» و«له»",
+    "فِي الْأَعْلَى الرَّصِيدُ. «عَلَيْهِ» يَعْنِي مَا عَلَى الْعَمِيلِ لَكَ، وَ«لَهُ» يَعْنِي مَا لَهُ عِنْدَكَ.", page.locator(".st-bal"), { s: 1.5 });
+  await snap("st_table", "كل عمليةٍ ورصيدها بعدها",
+    "وَفِي الْجَدْوَلِ كُلُّ عَمَلِيَّةٍ بِتَارِيخِهَا، وَالرَّصِيدُ بَعْدَهَا بِالذَّهَبِ وَالنَّقْدِ.", page.locator(".st-table"), { s: 1.45 });
+  await snap("st_tap", "اضغط أي عملية لمعاينتها", "اِضْغَطْ عَلَى أَيِّ عَمَلِيَّةٍ لِمُعَايَنَتِهَا.",
+    page.locator(".st-table tr.tap", { hasText: "S-00001" }), { press: true, after: 900 });
   await page.waitForSelector(".sheet .preview iframe");
   await wait(700);
-  await snap("doc_sheet", "الفاتورة كما تُرسَل — ومنها «تعديل»", "ومشاركتها صورةً أو طباعتها", null);
+  await snap("st_doc", "المعاينة… ومنها «تعديل»",
+    "تَظْهَرُ الْفَاتُورَةُ وَصُوَرُ أَطْقُمِهَا. وَإِذَا أَرَدْتَ تَصْحِيحَ شَيْءٍ، اِضْغَطْ «تَعْدِيل».",
+    page.locator(".sheet .doc-acts .btn", { hasText: "تعديل" }), { s: 1.3 });
   await page.goBack();
   await wait(500);
-  await snap("statement_share", "أرسل الكشف صورةً للعميل", "بلمسةٍ واحدة — في واتساب أو غيره", page.locator("#bar .icon-btn[aria-label='مشاركة صورة']"), { noClick: true });
+  await snap("st_period", "اختر الفترة",
+    "وَلِاخْتِيَارِ فَتْرَةٍ مُعَيَّنَةٍ، مِثْلَ هَذَا الشَّهْرِ، اِضْغَطْ زِرَّ الْفَتْرَةِ.", page.locator(".st-period"));
+  await snap("st_share", "أرسل الكشف صورةً",
+    "وَلِإِرْسَالِ الْكَشْفِ لِلْعَمِيلِ صُورَةً، اِضْغَطْ زِرَّ الْمُشَارَكَةِ فِي الْأَعْلَى، وَاخْتَرْ وَاتْسَابْ.",
+    page.locator("#bar .icon-btn[aria-label='مشاركة صورة']"));
 
-  // ══ 8. ممتلكاتك ══
-  chap("ممتلكاتك", "كل ما معك في شاشة");
-  await page.locator("#tabs button[data-tab=holdings]").click();
-  await wait(600);
-  await snap("holdings", "صناديق الذهب بعيارها، والنقد", "وذهب المصانع عندك، وذهبك عند العملاء، والأطقم التي معك", page.locator(".wide-tile.fac"), { after: 600 });
+  // ══ 10. ممتلكاتك ══
+  chap("ممتلكاتك", "كل ما معك في شاشة", "الْفَصْلُ الْعَاشِرُ: مُمْتَلَكَاتُكَ.");
+  await tab("holdings").click();
+  await wait(700);
+  await snap("h_boxes", "صناديق الذهب والنقد",
+    "فِي «الْمُمْتَلَكَاتِ» تَرَى صَنَادِيقَ الذَّهَبِ بِعِيَارِهَا، وَالنَّقْدَ الَّذِي مَعَكَ.", page.locator(".boxes"), { s: 1.3 });
+  await snap("h_fac", "«ذهب المصانع عندي»",
+    "وَلَوْحَةُ «ذَهَبُ الْمَصَانِعِ عِنْدِي» تُبَيِّنُ كَمْ عَلَيْكَ لِلْمَصَانِعِ. اِضْغَطْهَا لِتَرَى كُلَّ مَصْنَعٍ.",
+    page.locator(".wide-tile.fac"), { press: true, after: 700 });
   await page.waitForSelector(".sheet");
-  await snap("factories", "كل مصنع: كم أخذت، وكم سدّدت", "وكم عليك له الآن — واللمس يفتح كشفه", null,
-    { focus: { x: 196, y: 690, s: 1.4 } });
+  await snap("h_factories", "لكل مصنع: أخذتُ · سدّدتُ · عليّ",
+    "لِكُلِّ مَصْنَعٍ: كَمْ أَخَذْتَ مِنْهُ، وَكَمْ سَدَّدْتَ، وَكَمْ عَلَيْكَ لَهُ الْآنَ.", null, { focus: { x: 196, y: 690, s: 1.4 } });
   await page.goBack();
-  await wait(400);
-
-  // ══ 9. اطمئن ══
-  chap("اطمئن", "حفظٌ وتحديثٌ تلقائي");
-  await page.locator("#tabs button[data-tab=more]").click();
   await wait(500);
-  await snap("more", "نسختك محفوظةٌ تلقائياً في مجلدك", "والتحديثات تصلك بإشعار — اضغط «تثبيت» فقط", null);
+  await snap("h_cus", "«ذهبي عند العملاء»",
+    "وَلَوْحَةُ «ذَهَبِي عِنْدَ الْعُمَلَاءِ» تُبَيِّنُ كَمْ لَكَ عِنْدَ عُمَلَائِكَ، وَلَمْسُهَا يَعْرِضُ كُلَّ عَمِيلٍ.", page.locator(".wide-tile.cus"));
 
-  fs.writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify({ viewport: { w: 393, h: 851, dpr: 2 }, shots }, null, 1));
+  // ══ 11. اطمئن ══
+  chap("اطمئن", "حفظٌ وتحديثٌ تلقائي", "الْفَصْلُ الْحَادِي عَشَرَ: اِطْمَئِنَّ.");
+  await tab("more").click();
+  await wait(600);
+  await snap("more", "حفظٌ وتحديثٌ تلقائي",
+    "نُسْخَتُكَ الِاحْتِيَاطِيَّةُ تُحْفَظُ تِلْقَائِيًّا فِي الْمُجَلَّدِ الَّذِي اخْتَرْتَهُ. وَالتَّحْدِيثَاتُ تَصِلُكَ بِإِشْعَارٍ، فَاضْغَطْ «تَثْبِيت» فَقَطْ، وَتَبْقَى بَيَانَاتُكَ كَمَا هِيَ.",
+    null, { zoom: false });
+
+  fs.writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify({ viewport: { w: 393, h: 851, dpr: 2 }, meta, shots }, null, 1));
   console.log(`✔ ${shots.filter((s) => s.type === "shot").length} لقطة في ${OUT}`);
   await browser.close();
   srv.close();
