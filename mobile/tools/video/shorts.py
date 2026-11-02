@@ -153,7 +153,7 @@ def build(out, silent):
         "outroLines": ["سجّل البضاعة: بالوزن أو باسم الطقم", "بِع بالوزن مباشرة، أو من الأطقم التي معك", "حصّل وسدّد، وأرسل الكشف صورةً"],
     }
     if not silent:
-        meta["intro"] = "أَهْلًا بِكَ فِي تَطْبِيقِ حِسَابَاتِ الذَّهَبِ، لِلْجَوَّالَاتِ بِنِظَامِ أَنْدْرُويِد."
+        meta["intro"] = "أَهْلًا بِكَ فِي تَطْبِيقِ حِسَابَاتِ الذَّهَبِ لِهَوَاتِفِ أَنْدْرُويِد."
         meta["outro"] = "سَهْلٌ، وَوَاضِحٌ. اِبْدَأِ الْآنَ!"
     (out / "manifest.json").write_text(json.dumps({"viewport": full["viewport"], "meta": meta, "shots": shots},
                                                   ensure_ascii=False, indent=1), encoding="utf-8")
