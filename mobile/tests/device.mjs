@@ -216,14 +216,18 @@ async function main() {
   check("لا نشر داخل التطبيق", (await ev("typeof AndroidBridge.publishUpdate")) === "undefined" &&
     (await ev("typeof AndroidBridge.setPublisherToken")) === "undefined" && us.publisher === undefined);
 
-  // ══ الترحيب: اختيار مجلد الحفظ التلقائي ══
-  n0 = await evCount(ev, "backupFolder");
-  await run(ev, `t.click("اختر مجلد الحفظ التلقائي");`);
-  const picked = await chooseFolder("folder");
-  const bf = await waitEv(ev, "backupFolder", n0, 15000);
-  check("اختيار مجلد الحفظ التلقائي (Documents)", picked && bf && bf.ok && bf.name === "Documents", JSON.stringify(bf));
-  await sleep(800);
-  check("ثم الرئيسية", (await ev("location.hash")) === "#/home");
+  // ══ الترحيب: ملف «ÀUR» في «المستندات» يُنشأ وحده — بلا اختيار مجلدٍ ولا إذن ══
+  const bi = await ev("Bridge.backupInfo()");
+  check("الحفظ التلقائي في ملف ÀUR بلا اختيار مجلد", bi.mode === "auto" && bi.auto === true && bi.autoName === "ÀUR", JSON.stringify(bi));
+  check("والترحيب يقولها: «ملفٍ باسم ÀUR داخل المستندات»", await ev("__t.text().includes('ملفٍ باسم «ÀUR» داخل «المستندات»')"));
+  await run(ev, `t.click("ابدأ");`);
+  await sleep(2500);
+  check("«ابدأ» ← الرئيسية", (await ev("location.hash")) === "#/home");
+  check("ومكان الحفظ «ÀUR»", (await ev("Bridge.backupFolder()")) === "ÀUR");
+  check("ولا نافذة «يوجد تحديث» حين لا جديد", !(await ev("!!document.querySelector('.sheet.pop')")));
+  let lsA = "";
+  try { lsA = adb("shell", "ls", "/sdcard/Documents/ÀUR").toString(); } catch (e) { lsA = String(e.message || e); }
+  check("ومجلد ÀUR وملفه في «المستندات» من أول تشغيل", lsA.includes("gold-data.json"), lsA);
 
   // ══ الإعلان (1.7): شريط AdMob أسفل الشاشة — نسخة الاختبار بمعرّفات Google التجريبية ══
   await sleep(300);
@@ -335,14 +339,14 @@ async function main() {
   // الحفظ التلقائي في المجلد بعد كل عملية
   await sleep(2500);
   let saved = null;
-  try { saved = JSON.parse(adb("shell", "cat", "/sdcard/Documents/gold-data.json").toString()); } catch (e) { /* */ }
-  check("الحفظ التلقائي: gold-data.json في Documents بكل العمليات",
+  try { saved = JSON.parse(adb("shell", "cat", "/sdcard/Documents/ÀUR/gold-data.json").toString()); } catch (e) { /* */ }
+  check("الحفظ التلقائي: gold-data.json في «المستندات/ÀUR» بكل العمليات",
     saved && saved.format === "jadeite-mobile-backup" && saved.invoices.length === 4 && saved.vouchers.length === 2,
     saved ? `${saved.invoices.length}/${saved.vouchers.length}` : "no file");
-  const ls = adb("shell", "ls", "/sdcard/Documents").toString();
+  const ls = adb("shell", "ls", "/sdcard/Documents/ÀUR").toString();
   check("ونسخة اليوم معه", /gold-data-\d{4}-\d{2}-\d{2}\.json/.test(ls), ls);
   let pls = "";
-  try { pls = adb("shell", "ls", "/sdcard/Documents/gold-photos").toString(); } catch (e) { /* */ }
+  try { pls = adb("shell", "ls", "/sdcard/Documents/ÀUR/gold-photos").toString(); } catch (e) { /* */ }
   check("وصورة الطقم في المجلد (gold-photos)", pls.includes(phId + ".jpg"), pls);
   const dsx = await ev(`(() => { const r = Domain.diamondStatement(App.state, ${JSON.stringify(sid)}); return [r.plus, r.minus, r.diamond]; })()`);
   check("كشف الماس للأمانة: بيع 0.50 ومرتجع 0.50", dsx.join() === "0.5,0.5,0", JSON.stringify(dsx));
@@ -449,8 +453,14 @@ async function main() {
   await sleep(600);
   check("بعد إعادة التثبيت: لا بيانات، وشاشة الترحيب", (await ev("App.state.invoices.length")) === 0 &&
     (await ev("location.hash")) === "#/welcome");
+  // ملف ÀUR من التثبيت السابق يُرى، فيُعرض «استرجاع بياناتي» ونافذة المجلد تُفتح عليه مباشرة
+  const bi2 = await ev("Bridge.backupInfo()");
+  const found = bi2.mode === "found";
+  check("بعد إعادة التثبيت: يُرى ملف ÀUR السابق", found, JSON.stringify(bi2));
+  check("والترحيب يعرض «استرجاع بياناتي»", found && (await ev("__t.text().includes('وجدنا ملف «ÀUR»')")));
+  shot("welcome_found");
   n0 = await evCount(ev, "restore");
-  await run(ev, `t.click("عندي بيانات سابقة");`);
+  await run(ev, found ? `t.click("استرجاع بياناتي");` : `t.click("عندي بيانات سابقة");`);
   const picked2 = await chooseFolder("restore");
   const rs = await waitEv(ev, "restore", n0, 15000);
   check("المجلد نفسه يُقرأ: gold-data.json", picked2 && rs && rs.ok && rs.file === "gold-data.json",
@@ -460,7 +470,8 @@ async function main() {
   await run(ev, `await t.confirm("استرجاع"); await t.sleep(800);`);
   check("استُرجع كل شيء: 4 فواتير وسندان ومحلان ومصنع", (await ev("App.state.invoices.length")) === 4 &&
     (await ev("App.state.vouchers.length")) === 2 && (await ev("App.state.shops.length")) === 3);
-  check("والحفظ التلقائي مستمرٌّ في المجلد نفسه", (await ev("Bridge.backupFolder()")) === "Documents");
+  check("والحفظ التلقائي مستمرٌّ في ملف ÀUR نفسه", (await ev("Bridge.backupFolder()")) === "ÀUR" &&
+    (await ev("Bridge.backupInfo().mode")) === "tree", await ev("JSON.stringify(Bridge.backupInfo())"));
   const pd = await waitEv(ev, "photosDone", 0, 20000);
   await sleep(800);
   check("وصورة الطقم استُرجعت من المجلد", pd && pd.n === 1 && (await ev(`Store.getPhoto(${JSON.stringify(phId)}).then((d) => !!d)`)), JSON.stringify(pd));

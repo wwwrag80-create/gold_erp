@@ -80,6 +80,14 @@
 
     // ── الحفظ التلقائي في مجلدٍ خارج التطبيق (يبقى بعد حذفه) ──
     backupFolder() { return A && A.backupFolder ? A.backupFolder() : ""; },
+    // مكان الحفظ: tree (مجلدٌ مختار) · auto (مجلد «ÀUR» التلقائي) · found (مجلد «ÀUR» من
+    // تثبيتٍ سابق ينتظر الاسترجاع) · none — والآيفون والإصدارات الأقدم: مجلدٌ مختار أو لا شيء
+    backupInfo() {
+      if (A && A.backupInfo) { try { return JSON.parse(A.backupInfo()); } catch (e) { /* */ } }
+      const name = Bridge.backupFolder();
+      return { mode: name ? "tree" : "none", name, auto: false };
+    },
+    startAuto() { if (A && A.startAuto) A.startAuto(); },
     pickBackupFolder() { if (A) A.pickBackupFolder(); },
     restoreFromFolder() { if (A) A.restoreFromFolder(); },
     autoBackup(json) { if (A && A.autoBackup) A.autoBackup(json); },

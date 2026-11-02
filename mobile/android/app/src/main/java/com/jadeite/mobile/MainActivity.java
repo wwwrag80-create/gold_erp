@@ -472,14 +472,21 @@ public class MainActivity extends Activity {
         }, 450));
     }
 
-    /** نافذة اختيار مجلد — تفتح على «Documents» في ذاكرة الجوال (مكانٌ يبقى بعد حذف التطبيق). */
+    /**
+     * نافذة اختيار مجلد — تفتح على «Documents» في ذاكرة الجوال (مكانٌ يبقى بعد حذف التطبيق)،
+     * وللاسترجاع على مجلد «ÀUR» نفسه إن وُجد: «استخدام هذا المجلد» ثم «سماح» وحسب.
+     */
     void openTree(int req, String event) {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         if (Build.VERSION.SDK_INT >= 26) {
+            boolean auto = false;
+            try { auto = req == REQ_RESTORE && BackupFolder.autoSupported() && BackupFolder.autoDirFile().isDirectory(); }
+            catch (Exception ignored) { }
             i.putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(
-                    "com.android.externalstorage.documents", "primary:Documents"));
+                    "com.android.externalstorage.documents",
+                    auto ? "primary:Documents/" + BackupFolder.AUTO_NAME : "primary:Documents"));
         }
         try {
             startActivityForResult(i, req);
@@ -610,6 +617,19 @@ public class MainActivity extends Activity {
             return BackupFolder.name(MainActivity.this);
         }
 
+        /** مكان الحفظ: {mode: tree·auto·found·none, name, auto: أندرويد 10+} */
+        @JavascriptInterface
+        public String backupInfo() {
+            return obj("mode", BackupFolder.mode(MainActivity.this), "name", BackupFolder.name(MainActivity.this),
+                    "auto", BackupFolder.autoSupported(), "autoName", BackupFolder.AUTO_NAME).toString();
+        }
+
+        /** «ابدأ»: الحفظ في مجلد «ÀUR» التلقائي من الآن (ولو وُجد مجلدٌ من تثبيتٍ سابق) */
+        @JavascriptInterface
+        public void startAuto() {
+            BackupFolder.startAuto(MainActivity.this);
+        }
+
         @JavascriptInterface
         public void pickBackupFolder() {
             ui.post(() -> openTree(REQ_TREE, "backupFolder"));
@@ -638,7 +658,7 @@ public class MainActivity extends Activity {
         public void syncPhotos(String idsJson) {
             backupQ.execute(() -> {
                 try {
-                    if (BackupFolder.dir(MainActivity.this) == null) return;
+                    if (!BackupFolder.active(MainActivity.this)) return;
                     Set<String> have = BackupFolder.photoIds(MainActivity.this);
                     JSONArray want = new JSONArray(idsJson), missing = new JSONArray();
                     for (int i = 0; i < want.length(); i++) {

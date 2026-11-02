@@ -1637,14 +1637,21 @@
     });
     // الحفظ التلقائي في مجلد
     const folder = B.backupFolder();
+    const binfo = B.native ? B.backupInfo() : { mode: "none" };
+    const autoMode = binfo.mode === "auto";
+    const lastTxt = lastAutoBackup() ? `\nآخر حفظ: ${new Date(+lastAutoBackup()).toLocaleString("ar")}` : "";
     const autoCard = !B.native ? null : h("div", { class: "card" }, h("h2", null, ico("folder", 18), "الحفظ التلقائي"),
-      h("div", { class: "small", style: { marginBottom: "8px" } }, folder
-        ? `مفعّل — بعد كل عمليةٍ تُحفظ نسخةٌ في المجلد «${folder}»` + (lastAutoBackup() ? `\nآخر حفظ: ${new Date(+lastAutoBackup()).toLocaleString("ar")}` : "")
-        : "غير مفعّل. اختر مجلداً على الجوال (مثل Documents) يُحفظ فيه كل شيء تلقائياً — فتبقى بياناتك ولو حُذف التطبيق."),
-      h("div", { class: "muted small", style: { marginBottom: "10px" } },
-        "بعد إعادة تثبيت التطبيق: «استرجاع من المجلد» ثم اختر المجلد نفسه — فيعود كل شيء كما كان."),
+      h("div", { class: "small", style: { marginBottom: "8px", whiteSpace: "pre-line" } }, autoMode
+        ? `مفعّل — بعد كل عمليةٍ تُحفظ نسخةٌ في ملف «${binfo.autoName || folder}» داخل «المستندات» بجوالك` + lastTxt
+        : folder
+          ? `مفعّل — بعد كل عمليةٍ تُحفظ نسخةٌ في المجلد «${folder}»` + lastTxt
+          : "غير مفعّل. اختر مجلداً على الجوال (مثل Documents) يُحفظ فيه كل شيء تلقائياً — فتبقى بياناتك ولو حُذف التطبيق."),
+      h("div", { class: "muted small", style: { marginBottom: "10px" } }, autoMode
+        ? "بعد إعادة تثبيت التطبيق يظهر لك «استرجاع بياناتي» من هذا الملف مباشرة — فيعود كل شيء كما كان."
+        : "بعد إعادة تثبيت التطبيق: «استرجاع من المجلد» ثم اختر المجلد نفسه — فيعود كل شيء كما كان."),
       h("div", { class: "grid2" },
-        h("button", { class: "btn" + (folder ? " ghost" : ""), onclick: () => B.pickBackupFolder() }, ico("folder", 18), folder ? "تغيير المجلد" : "اختيار المجلد"),
+        h("button", { class: "btn" + (folder ? " ghost" : ""), onclick: () => B.pickBackupFolder() }, ico("folder", 18),
+          autoMode ? "اختيار مجلدٍ آخر" : folder ? "تغيير المجلد" : "اختيار المجلد"),
         h("button", { class: "btn ghost", onclick: () => B.restoreFromFolder() }, ico("history", 18), "استرجاع من المجلد")));
     const offF = onRoute("backupFolder", (r) => {
       if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); scheduleAutoBackup(); syncAllPhotos(); offF(); offR(); replace("settings"); }
@@ -1915,6 +1922,50 @@
     const b = document.getElementById("upd-btn");
     if (b) b.classList.toggle("dot", !!(us && us.available));
   }
+  // ══ «يوجد تحديث جديد» في وسط الشاشة — حين يُنشر إصدار: شعارٌ وزرٌّ كبير «حدّث الآن» يُنزّل
+  //    ويثبّت مباشرة. مرةً في كل فتحٍ للتطبيق، وفي شاشات التصفّح وحدها (لا يقطع فاتورةً تُكتب) ══
+  let popShown = "";
+  function maybeUpdatePop(us) {
+    if (!B.native) return;
+    us = us || B.updateState();
+    if (!us || us.unsupported || !us.available || !us.published || !us.published.version || updateOpen) return;
+    if (popShown === us.published.version || !AD_SCREENS.has(parse().parts[0] || "home")) return;
+    popShown = us.published.version;
+    updatePop(us);
+  }
+  function updatePop(us) {
+    const pub = us.published;
+    const offs = [];
+    sheet((box, close) => {
+      box.classList.add("pop");
+      if (box.parentNode) box.parentNode.classList.add("center");
+      const prog = h("div", { class: "progress", style: { display: "none" } }, h("span"));
+      const note = h("div", { class: "muted small pop-note" });
+      const go = h("button", { class: "btn block big", onclick: () => {
+        go.disabled = true;
+        note.textContent = "جارٍ التنزيل…";
+        prog.style.display = "";
+        B.installUpdate();
+      } }, ico("update", 20), "حدّث الآن");
+      box.append(
+        h("img", { src: "img/icon.png", alt: "", class: "pop-logo" }),
+        h("h3", null, "يوجد تحديث جديد"),
+        h("div", { class: "muted" }, `الإصدار ${pub.version}`),
+        pub.notes ? h("div", { class: "small pop-notes" }, pub.notes) : null,
+        go, prog, note,
+        h("button", { class: "btn ghost block sm", onclick: () => close() }, "لاحقاً"));
+      offs.push(B.on("updateProgress", (p) => {
+        prog.style.display = "";
+        prog.firstChild.style.width = (p.pct || 0) + "%";
+        note.textContent = `جارٍ التنزيل… ${p.pct || 0}%`;
+      }));
+      offs.push(B.on("update", (u) => {
+        if (u.error) { note.textContent = u.error; go.disabled = false; prog.style.display = "none"; }
+        else if (u.ready) { note.textContent = "اضغط «تثبيت» في نافذة أندرويد — بياناتك تبقى كما هي."; go.disabled = false; }
+      }));
+    }).then(() => offs.forEach((f) => f()));
+  }
+
   let updateOpen = false;
   async function updateSheet() {
     if (updateOpen) return;
@@ -1993,25 +2044,52 @@
     return true;
   }
 
-  // ══ الترحيب (أول تشغيل): مجلد الحفظ التلقائي أو استرجاع ما سبق ══
+  // ══ الترحيب (أول تشغيل) ══
+  // أندرويد 10+: ملف «ÀUR» في «المستندات» يُنشأ وحده من أول تشغيل ويُحفظ فيه كل شيء — وبعد
+  // إعادة التثبيت يُعرض الاسترجاع منه مباشرة. والأقدم: اختيار مجلدٍ كما كان.
   function welcome() {
     setBar("أهلاً بك", "", { back: false, noTabs: true });
     const v = view();
+    const info = B.backupInfo();
+    const AUR = info.autoName || APP_NAME;
     const done = () => { try { localStorage.setItem("welcomed", "1"); } catch (e) { /* */ } B.requestNotifications(); replace("home"); };
     const waitFolder = onRoute("backupFolder", (r) => { if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); syncAllPhotos(); waitFolder(); waitRestore(); done(); } });
     const waitRestore = onRoute("restore", async (r) => {
       if (!r.ok) { if (r.error) err(new Error(r.error)); return; }
       try { if (await restoreText(r.text, r.file)) { B.restorePhotos(); waitFolder(); waitRestore(); done(); } } catch (e) { err(e); }
     });
-    v.append(h("div", { class: "welcome" },
+    // «ابدأ»: الحفظ التلقائي في ملف «ÀUR» — ويُنشأ الملف الآن
+    const start = () => {
+      B.startAuto();
+      B.autoBackup(JSON.stringify(D.toBackup(st())));
+      waitFolder(); waitRestore(); done();
+    };
+    const head = [
       h("img", { src: "img/icon.png", alt: "", class: "welcome-logo" }),
       h("h2", null, APP_NAME),
-      h("div", { class: "muted" }, "حساباتك مع المحلات والمصانع"),
-      h("p", { class: "muted" }, "بياناتك في جوالك وحده. اختر مجلداً يُحفظ فيه كل شيءٍ تلقائياً بعد كل عملية — " +
-        "فإن حذفت التطبيق ثم ثبّته من جديد، اختر المجلد نفسه فيعود كل شيء كما كان."),
-      h("button", { class: "btn block", onclick: () => B.pickBackupFolder() }, ico("folder", 20), "ابدأ — اختر مجلد الحفظ التلقائي"),
-      h("button", { class: "btn ghost block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "عندي بيانات سابقة — استرجاعها"),
-      h("button", { class: "link", style: { marginTop: "12px" }, onclick: () => { waitFolder(); waitRestore(); done(); } }, "تخطَّ الآن")));
+      h("div", { class: "muted" }, "حساباتك مع المحلات والمصانع")];
+    let body;
+    if (info.mode === "found") {
+      body = [
+        h("p", null, `وجدنا ملف «${AUR}» من استخدامك السابق في «المستندات» بجوالك — فيه بياناتك كلها.`),
+        h("button", { class: "btn block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "استرجاع بياناتي"),
+        h("div", { class: "muted small" }, `تُفتح نافذة المجلد على «${AUR}» مباشرة: اضغط «استخدام هذا المجلد» ثم «سماح».`),
+        h("button", { class: "link", style: { marginTop: "12px" }, onclick: start }, "ابدأ من جديد بلا بيانات")];
+    } else if (info.mode === "auto") {
+      body = [
+        h("p", { class: "muted" }, `بياناتك في جوالك وحده، وتُحفظ تلقائياً بعد كل عملية في ملفٍ باسم «${AUR}» داخل «المستندات» — ` +
+          "فإن حذفت التطبيق ثم ثبّته من جديد، تعود منه بياناتك كلها."),
+        h("button", { class: "btn block", onclick: start }, ico("check", 20), "ابدأ"),
+        h("button", { class: "btn ghost block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "عندي بيانات سابقة — استرجاعها")];
+    } else {
+      body = [
+        h("p", { class: "muted" }, "بياناتك في جوالك وحده. اختر مجلداً يُحفظ فيه كل شيءٍ تلقائياً بعد كل عملية — " +
+          "فإن حذفت التطبيق ثم ثبّته من جديد، اختر المجلد نفسه فيعود كل شيء كما كان."),
+        h("button", { class: "btn block", onclick: () => B.pickBackupFolder() }, ico("folder", 20), "ابدأ — اختر مجلد الحفظ التلقائي"),
+        h("button", { class: "btn ghost block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "عندي بيانات سابقة — استرجاعها"),
+        h("button", { class: "link", style: { marginTop: "12px" }, onclick: () => { waitFolder(); waitRestore(); done(); } }, "تخطَّ الآن")];
+    }
+    v.append(h("div", { class: "welcome" }, ...head, ...body));
   }
 
   // ══ «+ جديد» ══
@@ -2065,6 +2143,7 @@
     // الإعلان (شريطٌ صغير أسفل الشاشة) في شاشات التصفّح وحدها — لا في الإدخال
     // ولا البحث ولا الترحيب، فلا يُلمس خطأً ولا يزاحم لوحة المفاتيح
     B.setAds(AD_SCREENS.has(parts[0] || "home"));
+    setTimeout(() => maybeUpdatePop(), 700);
     try {
       switch (parts[0]) {
         case "home": return home();
@@ -2103,12 +2182,13 @@
   function maybeCheckUpdate() {
     const us = B.updateState();
     if (us.unsupported) return;
-    if (Date.now() - (us.lastCheck || 0) > 3 * 3600 * 1000) B.checkUpdate();
+    // عند كل فتحٍ للتطبيق (وعودته من الخلفية) — بحدّ نصف ساعة بين فحصين
+    if (Date.now() - (us.lastCheck || 0) > 30 * 60 * 1000) B.checkUpdate();
   }
 
   function firstRun() {
     const s = st();
-    if (!B.native || B.backupFolder()) return false;
+    if (!B.native || B.backupInfo().mode === "tree") return false;
     if (s.shops.length + s.invoices.length + s.vouchers.length > 0) return false;
     try { return !localStorage.getItem("welcomed"); } catch (e) { return false; }
   }
@@ -2125,7 +2205,7 @@
     }
     // أحداث الأصل العامة: إشعار التحديث، ونتيجة الحفظ التلقائي
     B.on("openUpdate", () => updateSheet());
-    B.on("update", (us) => refreshUpdateDot(us));
+    B.on("update", (us) => { refreshUpdateDot(us); maybeUpdatePop(us); });
     let lastBackupErr = 0;
     B.on("backupDone", (r) => {
       if (r.ok) {
@@ -2149,6 +2229,8 @@
     setTimeout(promo, 1500);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) { maybeCheckUpdate(); promo(); } });
     window.addEventListener("hashchange", route);
+    // مجلد «ÀUR» من تثبيتٍ سابق، والتطبيق ليس في أول تشغيله (فيه بيانات): الحفظ فيه من الآن
+    if (B.native && !firstRun() && B.backupInfo().mode === "found") B.startAuto();
     if (firstRun()) location.replace("#/welcome");
     else if (!location.hash) location.replace("#/home");
     route();

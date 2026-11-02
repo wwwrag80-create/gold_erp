@@ -509,3 +509,16 @@ details.opts .in { margin-top: 6px; }
 .st-table tr.tap:active td { background: var(--hover); }
 .st-hint { text-align: center; margin: 8px 0 4px; }
 .nowrap { white-space: nowrap; }
+
+/* نافذة «يوجد تحديث جديد» في وسط الشاشة */
+.sheet-wrap.center { align-items: center; justify-content: center; padding: 20px; }
+.sheet.pop { max-width: 360px; border-radius: var(--r-card); text-align: center; padding: 22px 18px 16px;
+  animation: pop-in .26s cubic-bezier(.2,.8,.2,1); }
+.sheet.pop h3 { font-size: 20px; margin: 12px 0 4px; }
+.pop-logo { width: 84px; height: 84px; border-radius: 22px; display: block; margin: 0 auto; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.pop-notes { margin: 12px 0 14px; line-height: 1.7; white-space: pre-line; text-align: start;
+  background: var(--goldSoft2); border: 1px solid var(--goldRing); border-radius: var(--r-card); padding: 10px 12px; }
+.sheet.pop .btn.big { font-size: 18px; padding: 14px; margin-top: 4px; }
+.sheet.pop .btn.ghost { margin-top: 8px; }
+.pop-note { min-height: 1.4em; margin-top: 6px; }
+@keyframes pop-in { from { transform: scale(.92); opacity: 0; } to { transform: none; opacity: 1; } }
