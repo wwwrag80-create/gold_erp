@@ -23,6 +23,11 @@ SC = SynthesisConfig(length_scale=1.06, noise_scale=0.55, noise_w_scale=0.7)
 
 m = json.loads((SHOTS / "manifest.json").read_text(encoding="utf-8"))
 items = [("intro", m["meta"]["intro"]), ("outro", m["meta"]["outro"])]
+b = m["meta"].get("benefits")
+if b:
+    items.append(("benefits_q", b["say"]))
+    items += [(f"benefit_{i + 1}", it["say"]) for i, it in enumerate(b["items"])]
+    items.append(("benefits_end", b["end"]["say"]))
 for s in m["shots"]:
     if s.get("say"):
         items.append((f"ch{s['n']}" if s["type"] == "chapter" else s["file"][:-4], s["say"]))

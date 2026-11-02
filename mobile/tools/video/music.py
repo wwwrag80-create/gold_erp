@@ -106,6 +106,15 @@ for start in (0.5, outro_start + 0.2):
         add(L, start + i * 0.12, sig * (1.2 if i % 2 else 0.8))
         add(R, start + i * 0.12, sig * (0.8 if i % 2 else 1.2))
 
+# ── لمعةٌ خفيفة مع كل بطاقةٍ في لوحة الفوائد ──
+for s in TL["segments"]:
+    if s["type"] == "benefits":
+        for i, it in enumerate(s["items"] + [s["fin"]]):
+            for j, nm in enumerate(["A6", "E7"] if i < len(s["items"]) else ["E6", "A6", "E7"]):
+                sig = pluck(note(nm), dur=2.0, decay=0.7, amp=0.03)
+                add(L, s["start"] + it["at"] - 0.1 + j * 0.09, sig)
+                add(R, s["start"] + it["at"] - 0.1 + j * 0.09, sig)
+
 # ── المؤثرات: نقرة اللمسة، وهبّة الفصل ──
 sfx = np.zeros(N)
 for s in TL["segments"]:

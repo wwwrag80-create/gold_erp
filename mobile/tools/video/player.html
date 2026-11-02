@@ -96,6 +96,22 @@
   #obrand { margin-top: 110px; display: flex; align-items: center; gap: 26px; font-size: 44px; font-weight: 700; }
   #obrand svg { width: 110px; height: 110px; }
 
+  /* لوحة «ماذا تستفيد من النظام؟» */
+  #ben { inset: 0; padding: 0 64px 110px; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; }
+  #blogo { width: 128px; height: 128px; margin-bottom: 26px; }
+  #btitle { font-size: 74px; font-weight: 700; text-align: center; line-height: 1.25; }
+  #bline { margin: 22px auto 10px; height: 5px; width: 360px; border-radius: 5px;
+    background: linear-gradient(90deg, rgba(228,198,101,0), var(--ring), rgba(228,198,101,0)); }
+  #blist { width: 100%; }
+  .bcard { display: flex; gap: 28px; align-items: flex-start; width: 100%; margin-top: 30px; padding: 30px 34px 32px;
+    border-radius: 30px; background: linear-gradient(160deg, #2B2723, #1C1A17); border: 1.5px solid rgba(228,198,101,.2); }
+  .bcard.on { border-color: var(--ring); box-shadow: 0 0 0 5px rgba(228,198,101,.16), 0 24px 60px rgba(0,0,0,.45); }
+  .bnum { flex: 0 0 auto; width: 92px; height: 92px; border-radius: 26px; display: flex; align-items: center; justify-content: center;
+    font-size: 52px; font-weight: 700; color: #1A1305; background: linear-gradient(145deg, var(--ring), var(--gold) 55%, var(--goldL)); }
+  .bt { font-size: 50px; font-weight: 700; line-height: 1.3; }
+  .bd { font-size: 34px; color: var(--muted); line-height: 1.55; margin-top: 8px; }
+  #bfin { margin-top: 54px; font-size: 46px; font-weight: 700; text-align: center; line-height: 1.4; }
+
   /* شريط التقدّم والعلامة */
   #prog { left: 120px; right: 120px; top: 1858px; height: 8px; border-radius: 8px; background: rgba(243,238,226,.10); overflow: hidden; }
   #progf { position: absolute; top: 0; bottom: 0; right: 0; width: 0; border-radius: 8px;
@@ -149,6 +165,12 @@
     <div id="obrand"><span id="ologo"></span><span>نظام محاسبي للذهب</span></div>
   </div>
 
+  <div id="ben" class="abs">
+    <div id="blogo"></div><div id="btitle" class="gold-text"></div><div id="bline"></div>
+    <div id="blist"></div>
+    <div id="bfin" class="gold-text"></div>
+  </div>
+
   <div id="prog" class="abs"><div id="progf"></div></div>
   <div id="brand" class="abs">نظام محاسبي للذهب · دليل المندوب</div>
   <div id="fade" class="abs"></div>
@@ -177,6 +199,7 @@ function logoSvg() {
 }
 document.getElementById("ilogo").innerHTML = `<div class="logo">${logoSvg()}</div>`;
 document.getElementById("ologo").innerHTML = logoSvg();
+document.getElementById("blogo").innerHTML = logoSvg();
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -199,6 +222,20 @@ window.setup = async function (tl) {
     imgs[sg.idx] = im;
   }
   await document.fonts.ready;
+  // بطاقات لوحة الفوائد
+  const bs = TL.segments.find((x) => x.type === "benefits");
+  if (bs) {
+    $("btitle").textContent = bs.title;
+    $("bfin").textContent = bs.fin.text;
+    bs.items.forEach((it, i) => {
+      const c = document.createElement("div");
+      c.className = "bcard";
+      c.innerHTML = `<div class="bnum">${AR(i + 1)}</div><div><div class="bt"></div><div class="bd"></div></div>`;
+      c.querySelector(".bt").textContent = it.title;
+      c.querySelector(".bd").textContent = it.detail;
+      $("blist").appendChild(c);
+    });
+  }
   // علامات الفصول على شريط التقدّم
   for (const sg of TL.segments) {
     if (sg.type !== "chapter") continue;
@@ -283,6 +320,24 @@ window.renderAt = async function (t) {
     $("obrand").style.opacity = out((p - 2.2) / .8);
   }
   $("fade").style.opacity = Math.max(1 - out(t / .8), ov ? ease((p - (D - 1)) / 1) : 0);
+
+  // لوحة الفوائد: كل بطاقةٍ تظهر مع صوتها، والحالية مُضاءة
+  const bv = sg.type === "benefits";
+  $("ben").style.opacity = bv ? win(p, 0, .6, D, .6) : 0;
+  if (bv) {
+    $("btitle").style.transform = `translateY(${30 * (1 - out(p / .8))}px)`;
+    $("bline").style.transform = `scaleX(${out((p - .3) / 1)})`;
+    [...$("blist").children].forEach((c, i) => {
+      const it = sg.items[i], nx = i + 1 < sg.items.length ? sg.items[i + 1].at : sg.fin.at;
+      const k = out((p - it.at + .15) / .55);
+      c.style.opacity = k;
+      c.style.transform = `translateX(${-50 * (1 - k)}px)`;
+      c.classList.toggle("on", p >= it.at - .15 && p < nx - .1);
+    });
+    const kf = out((p - sg.fin.at + .1) / .7);
+    $("bfin").style.opacity = kf;
+    $("bfin").style.transform = `scale(${.92 + .08 * kf})`;
+  }
 
   // بطاقة الفصل
   const cv = sg.type === "chapter";

@@ -15,6 +15,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 segs = TL["segments"]
 chs = [s for s in segs if s["type"] == "chapter"]
 outro = next(s for s in segs if s["type"] == "outro")
+# المقدّمة ولوحة «ماذا تستفيد من النظام؟» — مقطعٌ للتعريف بالنظام
+ben = next((s for s in segs if s["type"] == "benefits"), None)
+if ben:
+    chs = [{"start": 0.1, "n": 0, "title": "ماذا تستفيد من النظام"}] + chs
 for i, c in enumerate(chs):
     a = max(0.0, c["start"] - 0.1)
     b = chs[i + 1]["start"] if i + 1 < len(chs) else outro["start"]

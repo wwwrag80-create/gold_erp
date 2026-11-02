@@ -29,6 +29,28 @@ function timeline(m, V) {
     t += d;
   };
   add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
+  // لوحة «ماذا تستفيد من النظام؟»: كل فائدةٍ تظهر مع صوتها، ثم خاتمتها
+  const B = m.meta && m.meta.benefits;
+  if (B) {
+    const st = t;
+    let p = 0.6;
+    const vpush = (k, at) => { if (V[k]) voices.push({ file: V[k].file, at: +(st + at).toFixed(3), dur: V[k].dur }); };
+    const qAt = p;
+    vpush("benefits_q", p);
+    p += dur("benefits_q") + 0.5;
+    const list = B.items.map((it, i) => {
+      const at = p;
+      vpush(`benefit_${i + 1}`, at);
+      p += dur(`benefit_${i + 1}`) + 0.6;
+      return { title: it.title, detail: it.detail, at: +at.toFixed(3) };
+    });
+    const finAt = p;
+    vpush("benefits_end", finAt);
+    p += dur("benefits_end") + 1.4;
+    segs.push({ type: "benefits", title: B.title, qAt, items: list, fin: { text: B.end.text, at: +finAt.toFixed(3) },
+      start: +st.toFixed(3), end: +(st + p).toFixed(3) });
+    t += p;
+  }
   const items = m.shots;
   const chapters = items.filter((x) => x.type === "chapter");
   let ch = null, step = 0, prevIdx = null, idx = 0;
