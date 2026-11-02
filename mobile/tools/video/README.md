@@ -30,8 +30,8 @@
 
     python3 mobile/tools/video/shorts.py $S/shots $S/silent $S/voice      # الخطوات ونصوصها
     TTS_STYLE=natural python3 mobile/tools/video/tts.py $S/voice VOICE_DIR
-    node mobile/tools/video/render.js $S/silent $S/out_s/video.mp4 --jobs 4 --fps 25   # ≈ دقيقة ونصف
-    node mobile/tools/video/render.js $S/voice  $S/out_v/video.mp4 --jobs 4 --fps 25   # ≈ دقيقتان
+    node mobile/tools/video/render.js $S/silent $S/out_s/video.mp4 --jobs 4 --fps 25   # ≈ دقيقتان
+    node mobile/tools/video/render.js $S/voice  $S/out_v/video.mp4 --jobs 4 --fps 25   # ≈ دقيقتان ونصف
     python3 mobile/tools/video/music.py $S/out_s ; python3 mobile/tools/video/music.py $S/out_v
 
 - `TTS_STYLE`: بلا قيمة = هادئ (الدليل الكامل)، `lively` = مفعم، `natural` = إيقاعٌ وتنغيمٌ أقرب
