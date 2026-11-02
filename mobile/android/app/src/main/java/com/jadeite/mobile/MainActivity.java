@@ -33,6 +33,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
@@ -70,6 +71,7 @@ public class MainActivity extends Activity {
 
     WebView web;
     FrameLayout root;
+    Ads ads;                        // شريط AdMob أسفل الشاشة (Ads.java)
     WebViewAssetLoader loader;
     ValueCallback<Uri[]> pickCallback;
     Uri cameraUri;                  // صورة الكاميرا المنتظرة لاختيار «صورة الطقم»
@@ -101,7 +103,16 @@ public class MainActivity extends Activity {
         web = new WebView(this);
         root.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        setContentView(root);
+        // الصفحة فوق، وشريط الإعلان تحتها (مطويٌّ حتى يصل إعلان) — لا يغطّي شيئاً منها
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.addView(root, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        FrameLayout adBar = new FrameLayout(this);
+        adBar.setBackgroundColor(getColor(R.color.surface));
+        page.addView(adBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        setContentView(page);
+        ads = new Ads(this, adBar);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -169,6 +180,7 @@ public class MainActivity extends Activity {
 
         Updater.ensureChannel(this);
         Updater.schedule(this);
+        ads.start();
         // النشر خرج من التطبيق (إلى GitHub): لا يبقى مفتاح نشرٍ قديم في أي جوال
         getSharedPreferences("publisher", MODE_PRIVATE).edit().clear().apply();
         handleIntent(getIntent());
@@ -188,8 +200,21 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        ads.pause();
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        ads.destroy();
+        super.onDestroy();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        ads.resume();
         // رجع من إعداد «السماح بالتثبيت» — يُكمل التثبيت إن أُذن له
         if (pendingInstall != null && canInstall()) {
             File f = pendingInstall;
@@ -455,6 +480,17 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String appVersion() {
             return BuildConfig.VERSION_NAME;
+        }
+
+        /** الصفحة عند كل شاشة: هل تناسبها الإعلانات؟ (التصفّح نعم، الإدخال لا) */
+        @JavascriptInterface
+        public void setAds(boolean on) {
+            ui.post(() -> ads.setWanted(on));
+        }
+
+        @JavascriptInterface
+        public String adsState() {
+            return ads.state().toString();
         }
 
         @JavascriptInterface

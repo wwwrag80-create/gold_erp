@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- التطبيق لا يتصل بالإنترنت: صفحاته من داخله (appassets) — لكن WebView
-         يحجب كل عنوان https بلا هذا الإذن، ولو كان مخدوماً من داخل التطبيق -->
+    <!-- صفحات التطبيق من داخله (appassets) — لكن WebView يحجب كل عنوان https
+         بلا هذا الإذن، ولو كان مخدوماً من داخله. وبه أيضاً قناة التحديث والإعلان -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- التحديث: تثبيت الإصدار المنزَّل (بلمسة صاحب الجهاز)، وإشعارٌ حين يجهز،
          وإعادة جدولة الفحص الدوري بعد إعادة تشغيل الجهاز -->
@@ -27,6 +27,18 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
+
+        <!-- AdMob: معرّف التطبيق من admob.properties؛ والتهيئة والتحميل خارج الخيط
+             الرئيسي فلا يتأخّر فتح التطبيق -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}" />
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
+            android:value="true" />
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
+            android:value="true" />
 
         <activity
             android:name=".MainActivity"

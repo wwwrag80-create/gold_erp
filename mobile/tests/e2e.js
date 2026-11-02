@@ -362,6 +362,16 @@ function check(name, cond, detail) {
   await page.waitForTimeout(150);
   check("ونصٌّ لا يطابق: «لا طقم باسمٍ أو وزنٍ يطابق»", (await text("#view .empty")).includes("لا طقم"));
 
+  // الإعلان (1.7): الصفحة تطلبه في شاشات التصفّح وحدها — لا في الإدخال ولا البحث
+  const adOn = async (hash) => { await page.goto(url + hash); await page.waitForTimeout(150); return page.evaluate(() => Bridge.adsWanted); };
+  check("الإعلان: البحث بلا إعلان، والرئيسية والممتلكات والكشف بإعلان",
+    (await page.evaluate(() => Bridge.adsWanted)) === false && (await adOn("#/home")) === true &&
+    (await adOn("#/holdings")) === true && (await adOn("#/customers")) === true && (await adOn("#/more")) === true);
+  check("ولا إعلان في الفاتورة والسند ونموذج المحل والإعدادات",
+    (await adOn("#/invoice/new?kind=sale")) === false && (await adOn("#/voucher/new?kind=receipt")) === false &&
+    (await adOn("#/shop-form")) === false && (await adOn("#/settings")) === false);
+  check("وفي المتصفح لا جسر إعلان: adsState «غير مدعوم»", (await page.evaluate(() => Bridge.adsState().unsupported)) === true);
+
   // كشف حساب المصنع
   const facId = await page.evaluate(() => App.state.shops.find((s) => s.type === "factory").id);
   await page.goto(url + `#/statement/${facId}`);

@@ -214,6 +214,24 @@ async function main() {
   check("اختيار مجلد الحفظ التلقائي (Documents)", picked && bf && bf.ok && bf.name === "Documents", JSON.stringify(bf));
   await sleep(800);
   check("ثم الرئيسية", (await ev("location.hash")) === "#/home");
+
+  // ══ الإعلان (1.7): شريط AdMob أسفل الشاشة — نسخة الاختبار بمعرّفات Google التجريبية ══
+  await sleep(300);
+  let ad = await ev("Bridge.adsState()");
+  check("الإعلان: مفعَّلٌ في نسخة الاختبار (معرّفات تجريبية)، ومطلوبٌ في الرئيسية",
+    ad.enabled === true && ad.testIds === true && ad.wanted === true, JSON.stringify(ad));
+  for (let i = 0; i < 60 && !(ad.loaded || ad.error); i++) { await sleep(500); ad = await ev("Bridge.adsState()"); }
+  // بلا مخزونٍ أو شبكةٍ في المحاكي (2 · 3) يبقى الشريط مطويّاً — وهذا سلوكٌ صحيح
+  check("إعلانٌ تجريبي يصل فيظهر شريطاً أسفل الصفحة (أو يبقى مطويّاً بلا إعلان)",
+    (ad.loaded && ad.visible && ad.height > 0) || (!ad.loaded && !ad.visible && /^(2|3) /.test(ad.error || "")), JSON.stringify(ad));
+  shot("ad_home");
+  await ev(`location.hash = "#/settings"`);
+  await sleep(500);
+  ad = await ev("Bridge.adsState()");
+  check("ويُخفى في شاشات الإدخال (الإعدادات)", ad.wanted === false && ad.visible === false, JSON.stringify(ad));
+  await ev(`location.hash = "#/home"`);
+  await sleep(500);
+  check("ويعود في الرئيسية", (await ev("Bridge.adsState()")).wanted === true);
   shot("home");
 
   await run(ev, `location.hash = "#/settings"; await t.sleep(300); t.fill("الاسم", "مؤسسة الذهب"); t.click("حفظ الإعدادات"); await t.sleep(300);`);

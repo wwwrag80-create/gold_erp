@@ -4,6 +4,13 @@ plugins {
 
 // رقم الإصدار من ملفٍ واحد يقرؤه التطبيق والبناء معاً
 def ver = new groovy.json.JsonSlurper().parse(file("../../web/version.json"))
+// معرّفات AdMob (mobile/android/admob.properties) — التطبيق والشريط الإعلاني
+def admob = new Properties()
+file("../admob.properties").withInputStream { admob.load(it) }
+def admobApp = admob.getProperty("ADMOB_APP_ID").trim()
+def admobBanner = admob.getProperty("ADMOB_BANNER_ID").trim()
+// معرّفات Google التجريبية: لا إعلان في النسخة المنشورة (Ads.enabled)
+def admobTest = admobApp.startsWith("ca-app-pub-3940256099942544")
 
 android {
     namespace 'com.jadeite.mobile'
@@ -15,6 +22,9 @@ android {
         targetSdk 34
         versionCode ver.code as int
         versionName ver.name as String
+        manifestPlaceholders = [admobAppId: admobApp]
+        buildConfigField "String", "ADMOB_BANNER_ID", "\"${admobBanner}\""
+        buildConfigField "boolean", "ADMOB_TEST_IDS", "${admobTest}"
     }
 
     buildTypes {
@@ -47,4 +57,7 @@ dependencies {
     implementation 'androidx.webkit:webkit:1.8.0'
     implementation 'androidx.core:core:1.12.0'
     implementation 'androidx.documentfile:documentfile:1.0.1'
+    // إعلان AdMob (شريطٌ صغير) وموافقة المستخدم حيث يلزمها القانون (UMP)
+    implementation 'com.google.android.gms:play-services-ads:23.6.0'
+    implementation 'com.google.android.ump:user-messaging-platform:3.1.0'
 }

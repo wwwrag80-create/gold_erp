@@ -2048,6 +2048,8 @@
     return { parts: (path || "home").split("/"), q };
   }
 
+  const AD_SCREENS = new Set(["home", "shops", "customers", "holdings", "today", "dashboard", "shop",
+    "doc", "statement", "log", "more"]);
   function route() {
     const { parts, q } = parse();
     const v = view();
@@ -2058,6 +2060,9 @@
     v.classList.remove("enter");
     void v.offsetWidth;                       // يعيد حركة الدخول لكل شاشة
     v.classList.add("enter");
+    // الإعلان (شريطٌ صغير أسفل الشاشة) في شاشات التصفّح وحدها — لا في الإدخال
+    // ولا البحث ولا الترحيب، فلا يُلمس خطأً ولا يزاحم لوحة المفاتيح
+    B.setAds(AD_SCREENS.has(parts[0] || "home"));
     try {
       switch (parts[0]) {
         case "home": return home();

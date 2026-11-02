@@ -97,6 +97,17 @@
     installUpdate() { if (A) A.installUpdate(); },
     requestNotifications() { if (A && A.requestNotifications) A.requestNotifications(); },
 
+    // ── الإعلان: شريط AdMob أسفل الشاشة — الصفحة تقول هل تناسبه الشاشة الحالية ──
+    adsWanted: null,
+    setAds(on) {
+      Bridge.adsWanted = !!on;
+      if (A && A.setAds) A.setAds(!!on);
+    },
+    adsState() {
+      if (!A || !A.adsState) return { unsupported: true, wanted: Bridge.adsWanted };
+      try { return JSON.parse(A.adsState()); } catch (e) { return { unsupported: true }; }
+    },
+
   };
   root.Bridge = Bridge;
 })(window);
