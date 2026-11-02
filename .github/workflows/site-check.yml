@@ -35,6 +35,7 @@ jobs:
           curl -sS "$SITE/" | grep -qi "wwwrag80" && { echo "✘ اسم الحساب ظاهر في الصفحة"; fail=1; } || echo "✔ لا اسم حسابٍ في الصفحة"
           V=$(curl -sS "$SITE/app/sw.js" | grep -o 'const VERSION = "[^"]*"')
           echo "sw: $V"; echo "$V" | grep -q '"dev"' && { echo "✘ عامل الخدمة بلا إصدار"; fail=1; }
+          curl -sSI "$SITE/app/manifest.webmanifest" | grep -qi "content-type: application/manifest+json" && echo "✔ نوع ملف التطبيق" || { echo "✘ نوع ملف التطبيق"; fail=1; }
           curl -sS "$SITE/ads.txt" | grep -q "pub-2600352063526857" && echo "✔ ads.txt" || { echo "✘ ads.txt"; fail=1; }
           F=$(python3 -c "import json;print(json.load(open('mobile/dist/versions.json'))[-1]['file'])")
           S1=$(python3 -c "import json;print(json.load(open('mobile/dist/versions.json'))[-1]['sha256'])")

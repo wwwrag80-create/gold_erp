@@ -50,6 +50,10 @@ def main(out: Path) -> None:
         shutil.copy(ROOT / "site" / name, out / name)
     shutil.copy(ROOT / "dist" / apk["file"], out / "AUR.apk")
     (out / ".nojekyll").write_text("", encoding="utf-8")
+    # Netlify: نوع ملف التطبيق الصحيح، وعامل الخدمة يُفحص كل مرة (فيصل التحديث فوراً)
+    (out / "_headers").write_text(
+        "/app/manifest.webmanifest\n  Content-Type: application/manifest+json\n"
+        "/app/sw.js\n  Cache-Control: no-cache\n", encoding="utf-8")
     print(f"✔ {out} — الويب {ver['name']} · أندرويد {apk['version']} · {len(files)} ملفاً في app/")
 
 
