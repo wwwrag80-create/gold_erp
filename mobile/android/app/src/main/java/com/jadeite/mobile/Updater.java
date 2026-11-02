@@ -311,6 +311,13 @@ final class Updater {
         } catch (Exception ignored) { }
     }
 
+    /** نسخة المتجر: لا فحص دوري (ولو بقي من نسخةٍ مباشرةٍ سابقة على الجهاز). */
+    static void cancel(Context c) {
+        try {
+            ((JobScheduler) c.getSystemService(Context.JOB_SCHEDULER_SERVICE)).cancel(JOB_ID);
+        } catch (Exception ignored) { }
+    }
+
     static Intent installIntent(Context c, File f) {
         Uri u = FileProvider.getUriForFile(c, c.getPackageName() + ".files", f);
         return new Intent(Intent.ACTION_VIEW)

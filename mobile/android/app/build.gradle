@@ -14,12 +14,13 @@ def admobTest = admobApp.startsWith("ca-app-pub-3940256099942544")
 
 android {
     namespace 'com.jadeite.mobile'
-    compileSdk 34
+    // أندرويد 16 (API 36): ما يشترطه Google Play للتطبيقات الجديدة وتحديثاتها
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.jadeite.mobile"
         minSdk 24
-        targetSdk 34
+        targetSdk 36
         versionCode ver.code as int
         versionName ver.name as String
         manifestPlaceholders = [admobAppId: admobApp]
@@ -30,6 +31,20 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+        }
+    }
+    // نسختان من الكود نفسه: «direct» (الرابط المباشر — يحدّث نفسه من GitHub كما كان)،
+    // و«play» لمتجر Google Play: لا تحديث ذاتي ولا إذن تثبيت (سياسة المتجر —
+    // التحديث عبره وحده)، وما سوى ذلك واحد
+    flavorDimensions = ["store"]
+    productFlavors {
+        direct {
+            dimension "store"
+            buildConfigField "boolean", "SELF_UPDATE", "true"
+        }
+        play {
+            dimension "store"
+            buildConfigField "boolean", "SELF_UPDATE", "false"
         }
     }
     buildFeatures {

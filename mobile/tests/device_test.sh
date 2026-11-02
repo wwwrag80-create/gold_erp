@@ -3,7 +3,7 @@
 set -u
 OUT="${OUT:-device-out}"
 mkdir -p "$OUT"
-APK=mobile/android/app/build/outputs/apk/debug/app-debug.apk
+APK=mobile/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk
 if ! adb install -r "$APK" > "$OUT/install.txt" 2>&1; then
   echo '{"failed":1,"results":[{"name":"install","ok":false}]}' > "$OUT/result.json"
   cat "$OUT/install.txt"

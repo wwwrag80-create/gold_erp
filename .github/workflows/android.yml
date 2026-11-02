@@ -45,21 +45,37 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: "8.5"
+          gradle-version: "8.13"
 
-      - name: بناء ملف التثبيت (والنسخة التجريبية للمحاكي)
+      - name: بناء ملف التثبيت (والنسخة التجريبية للمحاكي) وحزمة Google Play
         working-directory: mobile/android
-        run: gradle --no-daemon --stacktrace assembleRelease assembleDebug
+        run: gradle --no-daemon --stacktrace assembleDirectRelease assembleDirectDebug bundlePlayRelease
+
+      # حزمة المتجر: تُفحص قبل أي رفع — API 36، وبلا أذونات التحديث الذاتي
+      - name: فحص حزمة Google Play (AAB)
+        run: |
+          AAB=mobile/android/app/build/outputs/bundle/playRelease/app-play-release.aab
+          curl -sSL -o "$RUNNER_TEMP/bundletool.jar" https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+          java -jar "$RUNNER_TEMP/bundletool.jar" validate --bundle="$AAB"
+          java -jar "$RUNNER_TEMP/bundletool.jar" dump manifest --bundle="$AAB" > "$RUNNER_TEMP/play-manifest.xml"
+          grep -o 'targetSdkVersion="[0-9]*"' "$RUNNER_TEMP/play-manifest.xml"
+          grep -q 'targetSdkVersion="36"' "$RUNNER_TEMP/play-manifest.xml"
+          ! grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/play-manifest.xml"
+          grep -q "com.google.android.gms.ads.APPLICATION_ID" "$RUNNER_TEMP/play-manifest.xml"
+          echo "AAB ok"
 
       - name: نشر الملف (غير موقّع)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V=$(python -c "import json;print(json.load(open('mobile/web/version.json'))['name'])")
-          cp mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk jadeite-mobile-unsigned.apk
+          cp mobile/android/app/build/outputs/apk/direct/release/app-direct-release-unsigned.apk jadeite-mobile-unsigned.apk
           sha256sum jadeite-mobile-unsigned.apk | tee jadeite-mobile-unsigned.apk.sha256
+          cp mobile/android/app/build/outputs/bundle/playRelease/app-play-release.aab jadeite-mobile-play-unsigned.aab
+          sha256sum jadeite-mobile-play-unsigned.aab | tee jadeite-mobile-play-unsigned.aab.sha256
           gh release delete mobile-unsigned --yes --cleanup-tag || true
           gh release create mobile-unsigned jadeite-mobile-unsigned.apk jadeite-mobile-unsigned.apk.sha256 \
+            jadeite-mobile-play-unsigned.aab jadeite-mobile-play-unsigned.aab.sha256 \
             --prerelease --target "$GITHUB_SHA" \
             --title "Jadeite mobile $V — unsigned build" \
             --notes "Unsigned build of mobile/ at ${GITHUB_SHA::7}. Not installable as is: it is signed with the owner's key outside this repository. Device test results are attached when the emulator run finishes."
@@ -84,6 +100,22 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash mobile/tests/device_test.sh
 
+      # أندرويد 15: التطبيق يُرسم تحت شريطي النظام (targetSdk 36) — صورٌ للتحقّق أن
+      # الصفحة مزاحةٌ عنهما وأن لا انهيار
+      - name: أندرويد 15 — الحواف (edge-to-edge)
+        id: edge
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          OUT: device-out
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash mobile/tests/edge_test.sh
+
       - name: إرفاق نتائج التجربة بالإصدار
         if: always()
         env:
@@ -96,7 +128,7 @@ jobs:
           fi
 
       - name: نتيجة التجربة على الجهاز
-        if: steps.device.outcome != 'success'
+        if: steps.device.outcome != 'success' || steps.edge.outcome != 'success'
         run: |
           echo "فشلت التجربة على المحاكي — التفاصيل في device-test.zip"
           exit 1

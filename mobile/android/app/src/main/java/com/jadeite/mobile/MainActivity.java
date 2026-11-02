@@ -34,9 +34,15 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.window.OnBackInvokedDispatcher;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewAssetLoader;
 
 import org.json.JSONArray;
@@ -113,6 +119,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(page);
         ads = new Ads(this, adBar);
+        edgeToEdge(page);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -178,9 +185,18 @@ public class MainActivity extends Activity {
         if (state != null) web.restoreState(state);
         else web.loadUrl(BASE + "index.html");
 
-        Updater.ensureChannel(this);
-        Updater.schedule(this);
+        if (BuildConfig.SELF_UPDATE) {
+            Updater.ensureChannel(this);
+            Updater.schedule(this);
+        } else {
+            Updater.cancel(this);
+        }
         ads.start();
+        // الرجوع (أندرويد 13+ بالإيماءة الجديدة): صفحةٌ للوراء، أو إلى الخلفية كما كان
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::goBack);
+        }
         // النشر خرج من التطبيق (إلى GitHub): لا يبقى مفتاح نشرٍ قديم في أي جوال
         getSharedPreferences("publisher", MODE_PRIVATE).edit().clear().apply();
         handleIntent(getIntent());
@@ -274,8 +290,34 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        goBack();
+    }
+
+    void goBack() {
         if (web.canGoBack()) web.goBack();
-        else super.onBackPressed();
+        else moveTaskToBack(true);
+    }
+
+    /**
+     * أندرويد 15+ يرسم التطبيق تحت شريطي النظام (API 35/36): الصفحة تُزاح عنهما
+     * وعن لوحة المفاتيح بقدرهما، وما تحتهما بلون الشريط (surface) — فيبقى المظهر
+     * كما كان على كل الإصدارات.
+     */
+    void edgeToEdge(View page) {
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        page.setBackgroundColor(getColor(R.color.surface));
+        boolean night = (getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        WindowInsetsControllerCompat c = new WindowInsetsControllerCompat(getWindow(), page);
+        c.setAppearanceLightStatusBars(!night);
+        c.setAppearanceLightNavigationBars(!night);
+        ViewCompat.setOnApplyWindowInsetsListener(page, (v, wi) -> {
+            Insets bars = wi.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            Insets ime = wi.getInsets(WindowInsetsCompat.Type.ime());
+            v.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+            return WindowInsetsCompat.CONSUMED;
+        });
     }
 
     @Override
@@ -634,11 +676,16 @@ public class MainActivity extends Activity {
         // ── التحديث ──
         @JavascriptInterface
         public String updateState() {
+            // نسخة المتجر: التحديث من Google Play — فلا زرّ ولا قناة في التطبيق
+            if (!BuildConfig.SELF_UPDATE) {
+                return obj("unsupported", true, "store", "play", "version", BuildConfig.VERSION_NAME).toString();
+            }
             return Updater.state(MainActivity.this).toString();
         }
 
         @JavascriptInterface
         public void checkUpdate() {
+            if (!BuildConfig.SELF_UPDATE) return;
             bg.execute(() -> {
                 try {
                     Updater.fetchPointer(MainActivity.this);
@@ -657,6 +704,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void installUpdate() {
+            if (!BuildConfig.SELF_UPDATE) return;
             bg.execute(() -> {
                 try {
                     JSONObject p = Updater.cachedPointer(MainActivity.this);
@@ -677,7 +725,8 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void requestNotifications() {
-            if (Build.VERSION.SDK_INT >= 33 && !Updater.canNotify(MainActivity.this)) {
+            // الإشعار لـ«التحديث جاهز» وحده — ونسخة المتجر لا تحتاجه
+            if (BuildConfig.SELF_UPDATE && Build.VERSION.SDK_INT >= 33 && !Updater.canNotify(MainActivity.this)) {
                 ui.post(() -> requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY));
             }
         }
@@ -685,7 +734,7 @@ public class MainActivity extends Activity {
         // ── لنسخة الاختبار وحدها (debuggable): تجربة سلسلة التحديث آلياً ──
         @JavascriptInterface
         public void _testInstall(String url, String sha, String version) {
-            if (!debuggable()) return;
+            if (!debuggable() || !BuildConfig.SELF_UPDATE) return;
             bg.execute(() -> {
                 try {
                     File f = Updater.apkFile(MainActivity.this, 999999);
