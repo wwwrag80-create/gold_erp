@@ -59,6 +59,30 @@ function earrings() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="700"><defs>${GOLD}</defs>
     <rect width="900" height="700" fill="url(#bg)"/>${one(300)}${one(600)}</svg>`;
 }
+// صورة فاتورةٍ ورقية من المصنع (للتسجيل بالوزن والأجور، مرجعاً للمندوب) — بخطّ التطبيق
+function invoicePaper() {
+  const font = (w) => fs.readFileSync(path.join(WEB, `fonts/IBMPlexSansArabic-${w}.ttf`)).toString("base64");
+  const row = (a, b, c, d, cls) => `<tr class="${cls || ""}"><td>${a}</td><td>${b}</td><td>${c}</td><td>${d}</td></tr>`;
+  return `<style>
+    @font-face { font-family: P; src: url(data:font/ttf;base64,${font("Regular")}); font-weight: 400; }
+    @font-face { font-family: P; src: url(data:font/ttf;base64,${font("Bold")}); font-weight: 700; }
+    body { margin: 0; width: 900px; height: 700px; background: radial-gradient(circle at 40% 35%, #4A443A, #0B0907); overflow: hidden; }
+    .paper { position: absolute; left: 150px; top: 40px; width: 600px; height: 640px; background: #FAF8F3; transform: rotate(-3deg);
+      box-shadow: 0 30px 60px rgba(0,0,0,.55); direction: rtl; font-family: P; color: #0B0907; padding: 34px 38px; box-sizing: border-box; }
+    h1 { margin: 0; font-size: 38px; } .m { color: #4A443A; font-size: 20px; margin-top: 6px; display: flex; justify-content: space-between; }
+    table { width: 100%; border-collapse: collapse; margin-top: 26px; font-size: 21px; }
+    td { border-bottom: 1.5px solid #4A443A; padding: 12px 6px; text-align: center; } td:first-child { text-align: right; }
+    tr.h td { font-weight: 700; border-bottom: 3px solid #0B0907; } tr.t td { font-weight: 700; border-bottom: none; }
+    .st { position: absolute; left: 50px; bottom: 50px; width: 130px; height: 130px; border-radius: 50%; border: 5px solid #B08E2A;
+      color: #B08E2A; font-weight: 700; font-size: 22px; display: flex; align-items: center; justify-content: center; transform: rotate(-14deg); opacity: .85; }
+    .sg { position: absolute; right: 40px; bottom: 70px; font-size: 20px; color: #4A443A; }
+  </style><div class="paper"><h1>فاتورة بيع ذهب</h1>
+    <div class="m"><span>رقم: ٢٤١٧</span><span>التاريخ: ٠٢-١١-٢٠٢٦</span></div>
+    <div class="m"><span>إلى: مؤسسة الذهب</span></div>
+    <table>${row("الصنف", "العيار", "الوزن (جم)", "الأجور", "h")}${row("أطقم ذهب مشغول", "١٨", "٥٠٫٠٠", "١٬٠٠٠٫٠٠")}
+      ${row("الإجمالي", "", "٥٠٫٠٠", "١٬٠٠٠٫٠٠", "t")}</table>
+    <div class="st">ختم المصنع</div><div class="sg">التوقيع: ............</div></div>`;
+}
 
 (async () => {
   const srv = await serve();
@@ -68,7 +92,7 @@ function earrings() {
   // الصور أولاً
   const pg0 = await browser.newPage({ viewport: { width: 900, height: 700 } });
   const photos = {};
-  for (const [k, fn] of Object.entries({ necklace, ring, earrings })) {
+  for (const [k, fn] of Object.entries({ necklace, ring, earrings, invoice: invoicePaper })) {
     await pg0.setContent(`<body style="margin:0">${fn()}</body>`);
     photos[k] = await pg0.screenshot({ type: "png" });
     fs.writeFileSync(path.join(OUT, `photo_${k}.png`), photos[k]);
@@ -257,6 +281,17 @@ function earrings() {
   await setPhotos(["ring"], 1);
   await snap("p_lines", "الطقم الأول في «البنود»",
     "يَظْهَرُ الطَّقْمُ الْأَوَّلُ فِي «الْبُنُودِ» أَسْفَلَ الشَّاشَةِ، وَتَحْتَهُ الْإِجْمَالِيُّ.", page.locator(".line").first());
+  // الطريقة الأخرى: البضاعة جملةً — وزنها وأجورها، وصورة فاتورة المصنع مرجعاً
+  await btn("+ إضافة").click();
+  await wait(500);
+  await fill("الوزن (جم)", "50");
+  await fill("الأجور", "1000");
+  await snap("p_bulk", "أو جملةً: الوزن والأجور فقط",
+    "وَإِنْ شِئْتَ، سَجِّلِ الْبِضَاعَةَ جُمْلَةً: اُتْرُكْ خَانَةَ «الطَّقْمِ» فَارِغَةً، وَاكْتُبْ وَزْنَ الْبِضَاعَةِ، وَالْأُجُورَ الَّتِي عَلَيْكَ.",
+    field("الوزن (جم)"), { focus: { x: 196, y: 215, s: 1.3 } });
+  await setPhotos(["invoice"], 1);
+  await snap("p_bulk_photo", "وصورة فاتورة المصنع مرجعاً لك",
+    "ثُمَّ أَضِفْ صُورَةَ الْفَاتُورَةِ الَّتِي كَتَبَهَا الْمَصْنَعُ، لِتَكُونَ مَرْجِعًا لَكَ.", page.locator(".photo-pick"), { s: 1.5 });
   await snap("p_save", "آخر طقم؟ «حفظ الفاتورة» مباشرة",
     "وَبَعْدَ آخِرِ طَقْمٍ، انْقُرْ عَلَى «حِفْظِ الْفَاتُورَةِ» مُبَاشَرَةً، وَلَا تَحْتَاجُ إِلَى «زَائِدْ إِضَافَة».",
     footerBtn("حفظ الفاتورة"), { press: true, after: 700 });
@@ -306,6 +341,8 @@ function earrings() {
     sheetItem("ط-101").locator(".grow"), { press: true, after: 700 });
   await snap("sale_filled", "يُعبّأ الطقم ووزنه وصوره",
     "يُعَبِّئُ التَّطْبِيقُ اسْمَ الطَّقْمِ، وَوَزْنَهُ، وَعِيَارَهُ، وَصُوَرَهُ تِلْقَائِيًّا.", field("الوزن (جم)"));
+  await snap("sale_photos", "صور الطقم — وتستطيع إضافة غيرها",
+    "وَتَظْهَرُ صُوَرُ الطَّقْمِ هُنَا، وَتَسْتَطِيعُ إِضَافَةَ صُوَرٍ أُخْرَى لَهُ.", page.locator(".photo-pick"), { s: 1.5 });
   await snap("sale_wages_auto", "الأجور المتفق عليها تلقائياً",
     "وَفِي خَانَةِ «الْأُجُورِ» تَظْهَرُ أُجْرَةُ الْعَمِيلِ الْمُتَّفَقُ عَلَيْهَا تِلْقَائِيًّا. اُتْرُكْهَا كَمَا هِيَ، أَوِ اكْتُبْ مَبْلَغًا آخَرَ.",
     field("الأجور"));

@@ -29,15 +29,12 @@ function timeline(m, V) {
     t += d;
   };
   // «قصير»: بلا بطاقات فصول، والجوال متّصل، ومشاهد أسرع. «صامت»: المدة على قدر النص
-  // ويبدأ القصير بلوحة «ماذا تستفيد؟» ثم يظهر اسم النظام
+  // البداية: شعار النظام واسمه، ثم لوحة «ماذا تستفيد؟»
   const M = m.meta || {}, SHORT = !!M.short, SILENT = !!M.silent;
-  const intro = () => {
-    if (SILENT) add({ type: "intro" }, 4.0, null, 0);
-    else if (SHORT) add({ type: "intro" }, Math.max(4.2, 1.0 + dur("intro") + 0.7), "intro", 1.0);
-    else add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
-  };
+  if (SILENT) add({ type: "intro" }, 4.4, null, 0);
+  else if (SHORT) add({ type: "intro" }, Math.max(4.2, 1.0 + dur("intro") + 0.7), "intro", 1.0);
+  else add({ type: "intro" }, Math.max(5.6, 1.4 + dur("intro") + 0.9), "intro", 1.4);
   const B = m.meta && m.meta.benefits;
-  if (!(SHORT && B)) intro();
   // لوحة «ماذا تستفيد من النظام؟»: كل فائدةٍ تظهر مع صوتها (أو بقدر قراءتها بلا صوت)، ثم خاتمتها
   if (B) {
     const st = t;
@@ -60,7 +57,6 @@ function timeline(m, V) {
       start: +st.toFixed(3), end: +(st + p).toFixed(3) });
     t += p;
   }
-  if (SHORT && B) intro();
   const items = m.shots;
   const chapters = items.filter((x) => x.type === "chapter");
   let ch = null, step = 0, prevIdx = null, idx = 0;
