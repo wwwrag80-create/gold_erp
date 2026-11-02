@@ -34,6 +34,8 @@
   function goldBal(w18, fac) { return balSpan(G.g(w18, vk()), "جم", fac); }
   function cashBal(c, fac) { return balSpan(c, "ريال", fac); }
   const APP_NAME = "ÀUR";
+  // رابط ÀUR للجميع: الآيفون (يُضاف إلى الشاشة الرئيسية) وتحميل أندرويد — Netlify
+  const SITE_URL = "https://deluxe-chebakia-749799.netlify.app";
 
   // الانتقال بعد أن يكتمل رجوع السجل الذي يتبع إغلاق نافذةٍ سفلية — وإلا ألغاه
   function go(path) { root.UI.idle().then(() => { location.hash = "#/" + path; }); }
@@ -1676,6 +1678,8 @@
       item("book", "كشف حساب", "محل أو مصنع", pickPartyThen(null, (id) => go(`statement/${id}`))),
       us.unsupported ? null : item("update", "التحديثات", us.available ? "يوجد إصدارٌ جديد" : `الإصدار ${us.version}`, updateSheet),
       item("settings", "الإعدادات والحفظ", "اسم النشاط · العيار · المظهر · الحفظ التلقائي", () => go("settings")),
+      item("share", `شارك ${APP_NAME} مع غيرك`, "رابطٌ واحد للآيفون وأندرويد — مجاني",
+        () => B.shareText(`${APP_NAME} — حسابات الذهب للمندوب، مجاني لأندرويد والآيفون:\n${SITE_URL}`)),
       // حيث يلزم القانون (أوروبا وبريطانيا) وحده: تغيير موافقة الإعلانات
       B.adsState().privacy === true ? item("shield", "خيارات الخصوصية للإعلانات", "موافقتك على الإعلانات — غيّرها متى شئت", () => B.adsPrivacy()) : null,
       root.Promo && root.Promo.contact() ? item("megaphone", "أعلن في التطبيق", "اعرض نشاطك لكل المستخدمين", advertiseSheet) : null);

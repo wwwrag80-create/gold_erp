@@ -80,12 +80,14 @@ Mac/Xcode يلزم فقط لمن أراد فتح المشروع وتعديله �
 - الموقع يُبنى بـ `python3 mobile/tools/build_site.py OUT` وفيه: صفحة التثبيت (`mobile/site`)، والتطبيق نفسه في
   `app/` (يُضاف إلى الشاشة الرئيسية من سفاري، ويعمل بلا إنترنت، والتحديث بنافذة «يوجد تحديث جديد»)، ورابط تطبيق
   أندرويد، وسياسة الخصوصية، و`ads.txt`/`app-ads.txt`.
-- مكانه: **Netlify** (مجاني) برابطٍ محايد مثل `https://aur-gold.netlify.app` — `netlify.toml` في جذر المستودع يبنيه
+- مكانه: **Netlify** (مجاني) برابطٍ محايد: **https://deluxe-chebakia-749799.netlify.app** (يمكن تغيير اسمه من
+  Site configuration ← Change site name — ثم يُحدَّث `SITE_URL` في `mobile/web/js/app.js` و`site-check.yml`) — `netlify.toml` في جذر المستودع يبنيه
   من `mobile/` عند كل دفعٍ إلى main (فيصل كل إصدارٍ وحده)، ومعه ملف أندرويد `AUR.apk` من الموقع نفسه.
   الربط مرةً واحدة: netlify.com ← Sign up بـ GitHub ← Add new site ← Import ← GitHub ← gold_erp ← Deploy،
   ثم Site configuration ← Change site name ← `aur-gold`.
 - الحفظ: البيانات تُحفظ في الجوال فوراً؛ وبعد كل تغييرٍ بثوانٍ (وعند الفتح) يظهر «احفظ نسخة» — لمسةٌ تحفظ الملف في
   «الملفات»/iCloud (المتصفح لا يكتب خارج نفسه وحده — قاعدة Apple). والاسترجاع من الملف في أول فتح.
+- فحص الموقع كما يراه المستخدم: Actions ← «فحص موقع ÀUR» (الصفحات، وبصمة AUR.apk، والتطبيق بلا إنترنت).
 - **الإعلانات (AdSense)**: adsense.google.com بحساب Google نفسه ← Sites ← أضف رابط الموقع (التحقّق
   بوسم `google-adsense-account` الموجود في الصفحة، و`ads.txt`). بعد القبول: Ads ← By ad unit ← Display ← أفقي ←
   يُرسَل رقم الوحدة (data-ad-slot) فيوضع في `mobile/web/js/webads.js` (`slot`). أبقِ **Auto ads مطفأة** (الإعلان شريطٌ
