@@ -26,9 +26,26 @@ final class AURUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[cd] %@", text)).firstMatch
     }
 
+    /// أول تشغيل: رسالة موافقة الإعلانات من Google (UMP) ثم سؤال iOS عن التتبّع — حيث
+    /// يُعدّها حساب AdMob. «متابعة» ثم «اطلب من التطبيق عدم التتبّع»؛ والتطبيق يعمل في الحالين.
+    func passConsent() {
+        let cont = app.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "متابعة"])).firstMatch
+        guard cont.waitForExistence(timeout: 25) else { return }
+        snap("00_consent")
+        cont.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let deny = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@",
+                                                            "Not to Track", "عدم التتبع")).firstMatch
+        if deny.waitForExistence(timeout: 10) {
+            snap("00_tracking")
+            deny.tap()
+        }
+    }
+
     func testLaunchHomeSearchAndTabs() throws {
         // أول تشغيل: شاشة الترحيب باسم التطبيق وزرّي مجلد الحفظ
         XCTAssertTrue(anyText("ÀUR").waitForExistence(timeout: 30), "الترحيب باسم ÀUR")
+        passConsent()
         XCTAssertTrue(button("اختر مجلد الحفظ").exists, "زرّ مجلد الحفظ التلقائي")
         snap("01_welcome")
         button("تخط").tap()

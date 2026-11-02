@@ -48,13 +48,17 @@ function webBounds() {
 (async () => {
   const size = adb("shell", "wm", "size").toString().match(/(\d+)x(\d+)/);
   const H = +size[2];
+  // شريط الحالة 24dp: بالبكسل حسب كثافة الشاشة (160 = 1×)
+  const dpi = +((adb("shell", "wm", "density").toString().match(/(\d+)\s*$/m) || [0, 160])[1]);
+  const bar = Math.round(24 * dpi / 160);
   const ev = await connect();
   for (let i = 0; i < 40 && !(await ev("!!(window.App && App.state)")); i++) await sleep(250);
-  await ev(`try { localStorage.setItem("welcomed", "1"); } catch (e) {} location.hash = "#/home"; 1`);
-  await sleep(1200);
+  await ev(`try { localStorage.setItem("welcomed", "1"); } catch (e) {} App.go("home"); 1`);
+  for (let i = 0; i < 20 && !(await ev(`!!document.querySelector("#view .op-tile")`)); i++) await sleep(250);
+  await sleep(600);
   shot("02_home");
   const w = webBounds();
-  check("أندرويد 15: الصفحة تبدأ تحت شريط الحالة لا خلفه", w && w.t >= 40, JSON.stringify(w));
+  check("أندرويد 15: الصفحة تبدأ تحت شريط الحالة لا خلفه", w && w.t >= bar, `${JSON.stringify(w)} · شريط الحالة ${bar}px`);
   check("وتنتهي فوق شريط التنقّل", w && w.b <= H - 20, `${JSON.stringify(w)} / ${H}`);
   // لوحة المفاتيح: خانةٌ في الإعدادات تُلمس فتظهر — والصفحة تقصر بقدرها
   await ev(`location.hash = "#/settings"; 1`);
