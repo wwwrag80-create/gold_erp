@@ -301,5 +301,48 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("عميل ب دفع أكثر مما أخذ: له 2 — فلا يُحسب في «عند العملاء»", b.gold18 === -2 && ex.cusGold18 === 20 && ex.cusCash === 240, ex);
 }
 
+// ══ البحث عن طقم: باسمه أو وزنه — ومع من هو الآن (1.6) ══
+{
+  const t = D.newState();
+  const f = D.saveShop(t, { name: "مصنع الريان", type: "factory" });
+  const c = D.saveShop(t, { name: "محل الأمانة" });
+  const c2 = D.saveShop(t, { name: "مجوهرات النخبة" });
+  const p = D.saveInvoice(t, { kind: "purchase", shopId: f.id, date: "2026-03-01", lines: [
+    D.buildLine({ wo: "ط-101", reg: 24.5, wages: 490, photos: ["ph1", "ph2"] }),
+    D.buildLine({ wo: "ط-102", reg: 18.75, wages: 375 }),
+    D.buildLine({ wo: "خاتم 7", karat: 21, reg: 6, wages: 60 }),
+    D.buildLine({ reg: 50, wages: 1000, photos: ["inv"] })] });
+  const bulkId = p.lines[3].lid;
+  D.saveInvoice(t, { kind: "sale", shopId: c.id, date: "2026-03-02", lines: [D.buildLine({ wo: "ط-101", reg: 24.5, wages: 600 })] });
+  D.saveInvoice(t, { kind: "purchase_return", shopId: f.id, date: "2026-03-03", lines: [D.buildLine({ wo: "ط-102", reg: 18.75, wages: 375 })] });
+  D.saveInvoice(t, { kind: "sale", shopId: c2.id, date: "2026-03-04", lines: [D.buildLine({ reg: 50, wages: 900, src: bulkId })] });
+  // بيعٌ بالوزن مباشرةً (بلا اسمٍ ولا طقمٍ مختار) — ليس طقماً يُتتبَّع
+  D.saveInvoice(t, { kind: "sale", shopId: c.id, date: "2026-03-05", lines: [D.buildLine({ reg: 10, wages: 250 })] });
+  const names = (r) => r.map((x) => x.name || "بلا اسم").join("،");
+  const r1 = D.searchSets(t, "ط");
+  check("من أول حرف: «ط» ⇒ الطقمان ط-101 وط-102 (الأحدث حركةً أولاً)", names(r1) === "ط-102،ط-101", names(r1));
+  const a = D.searchSets(t, "ط-101")[0];
+  check("ط-101: عند «محل الأمانة» — مباعٌ بالفاتورة S-00001", a.where === "customer" && a.party.id === c.id && a.last.inv.no === "S-00001", a.where);
+  check("وحركتاه: بضاعة ثم بيع، ووزنه 24.50 عيار 18 وصورتاه", a.moves.map((m) => m.kind).join(",") === "purchase,sale" &&
+    a.weight === 24.5 && a.karat === 18 && a.photos.join() === "ph1,ph2");
+  check("ط-102 رجع إلى المصنع", D.searchSets(t, "ط-102")[0].where === "factory");
+  check("بلا مسافةٍ ولا شَرطة وبأرقامٍ عربية: «ط١٠١» = ط-101", names(D.searchSets(t, "ط١٠١")) === "ط-101");
+  check("وجزءٌ من الاسم: «101» يجد ط-101", names(D.searchSets(t, "101")) === "ط-101");
+  check("الألف والتاء: «خاتم ٧» و«خاتم7»", names(D.searchSets(t, "خاتم ٧")) === "خاتم 7" && names(D.searchSets(t, "خاتم7")) === "خاتم 7");
+  check("وعياره 21 بوزنه بعياره: 6.00", D.searchSets(t, "خاتم")[0].weight === 6 && D.searchSets(t, "خاتم")[0].karat === 21);
+  const w = D.searchSets(t, "24.5");
+  check("بالوزن: «24.5» ⇒ ط-101 (24.50)", names(w) === "ط-101", names(w));
+  check("وبأول الرقم: «18» ⇒ ط-102 (18.75)", names(D.searchSets(t, "18")) === "ط-102");
+  const u = D.searchSets(t, "50");
+  check("والطقم بلا اسم بوزنه 50 — بيع من الأطقم التي معي ⇒ عند «مجوهرات النخبة»",
+    u.length === 1 && !u[0].name && u[0].where === "customer" && u[0].party.id === c2.id && u[0].photos.join() === "inv", names(u));
+  check("والبيع بالوزن مباشرةً (10 جم) ليس طقماً", D.searchSets(t, "10").every((x) => x.name), names(D.searchSets(t, "10")));
+  check("الاسم المطابق تماماً قبل ما يحويه", D.searchSets(t, "ط-101")[0].name === "ط-101");
+  check("ولا نتائج لنصٍّ فارغ أو غير مطابق", D.searchSets(t, "  ").length === 0 && D.searchSets(t, "س").length === 0);
+  // يعود الطقم إلى اليد بمرتجعٍ من العميل
+  D.saveInvoice(t, { kind: "sale_return", shopId: c.id, date: "2026-03-06", lines: [D.buildLine({ wo: "ط-101", reg: 24.5, wages: 600 })] });
+  check("بعد المرتجع: ط-101 معك", D.searchSets(t, "ط-101")[0].where === "in");
+}
+
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);
 process.exit(fail ? 1 : 0);

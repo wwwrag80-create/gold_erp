@@ -465,6 +465,72 @@
     const h = woHistory(st, woNo).filter((m) => m.inv.id !== excludeInvoiceId);
     return h.length ? h[h.length - 1] : null;
   }
+  // ══ البحث عن طقم: باسمه أو بوزنه — ومع من هو الآن (1.6) ══
+  // تطبيعٌ للبحث: أرقامٌ لاتينية، وبلا تشكيلٍ ولا تطويل، وأشكال الألف والياء
+  // والتاء واحدة، وبلا مسافاتٍ ولا شَرطات — فـ«ط١٠١» و«ط-101» و«ط 101» سواء
+  function digitsLatin(t) {
+    return String(t == null ? "" : t).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x660))
+      .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x6F0));
+  }
+  function searchKey(t) {
+    return digitsLatin(t).replace(/[ً-ْٰـ]/g, "")
+      .replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
+      .toLowerCase().replace(/[\s\-_/.,،٫·]+/g, "");
+  }
+  // الأطقم كلها بحركاتها: المسمّى باسمه، والذي بلا اسم بسطر دخوله وما اختير
+  // منه بعد ذلك (`src`) — كل طقمٍ: آخر حركةٍ ووزنه وعياره وأين هو الآن
+  function setTracks(st) {
+    const tracks = new Map();
+    const unnamed = new Map();
+    for (const d of st.invoices.slice().sort(docOrder)) {
+      d.lines.forEach((li, idx) => {
+        if (li.wageOnly) return;
+        const name = (li.wo || "").trim();
+        let key = null;
+        if (name) key = "n:" + name;
+        else if (IN_KINDS.includes(d.kind)) { key = "u:" + lineId(d, li, idx); unnamed.set(lineId(d, li, idx), key); }
+        else if (li.src && unnamed.has(li.src)) key = unnamed.get(li.src);
+        if (!key) return;
+        let t = tracks.get(key);
+        if (!t) { t = { key, name, moves: [] }; tracks.set(key, t); }
+        t.moves.push({ inv: d, line: li, idx, kind: d.kind, date: d.date, createdAt: d.createdAt, shop: shopById(st, d.shopId) });
+      });
+    }
+    return [...tracks.values()].map((t) => {
+      const last = t.moves[t.moves.length - 1];
+      const karat = last.line.karat || 18;
+      // الصور: من آخر سطرٍ فيه صور (سطر البيع يحمل صور الطقم عادةً)
+      const withPh = t.moves.slice().reverse().find((m) => linePhotos(m.line).length);
+      return { key: t.key, name: t.name, moves: t.moves, last, karat,
+        w18: last.line.reg18 || 0, weight: Gold.g(last.line.reg18 || 0, karat),
+        where: IN_KINDS.includes(last.kind) ? "in" : last.kind === "sale" ? "customer" : "factory",
+        party: last.shop, photos: withPh ? linePhotos(withPh.line) : [] };
+    });
+  }
+  // يطابق من أول حرف: بدايةُ الاسم أولاً ثم ما يحويه، وإن كان المكتوب رقماً
+  // طابق الوزنَ أيضاً (24 ← 24.50 · ‎24.5 ← 24.50) — الأحدث حركةً أولاً
+  function searchSets(st, query, limit) {
+    const raw = digitsLatin(query).trim().replace(/[٫,]/g, ".");
+    const q = searchKey(query);
+    if (!q) return [];
+    const num = /^\d+(\.\d*)?$/.test(raw) ? raw : null;
+    const out = [];
+    for (const t of setTracks(st)) {
+      const k = searchKey(t.name);
+      let rank = 0;
+      if (k && k === q) rank = 4;
+      else if (k && k.startsWith(q)) rank = 3;
+      else if (k && k.includes(q)) rank = 2;
+      if (num !== null) {
+        const ws = Num.pyRound(t.weight, 2).toFixed(2);
+        if (ws === Number(num).toFixed(2) || ws.startsWith(num)) rank = Math.max(rank, 1);
+      }
+      if (rank) out.push({ rank, t });
+    }
+    out.sort((a, b) => b.rank - a.rank || docOrder(b.t.last.inv, a.t.last.inv));
+    return out.slice(0, limit || 30).map((x) => x.t);
+  }
+
   function daysBetween(a, b) {
     const t = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
     return Math.round((t(b) - t(a)) / 86400000);
@@ -694,7 +760,7 @@
     buildLine, lineToEntry, totals, checkLines, saveInvoice, deleteInvoice,
     voucherRows, saveVoucher, deleteVoucher,
     effects, docsOf, statement, balance, balanceAround, allBalances,
-    woHistory, woLast, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
+    woHistory, woLast, setTracks, searchSets, searchKey, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
     diamondOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };

@@ -264,6 +264,11 @@
       h("span", { class: "op-ic" }, ico("book", 24)),
       h("span", { class: "grow" }, h("span", { class: "op-t" }, "كشف حساب"), h("span", { class: "op-h" }, "عميل أو مصنع — بالذهب أو بالألماس، ويُرسَل صورة")),
       ico("chevron", 20, "muted")));
+    // بحث عن طقم: باسمه أو وزنه — ومع من هو الآن
+    v.append(h("button", { class: "wide-tile search", onclick: () => go("wo") },
+      h("span", { class: "op-ic" }, ico("search", 24)),
+      h("span", { class: "grow" }, h("span", { class: "op-t" }, "بحث عن طقم"), h("span", { class: "op-h" }, "باسمه أو وزنه — ومع من هو الآن")),
+      ico("chevron", 20, "muted")));
     // عمليات اليوم
     const todays = [...s.invoices, ...s.vouchers].filter((d) => d.date === t);
     let tw = 0, tg = 0;
@@ -1454,27 +1459,54 @@
   }
 
   // ══ حركة الطقم (باسمه) ══
+  // ══ البحث عن طقم: باسمه أو وزنه — ومع من هو الآن (1.6) ══
+  // الاقتراحات تظهر من أول حرف (أو أول رقمٍ للوزن)، ولمس الطقم يعرض مكانه
+  // الآن وكل حركاته؛ والطقم بلا اسم يُتتبَّع بسطر دخوله وما اختير منه بعده
+  function setWhere(t) {
+    const who = t.party ? t.party.name : "—";
+    if (t.where === "in") return { short: "معك", cls: "badge grade good",
+      long: `معك — ${t.last.kind === "purchase" ? "من مصنع" : "مرتجعٌ من"} «${who}»` };
+    if (t.where === "customer") return { short: `عند «${who}»`, cls: "badge",
+      long: `عند «${who}» — مباعٌ بالفاتورة ${t.last.inv.no}` };
+    return { short: `رجع إلى «${who}»`, cls: "badge ret", long: `رجع إلى المصنع «${who}» — ${D.KIND_LABEL[t.last.kind]} ${t.last.inv.no}` };
+  }
   function woScreen(q) {
     const s = st();
-    setBar("حركة الطقم", "كل ما جرى على طقمٍ باسمه");
-    setTab("more");
+    setBar("بحث عن طقم", "باسمه أو وزنه — ومع من هو الآن");
+    setTab("home");
     const v = view();
-    const inp = h("input", { class: "in hl", placeholder: "اسم الطقم أو رقمه", value: q.no || "", enterkeyhint: "search", dir: "auto" });
-    const out = h("div");
-    const render = () => {
-      const no = inp.value.trim();
+    // (نصٌّ لا `type=search`: زرّ المسح فيه بلونٍ من خارج لوحة التطبيق)
+    const inp = h("input", { class: "in hl sr-in", type: "text", inputmode: "search", placeholder: "اسم الطقم أو وزنه", value: q.no || "",
+      enterkeyhint: "search", dir: "auto", autocomplete: "off", "aria-label": "اسم الطقم أو وزنه" });
+    const out = h("div", { class: "sr-out" });
+    const title = (t) => t.name || "طقمٌ بلا اسم";
+    const meta = (t) => `${f2(t.weight)} جم عيار ${t.karat}`;
+    const thumbOf = (t) => lineThumb({ photos: t.photos, wo: t.name }, "md");
+    // الاقتراحات: الاسم ووزنه وعياره ومكانه الآن
+    const suggest = () => {
       out.innerHTML = "";
-      if (!no) return;
-      const hist = D.woHistory(s, no);
-      if (!hist.length) { out.append(h("div", { class: "empty" }, `لا حركة للطقم ${no}`)); return; }
-      const last = hist[hist.length - 1];
-      const who = last.shop ? last.shop.name : "—";
-      const what = `${D.KIND_LABEL[last.kind]} ${last.inv.no}`;
-      const msg = D.IN_KINDS.includes(last.kind) ? `الآن: معك — ${what} من «${who}»`
-        : last.kind === "sale" ? `الآن: عند «${who}» — مباعٌ بالفاتورة ${last.inv.no}`
-          : `الآن: رجع إلى المصنع «${who}» — ${what}`;
-      out.append(h("div", { class: "note-bar " + (D.IN_KINDS.includes(last.kind) ? "info" : "warn"), style: { marginBottom: "10px" } }, msg));
-      for (const m of hist.slice().reverse()) {
+      const text = inp.value.trim();
+      if (!text) { out.append(h("div", { class: "empty" }, "اكتب أول حرفٍ من اسم الطقم، أو وزنه — فتظهر الأطقم المطابقة")); return; }
+      const res = D.searchSets(s, text);
+      if (!res.length) { out.append(h("div", { class: "empty" }, `لا طقم باسمٍ أو وزنٍ يطابق «${text}»`)); return; }
+      for (const t of res) {
+        const w = setWhere(t);
+        out.append(h("div", { class: "list-item sr-item", onclick: () => detail(t) },
+          thumbOf(t),
+          h("div", { class: "grow" },
+            h("div", { class: "spread" }, h("span", { class: "t", dir: "auto", text: title(t) }), h("span", { class: w.cls, text: w.short })),
+            h("div", { class: "muted small num" }, meta(t))),
+          ico("chevron", 18, "muted")));
+      }
+    };
+    // الطقم: أين هو الآن، ثم حركاته من الأحدث
+    const detail = (t) => {
+      out.innerHTML = "";
+      const w = setWhere(t);
+      out.append(h("div", { class: "list-item", style: { cursor: "default" } }, thumbOf(t),
+        h("div", { class: "grow" }, h("div", { class: "t", dir: "auto", text: title(t) }), h("div", { class: "muted small num" }, meta(t)))));
+      out.append(h("div", { class: "note-bar info", style: { marginBottom: "10px" } }, `الآن: ${w.long}`));
+      for (const m of t.moves.slice().reverse()) {
         const lk = m.line.karat || 18;
         out.append(h("div", { class: "list-item", onclick: () => go(`doc/inv/${m.inv.id}`) },
           lineThumb(m.line, "md"),
@@ -1484,11 +1516,20 @@
               h("span", null, h("span", { dir: "ltr", text: m.inv.no }), " · ", h("span", { dir: "ltr", text: dmy(m.date) })),
               h("span", { class: "num" }, `${gw(m.line.reg18, lk)} جم ${lk} · أجر ${f2(G.wageView(m.line.rate18, lk))}`)))));
       }
+      out.append(h("button", { class: "btn ghost", style: { width: "100%" }, onclick: () => { suggest(); inp.focus(); } }, "نتائج البحث"));
     };
-    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); render(); } });
-    inp.addEventListener("change", render);
+    inp.addEventListener("input", suggest);
+    inp.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const res = D.searchSets(s, inp.value);
+      if (res.length === 1) detail(res[0]);
+    });
     v.append(h("div", { class: "card" }, field("الطقم", inp)), out);
-    render();
+    // من رابطٍ باسم طقمٍ بعينه: يُفتح مباشرةً إن طابقه طقمٌ واحد باسمه
+    const exact = q.no ? D.searchSets(s, q.no).filter((t) => D.searchKey(t.name) === D.searchKey(q.no)) : [];
+    if (exact.length === 1) detail(exact[0]);
+    else suggest();
     if (!q.no) setTimeout(() => inp.focus(), 100);
   }
 
@@ -1525,7 +1566,7 @@
     const us = B.updateState();
     v.append(
       item("list", "سجل العمليات", "كل الفواتير والسندات — بحثٌ ونوع", () => go("log")),
-      item("search", "حركة الطقم", "كل ما جرى على طقمٍ باسمه", () => go("wo")),
+      item("search", "بحث عن طقم", "باسمه أو وزنه — ومع من هو الآن", () => go("wo")),
       item("pause", "المعلّقات", `${st().held.length} فاتورة لم تُحفظ`, () => go("held")),
       item("book", "كشف حساب", "محل أو مصنع", pickPartyThen(null, (id) => go(`statement/${id}`))),
       us.unsupported ? null : item("update", "التحديثات", us.available ? "يوجد إصدارٌ جديد" : `الإصدار ${us.version}`, updateSheet),
@@ -1989,7 +2030,7 @@
         h("div", { class: "quick" },
           quickBtn("store", "محل جديد", () => close("shop-form")),
           quickBtn("package", "مصنع جديد", () => close("shop-form?type=factory")),
-          quickBtn("search", "حركة الطقم", () => close("wo"))));
+          quickBtn("search", "بحث عن طقم", () => close("wo"))));
     });
     if (r) setTimeout(() => go(r), 30);
   }

@@ -67,8 +67,8 @@ function check(name, cond, detail) {
   const tiles = await page.locator(".op-tile .op-t").allInnerTexts();
   check("الرئيسية: ستّ لوحاتٍ بالترتيب", tiles.join("،") ===
     "بيع للعميل،مرتجع للعميل،بضاعة من مصنع،إرجاع للمصنع،تحصيل من العميل،سداد للمصنع", tiles.join("،"));
-  check("ثم «كشف حساب» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
-    "كشف حساب،عمليات اليوم (0)" && (await page.locator(".kpis").count()) === 0);
+  check("ثم «كشف حساب» ثم «بحث عن طقم» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
+    "كشف حساب،بحث عن طقم،عمليات اليوم (0)" && (await page.locator(".kpis").count()) === 0);
   check("الاسم: نظام محاسبي للذهب، والشعار في الشريط", (await text("#bar h1")).includes("نظام محاسبي للذهب") &&
     (await page.locator("#bar img.bar-logo").count()) === 1);
   check("خمسة أزرار سفلية بأيقونات: الحسابات والممتلكات", (await page.locator("#tabs button .i svg").count()) === 5 &&
@@ -329,6 +329,38 @@ function check(name, cond, detail) {
   await shot("sale_doc_photo");
   check("رُحّلت S-00002، وبقي معي طقمٌ واحد (المرتجع)", (await text("#bar h1")).includes("S-00002") &&
     (await page.evaluate(() => Domain.holdings(App.state).pieces.length)) === 1);
+
+  // البحث عن طقم من الرئيسية: الاقتراحات من أول حرف، وبالوزن، ومع من هو الآن (1.6)
+  await page.goto(url + "#/home");
+  await page.waitForTimeout(200);
+  await tap(".wide-tile:has-text('بحث عن طقم')");
+  await page.waitForURL(/#\/wo/);
+  const sIn = page.locator("#view input.sr-in");
+  await page.waitForTimeout(200);
+  check("بحث عن طقم: الخانة جاهزة للكتابة وتلميحٌ قبلها", (await page.evaluate(() => !!document.activeElement && document.activeElement.classList.contains("sr-in"))) &&
+    (await text("#view .empty")).includes("أول حرف"));
+  await sIn.pressSequentially("t");
+  await page.waitForTimeout(150);
+  const sug = await page.locator(".sr-item").allInnerTexts();
+  check("من أول حرف «t»: يظهر T1 ومكانه «عند «محل النخبة»»", sug.length === 1 && sug[0].includes("T1") && sug[0].includes("عند «محل النخبة»") &&
+    sug[0].includes("12.00 جم عيار 18"), sug.join(" | "));
+  check("وبصورته المصغّرة", (await page.locator(".sr-item img.thumb").count()) === 1);
+  await sIn.fill("");
+  await sIn.pressSequentially("١٢");
+  await page.waitForTimeout(150);
+  check("وبالوزن بأرقامٍ عربية «١٢» ⇒ T1", (await page.locator(".sr-item", { hasText: "T1" }).count()) === 1);
+  await shot("set_search");
+  await page.locator(".sr-item", { hasText: "T1" }).click();
+  await page.waitForTimeout(150);
+  const det = await text("#view");
+  check("لمسه: «الآن: عند «محل النخبة» — مباعٌ بالفاتورة S-00002» ثم حركاته", det.includes("الآن: عند «محل النخبة» — مباعٌ بالفاتورة S-00002") &&
+    (await page.locator("#view .list-item .badge", { hasText: "بيع" }).count()) >= 1 &&
+    (await page.locator("#view .list-item .badge", { hasText: "بضاعة" }).count()) >= 1, det.slice(0, 160));
+  await shot("set_search_detail");
+  await sIn.fill("س");
+  await sIn.dispatchEvent("input");
+  await page.waitForTimeout(150);
+  check("ونصٌّ لا يطابق: «لا طقم باسمٍ أو وزنٍ يطابق»", (await text("#view .empty")).includes("لا طقم"));
 
   // كشف حساب المصنع
   const facId = await page.evaluate(() => App.state.shops.find((s) => s.type === "factory").id);
