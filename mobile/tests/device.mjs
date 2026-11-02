@@ -459,9 +459,12 @@ async function main() {
   check("بعد إعادة التثبيت: يُرى ملف ÀUR السابق", found, JSON.stringify(bi2));
   check("والترحيب يعرض «استرجاع بياناتي»", found && (await ev("__t.text().includes('وجدنا ملف «ÀUR»')")));
   shot("welcome_found");
+  check("ولا يُكتب فوقه قبل القرار: لا زرّ «ابدأ» بل «ابدأ من جديد بلا بيانات»",
+    (await ev("__t.text().includes('ابدأ من جديد بلا بيانات')")) && !(await ev("[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'ابدأ')")));
   n0 = await evCount(ev, "restore");
   await run(ev, found ? `t.click("استرجاع بياناتي");` : `t.click("عندي بيانات سابقة");`);
-  const picked2 = await chooseFolder("restore");
+  // ما زال الملف للتطبيق (يُقرأ مباشرة بلا نافذة) — أو نافذة المجلد تُفتح على «ÀUR»: استخدامه ثم سماح
+  const picked2 = bi2.readable ? true : await chooseFolder("restore");
   const rs = await waitEv(ev, "restore", n0, 15000);
   check("المجلد نفسه يُقرأ: gold-data.json", picked2 && rs && rs.ok && rs.file === "gold-data.json",
     JSON.stringify(rs && { ok: rs.ok, file: rs.file, error: rs.error }));
@@ -470,8 +473,9 @@ async function main() {
   await run(ev, `await t.confirm("استرجاع"); await t.sleep(800);`);
   check("استُرجع كل شيء: 4 فواتير وسندان ومحلان ومصنع", (await ev("App.state.invoices.length")) === 4 &&
     (await ev("App.state.vouchers.length")) === 2 && (await ev("App.state.shops.length")) === 3);
-  check("والحفظ التلقائي مستمرٌّ في ملف ÀUR نفسه", (await ev("Bridge.backupFolder()")) === "ÀUR" &&
-    (await ev("Bridge.backupInfo().mode")) === "tree", await ev("JSON.stringify(Bridge.backupInfo())"));
+  check(`والحفظ التلقائي مستمرٌّ في ملف ÀUR نفسه (${bi2.readable ? "مباشرةً بلا نافذة" : "عبر نافذة المجلد"})`,
+    (await ev("Bridge.backupFolder()")) === "ÀUR" && ["tree", "auto"].includes(await ev("Bridge.backupInfo().mode")),
+    await ev("JSON.stringify(Bridge.backupInfo())"));
   const pd = await waitEv(ev, "photosDone", 0, 20000);
   await sleep(800);
   check("وصورة الطقم استُرجعت من المجلد", pd && pd.n === 1 && (await ev(`Store.getPhoto(${JSON.stringify(phId)}).then((d) => !!d)`)), JSON.stringify(pd));

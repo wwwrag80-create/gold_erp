@@ -102,14 +102,50 @@ final class BackupFolder {
         if (dir(c) != null) return "tree";
         if (!autoSupported()) return "none";
         if (prefs(c).getBoolean("auto", false)) return "auto";
+        // تثبيتٌ جديد ومجلد «ÀUR» موجود (من تثبيتٍ سابق): لا يُكتب فيه قبل الاسترجاع أو «ابدأ من جديد»
         try {
-            if (autoSupported() && autoDirFile().isDirectory() && autoFind(c, null, LATEST) == null) return "found";
+            if (autoSupported() && (autoFind(c, null, LATEST) != null || autoDirFile().isDirectory())) return "found";
         } catch (Exception ignored) { }
         return "auto";
     }
 
+    /** نسخة التثبيت السابق ما زالت لنا (يقرؤها التطبيق مباشرة، بلا نافذة مجلد)؟ */
+    static boolean autoReadable(Context c) {
+        try {
+            return autoSupported() && autoFind(c, null, LATEST) != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     static void startAuto(Context c) {
         prefs(c).edit().putBoolean("auto", true).apply();
+    }
+
+    /** «ابدأ من جديد» فوق مجلد «ÀUR» سابق: نسخته الأخيرة تبقى باسمٍ آخر — لا يُكتب فوقها أبداً. */
+    static void startFresh(Context c) {
+        if (autoSupported()) {
+            try {
+                Uri u = autoFind(c, null, LATEST);
+                if (u != null) {
+                    ContentValues v = new ContentValues();
+                    v.put(MediaStore.MediaColumns.DISPLAY_NAME, DAILY + "old-"
+                            + new SimpleDateFormat("yyyy-MM-dd-HHmmss", Locale.US).format(new Date()) + ".json");
+                    c.getContentResolver().update(u, v, null, null);
+                }
+            } catch (Exception ignored) { }
+        }
+        startAuto(c);
+    }
+
+    /** نسخة «ÀUR» الأخيرة (ملف التطبيق نفسه): {اسم الملف، نصّه} — أو null */
+    static String[] autoReadLatest(Context c) throws Exception {
+        if (autoSupported()) {
+            Uri u = autoFind(c, null, LATEST);
+            byte[] b = u == null ? null : readUri(c, u);
+            if (b != null) return new String[]{LATEST, new String(b, StandardCharsets.UTF_8)};
+        }
+        return null;
     }
 
     static boolean active(Context c) {
@@ -214,7 +250,9 @@ final class BackupFolder {
             autoWrite(c, null, DAILY + day + ".json", "application/json", data, true);
             Map<String, Long> all = autoList(c, null);
             List<String> daily = new ArrayList<>();
-            for (String n : all.keySet()) if (n.startsWith(DAILY) && n.endsWith(".json")) daily.add(n);
+            for (String n : all.keySet()) {
+                if (n.startsWith(DAILY) && n.endsWith(".json") && !n.startsWith(DAILY + "old-")) daily.add(n);
+            }
             Collections.sort(daily, Collections.reverseOrder());
             for (int i = KEEP_DAYS; i < daily.size(); i++) {
                 try { c.getContentResolver().delete(ContentUris.withAppendedId(autoCol(), all.get(daily.get(i))), null, null); }

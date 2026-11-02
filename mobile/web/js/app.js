@@ -2056,11 +2056,17 @@
     const waitFolder = onRoute("backupFolder", (r) => { if (r.ok) { toast(`الحفظ التلقائي في «${r.name}»`); syncAllPhotos(); waitFolder(); waitRestore(); done(); } });
     const waitRestore = onRoute("restore", async (r) => {
       if (!r.ok) { if (r.error) err(new Error(r.error)); return; }
-      try { if (await restoreText(r.text, r.file)) { B.restorePhotos(); waitFolder(); waitRestore(); done(); } } catch (e) { err(e); }
+      try {
+        if (await restoreText(r.text, r.file)) {
+          B.startAuto();          // الحفظ مستمرٌّ في ملف «ÀUR» نفسه (أو المجلد المختار)
+          B.restorePhotos(); waitFolder(); waitRestore(); done();
+        }
+      } catch (e) { err(e); }
     });
-    // «ابدأ»: الحفظ التلقائي في ملف «ÀUR» — ويُنشأ الملف الآن
-    const start = () => {
-      B.startAuto();
+    // «ابدأ»: الحفظ التلقائي في ملف «ÀUR» — ويُنشأ الملف الآن. وفوق ملفٍ سابق («ابدأ من جديد»)
+    // تبقى نسخته الأخيرة باسمٍ آخر، فلا يُكتب فوق بيانات أحدٍ أبداً
+    const start = (fresh) => {
+      if (fresh) B.startFresh(); else B.startAuto();
       B.autoBackup(JSON.stringify(D.toBackup(st())));
       waitFolder(); waitRestore(); done();
     };
@@ -2072,14 +2078,16 @@
     if (info.mode === "found") {
       body = [
         h("p", null, `وجدنا ملف «${AUR}» من استخدامك السابق في «المستندات» بجوالك — فيه بياناتك كلها.`),
-        h("button", { class: "btn block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "استرجاع بياناتي"),
-        h("div", { class: "muted small" }, `تُفتح نافذة المجلد على «${AUR}» مباشرة: اضغط «استخدام هذا المجلد» ثم «سماح».`),
-        h("button", { class: "link", style: { marginTop: "12px" }, onclick: start }, "ابدأ من جديد بلا بيانات")];
+        h("button", { class: "btn block", onclick: () => (info.readable ? B.restoreAuto() : B.restoreFromFolder()) },
+          ico("history", 20), "استرجاع بياناتي"),
+        info.readable ? null
+          : h("div", { class: "muted small" }, `تُفتح نافذة المجلد على «${AUR}» مباشرة: اضغط «استخدام هذا المجلد» ثم «سماح».`),
+        h("button", { class: "link", style: { marginTop: "12px" }, onclick: () => start(true) }, "ابدأ من جديد بلا بيانات")];
     } else if (info.mode === "auto") {
       body = [
         h("p", { class: "muted" }, `بياناتك في جوالك وحده، وتُحفظ تلقائياً بعد كل عملية في ملفٍ باسم «${AUR}» داخل «المستندات» — ` +
           "فإن حذفت التطبيق ثم ثبّته من جديد، تعود منه بياناتك كلها."),
-        h("button", { class: "btn block", onclick: start }, ico("check", 20), "ابدأ"),
+        h("button", { class: "btn block", onclick: () => start(false) }, ico("check", 20), "ابدأ"),
         h("button", { class: "btn ghost block", onclick: () => B.restoreFromFolder() }, ico("history", 20), "عندي بيانات سابقة — استرجاعها")];
     } else {
       body = [

@@ -620,8 +620,33 @@ public class MainActivity extends Activity {
         /** مكان الحفظ: {mode: tree·auto·found·none, name, auto: أندرويد 10+} */
         @JavascriptInterface
         public String backupInfo() {
-            return obj("mode", BackupFolder.mode(MainActivity.this), "name", BackupFolder.name(MainActivity.this),
-                    "auto", BackupFolder.autoSupported(), "autoName", BackupFolder.AUTO_NAME).toString();
+            String m = BackupFolder.mode(MainActivity.this);
+            return obj("mode", m, "name", BackupFolder.name(MainActivity.this),
+                    "auto", BackupFolder.autoSupported(), "autoName", BackupFolder.AUTO_NAME,
+                    "readable", "found".equals(m) && BackupFolder.autoReadable(MainActivity.this)).toString();
+        }
+
+        /** الاسترجاع من ملف «ÀUR» مباشرة (حين ما زال للتطبيق) — حدث restore كالمجلد */
+        @JavascriptInterface
+        public void restoreAuto() {
+            bg.execute(() -> {
+                try {
+                    String[] r = BackupFolder.autoReadLatest(MainActivity.this);
+                    if (r == null) {
+                        emit("restore", obj("ok", false, "error", "لا توجد نسخةٌ من بيانات التطبيق في ملف «" + BackupFolder.AUTO_NAME + "»"));
+                    } else {
+                        emit("restore", obj("ok", true, "file", r[0], "text", r[1], "name", BackupFolder.AUTO_NAME));
+                    }
+                } catch (Exception e) {
+                    emit("restore", obj("ok", false, "error", String.valueOf(e.getMessage())));
+                }
+            });
+        }
+
+        /** «ابدأ من جديد» فوق ملف «ÀUR» سابق — نسخته تبقى باسمٍ آخر */
+        @JavascriptInterface
+        public void startFresh() {
+            BackupFolder.startFresh(MainActivity.this);
         }
 
         /** «ابدأ»: الحفظ في مجلد «ÀUR» التلقائي من الآن (ولو وُجد مجلدٌ من تثبيتٍ سابق) */

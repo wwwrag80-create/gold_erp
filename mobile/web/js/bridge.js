@@ -88,6 +88,8 @@
       return { mode: name ? "tree" : "none", name, auto: false };
     },
     startAuto() { if (A && A.startAuto) A.startAuto(); },
+    startFresh() { if (A && A.startFresh) A.startFresh(); else Bridge.startAuto(); },
+    restoreAuto() { if (A && A.restoreAuto) A.restoreAuto(); else Bridge.restoreFromFolder(); },
     pickBackupFolder() { if (A) A.pickBackupFolder(); },
     restoreFromFolder() { if (A) A.restoreFromFolder(); },
     autoBackup(json) { if (A && A.autoBackup) A.autoBackup(json); },
