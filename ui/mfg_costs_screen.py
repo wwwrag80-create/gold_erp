@@ -36,7 +36,7 @@ TARGET_COLS = [
     ("target_per_hour", "تارجت/ساعة", True),
     ("expected_output", "المفترض", True),
     ("actual_output", "الفعلي", False),
-    ("difference", "الفرق", True),
+    ("difference", "الحوافز", True),     # الفعلي − المفترض
     ("target_amount", "التارجت", False),
 ]
 
@@ -362,7 +362,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
         self._setup_table(self.t_table, TARGET_W)
         self.t_table.cellChanged.connect(self.on_target_edit)
         note = QtWidgets.QLabel(
-            "الأعمدة المحسوبة (الخصم · المفترض إنتاجه · الفرق) تتحدّث "
+            "الأعمدة المحسوبة (الخصم · المفترض إنتاجه · الحوافز) تتحدّث "
             "تلقائياً ولا تُدخل يدوياً. اضغط Enter للانتقال للخلية "
             "التي أسفلها في نفس العمود.")
         note.setObjectName("cardSub")
@@ -1028,7 +1028,7 @@ class MfgCostsScreen(QtWidgets.QWidget):
                                        for r in t))),
             ("المفترض إنتاجه", _num(exp)),
             ("الإنتاج الفعلي", _num(act)),
-            ("الفرق", _num(act - exp)),
+            ("الحوافز", _num(act - exp)),
             ("نسبة الإنجاز", f"{(act / exp * 100):,.1f}%" if exp else "—"),
             ("إجمالي الرواتب الأساسية",
              _num(sum(float(r.get('basic_salary') or 0) for r in s))),

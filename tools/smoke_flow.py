@@ -3094,6 +3094,35 @@ def main():
                   - 20.0 * _sal["overtime_rate"]) < 0.011,
           f"إضافية {_sal['overtime_hours']} × {_sal['overtime_rate']}"
           f" = {_sal['overtime']}")
+    # 5.1.4: المفترض = التارجت × ساعاته الفعلية ÷ ساعات الشهر الأساسية،
+    # من النسبة الدقيقة لا من «تارجت/ساعة» المقرَّب؛ والحوافز = الفعلي − المفترض
+    _tr = _mc2.compute_target_row({
+        "month_days": 26, "hours": 8, "overtime_hours": 12,
+        "absence": 2.5, "target_amount": 125000.5,
+        "actual_output": 131250.75})
+    check("المفترض = التارجت × (أيام×ساعات + إضافية − غياب×ساعات) "
+          "÷ (أيام×ساعات)",
+          _tr["overtime_month"] == 200.0
+          and _tr["expected_output"] == round(125000.5 * 200 / 208, 2),
+          f"{_tr['overtime_month']} · {_tr['expected_output']}")
+    check("والحوافز = الفعلي − المفترض",
+          _tr["difference"] == round(131250.75 - _tr["expected_output"], 2),
+          f"{_tr['difference']}")
+    try:
+        from ui.mfg_costs_screen import TARGET_COLS as _tc
+        check("عمود «الفرق» صار «الحوافز» في شاشة التارجت",
+              dict((k, t) for k, t, _ in _tc)["difference"] == "الحوافز"
+              and not any(t == "الفرق" for _, t, _ in _tc), "")
+    except ImportError:
+        pass
+    from services import print_manager as _pm514
+    with db(readonly=True) as conn:
+        _tg514 = _mc2.list_targets(conn, _per)
+    _h514 = _pm514.build_html("mfg_target", 0, period=_per,
+                              targets=_tg514)
+    check("طباعة التارجت: «الحوافز» بخطٍّ كبير (جدول big) وبلا «الفرق»",
+          "compact big" in _h514 and "الحوافز" in _h514
+          and "<th>الفرق</th>" not in _h514, "")
     _want = round(3000.0 + _sal["overtime"], 2)
     check("والصافي = الأساسي + الإضافي + التارجت + المكافأة − الخصوم",
           abs(_sal["net_salary"] - _want) < 0.011,

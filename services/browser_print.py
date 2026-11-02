@@ -126,6 +126,15 @@ PRINT_CSS = """
       padding: 2px 2px; font-size: 8pt; white-space: nowrap;
       overflow: hidden; text-overflow: clip; word-break: keep-all; }
   table.compact th { font-weight: bold; }
+  /* جدول التارجت: أعمدته أقلّ — فخطٌّ كبير واضح وصفوفٌ أرحب. وعرض
+     كل عمودٍ على قدر محتواه فلا يُقصّ رقمٌ ولا اسم؛ وإن زاد الجدول على
+     الورقة صغّره FIT_SCRIPT كلَّه بالنسبة نفسها */
+  table.compact.big { table-layout: auto; }
+  table.compact.big th, table.compact.big td {
+      font-size: 12pt; padding: 6px 4px; overflow: visible; }
+  table.compact.big th { font-size: 11pt; }
+  table.compact.big td.nm { text-align: right; padding-right: 6px;
+      font-weight: bold; }
   .note   { font-size: 9.5pt; color: #555; }
   img     { max-height: 110px; }
 

@@ -176,6 +176,13 @@ BASE_CSS = """
       padding: 2px 2px; font-size: 8pt; white-space: nowrap;
       overflow: hidden; text-overflow: clip; word-break: keep-all; }
   table.compact th { font-weight: bold; }
+  /* جدول التارجت: أعمدته أقلّ — فخطٌّ كبير مريح وصفوفٌ أرحب */
+  table.compact.big { table-layout: auto; }
+  table.compact.big th, table.compact.big td {
+      font-size: 12pt; padding: 6px 4px; overflow: visible; }
+  table.compact.big th { font-size: 11pt; background-color: #EFEFEF; }
+  table.compact.big td.nm { text-align: right; padding-right: 6px;
+      font-weight: bold; }
   .note { font-size: 9pt; color: #555; }
 
   /* لوحات تحليل المبيعات */
@@ -1724,27 +1731,34 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
     period = period or ""
     today = _qd(QtCore.QDate.currentDate())
 
-    def _table(headers, rows, totals=None):
+    def _table(headers, rows, totals=None, big=False):
         """جدول مضغوط: `table-layout:fixed` وخط صغير — فتظهر كل
-        الأعمدة في صفحة واحدة بلا قصّ."""
+        الأعمدة في صفحة واحدة بلا قصّ. و`big` (جدول التارجت): خطٌّ
+        كبير واضح (١٢) وصفوفٌ أرحب — أعمدته تتّسع له في الورقة العرضية."""
         n = max(1, len(headers))
         # خط يتناسب مع عدد الأعمدة — يضمن ظهورها كلها في صفحة واحدة
         # الطباعة تبقى بحجمها المعتاد؛ التقليص طفيف عند كثرة الأعمدة
-        fs = 7.5 if n >= 13 else (8 if n >= 11 else 8.5)
+        fs = 12 if big else (7.5 if n >= 13 else (8 if n >= 11 else 8.5))
         first = 14 if n > 10 else (16 if n > 6 else 22)
         rest = round((100 - first) / (n - 1), 3) if n > 1 else 100
-        cg = "".join(
+        # (الكبير: عرض الأعمدة على قدر محتواها — لا نِسَبٌ ثابتة تقصّ الأرقام)
+        cg = "" if big else "".join(
             f'<col style="width:{first if i == 0 else rest}%"/>'
             for i in range(n))
         head = "<tr>" + cells(*[thw(h) for h in headers]) + "</tr>"
+        # (الاسم بخطٍّ عريض إلى اليمين — بصنفٍ لا بموضعه: محرك Qt يعكس
+        # ترتيب الخلايا)
+        nm = ' class="nm"' if big else ""
         body = "".join(
-            "<tr>" + cells(*[f"<td>{en(c)}</td>" for c in r]) + "</tr>"
+            "<tr>" + cells(*[f"<td{nm if i == 0 else ''}>{en(c)}</td>"
+                             for i, c in enumerate(r)]) + "</tr>"
             for r in rows)
         if not body:
             body = f'<tr><td {TD} colspan="{n}">لا بيانات</td></tr>'
         foot = ("<tr>" + cells(*[thw(str(c)) for c in totals]) + "</tr>"
                 if totals else "")
-        return (f'<table class="items compact" width="100%"'
+        return (f'<table class="items compact{" big" if big else ""}"'
+                f' width="100%"'
                 f' cellspacing="0" cellpadding="1"'
                 f' style="font-size:{fs}pt">'
                 f'{cg}{head}{body}{foot}</table>')
@@ -1763,7 +1777,7 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
         else:
             hdr = ["الاسم", "أيام", "ساعات", "إضافية", "الغياب", "الخصم",
                    "إضافية/شهر", "تارجت/ساعة", "المفترض", "الفعلي",
-                   "الفرق", "التارجت"]
+                   "الحوافز", "التارجت"]
             keys = ["name", "month_days", "hours", "overtime_hours",
                     "absence", "deduction", "overtime_month",
                     "target_per_hour", "expected_output", "actual_output",
@@ -1773,7 +1787,7 @@ def _tpl_mfg(conn, _id=0, period=None, targets=None, salaries=None,
         tot = ["الإجمالي"] + [
             _w(sum(float(r.get(k) or 0) for r in (targets or [])), 2)
             for k in keys[1:]]
-        body = _table(hdr, rows, tot)
+        body = _table(hdr, rows, tot, big=True)
 
     elif kind == "mfg_salary":
         title = "رواتب العمال والإدارة"
