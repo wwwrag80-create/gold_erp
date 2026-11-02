@@ -194,7 +194,9 @@ async function main() {
 
   // ══ التحديث: الإصدار، وقراءة القناة من GitHub، وصلاحية PATCH ══
   const us = await ev("Bridge.updateState()");
-  check("الإصدار المثبّت 1.5.1 (7)", us.version === "1.5.1" && us.code === 7 && !us.unsupported, JSON.stringify(us));
+  // الإصدار المتوقَّع من ملف الإصدار نفسه — لا رقمٌ مكتوب يتأخّر عن كل إصدار
+  const VER = JSON.parse(fs.readFileSync(new URL("../web/version.json", import.meta.url), "utf8"));
+  check(`الإصدار المثبّت ${VER.name} (${VER.code})`, us.version === VER.name && us.code === VER.code && !us.unsupported, JSON.stringify(us));
   check("إذن الإشعارات ممنوح", us.canNotify === true);
   let n0 = await evCount(ev, "update");
   await ev("Bridge.checkUpdate(), 1");
