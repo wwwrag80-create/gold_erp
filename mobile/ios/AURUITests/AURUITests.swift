@@ -26,26 +26,32 @@ final class AURUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[cd] %@", text)).firstMatch
     }
 
-    /// أول تشغيل: رسالة موافقة الإعلانات من Google (UMP) ثم سؤال iOS عن التتبّع — حيث
-    /// يُعدّها حساب AdMob. «متابعة» ثم «اطلب من التطبيق عدم التتبّع»؛ والتطبيق يعمل في الحالين.
-    func passConsent() {
+    /// أول تشغيل: رسالة موافقة الإعلانات من Google (UMP) ثم سؤال iOS عن التتبّع — حيث يُعدّها
+    /// حساب AdMob، وتصل من الشبكة في أي لحظةٍ من أول التشغيل. «متابعة» (حين تصير قابلةً للّمس،
+    /// ويُتأكَّد أنها أُغلقت) ثم «اطلب من التطبيق عدم التتبّع»؛ والتطبيق يعمل في الحالين.
+    func clearConsent(wait: TimeInterval) {
         let cont = app.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "متابعة"])).firstMatch
-        guard cont.waitForExistence(timeout: 25) else { return }
-        snap("00_consent")
-        cont.tap()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let deny = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@",
                                                             "Not to Track", "عدم التتبع")).firstMatch
-        if deny.waitForExistence(timeout: 10) {
+        if deny.exists { snap("00_tracking"); deny.tap() }
+        guard cont.waitForExistence(timeout: wait) else { return }
+        snap("00_consent")
+        for _ in 0..<6 where cont.exists {
+            Thread.sleep(forTimeInterval: 1.5)
+            if cont.isHittable { cont.tap() }
+        }
+        if deny.waitForExistence(timeout: 15) {
             snap("00_tracking")
             deny.tap()
         }
+        Thread.sleep(forTimeInterval: 1)
     }
 
     func testLaunchHomeSearchAndTabs() throws {
         // أول تشغيل: شاشة الترحيب باسم التطبيق وزرّي مجلد الحفظ
         XCTAssertTrue(anyText("ÀUR").waitForExistence(timeout: 30), "الترحيب باسم ÀUR")
-        passConsent()
+        clearConsent(wait: 40)
         XCTAssertTrue(button("اختر مجلد الحفظ").exists, "زرّ مجلد الحفظ التلقائي")
         snap("01_welcome")
         button("تخط").tap()
@@ -53,6 +59,7 @@ final class AURUITests: XCTestCase {
         // الرئيسية: لوحات العمليات وكشف الحساب والبحث (لمسةٌ ثانية إن ضاعت الأولى — وتُسجَّل صورتها)
         if !button("بيع للعميل").waitForExistence(timeout: 8) {
             snap("01b_skip_again")
+            clearConsent(wait: 3)
             button("تخط").tap()
         }
         XCTAssertTrue(button("بيع للعميل").waitForExistence(timeout: 15), "لوحة «بيع للعميل»")
