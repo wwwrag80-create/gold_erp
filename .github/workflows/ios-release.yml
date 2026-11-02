@@ -1,0 +1,108 @@
+name: رفع الآيفون إلى App Store (TestFlight)
+
+# يبني ÀUR للآيفون موقّعاً ويرفعه إلى App Store Connect (TestFlight) — على جهاز Mac
+# سحابي من GitHub، بلا Mac عند المالك. يُشغَّل يدوياً فقط (Actions ← هذا السير ← Run).
+#
+# يلزمه حساب Apple Developer وأسرار المستودع (Settings ← Secrets and variables ← Actions):
+#   APPLE_TEAM_ID   معرّف الفريق (developer.apple.com ← Membership)
+#   ASC_KEY_ID      معرّف مفتاح App Store Connect API
+#   ASC_ISSUER_ID   معرّف المُصدِر (Issuer ID) في الصفحة نفسها
+#   ASC_KEY_P8      محتوى ملف المفتاح AuthKey_XXXX.p8 كاملاً
+# (App Store Connect ← Users and Access ← Integrations ← App Store Connect API، بصلاحية App Manager)
+# الشهادات وملفات التعريف تُنشأ تلقائياً بهذا المفتاح (-allowProvisioningUpdates) — لا ملف
+# توقيعٍ في المستودع. والتطبيق يُنشأ أولاً في App Store Connect بالمعرّف com.jadeite.mobile.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: الأسرار ومعرّفات AdMob
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          missing=""
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::أسرار ناقصة:$missing — أضفها في Settings ← Secrets and variables ← Actions"
+            exit 1
+          fi
+          # نسخة المتجر لا تُرفع بمعرّفات Google التجريبية (لا تعرض إعلاناً ولا أرباح)
+          if grep -q "^ADMOB_APP_ID = ca-app-pub-3940256099942544" mobile/ios/AUR/Config.xcconfig; then
+            echo "::error::معرّفات AdMob في mobile/ios/AUR/Config.xcconfig ما زالت تجريبية — ضع معرّفات تطبيق iOS من حسابك أولاً"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
+
+      - name: توليد المشروع (الإصدار من version.json)
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen
+          V=$(python3 -c "import json;print(json.load(open('../web/version.json'))['name'])")
+          C=$(python3 -c "import json;print(json.load(open('../web/version.json'))['code'])")
+          sed -i '' "s/^MARKETING_VERSION = .*/MARKETING_VERSION = $V/; s/^CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = $C/" AUR/Config.xcconfig
+          xcodegen generate
+          echo "VERSION=$V ($C)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: الأرشفة والتوقيع
+        working-directory: mobile/ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -project AUR.xcodeproj -scheme AUR -configuration Release \
+            -destination "generic/platform=iOS" -archivePath "$RUNNER_TEMP/AUR.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            archive | grep -E "error:|\*\* ARCHIVE" || true
+          test -d "$RUNNER_TEMP/AUR.xcarchive"
+
+      - name: الرفع إلى App Store Connect
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/AUR.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" 2>&1 | tail -40
+          echo "رُفع إلى App Store Connect — يظهر في TestFlight بعد المعالجة (دقائق)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: حذف المفتاح من الجهاز
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"
