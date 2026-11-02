@@ -1,0 +1,7 @@
+# موقع ÀUR على Netlify: رابط نسخة الآيفون، وتحميل تطبيق أندرويد — يُبنى من mobile/ عند كل
+# دفعٍ إلى main (فكل إصدارٍ جديد يصل المستخدمين وحده). base = mobile كي لا يُثبَّت شيءٌ من
+# مكتبات برنامج سطح المكتب (requirements.txt في الجذر).
+[build]
+  base = "mobile"
+  command = "python3 tools/build_site.py site-dist"
+  publish = "site-dist"

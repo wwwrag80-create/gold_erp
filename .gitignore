@@ -44,3 +44,6 @@ assets/barcodes/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# موقع ÀUR المبني (Netlify يبنيه بنفسه)
+mobile/site-dist/

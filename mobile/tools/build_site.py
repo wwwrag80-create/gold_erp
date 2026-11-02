@@ -5,7 +5,7 @@
 - الجذر: صفحة التثبيت (mobile/site/index.html) وسياسة الخصوصية وملفا ads.txt/app-ads.txt.
 - app/: التطبيق نفسه (mobile/web) يعمل من الشاشة الرئيسية وبلا إنترنت؛ sw.js يُكتب فيه رقم
   الإصدار وقائمة الملفات (فيُنزَّل الإصدار الجديد وينتظر «حدّث الآن»).
-- رابط تطبيق أندرويد: آخر إصدارٍ منشور في mobile/dist/versions.json.
+- تطبيق أندرويد: آخر إصدارٍ منشور (mobile/dist/versions.json) يُنسخ إلى الموقع باسم AUR.apk.
 """
 import hashlib
 import json
@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]           # mobile/
-REPO = "wwwrag80-create/gold_erp"
 
 
 def main(out: Path) -> None:
@@ -24,7 +23,7 @@ def main(out: Path) -> None:
     ver = json.loads((ROOT / "web" / "version.json").read_text(encoding="utf-8"))
     dist = json.loads((ROOT / "dist" / "versions.json").read_text(encoding="utf-8"))
     apk = dist[-1]
-    apk_url = f"https://raw.githubusercontent.com/{REPO}/main/mobile/dist/{apk['file']}"
+    apk_url = "AUR.apk"     # ملف أندرويد من الموقع نفسه — رابطٌ واحد للجميع
 
     # التطبيق
     app = out / "app"
@@ -49,6 +48,7 @@ def main(out: Path) -> None:
         (out / name).write_text(html, encoding="utf-8")
     for name in ("ads.txt", "app-ads.txt"):
         shutil.copy(ROOT / "site" / name, out / name)
+    shutil.copy(ROOT / "dist" / apk["file"], out / "AUR.apk")
     (out / ".nojekyll").write_text("", encoding="utf-8")
     print(f"✔ {out} — الويب {ver['name']} · أندرويد {apk['version']} · {len(files)} ملفاً في app/")
 
