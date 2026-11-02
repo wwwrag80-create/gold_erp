@@ -59,21 +59,29 @@ final class Ads {
         return !BuildConfig.ADMOB_TEST_IDS || debuggable();
     }
 
-    /** الموافقة أولاً (حيث تلزم)، ثم تهيئة المكتبة، ثم أول إعلان — مرّةً واحدة. */
+    /**
+     * الموافقة أولاً (حيث تلزم)، ثم تهيئة المكتبة، ثم أول إعلان — مرّةً واحدة.
+     * تنتهي خطوة الموافقة بنجاحٍ أو بخطأ (لا رسالة خصوصيةٍ معدّة في حساب AdMob بعد،
+     * أو لا شبكة) — وفي الحالين تبدأ الإعلانات؛ وحيث تلزم الموافقة ولم تُعطَ تحدّ
+     * Google الإعلانات بنفسها. ومهلةٌ أخيرة إن لم يُجب أحد.
+     */
     void start() {
         if (!enabled()) return;
+        bar.postDelayed(this::init, 15_000);
         try {
             ConsentInformation ci = UserMessagingPlatform.getConsentInformation(a);
             ci.requestConsentInfoUpdate(a, new ConsentRequestParameters.Builder().build(),
                     () -> UserMessagingPlatform.loadAndShowConsentFormIfRequired(a, err -> {
-                        if (ci.canRequestAds()) init();
+                        if (err != null) error = "consent form: " + err.getMessage();
+                        init();
                     }),
                     err -> {
-                        if (ci.canRequestAds()) init();
+                        error = "consent: " + err.getMessage();
+                        init();
                     });
             if (ci.canRequestAds()) init();
         } catch (Throwable t) {
-            error = String.valueOf(t.getMessage());
+            error = "consent: " + t.getMessage();
             init();
         }
     }
@@ -95,7 +103,6 @@ final class Ads {
                 @Override
                 public void onAdLoaded() {
                     loaded = true;
-                    error = "";
                     apply();
                 }
 
