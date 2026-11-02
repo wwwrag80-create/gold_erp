@@ -39,7 +39,7 @@ final class AURUITests: XCTestCase {
         snap("00_consent")
         for _ in 0..<6 where cont.exists {
             Thread.sleep(forTimeInterval: 1.5)
-            if cont.isHittable { cont.tap() }
+            if cont.exists && cont.isHittable { cont.tap() }
         }
         if deny.waitForExistence(timeout: 15) {
             snap("00_tracking")
