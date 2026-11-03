@@ -173,7 +173,7 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
     lines: [D.buildLine({ wo: "T1", reg: 20, wage: 5 }), D.buildLine({ reg: 12, wage: 5 })] });
   check("رقمها P-00001", pin.no === "P-00001", pin.no);
   check("البضاعة تُرحَّل للمصنع على المحل؟ لا — المحل مرفوض", throws(() => D.saveInvoice(t, { kind: "purchase", shopId: shopA.id, lines: [plain] }), /اختر المصنع/));
-  check("والبيع لا يُرحَّل على مصنع", throws(() => D.saveInvoice(t, { kind: "sale", shopId: fac.id, lines: [plain] }), /اختر المحل/));
+  check("والبيع لا يُرحَّل على مصنع", throws(() => D.saveInvoice(t, { kind: "sale", shopId: fac.id, lines: [plain] }), /اختر العميل/));
   let fb = D.balance(t, fac.id);
   check("عليّ للمصنع: 50 + 32 = 82 جم، و1000 + 160 = 1160 ريال", fb.gold18 === -82 && fb.cash === -1160, fb);
   let hd = D.holdings(t);
@@ -204,7 +204,7 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   const rv = D.saveVoucher(t, { kind: "receipt", shopId: shopA.id, date: "2026-02-05",
     rows: [{ kind: "gold", weight: 10, karat: 21 }, { kind: "gold", weight: 3, karat: 18 }, { kind: "cash", amount: 200 }] });
   check("التحصيل رقمه RV-00001 ولا يكون من مصنع", rv.no === "RV-00001" &&
-    throws(() => D.saveVoucher(t, { kind: "receipt", shopId: fac.id, rows: [{ kind: "cash", amount: 1 }] }), /اختر المحل/));
+    throws(() => D.saveVoucher(t, { kind: "receipt", shopId: fac.id, rows: [{ kind: "cash", amount: 1 }] }), /اختر العميل/));
   hd = D.holdings(t);
   const b21 = hd.boxes.find((b) => b.karat === 21), b18 = hd.boxes.find((b) => b.karat === 18);
   check("صندوق 21: 10 جم من «محل السلام» بتاريخه", b21 && b21.weight === 10 && b21.moves[0].party.id === shopA.id && b21.moves[0].date === "2026-02-05");
@@ -342,6 +342,66 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   // يعود الطقم إلى اليد بمرتجعٍ من العميل
   D.saveInvoice(t, { kind: "sale_return", shopId: c.id, date: "2026-03-06", lines: [D.buildLine({ wo: "ط-101", reg: 24.5, wages: 600 })] });
   check("بعد المرتجع: ط-101 معك", D.searchSets(t, "ط-101")[0].where === "in");
+}
+
+// ══ 1.9: عيار الحساب لكل عميلٍ ومصنع، والرصيد الافتتاحي للممتلكات، وصافي ما لي ══
+{
+  const t = D.newState();
+  const c21 = D.saveShop(t, { name: "عميل 21", karat: 21, openGold18: 7, openDate: "2026-01-01" });
+  const c18 = D.saveShop(t, { name: "عميل بلا عيار" });
+  const f22 = D.saveShop(t, { name: "مصنع 22", type: "factory", karat: "22", openGold18: -11, openDate: "2026-01-01" });
+  check("عيار الحساب يُحفظ (21 · 22) — والقديم بلا عيارٍ يأخذ 18", c21.karat === 21 && f22.karat === 22 && c18.karat === 18);
+  check("وعيارٌ غير مدعوم يرجع 18", D.saveShop(t, { name: "عميل 19", karat: 19 }).karat === 18);
+  check("partyKarat: عيار الحساب، وإلا عيار المجاميع", D.partyKarat(c21, 18) === 21 && D.partyKarat({}, 22) === 22 && D.partyKarat(null) === 18);
+  check("والتخزين بمكافئ 18 كما هو: 7 جم مكافئ = 6.00 جم عيار 21", D.balance(t, c21.id).gold18 === 7 && G.g(7, 21) === 6);
+  const back = D.fromBackup(JSON.parse(JSON.stringify(D.toBackup(t))));
+  check("والعيار يبقى بعد النسخ والاسترجاع", D.shopById(back, c21.id).karat === 21);
+
+  // الرصيد الافتتاحي: ذهبٌ لكل عيار، ونقد، وأطقم في يدي
+  check("بلا رصيدٍ افتتاحي: لا صناديق", D.holdings(t).boxes.length === 0 && D.holdings(t).pieces.length === 0);
+  check("وزنٌ سالب مرفوض", throws(() => D.saveOpenHold(t, { gold: { 21: -1 } }), /وزنٌ غير صحيح لعيار 21/));
+  check("ونقدٌ غير صحيح مرفوض", throws(() => D.saveOpenHold(t, { cash: "x" }), /النقد/));
+  check("وطقمٌ بلا وزن مرفوض", throws(() => D.saveOpenHold(t, { sets: [{ name: "ط1", karat: 18, weight: 0 }] }), /اكتب وزن كل طقم/));
+  check("وطقمٌ مكرّر الاسم مرفوض", throws(() => D.saveOpenHold(t, { sets: [{ name: "ط1", karat: 18, weight: 1 }, { name: "ط1", karat: 21, weight: 2 }] }), /مكرّر/));
+  D.saveOpenHold(t, { date: "2026-01-01", gold: { 21: 12, 18: 0, 24: 1.5 }, cash: 1000,
+    sets: [{ name: "T9", karat: 21, weight: 7 }, { name: "", karat: 18, weight: 4 }] });
+  const oh = D.openHold(t);
+  check("يُحفظ: ذهب 21 = 12 و24 = 1.5 (والصفر لا يُحفظ) ونقد 1000", oh.gold[21] === 12 && oh.gold[24] === 1.5 && !(18 in oh.gold) && oh.cash === 1000);
+  check("والأطقم بمكافئ 18: T9 7 جم ع21 = 8.167", oh.sets[0].w18 === 8.167 && oh.sets[0].karat === 21 && oh.sets[1].w18 === 4);
+  let hd = D.holdings(t);
+  const b21 = hd.boxes.find((b) => b.karat === 21);
+  check("صندوق 21 يبدأ بـ12 (افتتاحي) — وحركته الأولى «رصيد افتتاحي» بلا مستند", b21.weight === 12 && b21.open === 12 && b21.moves[0].opening && b21.moves[0].doc.opening);
+  check("والنقد يبدأ بـ1000", hd.cash.amount === 1000 && hd.cash.open === 1000);
+  check("والطقمان في يدي من الرصيد الافتتاحي", hd.pieces.length === 2 && hd.pieces.every((p) => p.fromKind === "opening" && !p.party));
+  check("ذهب يدي بمكافئ 18: 12×21/18 + 1.5×24/18 = 14 + 2 = 16", hd.gold18 === 16, hd.gold18);
+  check("والأطقم 8.167 + 4 = 12.167", hd.setsW18 === 12.167, hd.setsW18);
+  const tr = D.searchSets(t, "T9")[0];
+  check("البحث يجد T9: معك — من الرصيد الافتتاحي", tr && tr.where === "in" && tr.moves[0].kind === "opening" && tr.weight === 7);
+
+  // التحصيل يزيد الصندوق، وبيع طقمٍ افتتاحي يُخرجه من يدي
+  D.saveVoucher(t, { kind: "receipt", shopId: c21.id, date: "2026-02-01", rows: [{ kind: "gold", weight: 3, karat: 21 }, { kind: "cash", amount: 200 }] });
+  const unnamed = D.holdings(t).pieces.find((p) => !p.name);
+  D.saveInvoice(t, { kind: "sale", shopId: c21.id, date: "2026-02-02", lines: [
+    D.buildLine({ wo: "T9", karat: 21, reg: 7, wages: 70 }),
+    D.buildLine({ reg: 4, wages: 40, src: unnamed.id })] });
+  hd = D.holdings(t);
+  check("صندوق 21: 12 + 3 = 15 · والنقد 1200", hd.boxes.find((b) => b.karat === 21).weight === 15 && hd.cash.amount === 1200);
+  check("بيع T9 باسمه والآخر باختياره: لا أطقم في يدي", hd.pieces.length === 0);
+  check("وT9 الآن عند «عميل 21»", D.searchSets(t, "T9")[0].where === "customer");
+  check("طقمٌ خرج بفاتورة لا يُحذف من الرصيد الافتتاحي",
+    throws(() => D.saveOpenHold(t, { date: "2026-01-01", gold: { 21: 12 }, cash: 1000, sets: [{ id: oh.sets[0].id, name: "T9", karat: 21, weight: 7 }] }), /لا يُحذف/));
+  check("ويبقى كما كان", D.openHold(t).sets.length === 2);
+
+  // صافي ما لي = يدي + الأطقم + ما لي عند العملاء + (ما مع المصانع بإشارته)
+  const np = D.netPosition(t);
+  const cus = D.balance(t, c21.id).gold18 + D.balance(t, c18.id).gold18;
+  check("في يدي: 15×21/18 + 2 = 19.5", np.hand18 === 19.5, np.hand18);
+  check("لي عند العملاء: 7 + 8.167 + 4 − 3.5 = 15.667", np.cus18 === 15.667 && Math.abs(np.cus18 - cus) < 0.0005, np);
+  check("ومع المصانع −11 (عليّ)", np.fac18 === -11);
+  check("الصافي ذهباً: 19.5 + 0 + 15.667 − 11 = 24.167", np.gold18 === 24.167, np.gold18);
+  check("والصافي نقداً: 1200 + (110 − 200) = 1110", np.handCash === 1200 && np.cusCash === -90 && np.cash === 1110, np);
+  check("والرصيد الافتتاحي يبقى بعد النسخ والاسترجاع",
+    D.openHold(D.fromBackup(JSON.parse(JSON.stringify(D.toBackup(t))))).sets.length === 2);
 }
 
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);

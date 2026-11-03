@@ -1,14 +1,14 @@
 /* منطق حسابات المندوب — بلا واجهة، فيُختبر وحده (`mobile/tests`).
  *
- * المندوب يأخذ البضاعة من **المصانع** ويبيعها **للمحلات**، يحصّل من المحلات
+ * المندوب يأخذ البضاعة من **المصانع** ويبيعها **للعملاء**، يحصّل من العملاء
  * ذهباً ونقداً، ثم يدفع للمصانع ما عليه. الطرفان في قائمةٍ واحدة (`shops`)
  * ويميّزهما `type`: «shop» (الافتراضي) أو «factory».
  *
- * الأثر على حساب الطرف، والموجب «عليه» (للمحل: عليه لي · للمصنع: الموجب له
+ * الأثر على حساب الطرف، والموجب «عليه» (للعميل: عليه لي · للمصنع: الموجب له
  * عندي نادر، والسالب ما عليّ له):
- *   فاتورة بيع (محل)        : ذهب + الوزن المقيد (مكافئ 18) · نقد + (الأجور + الضريبة)
- *   مرتجع (محل)             : ذهب − الوزن · نقد − الأجور
- *   تحصيل (سند قبض، محل)    : ذهب − مكافئ كل سطر − الخصم الوزني · نقد − النقد − الخصم
+ *   فاتورة بيع (عميل)       : ذهب + الوزن المقيد (مكافئ 18) · نقد + (الأجور + الضريبة)
+ *   مرتجع (عميل)            : ذهب − الوزن · نقد − الأجور
+ *   تحصيل (سند قبض، عميل)   : ذهب − مكافئ كل سطر − الخصم الوزني · نقد − النقد − الخصم
  *   بضاعة من مصنع           : ذهب − الوزن · نقد − الأجور   (صار عليّ للمصنع)
  *   إرجاع لمصنع             : ذهب + الوزن · نقد + الأجور
  *   دفع (سند صرف، لمصنع)    : ذهب + مكافئ كل سطر · نقد + النقد   (نقص ما عليّ)
@@ -16,9 +16,13 @@
  * (`models/invoices.py` و`models/vouchers.py`)، والرصيد يُقرَّب عند كل حركة:
  * الذهب ثلاث منازل والنقد منزلتان.
  *
- * **الممتلكات** (`holdings`): ما مع المندوب الآن — صندوقٌ لكل عيار من ذهب
- * التحصيل ناقصاً ما دُفع للمصانع، وصندوق النقد، والأطقم التي في يده (من مصنعٍ
- * أو مرتجعةً من محل) ما لم تُبَع أو تُرجَع.
+ * **الممتلكات** (`holdings`): ما مع المندوب الآن — صندوقٌ لكل عيار (رصيده الافتتاحي
+ * ثم ذهب التحصيل ناقصاً ما دُفع للمصانع)، وصندوق النقد، والأطقم التي في يده (من الرصيد
+ * الافتتاحي، أو من مصنعٍ، أو مرتجعةً من عميل) ما لم تُبَع أو تُرجَع. و`netPosition`:
+ * صافي ما لي = ما في يدي + ما لي عند العملاء − ما عليّ للمصانع.
+ *
+ * **عيار الحساب** (`karat`): لكل عميلٍ ومصنعٍ عياره — يُعرض به رصيده وكشفه، ويبدأ به سطر
+ * فاتورته وسنده. والتخزين كله بمكافئ 18 كما في البرنامج، فالعيار وحدة عرضٍ لا غير.
  *
  * اسم الطقم اختياري: يُكتب الوزن ويُرحَّل. وإن كُتب اسمٌ سبق له حركة
  * عُبّئت أوزانه منها (`woLast`).
@@ -72,24 +76,27 @@
     return `${p}-${String(st.seq[p]).padStart(5, "0")}`;
   }
 
-  // ══ الأطراف: المحلات والمصانع ══
+  // ══ الأطراف: العملاء والمصانع ══
   function shopById(st, id) { return st.shops.find((s) => s.id === id) || null; }
   function isFactory(p) { return !!p && p.type === "factory"; }
   function shopsOnly(st) { return st.shops.filter((p) => !isFactory(p)); }
   function factoriesOnly(st) { return st.shops.filter(isFactory); }
   function saveShop(st, data) {
     const type = data.type === "factory" ? "factory" : "shop";
-    const word = type === "factory" ? "المصنع" : "المحل";
+    const word = type === "factory" ? "المصنع" : "العميل";
     const name = String(data.name || "").trim();
     if (!name) throw new Error(`اكتب اسم ${word}`);
     const dup = st.shops.find((s) => s.name.trim() === name && s.id !== data.id);
-    if (dup) throw new Error(`يوجد ${isFactory(dup) ? "مصنعٌ" : "محلٌّ"} بالاسم نفسه: ${name}`);
+    if (dup) throw new Error(`يوجد ${isFactory(dup) ? "مصنعٌ" : "عميلٌ"} بالاسم نفسه: ${name}`);
     const old = data.id ? shopById(st, data.id) : null;
-    if (old && (old.type || "shop") !== type) throw new Error("لا يتحوّل المحل مصنعاً ولا العكس");
+    if (old && (old.type || "shop") !== type) throw new Error("لا يتحوّل العميل مصنعاً ولا العكس");
     const rec = {
       id: data.id || uid(type === "factory" ? "fa_" : "sh_"), type,
       name, phone: String(data.phone || "").trim(),
       notes: String(data.notes || "").trim(),
+      // عيار الحساب: كل عميلٍ ومصنعٍ بعياره — رصيده وكشفه وأسطر فواتيره تُعرض به افتراضياً
+      // (والتخزين كما هو بمكافئ 18، فلا تتغيّر الأرصدة المحفوظة ولا معادلات البرنامج)
+      karat: Gold.KARATS.includes(parseInt(data.karat, 10)) ? parseInt(data.karat, 10) : 18,
       agreedWage18: Number(data.agreedWage18 || 0),
       openGold18: R(Number(data.openGold18 || 0), 3),
       openCash: R(Number(data.openCash || 0), 2),
@@ -99,6 +106,11 @@
     const i = st.shops.findIndex((s) => s.id === rec.id);
     if (i >= 0) st.shops[i] = rec; else st.shops.push(rec);
     return rec;
+  }
+  // عيار عرض الحساب (القديم بلا عيارٍ يُعرض بعيار المجاميع في الإعدادات)
+  function partyKarat(p, fallback) {
+    const k = p && parseInt(p.karat, 10);
+    return Gold.KARATS.includes(k) ? k : (parseInt(fallback, 10) || 18);
   }
   function deleteShop(st, id) {
     const used = st.invoices.some((d) => d.shopId === id) ||
@@ -245,7 +257,7 @@
     const party = shopById(st, draft.shopId);
     const forFactory = FACTORY_KINDS.includes(draft.kind);
     if (!SHOP_KINDS.includes(draft.kind) && !forFactory) throw new Error("نوع الفاتورة غير صحيح");
-    if (!party || isFactory(party) !== forFactory) throw new Error(forFactory ? "اختر المصنع" : "اختر المحل");
+    if (!party || isFactory(party) !== forFactory) throw new Error(forFactory ? "اختر المصنع" : "اختر العميل");
     const lines = draft.lines || [];
     checkLines(lines);
     const t = totals(lines, !!draft.vat);
@@ -293,8 +305,8 @@
   function saveVoucher(st, draft) {
     const party = shopById(st, draft.shopId);
     if (!["receipt", "payment"].includes(draft.kind)) throw new Error("نوع سند غير صحيح");
-    // التحصيل من المحلات، والدفع للمصانع (ودفعٌ قديم لمحلٍّ يبقى كما رُحّل)
-    if (draft.kind === "receipt" && (!party || isFactory(party))) throw new Error("اختر المحل");
+    // التحصيل من العملاء، والدفع للمصانع (ودفعٌ قديم لعميلٍ يبقى كما رُحّل)
+    if (draft.kind === "receipt" && (!party || isFactory(party))) throw new Error("اختر العميل");
     if (draft.kind === "payment" && !party) throw new Error("اختر المصنع");
     const rows = voucherRows(draft.rows);
     const discCash = R(Number(draft.discCash || 0), 2);
@@ -482,6 +494,12 @@
   function setTracks(st) {
     const tracks = new Map();
     const unnamed = new Map();
+    for (const p of openPieces(st)) {
+      const key = p.name ? "n:" + p.name : "u:" + p.id;
+      if (!p.name) unnamed.set(p.id, key);
+      tracks.set(key, { key, name: p.name, moves: [{ inv: p.doc, line: p.line, idx: 0, kind: "opening",
+        date: p.doc.date, createdAt: "", shop: null }] });
+    }
     for (const d of st.invoices.slice().sort(docOrder)) {
       d.lines.forEach((li, idx) => {
         if (li.wageOnly) return;
@@ -503,7 +521,7 @@
       const withPh = t.moves.slice().reverse().find((m) => linePhotos(m.line).length);
       return { key: t.key, name: t.name, moves: t.moves, last, karat,
         w18: last.line.reg18 || 0, weight: Gold.g(last.line.reg18 || 0, karat),
-        where: IN_KINDS.includes(last.kind) ? "in" : last.kind === "sale" ? "customer" : "factory",
+        where: IN_KINDS.includes(last.kind) || last.kind === "opening" ? "in" : last.kind === "sale" ? "customer" : "factory",
         party: last.shop, photos: withPh ? linePhotos(withPh.line) : [] };
     });
   }
@@ -599,17 +617,86 @@
 
   // ══ الممتلكات: ما مع المندوب الآن ══
   function lineId(doc, li, idx) { return li.lid || `${doc.id}#${idx}`; }
+
+  // الرصيد الافتتاحي للممتلكات (في الإعدادات): ما كان معي قبل أول عمليةٍ في التطبيق —
+  // ذهبٌ لكل عيار، ونقد، وأطقمٌ في يدي (اسمٌ اختياري ووزنٌ وعيار)
+  function openHold(st) {
+    const o = (st.settings && st.settings.openHold) || {};
+    const gold = {};
+    for (const k of Gold.KARATS) {
+      const w = R(Number((o.gold || {})[k] || 0), 3);
+      if (w) gold[k] = w;
+    }
+    const sets = (Array.isArray(o.sets) ? o.sets : []).filter((x) => x && Number(x.w18) > 0).map((x) => ({
+      id: String(x.id), name: String(x.name || "").trim(), karat: Gold.KARATS.includes(+x.karat) ? +x.karat : 18,
+      w18: R(Number(x.w18), 3), photos: cleanPhotos(x.photos),
+    }));
+    return { date: o.date || "", gold, cash: R(Number(o.cash || 0), 2), sets };
+  }
+  function saveOpenHold(st, data) {
+    const gold = {};
+    for (const k of Gold.KARATS) {
+      const w = R(Number((data.gold || {})[k] || 0), 3);
+      if (!isFinite(w) || w < 0) throw new Error(`وزنٌ غير صحيح لعيار ${k}`);
+      if (w) gold[k] = w;
+    }
+    const cash = R(Number(data.cash || 0), 2);
+    if (!isFinite(cash) || cash < 0) throw new Error("مبلغ النقد غير صحيح");
+    const names = new Set();
+    const sets = [];
+    for (const x of data.sets || []) {
+      const k = parseInt(x.karat, 10);
+      if (!Gold.KARATS.includes(k)) throw new Error(`عيار غير مدعوم: ${x.karat}`);
+      const w = Number(x.weight || 0);
+      if (!(w > 0)) throw new Error("اكتب وزن كل طقم (أو احذف سطره)");
+      const name = String(x.name || "").trim();
+      if (name && names.has(name)) throw new Error(`الطقم ${name} مكرّر`);
+      if (name) names.add(name);
+      sets.push({ id: x.id || uid("os"), name, karat: k, w18: Gold.store(w, k), photos: cleanPhotos(x.photos) });
+    }
+    // طقمٌ بِيع من الرصيد الافتتاحي (فاتورته تشير إليه) لا يُحذف منه — وإلا ضاع أصل ما بِيع
+    const kept = new Set(sets.map((x) => "op:" + x.id));
+    for (const o of openHold(st).sets) {
+      const id = "op:" + o.id;
+      if (!kept.has(id) && st.invoices.some((d) => d.lines.some((l) => l.src === id))) {
+        throw new Error(`الطقم ${o.name || "الذي بلا اسم"} خرج بفاتورة — لا يُحذف من الرصيد الافتتاحي (احذف فاتورته أولاً)`);
+      }
+    }
+    st.settings.openHold = { date: data.date || today(), gold, cash, sets };
+    return st.settings.openHold;
+  }
+  // مستندٌ رمزيّ للرصيد الافتتاحي (يُعرض في الحركات بلا رابط)
+  function openDoc(oh) { return { id: "opening", no: "", kind: "opening", date: oh.date, createdAt: "", opening: true, lines: [] }; }
+  // أطقم الرصيد الافتتاحي بسطرٍ كأسطر الفواتير (للبيع منها، والبحث عنها)
+  function openPieces(st) {
+    const oh = openHold(st);
+    const doc = openDoc(oh);
+    return oh.sets.map((x) => ({ id: "op:" + x.id, name: x.name, karat: x.karat, w18: x.w18, doc,
+      line: { wageOnly: false, wo: x.name, model: "", karat: x.karat, gold18: x.w18, small18: 0, big18: 0, after18: 0,
+        standing18: x.w18, reg18: x.w18, diamond: 0, rate18: 0, wages: 0, note: "", lid: "op:" + x.id, src: "",
+        photo: x.photos[0] || "", photos: x.photos } }));
+  }
+
   function holdings(st) {
-    // صناديق الذهب بعيارها، وصندوق النقد — من التحصيل ناقصاً الدفع
+    // صناديق الذهب بعيارها، وصندوق النقد — الرصيد الافتتاحي ثم التحصيل ناقصاً الدفع
     const boxes = {};
-    const cash = { amount: 0, inSum: 0, outSum: 0, moves: [] };
+    const cash = { amount: 0, open: 0, inSum: 0, outSum: 0, moves: [] };
+    const oh = openHold(st), od = openDoc(oh);
+    for (const [k, w] of Object.entries(oh.gold)) {
+      boxes[k] = { karat: +k, weight: w, open: w, inSum: 0, outSum: 0,
+        moves: [{ sign: 1, weight: w, date: oh.date, party: null, doc: od, notes: "", opening: true }] };
+    }
+    if (oh.cash) {
+      cash.amount = oh.cash; cash.open = oh.cash;
+      cash.moves.push({ sign: 1, amount: oh.cash, date: oh.date, party: null, doc: od, notes: "", opening: true });
+    }
     for (const v of st.vouchers.slice().sort(docOrder)) {
       const sg = v.kind === "receipt" ? 1 : v.kind === "payment" ? -1 : 0;
       if (!sg) continue;
       const party = shopById(st, v.shopId);
       for (const r of v.rows) {
         if (r.kind === "gold") {
-          const b = boxes[r.karat] = boxes[r.karat] || { karat: r.karat, weight: 0, inSum: 0, outSum: 0, moves: [] };
+          const b = boxes[r.karat] = boxes[r.karat] || { karat: r.karat, weight: 0, open: 0, inSum: 0, outSum: 0, moves: [] };
           b.weight = R(b.weight + sg * r.weight, 3);
           if (sg > 0) b.inSum = R(b.inSum + r.weight, 3); else b.outSum = R(b.outSum + r.weight, 3);
           b.moves.push({ sign: sg, weight: r.weight, date: v.date, party, doc: v, notes: r.notes || "" });
@@ -620,10 +707,16 @@
         }
       }
     }
-    // الأطقم في اليد: ما دخل (مرتجعٌ من محل · بضاعةٌ من مصنع) ولم يخرج
-    // (بيعٌ لمحل · إرجاعٌ لمصنع). الخارج يُطابق بطقمه المختار (`src`) أو باسمه
+    // الأطقم في اليد: ما دخل (مرتجعٌ من عميل · بضاعةٌ من مصنع) ولم يخرج
+    // (بيعٌ لعميل · إرجاعٌ لمصنع). الخارج يُطابق بطقمه المختار (`src`) أو باسمه
     const pieces = new Map();
     const byName = new Map();
+    // أطقم الرصيد الافتتاحي أولاً — في يدي ما لم تُبَع أو تُرجَع
+    for (const p of openPieces(st)) {
+      pieces.set(p.id, { id: p.id, name: p.name, karat: p.karat, w18: p.w18, rate18: 0, date: p.doc.date,
+        doc: p.doc, line: p.line, party: null, fromKind: "opening" });
+      if (p.name) byName.set(p.name, p.id);
+    }
     for (const d of st.invoices.slice().sort(docOrder)) {
       const isIn = IN_KINDS.includes(d.kind), isOut = OUT_KINDS.includes(d.kind);
       d.lines.forEach((li, idx) => {
@@ -655,7 +748,22 @@
     cash.moves.reverse();
     let gold18 = 0;
     for (const b of boxList) gold18 = R(gold18 + Gold.store(b.weight, b.karat), 3);
-    return { boxes: boxList, cash, pieces: list, setsW18, gold18 };
+    return { boxes: boxList, cash, pieces: list, setsW18, gold18, open: oh };
+  }
+  // صافي ما لي — موقف المندوب كلّه بمكافئ 18: ذهبي في يدي + الأطقم التي معي + ما لي عند العملاء
+  // − ما عليّ للمصانع (بإشارته)، والنقد كذلك. الأطقم بذهبها (أجورها في حسابات أصحابها)
+  function netPosition(st) {
+    const hd = holdings(st), bal = allBalances(st);
+    let cus18 = 0, cusCash = 0, fac18 = 0, facCash = 0;
+    for (const p of st.shops) {
+      const b = bal[p.id];
+      if (isFactory(p)) { fac18 += b.gold18; facCash += b.cash; } else { cus18 += b.gold18; cusCash += b.cash; }
+    }
+    cus18 = R(cus18, 3); fac18 = R(fac18, 3); cusCash = R(cusCash, 2); facCash = R(facCash, 2);
+    return {
+      hand18: hd.gold18, sets18: hd.setsW18, cus18, fac18, handCash: hd.cash.amount, cusCash, facCash,
+      gold18: R(hd.gold18 + hd.setsW18 + cus18 + fac18, 3), cash: R(hd.cash.amount + cusCash + facCash, 2),
+    };
   }
   // ذهب المصانع الذي عندي (ما عليّ لكل مصنع: أخذتُ − أرجعتُ − سدّدتُ، ومعه
   // الدَّين السابق)، وذهبي عند العملاء (ما على كل عميل) — بالأرصدة نفسها
@@ -762,6 +870,7 @@
     effects, docsOf, statement, balance, balanceAround, allBalances,
     woHistory, woLast, setTracks, searchSets, searchKey, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
+    partyKarat, openHold, saveOpenHold, netPosition,
     diamondOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };
   root.Domain = api;

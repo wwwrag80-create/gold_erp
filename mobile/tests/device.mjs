@@ -255,7 +255,7 @@ async function main() {
 
   await run(ev, `location.hash = "#/settings"; await t.sleep(300); t.fill("الاسم", "مؤسسة الذهب"); t.click("حفظ الإعدادات"); await t.sleep(300);`);
   for (const [n, w] of [["محل الأمانة", "20"], ["محل النخبة", ""]]) {
-    await run(ev, `location.hash = "#/shop-form"; await t.sleep(300); t.fill("اسم المحل", ${JSON.stringify(n)});
+    await run(ev, `location.hash = "#/shop-form"; await t.sleep(300); t.fill("اسم العميل", ${JSON.stringify(n)});
       ${w ? `t.fill("الأجرة المتفق عليها", "${w}");` : ""} t.click("حفظ"); await t.sleep(400);`);
   }
   await run(ev, `location.hash = "#/shop-form?type=factory"; await t.sleep(300); t.fill("اسم المصنع", "مصنع الريان");
@@ -373,7 +373,8 @@ async function main() {
   const hd = await ev("(() => { const h = Domain.holdings(App.state); return { b21: (h.boxes.find((b) => b.karat === 21) || {}).weight, cash: h.cash.amount, n: h.pieces.length }; })()");
   // الطقم بلا اسم من البضاعة لم يُبع (السطر 5 جم كُتب بوزنه لا باختياره)
   check("الممتلكات: صندوق 21 فيه 1.00 جم، والنقد 20، وطقمٌ واحد معي", hd.b21 === 1 && hd.cash === 20 && hd.n === 1, JSON.stringify(hd));
-  check("وصناديقها على الشاشة، ثم ذهب المصانع · ذهبي عند العملاء · الأطقم التي معي", (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
+  check("«صافي ما لي» أولاً بالذهب والنقد وتفصيلهما", await ev("(() => { const n = document.querySelector('.net-card'); return !!n && n.innerText.includes('صافي ما لي') && n.querySelectorAll('.net-row').length === 5; })()"));
+  check("ثم صناديقها، والأطقم التي معي · لي عند العملاء · عليّ للمصانع", (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
     (await ev("document.querySelectorAll('.wide-tile.big').length")) === 3 &&
     (await ev("document.querySelector('.wide-tile.sets').innerText")).includes("الأطقم التي معي (1)"));
   // التطبيق يقرأ الملف من main؛ والتجربة تقرؤه بالطريق نفسه من النسخة المُختبَرة

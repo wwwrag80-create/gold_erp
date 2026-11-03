@@ -133,8 +133,9 @@
       if (ids.length === 1) return `<td class="ph"><img src="${ph[ids[0]]}" alt=""></td>`;
       return `<td class="ph"><div class="phs">${ids.slice(0, 4).map((id) => `<img src="${ph[id]}" alt="">`).join("")}</div>${ids.length > 4 ? `<small>+${ids.length - 4}</small>` : ""}</td>`;
     };
-    const k = st.settings.viewKarat || 18;
     const shop = D.shopById(st, inv.shopId) || { name: "—" };
+    // عيار حساب العميل/المصنع
+    const k = D.partyKarat(D.shopById(st, inv.shopId), st.settings.viewKarat || 18);
     const title = (INV_TITLE[inv.kind] || "فاتورة") + (inv.vat ? " ضريبية" : "");
     const anyDia = inv.lines.some((l) => l.diamond > 0);
     let rows = "", n = 0;
@@ -188,8 +189,9 @@
   }
 
   function voucherHtml(st, v) {
-    const k = st.settings.viewKarat || 18;
     const shop = D.shopById(st, v.shopId) || { name: "—" };
+    // عيار حساب العميل/المصنع
+    const k = D.partyKarat(D.shopById(st, v.shopId), st.settings.viewKarat || 18);
     const title = v.kind === "receipt" ? "سند تحصيل" : D.isFactory(shop) ? "سند سداد للمصنع" : "سند صرف";
     let rows = "", n = 0;
     for (const r of v.rows) {
@@ -218,8 +220,9 @@
 
   // كشف الحساب بعرض الجوال: «gold» الذهب والنقد، أو «diamond» الماس
   function statementHtml(st, shopId, from, to, mode) {
-    const k = st.settings.viewKarat || 18;
     const shop = D.shopById(st, shopId) || { name: "—" };
+    // عيار حساب العميل/المصنع
+    const k = D.partyKarat(D.shopById(st, shopId), st.settings.viewKarat || 18);
     const fac = D.isFactory(shop);
     const period = from || to ? `من ${from ? dmy(from) : "البداية"} إلى ${to ? dmy(to) : "اليوم"}` : "كل الفترات";
     const sgn = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + f2(Math.abs(v));
@@ -228,7 +231,7 @@
     const dt = (iso) => iso ? `${ltr(iso.slice(8, 10) + "-" + iso.slice(5, 7))}<small>${iso.slice(0, 4)}</small>` : "";
     // الحركة فوق، والرصيد بعدها في الخانة نفسها
     const cell = (mv, bal, word) => `<td class="m">${mv ? `<span class="mv" dir="ltr">${mv}</span>` : ""}<b>${bal}</b>${word ? `<span class="w">${word}</span>` : ""}</td>`;
-    const partyRow = `<div class="party"><div><b>${fac ? "المصنع" : "المحل"}:</b> ${esc(shop.name)}</div>
+    const partyRow = `<div class="party"><div><b>${fac ? "المصنع" : "العميل"}:</b> ${esc(shop.name)}</div>
       <div class="muted">${period}${mode === "diamond" ? " · الماس بالجرام" : ` · الذهب بعيار ${k}`}</div></div>`;
     let body;
     if (mode === "diamond") {
@@ -271,8 +274,9 @@
 
   // نصٌّ قصير للمشاركة في واتساب
   function invoiceText(st, inv) {
-    const k = st.settings.viewKarat || 18;
     const shop = D.shopById(st, inv.shopId) || { name: "" };
+    // عيار حساب العميل/المصنع
+    const k = D.partyKarat(D.shopById(st, inv.shopId), st.settings.viewKarat || 18);
     const { after } = D.balanceAround(st, inv);
     return [`${INV_TITLE[inv.kind] || "فاتورة"} ${inv.no} — ${dmy(inv.date)}`,
       `${shop.name}`,

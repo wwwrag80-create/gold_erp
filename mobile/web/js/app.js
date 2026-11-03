@@ -12,26 +12,32 @@
 
   // ══ أدوات عامة ══
   const st = () => App.state;
+  // عيار المجاميع (الإعدادات): حين تُجمع حساباتٌ بأعيرةٍ مختلفة. ولكل حسابٍ عياره (`pk`)
   const vk = () => parseInt(st().settings.viewKarat || 18, 10);
+  const pk = (party) => D.partyKarat(party, vk());
   const gw = (w18, k) => f2(G.g(w18, k || vk()));
   const dmy = P.dmy;
   const view = () => document.getElementById("view");
 
-  // الرصيد بكلمته: المحل «عليه» (لي عنده) أو «له»، والمصنع «عليّ» (له عندي) أو «لي»
+  // الرصيد بكلمته: العميل «عليه» (لي عنده) أو «له»، والمصنع «عليّ» (له عندي) أو «لي»
   function balWord(v, fac) {
     if (fac) return v < 0 ? "عليّ" : "لي";
     return v > 0 ? "عليه" : "له";
   }
   function balSpan(v, unit, fac) {
     if (Math.abs(v) < 0.005) return h("span", { class: "muted" }, "0.00");
-    const owing = fac ? v < 0 : v > 0;   // أحمر: ما على المحل لي، أو ما عليّ للمصنع
+    const owing = fac ? v < 0 : v > 0;   // أحمر: ما على العميل لي، أو ما عليّ للمصنع
     return h("span", { class: owing ? "bal-on" : "bal-for" }, `${f2(Math.abs(v))} ${unit} ${balWord(v, fac)}`);
   }
   function balText(v, unit, fac) {
     if (Math.abs(v) < 0.005) return "0.00";
     return `${f2(Math.abs(v))} ${unit} ${balWord(v, fac)}`;
   }
-  function goldBal(w18, fac) { return balSpan(G.g(w18, vk()), "جم", fac); }
+  // رصيد الذهب بعيار الحساب (أو المعطى) — والعيار مكتوبٌ معه حين يخالف عيار المجاميع
+  function goldBal(w18, fac, k) {
+    k = k || vk();
+    return balSpan(G.g(w18, k), k === vk() ? "جم" : `جم ع${k}`, fac);
+  }
   function cashBal(c, fac) { return balSpan(c, "ريال", fac); }
   const APP_NAME = "ÀUR";
   // رابط ÀUR للجميع: الآيفون (يُضاف إلى الشاشة الرئيسية) وتحميل أندرويد — Cloudflare Pages
@@ -194,10 +200,13 @@
     return h("span", { class: "badge" + (isRetKind(kind) ? " ret" : ""), text: D.KIND_LABEL[kind] });
   }
 
+  // وزن المستند بعيار حسابه (العميل/المصنع) — والوحدة تذكر العيار إن خالف عيار المجاميع
+  const unitK = (k) => (k === vk() ? "جم" : `جم ع${k}`);
   function docSummary(d) {
-    if (isInvKind(d.kind)) return `${gw(d.totalW18)} جم · أجور ${f2(d.grand)}`;
+    const k = pk(D.shopById(st(), d.shopId));
+    if (isInvKind(d.kind)) return `${gw(d.totalW18, k)} ${unitK(k)} · أجور ${f2(d.grand)}`;
     const parts = [];
-    if (d.gold18) parts.push(`${gw(d.gold18)} جم`);
+    if (d.gold18) parts.push(`${gw(d.gold18, k)} ${unitK(k)}`);
     if (d.cash) parts.push(`${f2(d.cash)} ريال`);
     return parts.join(" · ") || "—";
   }
@@ -261,12 +270,14 @@
       photoThumb(ids[0], cls, all), ids.length > 1 ? h("span", { class: "thumb-n" }, `+${ids.length - 1}`) : null);
   }
   // من أين جاء الطقم الذي معي، ومتى — نصّاً، أو عناصرَ لا ينكسر فيها التاريخ
+  const pieceOrigin = (p) => (p.fromKind === "opening" ? "من الرصيد الافتتاحي"
+    : `${p.fromKind === "purchase" ? "من مصنع" : "مرتجع من"} «${p.party ? p.party.name : "—"}»`);
   function pieceFrom(p) {
-    return `${p.fromKind === "purchase" ? "من مصنع" : "مرتجع من"} «${p.party ? p.party.name : "—"}» · ${dmy(p.date)}`;
+    return `${pieceOrigin(p)}${p.date ? " · " + dmy(p.date) : ""}`;
   }
   function pieceFromEl(p, pre) {
-    return [`${pre || ""}${p.fromKind === "purchase" ? "من مصنع" : "مرتجع من"} «${p.party ? p.party.name : "—"}» · `,
-      h("span", { class: "nowrap", dir: "ltr" }, dmy(p.date))];
+    return [`${pre || ""}${pieceOrigin(p)}${p.date ? " · " : ""}`,
+      p.date ? h("span", { class: "nowrap", dir: "ltr" }, dmy(p.date)) : null];
   }
   function piecePhotos(p) {
     const ids = D.linePhotos(p.line);
@@ -511,7 +522,7 @@
     return h("button", { onclick: fn }, h("span", { class: "i" }, ico(icon, 24)), h("span", null, label));
   }
 
-  // ══ الحسابات: المحلات والمصانع ══
+  // ══ الحسابات: العملاء والمصانع ══
   // `type`: «shop» أو «factory» — أو null لكل الحسابات
   function partyItems(type) {
     const s = st();
@@ -519,17 +530,17 @@
     return s.shops.filter((x) => !type || (type === "factory") === D.isFactory(x))
       .sort((a, b) => (D.isFactory(a) - D.isFactory(b)) || a.name.localeCompare(b.name, "ar"))
       .map((x) => {
-        const fac = D.isFactory(x);
+        const fac = D.isFactory(x), k = pk(x);
         return { id: x.id, title: x.name,
-          sub: (type ? "" : fac ? "مصنع · " : "محل · ") +
-            `ذهب ${balText(G.g(bals[x.id].gold18, vk()), "جم", fac)} · نقد ${balText(bals[x.id].cash, "ريال", fac)}` };
+          sub: (type ? "" : fac ? "مصنع · " : "عميل · ") +
+            `ذهب ${balText(G.g(bals[x.id].gold18, k), `جم عيار ${k}`, fac)} · نقد ${balText(bals[x.id].cash, "ريال", fac)}` };
       });
   }
   function pickPartyThen(type, fn) {
     return async () => {
       const fac = type === "factory";
-      const it = await pickSheet(type ? `اختر ${fac ? "المصنع" : "المحل"}` : "اختر الحساب", partyItems(type),
-        { addLabel: type ? (fac ? "+ مصنع جديد" : "+ محل جديد") : null, empty: "لا حسابات بعد" });
+      const it = await pickSheet(type ? `اختر ${fac ? "المصنع" : "العميل"}` : "اختر الحساب", partyItems(type),
+        { addLabel: type ? (fac ? "+ مصنع جديد" : "+ عميل جديد") : null, empty: "لا حسابات بعد" });
       if (!it) return;
       if (it.add) { go(fac ? "shop-form?type=factory" : "shop-form"); return; }
       fn(it.id);
@@ -540,13 +551,13 @@
     const s = st();
     const mode = q.view === "board" ? "board" : q.view === "factories" ? "factories" : "shops";
     const fac = mode === "factories";
-    setBar("الحسابات", `${D.shopsOnly(s).length} محل · ${D.factoriesOnly(s).length} مصنع`, { back: false,
-      actions: mode === "board" ? [] : [h("button", { class: "icon-btn", "aria-label": fac ? "مصنع جديد" : "محل جديد",
-        onclick: () => go(fac ? "shop-form?type=factory" : "shop-form") }, ico("plus", 20), h("span", null, fac ? "مصنع" : "محل"))] });
+    setBar("الحسابات", `${D.shopsOnly(s).length} عميل · ${D.factoriesOnly(s).length} مصنع`, { back: false,
+      actions: mode === "board" ? [] : [h("button", { class: "icon-btn", "aria-label": fac ? "مصنع جديد" : "عميل جديد",
+        onclick: () => go(fac ? "shop-form?type=factory" : "shop-form") }, ico("plus", 20), h("span", null, fac ? "مصنع" : "عميل"))] });
     setTab("customers");
     const v = view();
     v.append(h("div", { class: "seg", style: { marginBottom: "10px" } },
-      h("button", { class: mode === "shops" ? "on" : "", onclick: () => replace("customers") }, "المحلات"),
+      h("button", { class: mode === "shops" ? "on" : "", onclick: () => replace("customers") }, "العملاء"),
       h("button", { class: fac ? "on" : "", onclick: () => replace("customers?view=factories") }, "المصانع"),
       h("button", { class: mode === "board" ? "on" : "", onclick: () => replace("customers?view=board") }, "المبيعات والتحصيل")));
     if (mode === "board") return boardView(v, q);
@@ -554,7 +565,7 @@
   }
 
   function partyList(v, fac) {
-    const q = h("input", { class: "in", type: "search", placeholder: fac ? "ابحث باسم المصنع أو الجوال…" : "ابحث باسم المحل أو الجوال…" });
+    const q = h("input", { class: "in", type: "search", placeholder: fac ? "ابحث باسم المصنع أو الجوال…" : "ابحث باسم العميل أو الجوال…" });
     const sortSeg = h("div", { class: "chips", style: { margin: "8px 0" } });
     let sort = "name";
     const list = h("div");
@@ -564,7 +575,7 @@
       const t = q.value.trim();
       const all = fac ? D.factoriesOnly(s) : D.shopsOnly(s);
       const arr = all.filter((x) => !t || x.name.includes(t) || (x.phone || "").includes(t));
-      // «الأكثر»: للمحل أكبر ما عليه، وللمصنع أكبر ما عليّ له (السالب)
+      // «الأكثر»: للعميل أكبر ما عليه، وللمصنع أكبر ما عليّ له (السالب) — بمكافئ 18 فالأعيرة تُقارن
       const sg = fac ? -1 : 1;
       if (sort === "name") arr.sort((a, b) => a.name.localeCompare(b.name, "ar"));
       if (sort === "gold") arr.sort((a, b) => sg * (bals[b.id].gold18 - bals[a.id].gold18));
@@ -573,7 +584,7 @@
       if (!arr.length) {
         list.append(h("div", { class: "empty" }, all.length ? "لا نتائج" : fac
           ? "لا مصانع بعد — اضغط «+ مصنع» لإضافة المصنع الذي تأخذ منه البضاعة وتدفع له."
-          : "لا محلات بعد — اضغط «+ محل» لإضافة أول محل."));
+          : "لا عملاء بعد — اضغط «+ عميل» لإضافة أول عميل."));
       }
       for (const x of arr) {
         list.append(h("div", { class: "list-item", onclick: () => go(`shop/${x.id}`) },
@@ -581,7 +592,7 @@
           h("div", { class: "grow" }, h("div", { class: "t", text: x.name }),
             x.phone ? h("div", { class: "muted small", dir: "ltr", style: { textAlign: "right" }, text: x.phone }) : null),
           h("div", { style: { textAlign: "left" }, class: "small num" },
-            h("div", null, goldBal(bals[x.id].gold18, fac)), h("div", null, cashBal(bals[x.id].cash, fac)))));
+            h("div", null, goldBal(bals[x.id].gold18, fac, pk(x))), h("div", null, cashBal(bals[x.id].cash, fac)))));
       }
     };
     const chips = fac ? [["name", "بالاسم"], ["gold", "الأكثر ذهباً عليّ"], ["cash", "الأكثر نقداً عليّ"]]
@@ -604,20 +615,21 @@
     const shop = D.shopById(s, id);
     if (!shop) { replace("customers"); return; }
     const fac = D.isFactory(shop);
-    setBar(shop.name, (fac ? "مصنع" : "محل") + (shop.phone ? " · " + shop.phone : ""), {
+    const k = pk(shop);
+    setBar(shop.name, (fac ? "مصنع" : "عميل") + ` · عيار ${k}` + (shop.phone ? " · " + shop.phone : ""), {
       actions: [h("button", { class: "icon-btn", "aria-label": "تعديل", onclick: () => go(`shop-form/${id}`) }, ico("edit", 20))] });
     setTab("customers");
     const b = D.balance(s, id);
     const v = view();
     v.append(h("div", { class: "kpis" },
-      h("div", { class: "kpi" }, h("b", null, `رصيد الذهب (عيار ${vk()})`), h("div", { class: "v num" }, goldBal(b.gold18, fac))),
+      h("div", { class: "kpi" }, h("b", null, `رصيد الذهب (عيار ${k})`), h("div", { class: "v num" }, goldBal(b.gold18, fac, k))),
       h("div", { class: "kpi" }, h("b", null, fac ? "رصيد النقد والأجور" : "رصيد الأجور والنقد"), h("div", { class: "v num" }, cashBal(b.cash, fac)))));
     if (shop.agreedWage18) {
       v.append(h("div", { class: "note-bar info", style: { marginBottom: "12px" } },
-        `${fac ? "أجرة المصنع المتفق عليها" : "الأجرة المتفق عليها"}: ${f2(G.rate(shop.agreedWage18, vk()))} ريال لكل جرام عيار ${vk()}`));
+        `${fac ? "أجرة المصنع المتفق عليها" : "الأجرة المتفق عليها"}: ${f2(G.rate(shop.agreedWage18, k))} ريال لكل جرام عيار ${k}`));
     }
     const contact = shop.phone ? quickBtn("phone", "اتصال", () => B.dial(shop.phone))
-      : quickBtn("edit", fac ? "تعديل المصنع" : "تعديل المحل", () => go(`shop-form/${id}`));
+      : quickBtn("edit", fac ? "تعديل المصنع" : "تعديل العميل", () => go(`shop-form/${id}`));
     v.append(h("div", { class: "quick" }, ...(fac ? [
       quickBtn("out", "سداد للمصنع", () => go(`voucher/new?kind=payment&shop=${id}`)),
       quickBtn("package", "بضاعة من المصنع", () => go(`invoice/new?kind=purchase&shop=${id}`)),
@@ -632,7 +644,7 @@
     if (shop.notes) v.append(h("div", { class: "card small" }, shop.notes));
     const docs = D.docsOf(s, id).reverse();
     v.append(h("div", { class: "sec-title" }, `العمليات (${docs.length})`));
-    if (!docs.length) v.append(h("div", { class: "empty" }, fac ? "لا عمليات مع هذا المصنع بعد" : "لا عمليات لهذا المحل بعد"));
+    if (!docs.length) v.append(h("div", { class: "empty" }, fac ? "لا عمليات مع هذا المصنع بعد" : "لا عمليات لهذا العميل بعد"));
     docs.slice(0, 60).forEach((d) => v.append(docItem(d)));
   }
 
@@ -640,9 +652,12 @@
     const s = st();
     const shop = id ? D.shopById(s, id) : null;
     const fac = shop ? D.isFactory(shop) : (q && q.type === "factory");
-    const word = fac ? "المصنع" : "المحل";
-    setBar(shop ? `تعديل ${word}` : fac ? "مصنع جديد" : "محل جديد", "", { noTabs: true });
-    const k = vk();
+    const word = fac ? "المصنع" : "العميل";
+    setBar(shop ? `تعديل ${word}` : fac ? "مصنع جديد" : "عميل جديد", "", { noTabs: true });
+    // عيار الحساب: لكل عميلٍ ومصنعٍ عياره — به يُعرض رصيده وكشفه، ويبدأ به كل سطرٍ في فواتيره
+    let k = shop ? pk(shop) : vk();
+    const karatSel = h("select", { class: "in" }, G.KARATS.map((x) => h("option", { value: x, text: `عيار ${x}` })));
+    karatSel.value = String(k);
     const name = h("input", { class: "in", value: shop ? shop.name : "", placeholder: `اسم ${word}`, enterkeyhint: "next" });
     const phone = h("input", { class: "in", value: shop ? shop.phone : "", inputmode: "tel", dir: "ltr", placeholder: "05xxxxxxxx" });
     const notes = h("textarea", { class: "in", rows: 2, placeholder: "ملاحظات (اختياري)" });
@@ -651,7 +666,32 @@
     const og = shop ? shop.openGold18 : 0, oc = shop ? shop.openCash : 0;
     const goldIn = numInput({ value: Math.abs(G.g(og, k)) });
     const cashIn = numInput({ value: Math.abs(oc) });
-    // الاتجاه: للمحل «عليه» موجب و«له» سالب — وللمصنع «عليّ» سالب و«لي» موجب
+    const wageF = field("", wage), goldF = field("", goldIn);
+    const labels = () => {
+      wageF.firstChild.textContent = fac ? `أجرة المصنع المتفق عليها (ريال لكل جرام عيار ${k}) — تُملأ تلقائياً في البضاعة`
+        : `الأجرة المتفق عليها (ريال لكل جرام عيار ${k}) — تُملأ تلقائياً في الفواتير`;
+      goldF.firstChild.textContent = `ذهب (جم عيار ${k})`;
+    };
+    labels();
+    // القيمة المحفوظة بمكافئ 18 ما دام الرقم المعروض لم يُمسّ — فتبديل العيار ذهاباً وإياباً لا يُقرّب شيئاً
+    const exact = (el, v18, toView, toStore) => {
+      let seen = el.value;
+      return {
+        v18: () => (el.value === seen ? v18 : toStore(el.getVal(), k)),
+        to: (nk) => { const x = (el.value === seen ? v18 : toStore(el.getVal(), k)); v18 = x; el.setVal(toView(x, nk)); seen = el.value; },
+      };
+    };
+    const goldX = exact(goldIn, Math.abs(og), G.g, G.store);
+    const wageX = exact(wage, shop ? shop.agreedWage18 || 0 : 0, G.rate, G.rateStore);
+    // تغيير العيار لا يغيّر ما بينكما: الوزن والأجرة المكتوبان يتحوّلان إلى العيار الجديد
+    karatSel.addEventListener("change", () => {
+      const nk = parseInt(karatSel.value, 10);
+      if ([goldIn.getVal(), wage.getVal()].some((x) => !isFinite(x))) { karatSel.value = String(k); err(new Error("صحّح الرقم أولاً")); return; }
+      goldX.to(nk); wageX.to(nk);
+      k = nk;
+      labels();
+    });
+    // الاتجاه: للعميل «عليه» موجب و«له» سالب — وللمصنع «عليّ» سالب و«لي» موجب
     const segOf = (val) => {
       let on = fac ? (val > 0 ? "for" : "on") : (val < 0 ? "for" : "on");
       const seg = h("div", { class: "seg" });
@@ -668,16 +708,18 @@
     const date = h("input", { class: "in", type: "date", value: shop ? shop.openDate : D.today() });
     const v = view();
     v.append(
-      h("div", { class: "card" }, h("h2", null, fac ? "بيانات المصنع" : "بيانات المحل"),
+      h("div", { class: "card" }, h("h2", null, fac ? "بيانات المصنع" : "بيانات العميل"),
         field(`اسم ${word}`, name), h("div", { style: { height: "8px" } }),
         field("الجوال", phone), h("div", { style: { height: "8px" } }),
-        field(fac ? `أجرة المصنع المتفق عليها (ريال لكل جرام عيار ${k}) — تُملأ تلقائياً في البضاعة`
-          : `الأجرة المتفق عليها (ريال لكل جرام عيار ${k}) — تُملأ تلقائياً في الفواتير`, wage),
+        field("عيار الحساب", karatSel),
+        h("div", { class: "muted small", style: { margin: "4px 0 8px" } },
+          fac ? "بهذا العيار يظهر رصيد المصنع وكشفه، ويبدأ به كل سطرٍ في بضاعته." : "بهذا العيار يظهر رصيد العميل وكشفه، ويبدأ به كل سطرٍ في فواتيره."),
+        wageF,
         h("div", { style: { height: "8px" } }), field("ملاحظات", notes)),
       h("div", { class: "card" }, h("h2", null, fac ? "دَينٌ سابق (اختياري)" : "رصيد افتتاحي (اختياري)"),
         h("div", { class: "muted small", style: { marginBottom: "8px" } },
-          fac ? "ما كان عليك للمصنع قبل أول عملية في التطبيق." : "ما كان بينك وبين المحل قبل أول فاتورة في التطبيق."),
-        h("div", { class: "grid2" }, field(`ذهب (جم عيار ${k})`, goldIn), field("الاتجاه", gSeg),
+          fac ? "ما كان بينك وبين المصنع قبل أول عملية في التطبيق." : "ما كان بينك وبين العميل قبل أول فاتورة في التطبيق."),
+        h("div", { class: "grid2" }, goldF, field("الاتجاه", gSeg),
           field("نقد (ريال)", cashIn), field("الاتجاه", cSeg), field("بتاريخ", date, "span2"))));
     const save = async () => {
       try {
@@ -686,12 +728,12 @@
         const rec = D.saveShop(s, {
           id: shop ? shop.id : null, createdAt: shop ? shop.createdAt : null, type: fac ? "factory" : "shop",
           name: name.value, phone: phone.value, notes: notes.value,
-          agreedWage18: wv ? G.rateStore(wv, k) : 0,
-          openGold18: gSeg.sign() * G.store(gv, k),
-          openCash: cSeg.sign() * cv, openDate: date.value || D.today(),
+          agreedWage18: wv ? wageX.v18() : 0,
+          openGold18: gv ? gSeg.sign() * goldX.v18() : 0,
+          openCash: cSeg.sign() * cv, openDate: date.value || D.today(), karat: k,
         });
         if (await persist([["shops", "put", rec]])) {
-          toast(fac ? "حُفظ المصنع" : "حُفظ المحل");
+          toast(fac ? "حُفظ المصنع" : "حُفظ العميل");
           if (shop) history.back(); else replace(`shop/${rec.id}`);
         }
       } catch (e) { err(e); }
@@ -756,7 +798,9 @@
     const isOut = () => D.OUT_KINDS.includes(inv.kind);
     const partyWord = () => (forFactory() ? "المصنع" : "العميل");
     const party = () => D.shopById(s, inv.shopId);
-    const ent = { karat: vk(), stoneRate: s.settings.stoneRate, regManual: false, fromCard: false, shadow: null,
+    // عيار الحساب: إجماليات الفاتورة والرصيد بعدها بعيار العميل/المصنع، ومنه يبدأ كل سطر
+    const partyK = () => pk(party());
+    const ent = { karat: partyK(), stoneRate: s.settings.stoneRate, regManual: false, fromCard: false, shadow: null,
       editIdx: null, lastWo: "", src: "", lid: null, smallV: 0, afterV: 0, exact18: null, photos: [] };
 
     // ── الرأس: النوع · الحساب · التاريخ ──
@@ -773,6 +817,8 @@
       if (it.add) { saveDraft(); go(fac ? "shop-form?type=factory" : "shop-form"); return; }
       inv.shopId = it.id;
       header();
+      // خانات الطقم فارغة؟ فعيارها عيار الحساب المختار
+      if (!pendingEntry() && !(gold.getVal() > 0)) { ent.karat = partyK(); karatSel.value = String(ent.karat); }
       ent.lastWo = "";
       woIn.dispatchEvent(new Event("change"));
       refresh();
@@ -947,6 +993,9 @@
       if (no === ent.lastWo) return;
       ent.lastWo = no; ent.src = "";
       const last = D.woLast(s, no, inv.id);
+      // طقمٌ من الرصيد الافتتاحي (لا حركة له بعد): يُعبّأ منه كما لو اختير من «الطقوم التي معي»
+      const op = !last && isOut() && ent.editIdx === null ? availablePieces().find((p) => p.fromKind === "opening" && p.name === no) : null;
+      if (op) { usePiece(op); return; }
       if (!last) {
         setNotice("info", `طقمٌ جديد باسم ${no}.`);
         ent.fromCard = false;
@@ -1107,11 +1156,11 @@
       const t = D.totals(inv.lines, inv.vat);
       const sets = inv.lines.filter((l) => !l.wageOnly).length;
       const dia0 = D.diamondOf(inv);
-      const k = vk();
+      const k = partyK();
       totalsBox.innerHTML = "";
       const row = (a, b, cls) => h("div", { class: "spread" + (cls ? " " + cls : "") }, h("span", null, a), h("span", { class: "num" }, b));
       totalsBox.append(row("عدد الأطقم", String(sets)),
-        row(`إجمالي الوزن (عيار ${k})`, gw(t.totalW18)),
+        row(`إجمالي الوزن (عيار ${k})`, gw(t.totalW18, k)),
         dia0 > 0 ? row("💎 إجمالي الماس (جم)", f2(dia0)) : null,
         row("إجمالي الأجور", f2(t.wages)));
       if (inv.vat) totalsBox.append(row("ضريبة 15% على الأجور", f2(t.vatAmt)));
@@ -1123,7 +1172,7 @@
         const g18 = Num_round3(before.gold18 + e.gd - e.gc);
         const c = Num_round2(before.cash + e.cd - e.cc);
         totalsBox.append(h("hr", { class: "sep" }),
-          h("div", { class: "spread small" }, h("span", null, "رصيد الذهب بعدها"), goldBal(g18, fac)),
+          h("div", { class: "spread small" }, h("span", null, "رصيد الذهب بعدها"), goldBal(g18, fac, k)),
           h("div", { class: "spread small" }, h("span", null, "رصيد الأجور بعدها"), cashBal(c, fac)));
       }
       renderPickBtn();
@@ -1150,7 +1199,7 @@
         const t = D.totals(inv.lines, inv.vat);
         const dia0 = D.diamondOf(inv);
         const msg = `${editing ? "حفظ تعديل" : "حفظ"} ${INV_TITLE[inv.kind]} — «${shopTitle(inv.shopId)}»\n` +
-          `${inv.lines.filter((l) => !l.wageOnly).length} طقم · ${gw(t.totalW18)} جم عيار ${vk()}` +
+          `${inv.lines.filter((l) => !l.wageOnly).length} طقم · ${gw(t.totalW18, partyK())} جم عيار ${partyK()}` +
           (dia0 > 0 ? ` · 💎 ${f2(dia0)} جم` : "") + "\n" +
           `الأجور ${f2(t.wages)}${inv.vat ? ` + ضريبة ${f2(t.vatAmt)}` : ""} = ${f2(t.grand)} ريال`;
         if (!(await confirmSheet(msg, editing ? "حفظ التعديل" : "حفظ الفاتورة"))) return;
@@ -1219,7 +1268,7 @@
   const Num_round3 = (x) => root.Num.pyRound(x, 3);
   const Num_round2 = (x) => root.Num.pyRound(x, 2);
 
-  // ══ التحصيل من محل · الدفع لمصنع ══
+  // ══ التحصيل من عميل · الدفع لمصنع ══
   function voucherEditor(q, mode, docId) {
     const s = st();
     let vo;
@@ -1232,14 +1281,16 @@
         notes: "", rows: [{ kind: "gold", weight: 0, karat: vk(), notes: "" }], discCash: 0, discGold18: 0, netDiff: 0 };
     }
     const editing = mode === "edit";
-    const k = vk();
     const isPay = vo.kind === "payment";
     const p0 = D.shopById(s, vo.shopId);
-    // دفعٌ قديم لمحل (من الإصدارات الأولى) يبقى قابلاً للتعديل كما هو
+    // عيار الحساب: الخصم وزناً والرصيد قبل وبعد بعيار العميل/المصنع، ومنه يبدأ سطر الذهب
+    let k = pk(p0);
+    if (!editing) vo.rows.forEach((r) => { if (r.kind === "gold") r.karat = k; });
+    // دفعٌ قديم لعميل (من الإصدارات الأولى) يبقى قابلاً للتعديل كما هو
     const legacy = isPay && p0 && !D.isFactory(p0);
     const forFactory = isPay && !legacy;
     const word = forFactory ? "المصنع" : "العميل";
-    const label = isPay ? (legacy ? "صرف لمحل" : "سداد للمصنع") : "تحصيل من العميل";
+    const label = isPay ? (legacy ? "صرف لعميل" : "سداد للمصنع") : "تحصيل من العميل";
     const header = () => {
       const sh = D.shopById(s, vo.shopId);
       docHeader(label + (editing ? ` ${vo.no}` : ""), sh ? sh.name : "", `اختر ${word}`, vo.date, pickParty,
@@ -1255,7 +1306,16 @@
         { addLabel: forFactory ? "+ مصنع جديد" : "+ عميل جديد", empty: forFactory ? "لا مصانع بعد" : "لا عملاء بعد" });
       if (!it) return;
       if (it.add) { go(forFactory ? "shop-form?type=factory" : "shop-form"); return; }
-      vo.shopId = it.id; header(); refresh();
+      vo.shopId = it.id; header();
+      const nk = pk(D.shopById(s, it.id));
+      if (nk !== k) {
+        const d18 = G.store(dGold.getVal() || 0, k);
+        k = nk;
+        dGold.setVal(G.g(d18, k)); dGoldLbl();
+        vo.rows.forEach((r) => { if (r.kind === "gold" && !(r.weight > 0)) r.karat = k; });
+        renderRows();
+      }
+      refresh();
     }
     const notesIn = h("input", { class: "in", value: vo.notes, placeholder: "البيان — يظهر في كشف الحساب", oninput: (e) => { vo.notes = e.target.value; } });
 
@@ -1276,7 +1336,7 @@
           const upd = () => {
             r.weight = w.getVal() || 0; r.karat = parseInt(ks.value, 10);
             const vg = G.voucherGold(r.weight, r.karat);
-            eq.textContent = `= ${f2(vg.equiv)} جم عيار 18` + (k !== 18 ? ` · ${gw(vg.equiv)} جم عيار ${k}` : "");
+            eq.textContent = `= ${f2(vg.equiv)} جم عيار 18` + (k !== 18 ? ` · ${gw(vg.equiv, k)} جم عيار ${k}` : "");
             if (isPay) {
               const have = boxOf(r.karat);
               avail.className = "small " + (r.weight > have + 0.0005 ? "bal-on" : "muted");
@@ -1314,11 +1374,14 @@
     const dCash = numInput({ value: vo.discCash });
     const nDiff = numInput({ value: vo.netDiff });
     for (const el of [dGold, dCash, nDiff]) el.addEventListener("input", refresh);
+    const dGoldF = field("", dGold);
+    const dGoldLbl = () => { dGoldF.firstChild.textContent = `خصم مسموح وزناً (جم عيار ${k})`; };
+    dGoldLbl();
     // البيان (والخصومات في التحصيل) مطويّةٌ — نادراً ما تُحتاج
     const extras = h("details", { class: "opts" },
       h("summary", null, isPay ? "بيان (اختياري)" : "بيان · خصومات (اختياري)"), notesIn,
       isPay ? null : h("div", { class: "grid2", style: { marginTop: "10px" } },
-        field(`خصم مسموح وزناً (جم عيار ${k})`, dGold), field("خصم مسموح نقداً (ريال)", dCash),
+        dGoldF, field("خصم مسموح نقداً (ريال)", dCash),
         field("فرق الصافي (ريال، + زيادة · − تخفيض)", nDiff, "span2")));
     if (vo.notes || vo.discCash || vo.discGold18 || vo.netDiff) extras.open = true;
 
@@ -1334,7 +1397,7 @@
       for (const r of rows) { eq += r.equiv; cash += r.amount; }
       const row = (a, b) => h("div", { class: "spread" }, h("span", null, a), h("span", { class: "num" }, b));
       totalsBox.append(row("الذهب (مكافئ عيار 18)", f2(Num_round3(eq))),
-        k !== 18 ? row(`الذهب (عيار ${k})`, gw(Num_round3(eq))) : null, row("النقد", f2(Num_round2(cash)) + " ريال"));
+        k !== 18 ? row(`الذهب (عيار ${k})`, gw(Num_round3(eq), k)) : null, row("النقد", f2(Num_round2(cash)) + " ريال"));
       if (vo.shopId) {
         const fac = D.isFactory(D.shopById(s, vo.shopId));
         const dv = draft();
@@ -1345,8 +1408,8 @@
             netDiff: Num_round2(dv.netDiff) });
         } catch (x) { e = { gd: 0, gc: 0, cd: 0, cc: 0 }; }
         totalsBox.append(h("hr", { class: "sep" }),
-          h("div", { class: "spread small" }, h("span", null, "رصيد الذهب قبل"), goldBal(before.gold18, fac)),
-          h("div", { class: "spread small" }, h("span", null, "رصيد الذهب بعد"), goldBal(Num_round3(before.gold18 + e.gd - e.gc), fac)),
+          h("div", { class: "spread small" }, h("span", null, "رصيد الذهب قبل"), goldBal(before.gold18, fac, k)),
+          h("div", { class: "spread small" }, h("span", null, "رصيد الذهب بعد"), goldBal(Num_round3(before.gold18 + e.gd - e.gc), fac, k)),
           h("div", { class: "spread small" }, h("span", null, "رصيد النقد قبل"), cashBal(before.cash, fac)),
           h("div", { class: "spread small" }, h("span", null, "رصيد النقد بعد"), cashBal(Num_round2(before.cash + e.cd - e.cc), fac)));
       }
@@ -1458,7 +1521,7 @@
     const fac = D.isFactory(shop);
     const mode = q.view === "diamond" ? "diamond" : "gold";
     const from = q.from || "", to = q.to || "";
-    const k = vk();
+    const k = pk(shop);
     const url = (o) => {
       const x = Object.assign({ id, from, to, view: mode === "diamond" ? "diamond" : "" }, o);
       const qs = ["from", "to", "view"].filter((key) => x[key]).map((key) => `${key}=${encodeURIComponent(x[key])}`).join("&");
@@ -1541,7 +1604,7 @@
       }
       head = ["التاريخ", "العملية", `الذهب (${k})`, "النقد"];
       bal = h("div", { class: "st-bal" }, h("span", { class: "muted" }, "الرصيد"),
-        goldBal(res.gold18, fac), h("span", { class: "muted" }, "·"), cashBal(res.cash, fac));
+        goldBal(res.gold18, fac, k), h("span", { class: "muted" }, "·"), cashBal(res.cash, fac));
     }
     v.append(bal);
     if (!tbody.children.length) {
@@ -1598,7 +1661,7 @@
   function setWhere(t) {
     const who = t.party ? t.party.name : "—";
     if (t.where === "in") return { short: "معك", cls: "badge grade good",
-      long: `معك — ${t.last.kind === "purchase" ? "من مصنع" : "مرتجعٌ من"} «${who}»` };
+      long: t.last.kind === "opening" ? "معك — من الرصيد الافتتاحي" : `معك — ${t.last.kind === "purchase" ? "من مصنع" : "مرتجعٌ من"} «${who}»` };
     if (t.where === "customer") return { short: `عند «${who}»`, cls: "badge",
       long: `عند «${who}» — مباعٌ بالفاتورة ${t.last.inv.no}` };
     return { short: `رجع إلى «${who}»`, cls: "badge ret", long: `رجع إلى المصنع «${who}» — ${D.KIND_LABEL[t.last.kind]} ${t.last.inv.no}` };
@@ -1641,10 +1704,11 @@
       out.append(h("div", { class: "note-bar info", style: { marginBottom: "10px" } }, `الآن: ${w.long}`));
       for (const m of t.moves.slice().reverse()) {
         const lk = m.line.karat || 18;
-        out.append(h("div", { class: "list-item", onclick: () => go(`doc/inv/${m.inv.id}`) },
+        const op = m.kind === "opening";
+        out.append(h("div", { class: "list-item", onclick: () => go(op ? "opening" : `doc/inv/${m.inv.id}`) },
           lineThumb(m.line, "md"),
           h("div", { class: "grow" },
-            h("div", { class: "spread" }, h("span", { class: "t" }, m.shop ? m.shop.name : "—"), kindBadge(m.kind)),
+            h("div", { class: "spread" }, h("span", { class: "t" }, op ? "ما كان معي" : m.shop ? m.shop.name : "—"), kindBadge(m.kind)),
             h("div", { class: "spread muted small" },
               h("span", null, h("span", { dir: "ltr", text: m.inv.no }), " · ", h("span", { dir: "ltr", text: dmy(m.date) })),
               h("span", { class: "num" }, `${gw(m.line.reg18, lk)} جم ${lk} · أجر ${f2(G.wageView(m.line.rate18, lk))}`)))));
@@ -1678,7 +1742,7 @@
       v.append(h("div", { class: "list-item" },
         h("div", { class: "grow", onclick: () => go(`invoice/held/${hd.id}`) },
           h("div", { class: "spread" }, h("span", { class: "t" }, shopTitle(hd.shopId)), kindBadge(hd.kind)),
-          h("div", { class: "muted small" }, `${hd.lines.length} سطر · ${gw(t.totalW18)} جم · ${f2(t.grand)} ريال · ${dmy((hd.savedAt || "").slice(0, 10))}`)),
+          h("div", { class: "muted small" }, `${hd.lines.length} سطر · ${gw(t.totalW18, pk(D.shopById(s, hd.shopId)))} ${unitK(pk(D.shopById(s, hd.shopId)))} · ${f2(t.grand)} ريال · ${dmy((hd.savedAt || "").slice(0, 10))}`)),
         h("div", { class: "act" }, h("button", { class: "del", onclick: async () => {
           if (!(await confirmSheet("حذف الفاتورة المعلّقة؟", "حذف", true))) return;
           s.held = s.held.filter((x) => x.id !== hd.id);
@@ -1701,9 +1765,10 @@
       item("list", "سجل العمليات", "كل الفواتير والسندات — بحثٌ ونوع", () => go("log")),
       item("search", "بحث عن طقم", "باسمه أو وزنه — ومع من هو الآن", () => go("wo")),
       item("pause", "المعلّقات", `${st().held.length} فاتورة لم تُحفظ`, () => go("held")),
-      item("book", "كشف حساب", "محل أو مصنع", pickPartyThen(null, (id) => go(`statement/${id}`))),
+      item("book", "كشف حساب", "عميل أو مصنع", pickPartyThen(null, (id) => go(`statement/${id}`))),
+      item("coins", "الرصيد الافتتاحي للممتلكات", "ما كان معك قبل التطبيق: ذهب · نقد · أطقم", () => go("opening")),
       us.unsupported ? null : item("update", "التحديثات", us.available ? "يوجد إصدارٌ جديد" : `الإصدار ${us.version}`, updateSheet),
-      item("settings", "الإعدادات والحفظ", "اسم النشاط · العيار · المظهر · الحفظ التلقائي", () => go("settings")),
+      item("settings", "الإعدادات والحفظ", "اسم النشاط · عيار المجاميع · المظهر · الحفظ التلقائي", () => go("settings")),
       item("share", `شارك ${APP_NAME} مع غيرك`, "رابطٌ واحد للآيفون وأندرويد — مجاني",
         () => B.shareText(`${APP_NAME} — حسابات الذهب للمندوب، مجاني لأندرويد والآيفون:\n${SITE_URL}`)),
       // حيث يلزم القانون (أوروبا وبريطانيا) وحده: تغيير موافقة الإعلانات
@@ -1759,7 +1824,7 @@
         const obj = JSON.parse(await f.text());
         const ns = D.fromBackup(obj);
         const msg = `استرجاع النسخة المحفوظة ${(obj.savedAt || "").slice(0, 10)}:\n` +
-          `${ns.shops.length} محل · ${ns.invoices.length} فاتورة · ${ns.vouchers.length} سند\n\n` +
+          `${ns.shops.length} عميل ومصنع · ${ns.invoices.length} فاتورة · ${ns.vouchers.length} سند\n\n` +
           "تُستبدل بها كل البيانات الحالية في هذا الجوال.";
         if (!(await confirmSheet(msg, "استرجاع", true))) return;
         await S.replaceAll(ns);
@@ -1804,10 +1869,10 @@
         h("div", { class: "grid2" }, field("الجوال", phone), field("الرقم الضريبي", vatNo)),
         h("div", { style: { height: "8px" } }), field("العنوان", address)),
       h("div", { class: "card" }, h("h2", null, "الحساب والعرض"),
-        h("div", { class: "grid2" }, field("عيار العرض", karat), field("نسبة خصم الأحجار %", rate),
+        h("div", { class: "grid2" }, field("عيار المجاميع", karat), field("نسبة خصم الأحجار %", rate),
           field("المظهر", theme, "span2")),
-        h("label", { class: "switch" }, showBal, "إظهار رصيد المحل في الفاتورة"),
-        h("div", { class: "muted small" }, "الأوزان تُحفظ دائماً بمكافئ عيار 18 كما في البرنامج — العيار هنا وحدة عرضٍ فقط.")),
+        h("label", { class: "switch" }, showBal, "إظهار رصيد العميل في الفاتورة"),
+        h("div", { class: "muted small" }, "لكل عميلٍ ومصنعٍ عياره (من «تعديل العميل»): به يظهر رصيده وكشفه وفواتيره. و«عيار المجاميع» لما يجمع الأعيرة كلها: صافي ما لك، ومجموع العملاء والمصانع، والعميل الذي لم يُحدَّد عياره. والأوزان تُحفظ دائماً بمكافئ عيار 18 كما في البرنامج.")),
       h("button", { class: "btn block", onclick: save, style: { marginBottom: "12px" } }, "حفظ الإعدادات"),
       autoCard,
       h("div", { class: "card" }, h("h2", null, ico("save", 18), "نسخةٌ في ملف"),
@@ -1821,10 +1886,10 @@
         fileIn),
       B.native ? h("button", { class: "btn ghost block", style: { marginBottom: "12px" }, onclick: updateSheet }, ico("update", 18), "التحديثات") : null,
       h("div", { class: "muted small", style: { textAlign: "center", margin: "16px 0" } },
-        `${APP_NAME} · الإصدار ${B.appVersion()} · ${D.shopsOnly(s).length} محل · ${D.factoriesOnly(s).length} مصنع · ${s.invoices.length} فاتورة · ${s.vouchers.length} سند`));
+        `${APP_NAME} · الإصدار ${B.appVersion()} · ${D.shopsOnly(s).length} عميل · ${D.factoriesOnly(s).length} مصنع · ${s.invoices.length} فاتورة · ${s.vouchers.length} سند`));
   }
 
-  // ══ المحلات — المبيعات والتحصيل (كشاشة العملاء في البرنامج) ══
+  // ══ العملاء — المبيعات والتحصيل (كشاشة العملاء في البرنامج) ══
   function periodPresets() {
     const t = D.today(), ym = t.slice(0, 7);
     const d = new Date(+t.slice(0, 4), +t.slice(5, 7) - 2, 1);
@@ -1859,14 +1924,14 @@
     const fIn = h("input", { class: "in", type: "date", value: from, onchange: (e) => replace(url({ from: e.target.value })) });
     const tIn = h("input", { class: "in", type: "date", value: to, onchange: (e) => replace(url({ to: e.target.value })) });
     const sideSeg = h("div", { class: "seg sm" },
-      h("button", { class: side === "gold" ? "on" : "", onclick: () => replace(url({ side: "gold" })) }, `الذهب (عيار ${k})`),
+      h("button", { class: side === "gold" ? "on" : "", onclick: () => replace(url({ side: "gold" })) }, "الذهب"),
       h("button", { class: side === "cash" ? "on" : "", onclick: () => replace(url({ side: "cash" })) }, "النقد (ريال)"));
     const idle = h("input", { type: "checkbox", checked: hideIdle, onchange: (e) => replace(url({ all: e.target.checked ? "" : "1" })) });
     v.append(h("div", { class: "card" }, chips, h("div", { class: "grid2", style: { marginTop: "8px" } }, field("من", fIn), field("إلى", tIn)),
       h("div", { style: { marginTop: "10px" } }, sideSeg), h("label", { class: "switch" }, idle, "إخفاء من لا حركة له")));
     const b = D.board(s, from || null, to || null);
     const fmt = (x) => (side === "gold" ? gw(x) : f2(x));
-    const unit = side === "gold" ? `جم ${k}` : "ريال";
+    const unit = side === "gold" ? `جم عيار ${k}` : "ريال";
     const T = b[side];
     const rows = hideIdle ? b.rows.filter(D.hasMovement) : b.rows;
     const tile = (label, val, sub) => h("div", { class: "stat" }, h("span", { class: "l" }, label),
@@ -1878,33 +1943,73 @@
     if (!rows.length) { v.append(h("div", { class: "empty" }, "لا حركة في الفترة")); return; }
     for (const r of rows) {
       const x = r[side];
+      // كل عميلٍ بعيار حسابه — والمجاميع أعلاه بعيار المجاميع
+      const rk = pk(D.shopById(s, r.id));
+      const fr = (val) => (side === "gold" ? gw(val, rk) : f2(val));
       v.append(h("div", { class: "list-item col", onclick: () => go(`shop/${r.id}`) },
-        h("div", { class: "spread" }, h("span", { class: "t" }, r.name), gradeBadge(x.grade)),
+        h("div", { class: "spread" }, h("span", { class: "t" }, r.name,
+          side === "gold" ? h("span", { class: "muted small" }, ` · عيار ${rk}`) : null), gradeBadge(x.grade)),
         h("div", { class: "grid3 small" },
-          h("div", null, h("span", { class: "muted" }, "الصافي"), h("b", { class: "num" }, fmt(x.net))),
-          h("div", null, h("span", { class: "muted" }, "التحصيل"), h("b", { class: "num" }, fmt(x.paid))),
-          h("div", null, h("span", { class: "muted" }, "الباقي"), h("b", { class: "num" }, fmt(x.remaining)))),
+          h("div", null, h("span", { class: "muted" }, "الصافي"), h("b", { class: "num" }, fr(x.net))),
+          h("div", null, h("span", { class: "muted" }, "التحصيل"), h("b", { class: "num" }, fr(x.paid))),
+          h("div", null, h("span", { class: "muted" }, "الباقي"), h("b", { class: "num" }, fr(x.remaining)))),
         h("div", { class: "row small", style: { marginTop: "6px" } }, meter(x.paidPct),
           h("span", { class: "muted num", style: { minWidth: "48px", textAlign: "left" } }, x.paidPct === null ? "—" : `${f2(x.paidPct)}%`)),
         h("div", { class: "muted small" },
           r.lastPay ? ["آخر تحصيل ", h("span", { dir: "ltr", text: dmy(r.lastPay) })] : "لا تحصيل في الفترة",
           r.lastSale ? [" · آخر بيع ", h("span", { dir: "ltr", text: dmy(r.lastSale) })] : null,
-          x.open ? [" · رصيد سابق ", h("span", { class: "num", text: fmt(x.open) })] : null)));
+          x.open ? [" · رصيد سابق ", h("span", { class: "num", text: fr(x.open) })] : null)));
     }
   }
 
-  // ══ الممتلكات: صندوقٌ لكل عيار، والنقد، والأطقم التي معي ══
+  // ══ الممتلكات: صافي ما لي أولاً، ثم ما معي الآن (صندوقٌ لكل عيار · النقد · الأطقم)، ثم حساباتي ══
+  let netK = 0;   // عيار عرض «صافي ما لي» (يُبدَّل بلمسة؛ والأصل عيار المجاميع)
   function holdingsScreen() {
     const s = st(), k = vk();
-    setBar("الممتلكات", "ما معي الآن", { back: false, actions: [updateButton()] });
+    setBar("الممتلكات", "صافي ما لي · ما معي الآن", { back: false, actions: [updateButton()] });
     setTab("holdings");
     const v = view();
     const hd = D.holdings(s);
-    const empty = !hd.boxes.length && !hd.cash.moves.length && !hd.pieces.length;
-    v.append(h("div", { class: "kpis" },
-      h("div", { class: "kpi" }, h("b", null, "ذهب معي"), h("span", { class: "v num" }, gw(hd.gold18)), h("span", { class: "u" }, ` جم عيار ${k}`)),
-      h("div", { class: "kpi" }, h("b", null, "نقد معي"), h("span", { class: "v num" }, f2(hd.cash.amount)), h("span", { class: "u" }, " ريال"))));
-    const tile = (icon, title, val, unit, sub, onclick, neg) => h("button", { class: "box-tile", onclick },
+    const np = D.netPosition(s);
+    const oh = hd.open;
+    const hasOpen = Object.keys(oh.gold).length || oh.cash || oh.sets.length;
+
+    // ── صافي ما لي: ما في يدي + الأطقم + ما لي عند العملاء − ما عليّ للمصانع ──
+    const net = h("div", { class: "net-card" });
+    const renderNet = () => {
+      const nk = G.KARATS.includes(netK) ? netK : k;
+      const sg = (x, d) => (Math.abs(x) < (d === 2 ? 0.005 : 0.0005) ? "0.00" : (x > 0 ? "+" : "−") + f2(Math.abs(x)));
+      const sgn0 = (x) => (x < 0 && f2(Math.abs(x)) !== "0.00" ? "−" : "") + f2(Math.abs(x));
+      const gRow = (label, w18, cash) => h("div", { class: "net-row" }, h("span", null, label),
+        h("b", { class: "num", dir: "ltr" }, w18 === null ? "" : sg(G.g(w18, nk), 3)),
+        h("b", { class: "num", dir: "ltr" }, cash === null ? "" : sg(cash, 2)));
+      const chips = h("div", { class: "seg sm net-k" }, G.KARATS.map((x) => h("button", { type: "button",
+        class: x === nk ? "on" : "", "aria-label": `بعيار ${x}`, onclick: () => { netK = x; renderNet(); } }, String(x))));
+      net.innerHTML = "";
+      net.append(
+        h("div", { class: "spread" }, h("span", { class: "net-t" }, "صافي ما لي"), chips),
+        h("div", { class: "net-v" + (np.gold18 < -0.0005 ? " neg" : "") }, h("span", { class: "num", dir: "ltr" }, sgn0(G.g(np.gold18, nk))),
+          h("span", { class: "u" }, ` جم عيار ${nk}`)),
+        h("div", { class: "net-c" + (np.cash < -0.005 ? " neg" : "") }, h("span", { class: "num", dir: "ltr" }, sgn0(np.cash)), h("span", { class: "u" }, " ريال")),
+        h("div", { class: "net-rows" },
+          h("div", { class: "net-row head" }, h("span"), h("span", null, "ذهب"), h("span", null, "نقد")),
+          gRow("في يدي", np.hand18, np.handCash),
+          gRow("الأطقم التي معي", np.sets18, null),
+          gRow("لي عند العملاء", np.cus18, np.cusCash),
+          gRow("مع المصانع", np.fac18, np.facCash)),
+        h("div", { class: "muted small" }, "«مع المصانع» بالسالب: ما عليك لهم. والأطقم بوزن ذهبها."));
+    };
+    renderNet();
+    v.append(net);
+    if (!hasOpen) {
+      v.append(h("button", { class: "note-bar info open-cta", onclick: () => go("opening") },
+        ico("coins", 18), h("span", { class: "grow" }, h("b", null, "سجّل ما معك الآن"),
+          h("span", { class: "muted small" }, " — ذهبٌ بعياره، ونقد، وأطقم في يدك قبل أول عملية (رصيد افتتاحي)")),
+        ico("chevron", 18, "muted")));
+    }
+
+    // ── معي الآن: صندوقٌ لكل عيار بوزنه في عياره، والنقد، والأطقم ──
+    const tile = (icon, title, val, unit, sub, onclick, neg, cls) => h("button", { class: "box-tile" + (cls ? " " + cls : ""), onclick },
       h("div", { class: "spread" }, h("span", { class: "box-ic" }, ico(icon, 20)), ico("chevron", 18, "muted")),
       h("div", { class: "box-t" }, title),
       h("div", { class: "box-v" + (neg ? " bal-on" : "") }, h("span", { class: "num" }, val), h("span", { class: "u" }, " " + unit)),
@@ -1912,39 +2017,112 @@
     const grid = h("div", { class: "boxes" });
     for (const b of hd.boxes) {
       grid.append(tile("coins", `ذهب عيار ${b.karat}`, f2(b.weight), "جم",
-        `حصّلت ${f2(b.inSum)} · دفعت ${f2(b.outSum)}`, () => boxSheet(b), b.weight < -0.0005));
+        (b.open ? `افتتاحي ${f2(b.open)} · ` : "") + `حصّلت ${f2(b.inSum)} · دفعت ${f2(b.outSum)}`, () => boxSheet(b), b.weight < -0.0005));
     }
     if (hd.cash.moves.length) {
-      grid.append(tile("receipt", "الأجور والنقد", f2(hd.cash.amount), "ريال",
-        `حصّلت ${f2(hd.cash.inSum)} · دفعت ${f2(hd.cash.outSum)}`, () => cashSheet(hd.cash), hd.cash.amount < -0.005));
+      grid.append(tile("receipt", "النقد والأجور", f2(hd.cash.amount), "ريال",
+        (hd.cash.open ? `افتتاحي ${f2(hd.cash.open)} · ` : "") + `حصّلت ${f2(hd.cash.inSum)} · دفعت ${f2(hd.cash.outSum)}`,
+        () => cashSheet(hd.cash), hd.cash.amount < -0.005));
     }
+    v.append(h("div", { class: "sec-title" }, "معي الآن"));
     if (grid.children.length) v.append(grid);
-    if (empty) {
-      v.append(h("div", { class: "note-bar info", style: { margin: "4px 0 12px" } },
+    else {
+      v.append(h("div", { class: "note-bar info", style: { margin: "0 0 12px" } },
         "ما تحصّله من العملاء يظهر هنا في صندوق عياره، والنقد في صندوقه. وما تسدّده للمصانع يُخصم منها."));
     }
-    // ذهب المصانع الذي عندي، ثم ذهبي عند العملاء — ولكلٍّ تفصيله بلمسة
+    // الأطقم التي معي: وزنها وعددها — ولمسها يعرض كل طقمٍ بزرّ «معاينة» لصوره
+    const big = (cls, icon, title, val, unit, sub, onclick) => h("button", { class: "wide-tile big " + cls, onclick },
+      h("span", { class: "op-ic" }, ico(icon, 24)),
+      h("span", { class: "grow" }, h("span", { class: "op-t" }, title),
+        h("span", { class: "big-v" }, h("span", { class: "num" }, val), h("span", { class: "u" }, unit)),
+        h("span", { class: "op-h" }, sub)),
+      ico("chevron", 20, "muted"));
+    v.append(big("sets", "gem", `الأطقم التي معي (${hd.pieces.length})`, gw(hd.setsW18, k), ` جم عيار ${k}`,
+      hd.pieces.length ? `${hd.pieces.length} طقم — اضغط لترى كل طقم وصوره` : "لا أطقم معك الآن", () => piecesSheet(hd)));
+
+    // ── حساباتي: لي عند العملاء، وعليّ للمصانع — كلٌّ بعياره داخل القائمة ──
     const ex = D.exposure(s);
     const facN = ex.factories.filter((x) => x.owe18 > 0.0005 || x.oweCash > 0.005).length;
     const cusN = ex.customers.filter((x) => x.gold18 > 0.0005 || x.cash > 0.005).length;
-    const big = (cls, icon, title, val, sub, onclick) => h("button", { class: "wide-tile big " + cls, onclick },
-      h("span", { class: "op-ic" }, ico(icon, 24)),
-      h("span", { class: "grow" }, h("span", { class: "op-t" }, title),
-        h("span", { class: "big-v" }, h("span", { class: "num" }, val), h("span", { class: "u" }, ` جم عيار ${k}`)),
-        h("span", { class: "op-h" }, sub)),
-      ico("chevron", 20, "muted"));
-    v.append(
-      big("fac", "package", "ذهب المصانع عندي", gw(ex.facGold18),
-        `ونقد ${f2(ex.facCash)} ريال · ${facN} مصنع — اضغط لترى كل مصنع`, () => factoriesSheet(ex)),
-      big("cus", "users", "ذهبي عند العملاء", gw(ex.cusGold18),
-        `وأجور ${f2(ex.cusCash)} ريال · ${cusN} عميل — اضغط لترى كل عميل`, () => customersSheet(ex)),
-      // الأطقم التي معي: وزنها وعددها — ولمسها يعرض كل طقمٍ بزرّ «معاينة» لصوره
-      big("sets", "gem", `الأطقم التي معي (${hd.pieces.length})`, gw(hd.setsW18),
-        hd.pieces.length ? `${hd.pieces.length} طقم — اضغط لترى كل طقم وصوره` : "لا أطقم معك الآن", () => piecesSheet(hd)));
+    v.append(h("div", { class: "sec-title" }, "حساباتي"),
+      big("cus", "users", "لي عند العملاء", gw(ex.cusGold18, k), ` جم عيار ${k}`,
+        `وأجور ${f2(ex.cusCash)} ريال · ${cusN} عميل — اضغط لترى كل عميل بعياره`, () => customersSheet(ex)),
+      big("fac", "package", "عليّ للمصانع", gw(ex.facGold18, k), ` جم عيار ${k}`,
+        `ونقد ${f2(ex.facCash)} ريال · ${facN} مصنع — اضغط لترى كل مصنع بعياره`, () => factoriesSheet(ex)));
     v.append(h("div", { class: "quick" },
       quickBtn("in", "تحصيل من العميل", () => go("voucher/new?kind=receipt")),
       quickBtn("out", "سداد للمصنع", () => go("voucher/new?kind=payment")),
-      quickBtn("package", "بضاعة من مصنع", () => go("invoice/new?kind=purchase"))));
+      quickBtn("coins", "الرصيد الافتتاحي", () => go("opening"))));
+  }
+
+  // ══ الرصيد الافتتاحي للممتلكات: ما كان معي قبل أول عملية في التطبيق ══
+  function openingScreen() {
+    const s = st();
+    setBar("الرصيد الافتتاحي", "ما كان معك قبل التطبيق", { noTabs: true });
+    const v = view();
+    const oh = D.openHold(s);
+    const date = h("input", { class: "in", type: "date", value: oh.date || D.today() });
+    const goldIns = {};
+    for (const x of G.KARATS) goldIns[x] = numInput({ value: oh.gold[x] || 0 });
+    const cashIn = numInput({ value: oh.cash });
+    // الأطقم: اسمٌ اختياري، وعيار، ووزن (بعياره) — وما خرج منها بفاتورةٍ لا يُحذف
+    const used = new Set();
+    for (const d of s.invoices) for (const l of d.lines) if (l.src && l.src.startsWith("op:")) used.add(l.src.slice(3));
+    const rows = oh.sets.map((x) => ({ id: x.id, name: x.name, karat: x.karat, weight: G.g(x.w18, x.karat), photos: x.photos }));
+    const setsBox = h("div");
+    const renderSets = () => {
+      setsBox.innerHTML = "";
+      if (!rows.length) setsBox.append(h("div", { class: "muted small", style: { margin: "4px 0 8px" } }, "لا أطقم — اضغط «+ طقم» لكل طقمٍ في يدك."));
+      rows.forEach((r, i) => {
+        const nm = h("input", { class: "in", value: r.name || "", placeholder: "اسم الطقم (اختياري)", dir: "auto",
+          oninput: (e) => { r.name = e.target.value; } });
+        const ks = h("select", { class: "in" }, G.KARATS.map((x) => h("option", { value: x, text: `عيار ${x}` })));
+        ks.value = String(r.karat);
+        ks.addEventListener("change", () => { r.karat = parseInt(ks.value, 10); });
+        const w = numInput({ value: r.weight });
+        w.addEventListener("input", () => { r.weight = w.getVal(); });
+        const sold = r.id && used.has(r.id);
+        setsBox.append(h("div", { class: "line" },
+          h("div", { class: "top" }, h("b", { class: "grow" }, `طقم ${i + 1}`),
+            sold ? h("span", { class: "badge" }, "خرج بفاتورة")
+              : h("div", { class: "act" }, h("button", { class: "del", "aria-label": `حذف الطقم ${i + 1}`,
+                onclick: () => { rows.splice(i, 1); renderSets(); } }, ico("x", 17)))),
+          h("div", { style: { marginTop: "6px" } }, nm),
+          h("div", { class: "grid2", style: { marginTop: "6px" } }, field("الوزن (جم)", w), field("العيار", ks))));
+      });
+    };
+    renderSets();
+    v.append(
+      h("div", { class: "note-bar info", style: { marginBottom: "12px" } },
+        "اكتب ما كان معك قبل أول عمليةٍ تسجّلها في التطبيق — فيبدأ منه «معي الآن» و«صافي ما لي». " +
+        "أمّا ما لك عند كل عميل وما عليك لكل مصنع فيُكتب في «رصيد افتتاحي» داخل حسابه."),
+      h("div", { class: "card" }, h("h2", null, ico("coins", 18), "ذهبٌ في يدي (كل عيارٍ بوزنه)"),
+        h("div", { class: "grid2" }, ...G.KARATS.map((x) => field(`عيار ${x} (جم)`, goldIns[x])))),
+      h("div", { class: "card" }, h("h2", null, ico("receipt", 18), "نقدٌ في يدي"), field("المبلغ (ريال)", cashIn)),
+      h("div", { class: "card" }, h("h2", null, ico("gem", 18), "أطقمٌ في يدي"), setsBox,
+        h("button", { class: "btn ghost block", onclick: () => { rows.push({ name: "", karat: vk(), weight: 0 }); renderSets(); } }, "+ طقم")),
+      h("div", { class: "card" }, field("بتاريخ", date),
+        h("div", { class: "row", style: { marginTop: "10px", flexWrap: "wrap" } },
+          h("button", { class: "btn ghost sm", onclick: () => go("customers") }, ico("users", 16), "أرصدة العملاء"),
+          h("button", { class: "btn ghost sm", onclick: () => go("customers?view=factories") }, ico("package", 16), "أرصدة المصانع"))));
+    const save = async () => {
+      try {
+        const gold = {};
+        for (const x of G.KARATS) {
+          const g = goldIns[x].getVal();
+          if (!isFinite(g) || g < 0) throw new Error(`وزنٌ غير صحيح لعيار ${x}`);
+          gold[x] = g;
+        }
+        const cash = cashIn.getVal();
+        if (!isFinite(cash) || cash < 0) throw new Error("مبلغ النقد غير صحيح");
+        if (rows.some((r) => !isFinite(r.weight))) throw new Error("رقمٌ غير صحيح في وزن أحد الأطقم");
+        const prev = JSON.stringify(s.settings.openHold || null);
+        D.saveOpenHold(s, { date: date.value || D.today(), gold, cash, sets: rows });
+        if (await persist(S.meta(s))) { toast("حُفظ الرصيد الافتتاحي"); replace("holdings"); }
+        else s.settings.openHold = JSON.parse(prev);
+      } catch (e) { err(e); }
+    };
+    v.append(h("div", { class: "footer-bar" }, h("button", { class: "btn", onclick: save }, "حفظ")));
   }
 
   // كل طقمٍ معي: اسمه ووزنه ومن أين جاء — و«معاينة» تفتح صوره كلٌّ وحدها
@@ -1972,17 +2150,18 @@
   async function factoriesSheet(ex) {
     const k = vk();
     const id = await sheet((box, close) => {
-      box.append(h("h3", null, ico("package", 20), " ذهب المصانع عندي"),
+      box.append(h("h3", null, ico("package", 20), " عليّ للمصانع"),
         h("div", { class: "totals", style: { marginBottom: "10px" } },
           sumRow("عليّ للمصانع ذهباً", `${gw(ex.facGold18)} جم عيار ${k}`, "grand"),
           sumRow("وعليّ نقداً", `${f2(ex.facCash)} ريال`)));
       if (!ex.factories.length) box.append(h("div", { class: "empty" }, "لا مصانع بعد"));
       for (const x of ex.factories) {
+        const pk1 = pk(x.party);
         box.append(h("div", { class: "list-item", onclick: () => close(x.party.id) },
           h("span", { class: "avatar fac" }, ico("package", 18)),
           h("div", { class: "grow" },
-            h("div", { class: "spread" }, h("span", { class: "t" }, x.party.name), goldBal(-x.owe18, true)),
-            h("div", { class: "muted small" }, `أخذتُ ${gw(x.took18)} · أرجعتُ ${gw(x.back18)} · سدّدتُ ${gw(x.paid18)} جم`),
+            h("div", { class: "spread" }, h("span", { class: "t" }, x.party.name), goldBal(-x.owe18, true, pk1)),
+            h("div", { class: "muted small" }, `أخذتُ ${gw(x.took18, pk1)} · أرجعتُ ${gw(x.back18, pk1)} · سدّدتُ ${gw(x.paid18, pk1)} جم عيار ${pk1}`),
             Math.abs(x.oweCash) > 0.005 ? h("div", { class: "small" }, "نقد: ", cashBal(-x.oweCash, true)) : null)));
       }
     });
@@ -1992,7 +2171,7 @@
   async function customersSheet(ex) {
     const k = vk();
     const id = await sheet((box, close) => {
-      box.append(h("h3", null, ico("users", 20), " ذهبي عند العملاء"),
+      box.append(h("h3", null, ico("users", 20), " لي عند العملاء"),
         h("div", { class: "totals", style: { marginBottom: "10px" } },
           sumRow("عند العملاء ذهباً", `${gw(ex.cusGold18)} جم عيار ${k}`, "grand"),
           sumRow("وعليهم أجور ونقد", `${f2(ex.cusCash)} ريال`)));
@@ -2001,7 +2180,7 @@
         box.append(h("div", { class: "list-item", onclick: () => close(x.party.id) },
           h("span", { class: "avatar" }, x.party.name.trim()[0] || "؟"),
           h("div", { class: "grow" },
-            h("div", { class: "spread" }, h("span", { class: "t" }, x.party.name), goldBal(x.gold18)),
+            h("div", { class: "spread" }, h("span", { class: "t" }, x.party.name), goldBal(x.gold18, false, pk(x.party))),
             h("div", { class: "small" }, "أجور ونقد: ", cashBal(x.cash)))));
       }
     });
@@ -2013,13 +2192,15 @@
     const list = h("div");
     if (!moves.length) list.append(h("div", { class: "empty" }, "لا حركة"));
     for (const m of moves) {
-      list.append(h("div", { class: "list-item", onclick: () => { close(); setTimeout(() => go(`doc/vo/${m.doc.id}`), 30); } },
-        h("span", { class: "avatar" + (m.sign < 0 ? " ret" : "") }, ico(m.sign > 0 ? "in" : "out", 18)),
+      const to = m.opening ? "opening" : `doc/vo/${m.doc.id}`;
+      list.append(h("div", { class: "list-item", onclick: () => { close(); setTimeout(() => go(to), 30); } },
+        h("span", { class: "avatar" + (m.sign < 0 ? " ret" : "") }, ico(m.opening ? "coins" : m.sign > 0 ? "in" : "out", 18)),
         h("div", { class: "grow" },
-          h("div", { class: "spread" }, h("span", { class: "t" }, m.party ? m.party.name : "—"),
+          h("div", { class: "spread" }, h("span", { class: "t" }, m.opening ? "رصيد افتتاحي" : m.party ? m.party.name : "—"),
             h("b", { class: "num " + (m.sign > 0 ? "bal-for" : "bal-on") }, (m.sign > 0 ? "+" : "−") + fmt(m))),
           h("div", { class: "spread muted small" },
-            h("span", null, (m.sign > 0 ? "تحصيل" : "دفع") + " · ", h("span", { dir: "ltr", text: m.doc.no })),
+            m.opening ? h("span", null, "ما كان معي قبل التطبيق")
+              : h("span", null, (m.sign > 0 ? "تحصيل" : "دفع") + " · ", h("span", { dir: "ltr", text: m.doc.no })),
             h("span", { dir: "ltr", text: dmy(m.date) })),
           m.notes ? h("div", { class: "muted small" }, m.notes) : null)));
     }
@@ -2032,7 +2213,8 @@
     return sheet((box, close) => {
       box.append(h("h3", null, ico("coins", 20), ` صندوق ذهب عيار ${b.karat}`),
         h("div", { class: "totals", style: { marginBottom: "10px" } },
-          sumRow("حصّلته من المحلات", `${f2(b.inSum)} جم`), sumRow("دفعته للمصانع", `${f2(b.outSum)} جم`),
+          b.open ? sumRow("رصيد افتتاحي", `${f2(b.open)} جم`) : null,
+          sumRow("حصّلته من العملاء", `${f2(b.inSum)} جم`), sumRow("دفعته للمصانع", `${f2(b.outSum)} جم`),
           sumRow("معي الآن", `${f2(b.weight)} جم`, "grand"),
           b.karat !== 18 ? h("div", { class: "muted small" }, `= ${f2(G.store(b.weight, b.karat))} جم مكافئ عيار 18`) : null),
         movesList(b.moves, (m) => `${f2(m.weight)} جم`, close));
@@ -2040,9 +2222,10 @@
   }
   function cashSheet(c) {
     return sheet((box, close) => {
-      box.append(h("h3", null, ico("receipt", 20), " صندوق الأجور والنقد"),
+      box.append(h("h3", null, ico("receipt", 20), " صندوق النقد والأجور"),
         h("div", { class: "totals", style: { marginBottom: "10px" } },
-          sumRow("حصّلته من المحلات", `${f2(c.inSum)} ريال`), sumRow("دفعته للمصانع", `${f2(c.outSum)} ريال`),
+          c.open ? sumRow("رصيد افتتاحي", `${f2(c.open)} ريال`) : null,
+          sumRow("حصّلته من العملاء", `${f2(c.inSum)} ريال`), sumRow("دفعته للمصانع", `${f2(c.outSum)} ريال`),
           sumRow("معي الآن", `${f2(c.amount)} ريال`, "grand")),
         movesList(c.moves, (m) => `${f2(m.amount)} ريال`, close));
     });
@@ -2219,7 +2402,7 @@
     const head = [
       h("img", { src: "img/icon.png", alt: "", class: "welcome-logo" }),
       h("h2", null, APP_NAME),
-      h("div", { class: "muted" }, "حساباتك مع المحلات والمصانع")];
+      h("div", { class: "muted" }, "حساباتك مع العملاء والمصانع")];
     let body;
     if (info.mode === "found") {
       body = [
@@ -2250,7 +2433,7 @@
   async function newSheet() {
     const r = await sheet((box, close) => {
       box.append(h("h3", null, "عملية جديدة"),
-        h("div", { class: "sec-title" }, "مع المحلات"),
+        h("div", { class: "sec-title" }, "مع العملاء"),
         h("div", { class: "quick" },
           quickBtn("receipt", "فاتورة بيع", () => close("invoice/new?kind=sale")),
           quickBtn("return", "مرتجع", () => close("invoice/new?kind=sale_return")),
@@ -2262,7 +2445,7 @@
           quickBtn("return", "إرجاع للمصنع", () => close("invoice/new?kind=purchase_return"))),
         h("div", { class: "sec-title" }, "حساب جديد"),
         h("div", { class: "quick" },
-          quickBtn("store", "محل جديد", () => close("shop-form")),
+          quickBtn("store", "عميل جديد", () => close("shop-form")),
           quickBtn("package", "مصنع جديد", () => close("shop-form?type=factory")),
           quickBtn("search", "بحث عن طقم", () => close("wo"))));
     });
@@ -2319,6 +2502,7 @@
         case "held": return heldScreen();
         case "more": return moreScreen();
         case "settings": return settingsScreen();
+        case "opening": return openingScreen();
         default: return home();
       }
     } catch (e) {

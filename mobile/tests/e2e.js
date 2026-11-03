@@ -86,7 +86,7 @@ function check(name, cond, detail) {
   // محلان ومصنع
   for (const [name, wage] of [["محل الأمانة", "20"], ["محل النخبة", ""]]) {
     await page.goto(url + "#/shop-form");
-    await fill("اسم المحل", name);
+    await fill("اسم العميل", name);
     if (wage) await fill("الأجرة المتفق عليها", wage);
     await tap(".footer-bar .btn:has-text('حفظ')");
     await page.waitForTimeout(250);
@@ -171,7 +171,7 @@ function check(name, cond, detail) {
   await page.goBack();
   await page.waitForTimeout(250);
   const ft = (await text(".wide-tile.fac")).replace(/\s+/g, " ");
-  check("ذهب المصانع عندي: 82.00 (50 سابق + 32 بضاعة)", ft.includes("ذهب المصانع عندي") && ft.includes("82.00"), ft);
+  check("عليّ للمصانع: 82.00 (50 سابق + 32 بضاعة)", ft.includes("عليّ للمصانع") && ft.includes("82.00"), ft);
   await page.locator(".wide-tile.fac").click();
   await page.waitForSelector(".sheet");
   const fs1 = (await text(".sheet")).replace(/\s+/g, " ");
@@ -269,11 +269,11 @@ function check(name, cond, detail) {
   await page.waitForTimeout(250);
   const b21 = await page.locator(".box-tile", { hasText: "عيار 21" }).innerText();
   check("صندوق عيار 21: 2.00 جم (حصّلت 6 · دفعت 4)", b21.includes("2.00") && b21.includes("حصّلت 6.00") && b21.includes("دفعت 4.00"), b21);
-  check("صندوق النقد: 100.00", (await page.locator(".box-tile", { hasText: "الأجور والنقد" }).innerText()).includes("100.00"));
+  check("صندوق النقد: 100.00", (await page.locator(".box-tile", { hasText: "النقد والأجور" }).innerText()).includes("100.00"));
   const ct = (await text(".wide-tile.cus")).replace(/\s+/g, " ");
   // الأمانة: 25 − 5 − 7 = 13 ذهباً، و500 − 100 − 300 = 100 أجوراً
-  check("ذهبي عند العملاء: 13.00 وأجور 100.00", ct.includes("ذهبي عند العملاء") && ct.includes("13.00") && ct.includes("100.00"), ct);
-  check("وذهب المصانع عندي بعد السداد: 77.33 ونقد 56.00", (await text(".wide-tile.fac")).includes("77.33") && (await text(".wide-tile.fac")).includes("56.00"));
+  check("لي عند العملاء: 13.00 وأجور 100.00", ct.includes("لي عند العملاء") && ct.includes("13.00") && ct.includes("100.00"), ct);
+  check("وعليّ للمصانع بعد السداد: 77.33 ونقد 56.00", (await text(".wide-tile.fac")).includes("77.33") && (await text(".wide-tile.fac")).includes("56.00"));
   await page.locator(".wide-tile.cus").click();
   await page.waitForSelector(".sheet");
   const cs1 = (await text(".sheet")).replace(/\s+/g, " ");
@@ -442,7 +442,7 @@ function check(name, cond, detail) {
   await tap("#tabs button[data-tab=customers]");
   await page.waitForURL(/#\/customers/);
   await page.waitForTimeout(200);
-  check("الحسابات ← المحلات: محلان", (await page.locator(".list-item .avatar").count()) === 2);
+  check("الحسابات ← العملاء: عميلان", (await page.locator(".list-item .avatar").count()) === 2);
   await tap(".seg button:has-text('المصانع')");
   await page.waitForURL(/view=factories/);
   await page.waitForTimeout(200);
@@ -455,7 +455,7 @@ function check(name, cond, detail) {
   const at = (await page.locator(".list-item.col", { hasText: "محل الأمانة" }).innerText()).replace(/\s+/g, " ");
   check("المبيعات والتحصيل: الأمانة صافي 20.00 وتحصيل 7.00 وباقي 13.00",
     at.includes("20.00") && at.includes("7.00") && at.includes("13.00") && at.includes("التحصيل"), at);
-  check("وفيها المحلات وحدها", (await page.locator(".list-item.col").count()) <= 2 &&
+  check("وفيها العملاء وحدهم", (await page.locator(".list-item.col").count()) <= 2 &&
     !(await page.content()).includes("مصنع الريان"));
   await shot("board");
 
@@ -501,7 +501,7 @@ function check(name, cond, detail) {
   await tap("#tabs button[data-tab=plus]");
   await page.waitForSelector(".sheet");
   const ns = await text(".sheet");
-  check("«+» بلا قبض ولا صرف: مع المحلات · مع المصانع", ns.includes("مع المحلات") && ns.includes("مع المصانع") &&
+  check("«+» بلا قبض ولا صرف: مع العملاء · مع المصانع", ns.includes("مع العملاء") && ns.includes("مع المصانع") &&
     ns.includes("تحصيل") && ns.includes("سداد للمصنع") && !ns.includes("سند قبض") && !ns.includes("سند صرف"));
   await page.goBack();
 
@@ -552,6 +552,95 @@ function check(name, cond, detail) {
   const s3 = await page.evaluate(() => { const d = App.state.invoices.find((x) => x.no === "S-00003");
     return d && [d.totalW18, d.wages, Domain.diamondOf(d)]; });
   check("حُفظت S-00003: وزن 2 وأجور 50 وماس 0.3", s3 && s3.join() === "2,50,0.3", JSON.stringify(s3));
+
+  // ══ 1.9: صافي ما لي · الرصيد الافتتاحي · عيار الحساب لكل عميل ══
+  await page.goto(url + "#/holdings");
+  await page.waitForTimeout(250);
+  const netOf = (k) => page.evaluate((kk) => { const np = Domain.netPosition(App.state);
+    return Num.f2(Gold.g(np.gold18, kk || App.state.settings.viewKarat)); }, k);
+  check("«صافي ما لي» أول الممتلكات بعيار المجاميع (18)", (await text(".net-card")).includes("صافي ما لي") &&
+    (await text(".net-card .net-v")).includes((await netOf()).replace("-", "−")) && (await text(".net-card .net-v")).includes("عيار 18"), await text(".net-card"));
+  check("ودعوةٌ لتسجيل الرصيد الافتتاحي", (await page.locator(".open-cta").count()) === 1);
+  await page.locator(".net-card .net-k button", { hasText: "21" }).click();
+  await page.waitForTimeout(100);
+  check("وبلمسة «21» يُعرض الصافي بعيار 21", (await text(".net-card .net-v")).includes((await netOf(21)).replace("-", "−")) &&
+    (await text(".net-card .net-v")).includes("عيار 21"), await text(".net-card .net-v"));
+  const net0 = await page.evaluate(() => Domain.netPosition(App.state));
+  await page.locator(".open-cta").click();
+  await page.waitForURL(/#\/opening/);
+  await fill("عيار 21 (جم)", "10");
+  await fill("المبلغ (ريال)", "500");
+  await tap("button:has-text('+ طقم')");
+  await page.locator(".line input[placeholder^='اسم الطقم']").fill("OP1");
+  await page.locator(".line input[placeholder^='اسم الطقم']").dispatchEvent("input");
+  await page.locator(".line label.f", { hasText: "الوزن" }).locator("input").fill("7");
+  await page.locator(".line label.f", { hasText: "الوزن" }).locator("input").dispatchEvent("input");
+  await page.locator(".line label.f", { hasText: "العيار" }).locator("select").selectOption("21");
+  await shot("opening");
+  await tap(".footer-bar .btn:has-text('حفظ')");
+  await page.waitForURL(/#\/holdings/);
+  await page.waitForTimeout(250);
+  const oh = await page.evaluate(() => Domain.openHold(App.state));
+  check("حُفظ الرصيد الافتتاحي: 10 جم ع21 · 500 ريال · OP1 7 جم ع21", oh.gold[21] === 10 && oh.cash === 500 &&
+    oh.sets.length === 1 && oh.sets[0].name === "OP1" && oh.sets[0].w18 === 8.167, JSON.stringify(oh));
+  const b21o = (await page.locator(".box-tile", { hasText: "عيار 21" }).innerText()).replace(/\s+/g, " ");
+  check("صندوق 21: 2 + 10 افتتاحي = 12.00", b21o.includes("12.00") && b21o.includes("افتتاحي 10.00"), b21o);
+  check("والأطقم التي معي زادت OP1", (await text(".wide-tile.sets")).includes("OP1") || (await page.evaluate(() =>
+    Domain.holdings(App.state).pieces.some((p) => p.name === "OP1" && p.fromKind === "opening"))));
+  const net1 = await page.evaluate(() => Domain.netPosition(App.state));
+  check("والصافي زاد 10×21/18 + 8.167 = 19.834 ذهباً و500 نقداً",
+    Math.abs(net1.gold18 - net0.gold18 - 19.834) < 0.0015 && Math.abs(net1.cash - net0.cash - 500) < 0.005, JSON.stringify([net0, net1]));
+  check("ولا دعوةً بعد التسجيل", (await page.locator(".open-cta").count()) === 0);
+  await page.locator(".box-tile", { hasText: "عيار 21" }).click();
+  await page.waitForSelector(".sheet");
+  check("تفصيل الصندوق يبدأ بالرصيد الافتتاحي", (await text(".sheet")).includes("رصيد افتتاحي") &&
+    (await text(".sheet")).includes("ما كان معي قبل التطبيق"));
+  await page.goBack();
+  await page.waitForTimeout(150);
+  await shot("holdings_19");
+
+  // عميلٌ بعيار 21: الرصيد الافتتاحي يُكتب بعياره ويُحفظ بمكافئ 18
+  await page.goto(url + "#/shop-form");
+  await page.waitForTimeout(150);
+  await fill("اسم العميل", "عميل الخليج");
+  await page.locator("label.f", { hasText: "عيار الحساب" }).locator("select").selectOption("21");
+  await page.waitForTimeout(50);
+  check("تبديل العيار يغيّر عنوان خانة الذهب", (await page.content()).includes("ذهب (جم عيار 21)"));
+  await fill("ذهب (جم عيار 21)", "6");
+  await page.locator("label.f", { hasText: "عيار الحساب" }).locator("select").selectOption("18");
+  await page.waitForTimeout(50);
+  check("وإلى 18: الوزن نفسه يصير 7.00", (await page.locator("label.f", { hasText: "ذهب (جم عيار 18)" }).locator("input").inputValue()) === "7.00");
+  await page.locator("label.f", { hasText: "عيار الحساب" }).locator("select").selectOption("21");
+  await page.waitForTimeout(50);
+  check("وعودته إلى 21: 6.00 كما كُتب", (await page.locator("label.f", { hasText: "ذهب (جم عيار 21)" }).locator("input").inputValue()) === "6.00");
+  await shot("shop_form_karat");
+  await tap(".footer-bar .btn:has-text('حفظ')");
+  await page.waitForURL(/#\/shop\//);
+  await page.waitForTimeout(200);
+  const kh = await page.evaluate(() => App.state.shops.find((x) => x.name === "عميل الخليج"));
+  check("حُفظ بعيار 21 ورصيدٍ 7 مكافئ 18", kh.karat === 21 && kh.openGold18 === 7, JSON.stringify(kh));
+  check("وصفحته بعياره: «عيار 21» و6.00 جم عليه", (await text("#bar")).includes("عيار 21") &&
+    (await text(".kpis")).includes("عيار 21") && (await text(".kpis")).includes("6.00"), await text(".kpis"));
+  // فاتورة بيعٍ له: السطر يبدأ بعياره، وOP1 يُعبّأ من الرصيد الافتتاحي باسمه
+  await page.goto(url + `#/invoice/new?kind=sale&shop=${kh.id}`);
+  await page.waitForTimeout(250);
+  check("سطر الفاتورة يبدأ بعيار 21", (await page.locator("label.f", { hasText: "العيار" }).locator("select").inputValue()) === "21");
+  await page.locator("label.f", { hasText: "الطقم (اختياري)" }).locator("input").fill("OP1");
+  await page.locator("label.f", { hasText: "الطقم (اختياري)" }).locator("input").dispatchEvent("change");
+  await page.waitForTimeout(150);
+  check("OP1 يُعبّأ من الرصيد الافتتاحي: 7.00 عيار 21", (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "7.00" &&
+    (await page.content()).includes("من الرصيد الافتتاحي"));
+  await fill("الأجور (ريال)", "70");
+  check("إجمالي الوزن بعيار العميل", (await text(".totals")).includes("إجمالي الوزن (عيار 21)"));
+  await tap(".footer-bar .btn:has-text('حفظ الفاتورة')");
+  await confirm("حفظ الفاتورة");
+  await page.waitForURL(/#\/doc\/inv\//);
+  const pc = await page.evaluate(() => Domain.holdings(App.state).pieces.some((p) => p.name === "OP1"));
+  check("بِيع OP1: خرج من يدي", !pc);
+  check("وعلى عميل الخليج الآن 6 + 7 = 13.00 جم عيار 21", await page.evaluate((id) =>
+    Num.f2(Gold.g(Domain.balance(App.state, id).gold18, 21)) === "13.00", kh.id));
+  const cl = await page.evaluate((id) => App.state.invoices.find((d) => d.shopId === id).lines[0], kh.id);
+  check("والسطر مربوطٌ بطقم الرصيد الافتتاحي", cl.src && cl.src.startsWith("op:") && cl.karat === 21, JSON.stringify(cl));
 
   // الوضع الليلي
   await page.evaluate(() => { App.state.settings.theme = "dark"; document.documentElement.setAttribute("data-theme", "dark"); });
