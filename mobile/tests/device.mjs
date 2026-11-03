@@ -511,9 +511,10 @@ async function main() {
   const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const xml = `<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n  <string name="pointer">${esc(ptr)}</string>\n` +
     `  <long name="lastCheck" value="${Date.now()}" />\n</map>\n`;
-  execFileSync("adb", ["shell", "run-as", PKG, "sh", "-c", "cat > shared_prefs/updates.xml"], { input: xml });
+  const PREFS = `/data/data/${PKG}/shared_prefs`;
+  execFileSync("adb", ["shell", "run-as", PKG, "sh", "-c", `'mkdir -p ${PREFS} && cat > ${PREFS}/updates.xml'`], { input: xml });
   let back = "";
-  try { back = adb("shell", "run-as", PKG, "cat", "shared_prefs/updates.xml").toString(); } catch (e) { back = String(e.message || e); }
+  try { back = adb("shell", "run-as", PKG, "cat", `${PREFS}/updates.xml`).toString(); } catch (e) { back = String(e.message || e); }
   check("قناةٌ تقول 9.9.9 (كما يحفظها فحصٌ للتوّ)", back.includes("9.9.9"), back.slice(0, 200));
   ({ ws, ev } = await relaunch());
   let pop = false;
@@ -530,7 +531,7 @@ async function main() {
   ws.close();
   // تُعاد القناة كما كانت (لا أثر للتجربة)
   adb("shell", "am", "force-stop", PKG);
-  try { adb("shell", "run-as", PKG, "rm", "-f", "shared_prefs/updates.xml"); } catch (e) { /* */ }
+  try { adb("shell", "run-as", PKG, "rm", "-f", `${PREFS}/updates.xml`); } catch (e) { /* */ }
 }
 
 function finish() {
