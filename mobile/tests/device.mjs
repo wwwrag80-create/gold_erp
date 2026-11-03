@@ -237,7 +237,8 @@ async function main() {
   // الموافقة ثم التهيئة ثم التحميل — حتى 45 ثانية في المحاكي
   for (let i = 0; i < 90 && !(ad.loaded || /(^|\b)(2|3) /.test(ad.error || "")); i++) { await sleep(500); ad = await ev("Bridge.adsState()"); }
   // وصل الإعلان: يُعطى الشريط لحظةً ليُرسم قبل قياس ارتفاعه
-  for (let i = 0; i < 10 && ad.loaded && !(ad.height > 0); i++) { await sleep(300); ad = await ev("Bridge.adsState()"); }
+  // (حتى 15 ثانية: المحاكي البطيء يرسم الشريط بعد وصول الإعلان بثوانٍ أحياناً)
+  for (let i = 0; i < 30 && ad.loaded && !(ad.height > 0); i++) { await sleep(500); ad = await ev("Bridge.adsState()"); }
   // بلا مخزونٍ أو شبكةٍ في المحاكي (2 · 3) يبقى الشريط مطويّاً — وهذا سلوكٌ صحيح
   check("إعلانٌ تجريبي يصل فيظهر شريطاً أسفل الصفحة (أو يبقى مطويّاً بلا إعلان)",
     ad.started === true && ((ad.loaded && ad.visible && ad.height > 0) || (!ad.loaded && !ad.visible && /(^|\b)(2|3) /.test(ad.error || ""))),
@@ -265,11 +266,17 @@ async function main() {
   await run(ev, `location.hash = "#/invoice/new?kind=purchase"; await t.sleep(400); await t.pick("مصنع الريان");
     t.fill("الطقم", "T1"); await t.sleep(150); t.fill("الوزن (جم)", "12"); t.fill("💎 الماس", "0.5");`);
   // زرّ الصورة (بلمسةٍ حقيقية) يفتح نافذة أندرويد: الكاميرا والمعرض
-  const tapped = await touch(send, ev, `() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "صورة")`);
-  await sleep(2500);
+  // تُنتظر النافذة حتى 8 ثوانٍ (المحاكي البطيء)، ولمسةٌ ثانيةٌ واحدة إن ضاعت الأولى
+  let tapped = false, ch = "", opened = false;
+  for (let attempt = 0; attempt < 2 && !opened; attempt++) {
+    tapped = await touch(send, ev, `() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "صورة")`);
+    for (let i = 0; i < 16 && !opened; i++) {
+      await sleep(500);
+      ch = resumed();
+      opened = tapped && /ChooserActivity|ResolverActivity|documentsui|photopicker|camera/i.test(ch);
+    }
+  }
   shot("photo_chooser");
-  const ch = resumed();
-  const opened = tapped && /ChooserActivity|ResolverActivity|documentsui|photopicker|camera/i.test(ch);
   check("زرّ الصورة يفتح اختيار الكاميرا أو المعرض", opened, ch.slice(0, 300));
   if (opened) adb("shell", "input", "keyevent", "4");
   await sleep(1500);
@@ -512,6 +519,9 @@ async function main() {
   const xml = `<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n  <string name="pointer">${esc(ptr)}</string>\n` +
     `  <long name="lastCheck" value="${Date.now()}" />\n</map>\n`;
   const PREFS = `/data/data/${PKG}/shared_prefs`;
+  // بلا شبكة أثناء التجربة: وإلا قرأ التطبيق (أو فحصه الدوري) القناةَ الحقيقية فوراً وكتبها فوق هذه — كجوالٍ
+  // فحص قبل قليل ووجد إصداراً جديداً ثم فُتح التطبيق
+  adb("shell", "svc", "wifi", "disable"); adb("shell", "svc", "data", "disable");
   execFileSync("adb", ["shell", "run-as", PKG, "sh", "-c", `'mkdir -p ${PREFS} && cat > ${PREFS}/updates.xml'`], { input: xml });
   let back = "";
   try { back = adb("shell", "run-as", PKG, "cat", `${PREFS}/updates.xml`).toString(); } catch (e) { back = String(e.message || e); }
@@ -529,7 +539,8 @@ async function main() {
   await run(ev, `location.hash = "#/holdings"; await t.sleep(1200); location.hash = "#/home"; await t.sleep(1200);`);
   check("«لاحقاً» تُغلقها، ولا تعود مع التنقّل في الجلسة نفسها", !(await ev("!!document.querySelector('.sheet.pop')")));
   ws.close();
-  // تُعاد القناة كما كانت (لا أثر للتجربة)
+  // تُعاد القناة والشبكة كما كانتا (لا أثر للتجربة)
+  adb("shell", "svc", "wifi", "enable"); adb("shell", "svc", "data", "enable");
   adb("shell", "am", "force-stop", PKG);
   try { adb("shell", "run-as", PKG, "rm", "-f", `${PREFS}/updates.xml`); } catch (e) { /* */ }
 }
