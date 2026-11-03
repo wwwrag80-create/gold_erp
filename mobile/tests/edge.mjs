@@ -70,7 +70,10 @@ function webBounds() {
   await sleep(1800);
   shot("03_keyboard");
   const k = webBounds();
-  check("ولوحة المفاتيح لا تغطّي الصفحة: تقصر بقدرها", k && w && k.b < w.b - 200, `${JSON.stringify(k)} vs ${JSON.stringify(w)}`);
+  // بقدر لوحة المفاتيح: خُمس الشاشة على الأقل — لا عددٌ ثابت من البكسل، فلوحة
+  // محاكي 320×640 بلا شريط اقتراحات ارتفاعها 185px وحده
+  check("ولوحة المفاتيح لا تغطّي الصفحة: تقصر بقدرها", k && w && k.b < w.b - Math.round(H * 0.2) && k.b > w.t + 100,
+    `${JSON.stringify(k)} vs ${JSON.stringify(w)} · H ${H}`);
   adb("shell", "input", "keyevent", "KEYCODE_BACK");
   await sleep(600);
   // الرجوع بالإيماءة الجديدة: من الإعدادات إلى الرئيسية
