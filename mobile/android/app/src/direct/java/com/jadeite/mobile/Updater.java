@@ -18,6 +18,7 @@ import android.os.Build;
 
 import androidx.core.content.FileProvider;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -140,7 +141,11 @@ final class Updater {
         int a = body.indexOf("```json", i);
         int b = a < 0 ? -1 : body.indexOf("```", a + 7);
         if (a < 0 || b < 0) throw new Exception("بيانات القناة ناقصة");
-        JSONObject p = new JSONObject(body.substring(a + 7, b).trim());
+        return checked(new JSONObject(body.substring(a + 7, b).trim()));
+    }
+
+    /** فحص القناة — أيّاً كان مصدرها: الملف من مستودع التطبيق وحده، وبصمته كاملة. */
+    static JSONObject checked(JSONObject p) throws Exception {
         if (!"jadeite-mobile".equals(p.optString("channel"))) throw new Exception("قناةٌ غير معروفة");
         if (p.optLong("code") > 0) {
             String url = p.optString("url");
@@ -151,9 +156,35 @@ final class Updater {
         return p;
     }
 
+    /** القناة من ملف الإصدارات نفسه في المستودع (mobile/dist/versions.json): آخر إصدارٍ فيه. */
+    static JSONObject fromVersions(String body) throws Exception {
+        JSONArray a = new JSONArray(body);
+        if (a.length() == 0) throw new Exception("ملف الإصدارات فارغ");
+        JSONObject v = a.getJSONObject(a.length() - 1);
+        String file = v.getString("file");
+        if (!file.matches("[A-Za-z0-9._-]+\\.apk")) throw new Exception("اسم ملف التحديث غير صالح");
+        JSONObject p = new JSONObject();
+        p.put("channel", "jadeite-mobile").put("version", v.getString("version")).put("code", v.getLong("code"))
+                .put("sha256", v.getString("sha256")).put("url", RAW + "main/mobile/dist/" + file)
+                .put("notes", v.optString("notes", "")).put("source", "versions");
+        return checked(p);
+    }
+
     static JSONObject fetchPointer(Context c) throws Exception {
-        JSONObject issue = new JSONObject(http(API_ISSUE, "GET", null, null, 15000));
-        JSONObject p = parseChannel(issue.optString("body", ""));
+        JSONObject p;
+        try {
+            JSONObject issue = new JSONObject(http(API_ISSUE, "GET", null, null, 15000));
+            p = parseChannel(issue.optString("body", ""));
+        } catch (Exception apiError) {
+            // واجهة GitHub تحدّ الطلبات لكل عنوان إنترنت (60 في الساعة)، وفي شبكات الجوال يتشارك كثيرون
+            // عنواناً واحداً فيُرفض الطلب («rate limit»). البديل: ملف الإصدارات نفسه من ملفات المستودع —
+            // لا يخضع لذلك الحدّ، وفيه الإصدار والبصمة نفسهما.
+            try {
+                p = fromVersions(http(VERSIONS, "GET", null, null, 15000));
+            } catch (Exception fallbackError) {
+                throw apiError;
+            }
+        }
         prefs(c).edit().putString("pointer", p.toString())
                 .putLong("lastCheck", System.currentTimeMillis()).remove("lastError").apply();
         return p;
