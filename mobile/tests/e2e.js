@@ -553,19 +553,13 @@ function check(name, cond, detail) {
     return d && [d.totalW18, d.wages, Domain.diamondOf(d)]; });
   check("حُفظت S-00003: وزن 2 وأجور 50 وماس 0.3", s3 && s3.join() === "2,50,0.3", JSON.stringify(s3));
 
-  // ══ 1.9: صافي ما لي · الرصيد الافتتاحي · عيار الحساب لكل عميل ══
+  // ══ 1.9: الرصيد الافتتاحي · عيار الحساب لكل عميل (و1.10: بلا لوحة «صافي ما لي») ══
   await page.goto(url + "#/holdings");
   await page.waitForTimeout(250);
-  const netOf = (k) => page.evaluate((kk) => { const np = Domain.netPosition(App.state);
-    return Num.f2(Gold.g(np.gold18, kk || App.state.settings.viewKarat)); }, k);
-  check("«صافي ما لي» أول الممتلكات بعيار المجاميع (18)", (await text(".net-card")).includes("صافي ما لي") &&
-    (await text(".net-card .net-v")).includes((await netOf()).replace("-", "−")) && (await text(".net-card .net-v")).includes("عيار 18"), await text(".net-card"));
+  check("الممتلكات بلا «صافي ما لي»: تبدأ بالدعوة ثم «معي الآن»", (await page.locator(".net-card").count()) === 0 &&
+    !(await text("#view")).includes("صافي ما لي") && (await text("#bar")).includes("ما معي الآن"));
   check("ودعوةٌ لتسجيل الرصيد الافتتاحي", (await page.locator(".open-cta").count()) === 1);
-  await page.locator(".net-card .net-k button", { hasText: "21" }).click();
-  await page.waitForTimeout(100);
-  check("وبلمسة «21» يُعرض الصافي بعيار 21", (await text(".net-card .net-v")).includes((await netOf(21)).replace("-", "−")) &&
-    (await text(".net-card .net-v")).includes("عيار 21"), await text(".net-card .net-v"));
-  const net0 = await page.evaluate(() => Domain.netPosition(App.state));
+  const hd0 = await page.evaluate(() => { const h = Domain.holdings(App.state); return { g: h.gold18, s: h.setsW18, c: h.cash.amount }; });
   await page.locator(".open-cta").click();
   await page.waitForURL(/#\/opening/);
   await fill("عيار 21 (جم)", "10");
@@ -587,9 +581,9 @@ function check(name, cond, detail) {
   check("صندوق 21: 2 + 10 افتتاحي = 12.00", b21o.includes("12.00") && b21o.includes("افتتاحي 10.00"), b21o);
   check("والأطقم التي معي زادت OP1", (await text(".wide-tile.sets")).includes("OP1") || (await page.evaluate(() =>
     Domain.holdings(App.state).pieces.some((p) => p.name === "OP1" && p.fromKind === "opening"))));
-  const net1 = await page.evaluate(() => Domain.netPosition(App.state));
-  check("والصافي زاد 10×21/18 + 8.167 = 19.834 ذهباً و500 نقداً",
-    Math.abs(net1.gold18 - net0.gold18 - 19.834) < 0.0015 && Math.abs(net1.cash - net0.cash - 500) < 0.005, JSON.stringify([net0, net1]));
+  const hd1 = await page.evaluate(() => { const h = Domain.holdings(App.state); return { g: h.gold18, s: h.setsW18, c: h.cash.amount }; });
+  check("وما معي زاد: 10×21/18 = 11.667 ذهباً · OP1 8.167 · و500 نقداً",
+    Math.abs(hd1.g - hd0.g - 11.667) < 0.0015 && Math.abs(hd1.s - hd0.s - 8.167) < 0.0015 && Math.abs(hd1.c - hd0.c - 500) < 0.005, JSON.stringify([hd0, hd1]));
   check("ولا دعوةً بعد التسجيل", (await page.locator(".open-cta").count()) === 0);
   await page.locator(".box-tile", { hasText: "عيار 21" }).click();
   await page.waitForSelector(".sheet");

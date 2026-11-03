@@ -373,7 +373,7 @@ async function main() {
   const hd = await ev("(() => { const h = Domain.holdings(App.state); return { b21: (h.boxes.find((b) => b.karat === 21) || {}).weight, cash: h.cash.amount, n: h.pieces.length }; })()");
   // الطقم بلا اسم من البضاعة لم يُبع (السطر 5 جم كُتب بوزنه لا باختياره)
   check("الممتلكات: صندوق 21 فيه 1.00 جم، والنقد 20، وطقمٌ واحد معي", hd.b21 === 1 && hd.cash === 20 && hd.n === 1, JSON.stringify(hd));
-  check("«صافي ما لي» أولاً بالذهب والنقد وتفصيلهما", await ev("(() => { const n = document.querySelector('.net-card'); return !!n && n.innerText.includes('صافي ما لي') && n.querySelectorAll('.net-row').length === 5; })()"));
+  check("بلا لوحة «صافي ما لي»", await ev("document.querySelectorAll('.net-card').length === 0"));
   check("ثم صناديقها، والأطقم التي معي · لي عند العملاء · عليّ للمصانع", (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
     (await ev("document.querySelectorAll('.wide-tile.big').length")) === 3 &&
     (await ev("document.querySelector('.wide-tile.sets').innerText")).includes("الأطقم التي معي (1)"));

@@ -344,7 +344,7 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("بعد المرتجع: ط-101 معك", D.searchSets(t, "ط-101")[0].where === "in");
 }
 
-// ══ 1.9: عيار الحساب لكل عميلٍ ومصنع، والرصيد الافتتاحي للممتلكات، وصافي ما لي ══
+// ══ 1.9: عيار الحساب لكل عميلٍ ومصنع، والرصيد الافتتاحي للممتلكات ══
 {
   const t = D.newState();
   const c21 = D.saveShop(t, { name: "عميل 21", karat: 21, openGold18: 7, openDate: "2026-01-01" });
@@ -392,14 +392,6 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
     throws(() => D.saveOpenHold(t, { date: "2026-01-01", gold: { 21: 12 }, cash: 1000, sets: [{ id: oh.sets[0].id, name: "T9", karat: 21, weight: 7 }] }), /لا يُحذف/));
   check("ويبقى كما كان", D.openHold(t).sets.length === 2);
 
-  // صافي ما لي = يدي + الأطقم + ما لي عند العملاء + (ما مع المصانع بإشارته)
-  const np = D.netPosition(t);
-  const cus = D.balance(t, c21.id).gold18 + D.balance(t, c18.id).gold18;
-  check("في يدي: 15×21/18 + 2 = 19.5", np.hand18 === 19.5, np.hand18);
-  check("لي عند العملاء: 7 + 8.167 + 4 − 3.5 = 15.667", np.cus18 === 15.667 && Math.abs(np.cus18 - cus) < 0.0005, np);
-  check("ومع المصانع −11 (عليّ)", np.fac18 === -11);
-  check("الصافي ذهباً: 19.5 + 0 + 15.667 − 11 = 24.167", np.gold18 === 24.167, np.gold18);
-  check("والصافي نقداً: 1200 + (110 − 200) = 1110", np.handCash === 1200 && np.cusCash === -90 && np.cash === 1110, np);
   check("والرصيد الافتتاحي يبقى بعد النسخ والاسترجاع",
     D.openHold(D.fromBackup(JSON.parse(JSON.stringify(D.toBackup(t))))).sets.length === 2);
 }

@@ -1887,7 +1887,7 @@
         h("div", { class: "grid2" }, field(T("عيار المجاميع"), karat), field(T("نسبة خصم الأحجار %"), rate),
           field(T("المظهر"), theme), field(T("اللغة"), langSel)),
         h("label", { class: "switch" }, showBal, T("إظهار رصيد العميل في الفاتورة")),
-        h("div", { class: "muted small" }, T("لكل عميلٍ ومصنعٍ عياره (من «تعديل العميل»): به يظهر رصيده وكشفه وفواتيره. و«عيار المجاميع» لما يجمع الأعيرة كلها: صافي ما لك، ومجموع العملاء والمصانع، والعميل الذي لم يُحدَّد عياره. والأوزان تُحفظ دائماً بمكافئ عيار 18 كما في البرنامج."))),
+        h("div", { class: "muted small" }, T("لكل عميلٍ ومصنعٍ عياره (من «تعديل العميل»): به يظهر رصيده وكشفه وفواتيره. و«عيار المجاميع» لما يجمع الأعيرة كلها: مجموع العملاء والمصانع، والعميل الذي لم يُحدَّد عياره. والأوزان تُحفظ دائماً بمكافئ عيار 18 كما في البرنامج."))),
       h("button", { class: "btn block", onclick: save, style: { marginBottom: "12px" } }, T("حفظ الإعدادات")),
       autoCard,
       h("div", { class: "card" }, h("h2", null, ico("save", 18), T("نسخةٌ في ملف")),
@@ -1977,45 +1977,15 @@
     }
   }
 
-  // ══ الممتلكات: صافي ما لي أولاً، ثم ما معي الآن (صندوقٌ لكل عيار · النقد · الأطقم)، ثم حساباتي ══
-  let netK = 0;   // عيار عرض «صافي ما لي» (يُبدَّل بلمسة؛ والأصل عيار المجاميع)
+  // ══ الممتلكات: ما معي الآن (صندوقٌ لكل عيار · النقد · الأطقم)، ثم حساباتي ══
   function holdingsScreen() {
     const s = st(), k = vk();
-    setBar(T("الممتلكات"), T("صافي ما لي · ما معي الآن"), { back: false, actions: [updateButton()] });
+    setBar(T("الممتلكات"), T("ما معي الآن"), { back: false, actions: [updateButton()] });
     setTab("holdings");
     const v = view();
     const hd = D.holdings(s);
-    const np = D.netPosition(s);
     const oh = hd.open;
     const hasOpen = Object.keys(oh.gold).length || oh.cash || oh.sets.length;
-
-    // ── صافي ما لي: ما في يدي + الأطقم + ما لي عند العملاء − ما عليّ للمصانع ──
-    const net = h("div", { class: "net-card" });
-    const renderNet = () => {
-      const nk = G.KARATS.includes(netK) ? netK : k;
-      const sg = (x, d) => (Math.abs(x) < (d === 2 ? 0.005 : 0.0005) ? "0.00" : (x > 0 ? "+" : "−") + f2(Math.abs(x)));
-      const sgn0 = (x) => (x < 0 && f2(Math.abs(x)) !== "0.00" ? "−" : "") + f2(Math.abs(x));
-      const gRow = (label, w18, cash) => h("div", { class: "net-row" }, h("span", null, label),
-        h("b", { class: "num", dir: "ltr" }, w18 === null ? "" : sg(G.g(w18, nk), 3)),
-        h("b", { class: "num", dir: "ltr" }, cash === null ? "" : sg(cash, 2)));
-      const chips = h("div", { class: "seg sm net-k" }, G.KARATS.map((x) => h("button", { type: "button",
-        class: x === nk ? "on" : "", "aria-label": T("بعيار {0}", x), onclick: () => { netK = x; renderNet(); } }, String(x))));
-      net.innerHTML = "";
-      net.append(
-        h("div", { class: "spread" }, h("span", { class: "net-t" }, T("صافي ما لي")), chips),
-        h("div", { class: "net-v" + (np.gold18 < -0.0005 ? " neg" : "") }, h("span", { class: "num", dir: "ltr" }, sgn0(G.g(np.gold18, nk))),
-          h("span", { class: "u" }, T(" جم عيار {0}", nk))),
-        h("div", { class: "net-c" + (np.cash < -0.005 ? " neg" : "") }, h("span", { class: "num", dir: "ltr" }, sgn0(np.cash)), h("span", { class: "u" }, T(" ريال"))),
-        h("div", { class: "net-rows" },
-          h("div", { class: "net-row head" }, h("span"), h("span", null, T("ذهب")), h("span", null, T("نقد"))),
-          gRow(T("في يدي"), np.hand18, np.handCash),
-          gRow(T("الأطقم التي معي"), np.sets18, null),
-          gRow(T("لي عند العملاء"), np.cus18, np.cusCash),
-          gRow(T("مع المصانع"), np.fac18, np.facCash)),
-        h("div", { class: "muted small" }, T("«مع المصانع» بالسالب: ما عليك لهم. والأطقم بوزن ذهبها.")));
-    };
-    renderNet();
-    v.append(net);
     if (!hasOpen) {
       v.append(h("button", { class: "note-bar info open-cta", onclick: () => go("opening") },
         ico("coins", 18), h("span", { class: "grow" }, h("b", null, T("سجّل ما معك الآن")),
@@ -2109,7 +2079,7 @@
     renderSets();
     v.append(
       h("div", { class: "note-bar info", style: { marginBottom: "12px" } },
-        T("اكتب ما كان معك قبل أول عمليةٍ تسجّلها في التطبيق — فيبدأ منه «معي الآن» و«صافي ما لي». ") +
+        T("اكتب ما كان معك قبل أول عمليةٍ تسجّلها في التطبيق — فيبدأ منه «معي الآن». ") +
         T("أمّا ما لك عند كل عميل وما عليك لكل مصنع فيُكتب في «رصيد افتتاحي» داخل حسابه.")),
       h("div", { class: "card" }, h("h2", null, ico("coins", 18), T("ذهبٌ في يدي (كل عيارٍ بوزنه)")),
         h("div", { class: "grid2" }, ...G.KARATS.map((x) => field(T("عيار {0} (جم)", x), goldIns[x])))),

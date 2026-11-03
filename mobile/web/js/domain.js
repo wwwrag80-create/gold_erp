@@ -18,8 +18,7 @@
  *
  * **الممتلكات** (`holdings`): ما مع المندوب الآن — صندوقٌ لكل عيار (رصيده الافتتاحي
  * ثم ذهب التحصيل ناقصاً ما دُفع للمصانع)، وصندوق النقد، والأطقم التي في يده (من الرصيد
- * الافتتاحي، أو من مصنعٍ، أو مرتجعةً من عميل) ما لم تُبَع أو تُرجَع. و`netPosition`:
- * صافي ما لي = ما في يدي + ما لي عند العملاء − ما عليّ للمصانع.
+ * الافتتاحي، أو من مصنعٍ، أو مرتجعةً من عميل) ما لم تُبَع أو تُرجَع.
  *
  * **عيار الحساب** (`karat`): لكل عميلٍ ومصنعٍ عياره — يُعرض به رصيده وكشفه، ويبدأ به سطر
  * فاتورته وسنده. والتخزين كله بمكافئ 18 كما في البرنامج، فالعيار وحدة عرضٍ لا غير.
@@ -752,21 +751,6 @@
     for (const b of boxList) gold18 = R(gold18 + Gold.store(b.weight, b.karat), 3);
     return { boxes: boxList, cash, pieces: list, setsW18, gold18, open: oh };
   }
-  // صافي ما لي — موقف المندوب كلّه بمكافئ 18: ذهبي في يدي + الأطقم التي معي + ما لي عند العملاء
-  // − ما عليّ للمصانع (بإشارته)، والنقد كذلك. الأطقم بذهبها (أجورها في حسابات أصحابها)
-  function netPosition(st) {
-    const hd = holdings(st), bal = allBalances(st);
-    let cus18 = 0, cusCash = 0, fac18 = 0, facCash = 0;
-    for (const p of st.shops) {
-      const b = bal[p.id];
-      if (isFactory(p)) { fac18 += b.gold18; facCash += b.cash; } else { cus18 += b.gold18; cusCash += b.cash; }
-    }
-    cus18 = R(cus18, 3); fac18 = R(fac18, 3); cusCash = R(cusCash, 2); facCash = R(facCash, 2);
-    return {
-      hand18: hd.gold18, sets18: hd.setsW18, cus18, fac18, handCash: hd.cash.amount, cusCash, facCash,
-      gold18: R(hd.gold18 + hd.setsW18 + cus18 + fac18, 3), cash: R(hd.cash.amount + cusCash + facCash, 2),
-    };
-  }
   // ذهب المصانع الذي عندي (ما عليّ لكل مصنع: أخذتُ − أرجعتُ − سدّدتُ، ومعه
   // الدَّين السابق)، وذهبي عند العملاء (ما على كل عميل) — بالأرصدة نفسها
   function exposure(st) {
@@ -872,7 +856,7 @@
     effects, docsOf, statement, balance, balanceAround, allBalances,
     woHistory, woLast, setTracks, searchSets, searchKey, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
-    partyKarat, openHold, saveOpenHold, netPosition,
+    partyKarat, openHold, saveOpenHold,
     diamondOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };
   root.Domain = api;

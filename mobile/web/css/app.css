@@ -543,21 +543,7 @@ body.no-tabs .web-bk { bottom: calc(16px + env(safe-area-inset-bottom)); }
 /* بطاقة «ثبّت ÀUR على الآيفون» */
 .install-card ol { margin: 6px 0 0; padding-inline-start: 20px; line-height: 1.9; }
 
-/* ══ الممتلكات 1.9: «صافي ما لي» — بطاقةٌ واحدة تجمع الموقف كلّه ══ */
-.net-card { background: var(--sumBg); border: 1px solid var(--sumEdge); border-radius: var(--r-card);
-  padding: 14px 14px 10px; margin-bottom: 12px; color: var(--sumInk); }
-.net-card .net-t { font-weight: 700; font-size: 15px; }
-.net-card .net-v { font-size: 30px; font-weight: 700; margin-top: 4px; color: var(--ink); }
-.net-card .net-c { font-size: 18px; font-weight: 700; color: var(--ink); }
-.net-card .neg .num { color: var(--red); }
-.net-card .u { font-size: 13px; font-weight: 400; color: var(--muted); }
-.net-card .seg.net-k button { min-width: 34px; padding: 4px 6px; }
-.net-rows { margin: 10px 0 6px; border-top: 1px solid var(--sumEdge); padding-top: 6px; }
-.net-row { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 14px; padding: 3px 0; font-size: 14px; color: var(--ink); }
-.net-row b { text-align: left; min-width: 72px; }
-.net-row.head { font-size: 12px; color: var(--muted); }
-.net-row.head span { text-align: left; }
-.net-row.head span:first-child { text-align: start; }
+/* ══ الممتلكات 1.9: دعوة «سجّل ما معك الآن» ══ */
 .open-cta { display: flex; align-items: center; gap: 8px; width: 100%; text-align: start; font: inherit; color: var(--ink);
   cursor: pointer; margin-bottom: 12px; }
 
@@ -566,7 +552,5 @@ body.no-tabs .web-bk { bottom: calc(16px + env(safe-area-inset-bottom)); }
 [dir="ltr"] .preview iframe { transform-origin: top left; }
 [dir="ltr"] .line .vals b.num, [dir="ltr"] .list-item.col .grid3 b, [dir="ltr"] .stat .v { text-align: left; }
 [dir="ltr"] .box-v { direction: ltr; }
-[dir="ltr"] .net-row b, [dir="ltr"] .net-row.head span { text-align: right; }
-[dir="ltr"] .net-row.head span:first-child { text-align: left; }
 .lang-top { display: flex; justify-content: flex-end; }
 .lang-chip { display: inline-flex; align-items: center; gap: 4px; }

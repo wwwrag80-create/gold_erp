@@ -169,7 +169,8 @@ function check(name, cond, detail) {
   await tap(".footer-bar .btn:has-text('Save')");
   await page.waitForURL(/#\/holdings/);
   await page.waitForTimeout(300);
-  check("Holdings: “My net position” card", (await page.locator(".net-card").innerText()).includes("My net position"));
+  check("Holdings: what I have now, no net position card", (await page.locator(".net-card").count()) === 0 &&
+    (await page.locator(".boxes").innerText()).includes("Gold 21K"));
   await screen("holdings", null);
   await screen("holdings_boxsheet", null, async () => { await page.locator(".box-tile").first().click(); await page.waitForSelector(".sheet"); });
   await page.goBack();
