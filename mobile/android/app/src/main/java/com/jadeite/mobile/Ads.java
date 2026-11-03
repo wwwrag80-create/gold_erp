@@ -67,6 +67,13 @@ final class Ads {
      */
     void start() {
         if (!enabled()) return;
+        // التجربة الآلية (نسخة الاختبار وحدها، وبعلامةٍ صريحة عند التشغيل): بلا نافذة الموافقة — وإلا غطّت
+        // التطبيق حين يكون جهاز التجربة في أوروبا (كما فعلنا في الآيفون: ‎-AURUITesting)
+        if ((a.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                && a.getIntent() != null && a.getIntent().getBooleanExtra("aurUiTesting", false)) {
+            init();
+            return;
+        }
         bar.postDelayed(this::init, 15_000);
         try {
             ConsentInformation ci = UserMessagingPlatform.getConsentInformation(a);

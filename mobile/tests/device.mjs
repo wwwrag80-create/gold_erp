@@ -163,7 +163,7 @@ function resumed() {
 }
 // يعيد التطبيق إلى الواجهة (بلا تشغيلٍ جديد إن كان يعمل)
 function front() {
-  try { adb("shell", "am", "start", "-n", `${PKG}/.MainActivity`); } catch (e) { /* */ }
+  try { adb("shell", "am", "start", "-n", `${PKG}/.MainActivity`, "--ez", "aurUiTesting", "true"); } catch (e) { /* */ }
 }
 
 const pidOf = () => { try { return adb("shell", "pidof", PKG).toString().trim(); } catch (e) { return ""; } };
@@ -174,7 +174,7 @@ async function relaunch() {
   await sleep(500);
   let pid = "";
   for (let attempt = 0; attempt < 3 && !pid; attempt++) {
-    adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`);
+    adb("shell", "am", "start", "-W", "-n", `${PKG}/.MainActivity`, "--ez", "aurUiTesting", "true");
     await sleep(5000);
     pid = pidOf();
     if (pid) { await sleep(1500); if (pidOf() !== pid) pid = ""; }

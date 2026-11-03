@@ -18,7 +18,7 @@ export APK
 export UNSIGNED_URL="https://github.com/${GITHUB_REPOSITORY:-wwwrag80-create/gold_erp}/releases/download/mobile-unsigned/jadeite-mobile-unsigned.apk"
 export UNSIGNED_SHA="$(cut -d' ' -f1 jadeite-mobile-unsigned.apk.sha256 2>/dev/null)"
 adb logcat -c
-adb shell am start -W -n com.jadeite.mobile/.MainActivity
+adb shell am start -W -n com.jadeite.mobile/.MainActivity --ez aurUiTesting true
 sleep 8
 adb exec-out screencap -p > "$OUT/01_launch.png"
 PID=$(adb shell pidof com.jadeite.mobile | tr -d '\r')

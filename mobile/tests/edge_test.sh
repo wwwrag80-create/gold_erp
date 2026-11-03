@@ -11,7 +11,7 @@ adb logcat -c
 # يُفتح التطبيق (ومن جديد إن أغلقه أندرويد مع إعادة تشغيل خدمات Google على المحاكي)
 PID=""
 for i in 1 2 3; do
-  adb shell am start -W -n com.jadeite.mobile/.MainActivity
+  adb shell am start -W -n com.jadeite.mobile/.MainActivity --ez aurUiTesting true
   sleep 8
   PID=$(adb shell pidof com.jadeite.mobile | tr -d '\r')
   [ -n "$PID" ] && break
