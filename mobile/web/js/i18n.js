@@ -16,6 +16,11 @@
     const v = root.localStorage && root.localStorage.getItem(KEY);
     if (v === "en" || v === "ar") lang = v;
   } catch (e) { /* لا تخزين: العربية */ }
+  // في أندرويد يحفظها الجهاز أيضاً (في الحال) — وهو المرجع إن وُجد
+  try {
+    const n = root.AndroidBridge && root.AndroidBridge.getLang && root.AndroidBridge.getLang();
+    if (n === "en" || n === "ar") lang = n;
+  } catch (e) { /* */ }
 
   const missing = new Set();
   const has = (d, k) => Object.prototype.hasOwnProperty.call(d, k);

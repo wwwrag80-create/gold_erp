@@ -12,9 +12,15 @@ final class Lang {
 
     private Lang() {}
 
+    // commit (لا apply): يُكتب في الحال، فلا يضيع الاختيار ولو أُغلق التطبيق بعده بلحظة
     static void set(Context c, String lang) {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString("lang", "en".equals(lang) ? "en" : "ar").apply();
+                .putString("lang", "en".equals(lang) ? "en" : "ar").commit();
+    }
+
+    /** المحفوظ («ar» أو «en»)، أو "" إن لم يُختر بعد. */
+    static String get(Context c) {
+        return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("lang", "");
     }
 
     static boolean en(Context c) {

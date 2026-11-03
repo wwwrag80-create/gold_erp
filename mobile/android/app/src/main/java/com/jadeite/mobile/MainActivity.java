@@ -532,6 +532,11 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String getLang() {
+            return Lang.get(MainActivity.this);
+        }
+
+        @JavascriptInterface
         public String appVersion() {
             return BuildConfig.VERSION_NAME;
         }
