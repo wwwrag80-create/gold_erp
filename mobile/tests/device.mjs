@@ -503,6 +503,34 @@ async function main() {
   check("وكشف الحساب كما كان: 1.50 جم و50.00 ريال عليه", kp2.includes("1.50 جم عليه") && kp2.includes("50.00 ريال عليه"), kp2);
   shot("restored_statement");
   ws.close();
+
+  // ══ «يوجد تحديث جديد» في وسط الشاشة حين يُنشر إصدارٌ أحدث: قناةٌ (كما يحفظها فحصٌ للتوّ) تقول 9.9.9 ══
+  adb("shell", "am", "force-stop", PKG);
+  const ptr = JSON.stringify({ channel: "jadeite-mobile", version: "9.9.9", code: 999, sha256: "0".repeat(64),
+    url: "https://raw.githubusercontent.com/wwwrag80-create/gold_erp/main/mobile/dist/x.apk", notes: "تجربة نافذة التحديث" });
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const xml = `<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n  <string name="pointer">${esc(ptr)}</string>\n` +
+    `  <long name="lastCheck" value="${Date.now()}" />\n</map>\n`;
+  execFileSync("adb", ["shell", "run-as", PKG, "sh", "-c", "cat > shared_prefs/updates.xml"], { input: xml });
+  let back = "";
+  try { back = adb("shell", "run-as", PKG, "cat", "shared_prefs/updates.xml").toString(); } catch (e) { back = String(e.message || e); }
+  check("قناةٌ تقول 9.9.9 (كما يحفظها فحصٌ للتوّ)", back.includes("9.9.9"), back.slice(0, 200));
+  ({ ws, ev } = await relaunch());
+  let pop = false;
+  for (let i = 0; i < 24 && !pop; i++) { pop = await ev("!!document.querySelector('.sheet.pop')"); if (!pop) await sleep(250); }
+  const popText = pop ? await ev("document.querySelector('.sheet.pop').innerText") : "";
+  check("إصدارٌ أحدث منشور ⇒ «يوجد تحديث جديد» في وسط الشاشة عند الفتح", pop && popText.includes("يوجد تحديث جديد") &&
+    popText.includes("9.9.9") && popText.includes("حدّث الآن"), popText || (await ev("location.hash")));
+  shot("update_pop");
+  check("والنافذة في الوسط", pop && (await ev(`(() => { const r = document.querySelector('.sheet.pop').getBoundingClientRect();
+    const mid = (r.top + r.bottom) / 2; return Math.abs(mid - innerHeight / 2) < innerHeight * 0.15; })()`)));
+  await run(ev, `await t.confirm("لاحقاً");`);
+  await run(ev, `location.hash = "#/holdings"; await t.sleep(1200); location.hash = "#/home"; await t.sleep(1200);`);
+  check("«لاحقاً» تُغلقها، ولا تعود مع التنقّل في الجلسة نفسها", !(await ev("!!document.querySelector('.sheet.pop')")));
+  ws.close();
+  // تُعاد القناة كما كانت (لا أثر للتجربة)
+  adb("shell", "am", "force-stop", PKG);
+  try { adb("shell", "run-as", PKG, "rm", "-f", "shared_prefs/updates.xml"); } catch (e) { /* */ }
 }
 
 function finish() {

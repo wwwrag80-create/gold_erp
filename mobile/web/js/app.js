@@ -2333,12 +2333,12 @@
     else document.documentElement.setAttribute("data-theme", t);
   }
 
-  // فحص التحديث عند الفتح والعودة إلى التطبيق — مرةً كل 3 ساعات على الأكثر
+  // فحص التحديث عند كل فتحٍ للتطبيق وعودته من الخلفية — بحدّ دقيقتين بين فحصين، فإصدارٌ نُشر
+  // للتوّ تظهر نافذته في أول فتحٍ بعده (لا بعد نصف ساعة)
   function maybeCheckUpdate() {
     const us = B.updateState();
     if (us.unsupported) return;
-    // عند كل فتحٍ للتطبيق (وعودته من الخلفية) — بحدّ نصف ساعة بين فحصين
-    if (Date.now() - (us.lastCheck || 0) > 30 * 60 * 1000) B.checkUpdate();
+    if (Date.now() - (us.lastCheck || 0) > 2 * 60 * 1000) B.checkUpdate();
   }
 
   function firstRun() {
@@ -2382,7 +2382,14 @@
       if (changed && ["home", "more"].includes(parse().parts[0])) route();
     });
     setTimeout(promo, 1500);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) { maybeCheckUpdate(); promo(); } });
+    // العودة إلى التطبيق بعد غيابٍ (10 دقائق فأكثر) فتحٌ جديد: نافذة «يوجد تحديث» تظهر من جديد إن
+    // لم يُثبَّت بعد — لا مرةً واحدة طوال بقاء التطبيق في ذاكرة الجوال
+    let hiddenAt = 0;
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt >= 10 * 60 * 1000) { popShown = ""; setTimeout(() => maybeUpdatePop(), 700); }
+      maybeCheckUpdate(); promo();
+    });
     window.addEventListener("hashchange", route);
     webSetup();
     // مجلد «ÀUR» من تثبيتٍ سابق، والتطبيق ليس في أول تشغيله (فيه بيانات): الحفظ فيه من الآن
