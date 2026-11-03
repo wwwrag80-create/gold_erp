@@ -17,6 +17,10 @@ export APK
 # تجربة التنزيل: الملف غير الموقّع الذي نُشر للتوّ وبصمته
 export UNSIGNED_URL="https://github.com/${GITHUB_REPOSITORY:-wwwrag80-create/gold_erp}/releases/download/mobile-unsigned/jadeite-mobile-unsigned.apk"
 export UNSIGNED_SHA="$(cut -d' ' -f1 jadeite-mobile-unsigned.apk.sha256 2>/dev/null)"
+# نوافذ «… isn't responding» لتطبيقات النظام في المحاكي (Pixel Launcher مثلاً) تغطّي التطبيق: تُخفى؛
+# وتعليق ÀUR نفسه يبقى مكشوفاً من سجلّ النظام («ANR in com.jadeite.mobile») أدناه
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 adb logcat -c
 adb shell am start -W -n com.jadeite.mobile/.MainActivity --ez aurUiTesting true
 sleep 8
@@ -33,7 +37,7 @@ if [ ! -s "$OUT/result.json" ]; then
 fi
 adb logcat -d > "$OUT/logcat.txt"
 # الانهيار الحقيقي وحده — «I AndroidRuntime: VM exiting» سطرٌ عادي من أوامر adb
-grep -E "FATAL EXCEPTION| E AndroidRuntime" "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
+grep -E "FATAL EXCEPTION| E AndroidRuntime|ANR in com\.jadeite\.mobile" "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
 grep -E "SecurityException.*com\.jadeite" "$OUT/logcat.txt" > "$OUT/security.txt" || true
 grep -E "chromium.*(Uncaught|ERROR:CONSOLE)" "$OUT/logcat.txt" > "$OUT/js_errors.txt" || true
 if [ -s "$OUT/crashes.txt" ]; then echo "crash in logcat"; RC=1; fi

@@ -7,6 +7,10 @@ OUT="${OUT:-device-out}/edge"
 mkdir -p "$OUT"
 APK=mobile/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk
 adb install -r "$APK" > "$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; exit 1; }
+# نوافذ «… isn't responding» لتطبيقات النظام في المحاكي (Pixel Launcher مثلاً) تغطّي التطبيق: تُخفى؛
+# وتعليق ÀUR نفسه يبقى مكشوفاً من سجلّ النظام («ANR in com.jadeite.mobile») أدناه
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 adb logcat -c
 # يُفتح التطبيق (ومن جديد إن أغلقه أندرويد مع إعادة تشغيل خدمات Google على المحاكي)
 PID=""
@@ -22,6 +26,6 @@ adb forward tcp:9223 "localabstract:webview_devtools_remote_$PID"
 node mobile/tests/edge.mjs "$OUT"
 RC=$?
 adb logcat -d > "$OUT/logcat.txt"
-grep -E "FATAL EXCEPTION| E AndroidRuntime" "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
+grep -E "FATAL EXCEPTION| E AndroidRuntime|ANR in com\.jadeite\.mobile" "$OUT/logcat.txt" > "$OUT/crashes.txt" || true
 if [ -s "$OUT/crashes.txt" ]; then echo "crash in logcat"; cat "$OUT/crashes.txt"; RC=1; fi
 exit $RC
