@@ -48,6 +48,15 @@ jobs:
             if [ -n "$m" ]; then echo "✘ $p: إضافةٌ من Netlify في الصفحة:"; echo "$m"; badge=1; fi
           done
           [ "$badge" = 0 ] && echo "✔ لا إضافة من Netlify في الصفحات"
+          # الرابط القديم (Netlify) يحوّل كل صفحةٍ إلى مكانها هنا — بلا صفحةٍ ولا شعار هناك
+          OLD=https://deluxe-chebakia-749799.netlify.app
+          if [ "$SITE" != "$OLD" ]; then
+            for p in / /privacy.html /app/; do
+              h=$(curl -sS -o /dev/null -w "%{http_code} %{redirect_url}" "$OLD$p")
+              echo "قديم $p → $h"
+              case "$h" in "301 $SITE$p"|"308 $SITE$p") ;; *) echo "✘ الرابط القديم $p لا يحوّل إلى $SITE$p"; fail=1;; esac
+            done
+          fi
           echo "FAIL=$fail" >> "$GITHUB_ENV"
           echo "BADGE=$badge" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
