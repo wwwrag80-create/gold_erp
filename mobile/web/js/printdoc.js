@@ -4,6 +4,7 @@
 (function (root) {
   "use strict";
   const { f2 } = root.Num;
+  const T = root.I18N.T;
   const G = root.Gold, D = root.Domain;
 
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g,
@@ -78,28 +79,31 @@
   }
 
   function page(title, body, narrow) {
-    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">${narrow ? `<!--page-width:${NARROW}-->` : ""}
+    // بلغة الواجهة واتجاهها — والأنماط مكتوبةٌ للعربية فتُقلب جهاتها للإنجليزية
+    const rtl = root.I18N.rtl;
+    const css = rtl ? CSS : CSS.replace(/\b(left|right)\b/g, (m) => (m === "left" ? "right" : "left"));
+    return `<!doctype html><html lang="${root.I18N.lang}" dir="${rtl ? "rtl" : "ltr"}"><head><meta charset="utf-8">${narrow ? `<!--page-width:${NARROW}-->` : ""}
 <base href="${esc(base())}"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title><style>${CSS}${narrow ? CSS_NARROW : ""}</style></head><body><div class="page">${body}${brand()}</div></body></html>`;
+<title>${esc(title)}</title><style>${css}${narrow ? CSS_NARROW : ""}</style></head><body><div class="page">${body}${brand()}</div></body></html>`;
   }
 
   function header(st, title, no, date) {
     const s = st.settings;
     return `<div class="head"><div><div class="biz">${esc(s.name || APP)}</div>
-      ${s.phone ? `<div class="muted">هاتف: ${ltr(s.phone)}</div>` : ""}
+      ${s.phone ? T("<div class=\"muted\">هاتف: {0}</div>", ltr(s.phone)) : ""}
       ${s.address ? `<div class="muted">${esc(s.address)}</div>` : ""}</div>
       <div><div class="title">${esc(title)}</div>
       ${no ? `<div class="no">${ltr(no)}</div>` : ""}
-      <div class="muted" style="text-align:left">${ltr(dmy(date))}</div></div></div>`;
+      <div class="muted" style="text-align:${root.I18N.end}">${ltr(dmy(date))}</div></div></div>`;
   }
 
   const APP = "ÀUR";
-  const INV_TITLE = { sale: "فاتورة بيع", sale_return: "مرتجع", purchase: "بضاعة من مصنع", purchase_return: "إرجاع للمصنع" };
-  const PARTY_WORD = { sale: "العميل", sale_return: "من", purchase: "المصنع", purchase_return: "إلى" };
+  const INV_TITLE = { sale: T("فاتورة بيع"), sale_return: T("مرتجع"), purchase: T("بضاعة من مصنع"), purchase_return: T("إرجاع للمصنع") };
+  const PARTY_WORD = { sale: T("العميل"), sale_return: T("من"), purchase: T("المصنع"), purchase_return: T("إلى") };
 
   function balTxt(v, unit) {
     if (Math.abs(v) < 0.005) return "0.00";
-    return `${f2(Math.abs(v))} ${unit} ${v > 0 ? "عليه" : "له"}`;
+    return `${f2(Math.abs(v))} ${unit} ${v > 0 ? T("عليه") : T("له")}`;
   }
 
   // ══ رمز QR الضريبي (المرحلة الأولى) — كـ`services/zatca.py` ══
@@ -136,14 +140,13 @@
     const shop = D.shopById(st, inv.shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
     const k = D.partyKarat(D.shopById(st, inv.shopId), st.settings.viewKarat || 18);
-    const title = (INV_TITLE[inv.kind] || "فاتورة") + (inv.vat ? " ضريبية" : "");
+    const title = (INV_TITLE[inv.kind] || T("فاتورة")) + (inv.vat ? T(" ضريبية") : "");
     const anyDia = inv.lines.some((l) => l.diamond > 0);
     let rows = "", n = 0;
     for (const li of inv.lines) {
       n++;
       if (li.wageOnly) {
-        rows += `<tr><td>${n}</td><td class="t" colspan="${(anyDia ? 5 : 4) + (anyPh ? 1 : 0)}">أجور فقط${li.note ? " — " + esc(li.note) : ""}</td>
-          <td>${f2(li.amount)}</td></tr>`;
+        rows += T("<tr><td>{0}</td><td class=\"t\" colspan=\"{1}\">أجور فقط{2}</td>\n          <td>{3}</td></tr>", n, (anyDia ? 5 : 4) + (anyPh ? 1 : 0), li.note ? " — " + esc(li.note) : "", f2(li.amount));
         continue;
       }
       const lk = li.karat || 18;
@@ -153,8 +156,7 @@
         <td>${f2(li.wages)}</td></tr>`;
     }
     const sets = inv.lines.filter((l) => !l.wageOnly).length;
-    rows += `<tr class="tot"><td colspan="${anyPh ? 5 : 4}">الإجمالي — ${sets} طقم · عيار ${k}</td>
-      <td>${f2(G.g(inv.totalW18, k))}</td>${anyDia ? `<td>${f2(D.diamondOf(inv))}</td>` : ""}<td>${f2(inv.wages)}</td></tr>`;
+    rows += T("<tr class=\"tot\"><td colspan=\"{0}\">الإجمالي — {1} طقم · عيار {2}</td>\n      <td>{3}</td>{4}<td>{5}</td></tr>", anyPh ? 5 : 4, sets, k, f2(G.g(inv.totalW18, k)), anyDia ? `<td>${f2(D.diamondOf(inv))}</td>` : "", f2(inv.wages));
 
     let qr = "";
     if (inv.vat && st.settings.vatNo) {
@@ -164,27 +166,10 @@
     let bal = "";
     if (st.settings.showBalanceOnInvoice) {
       const { before, after } = D.balanceAround(st, inv);
-      bal = `<div class="sum">
-        <div class="box"><b>رصيد الذهب قبل الفاتورة (عيار ${k})</b><span>${balTxt(G.g(before.gold18, k), "جم")}</span></div>
-        <div class="box"><b>رصيد الذهب بعد الفاتورة (عيار ${k})</b><span>${balTxt(G.g(after.gold18, k), "جم")}</span></div>
-        <div class="box"><b>رصيد الأجور قبل الفاتورة</b><span>${balTxt(before.cash, "ريال")}</span></div>
-        <div class="box"><b>رصيد الأجور بعد الفاتورة</b><span>${balTxt(after.cash, "ريال")}</span></div></div>`;
+      bal = T("<div class=\"sum\">\n        <div class=\"box\"><b>رصيد الذهب قبل الفاتورة (عيار {0})</b><span>{1}</span></div>\n        <div class=\"box\"><b>رصيد الذهب بعد الفاتورة (عيار {2})</b><span>{3}</span></div>\n        <div class=\"box\"><b>رصيد الأجور قبل الفاتورة</b><span>{4}</span></div>\n        <div class=\"box\"><b>رصيد الأجور بعد الفاتورة</b><span>{5}</span></div></div>", k, balTxt(G.g(before.gold18, k), T("جم")), k, balTxt(G.g(after.gold18, k), T("جم")), balTxt(before.cash, T("ريال")), balTxt(after.cash, T("ريال")));
     }
     const body = header(st, title, inv.no, inv.date) +
-      `<div class="party"><div><b>${PARTY_WORD[inv.kind] || "الحساب"}:</b> ${esc(shop.name)}</div>
-       ${shop.phone ? `<div>${ltr(shop.phone)}</div>` : ""}
-       ${inv.vat && st.settings.vatNo ? `<div class="muted">الرقم الضريبي: ${ltr(st.settings.vatNo)}</div>` : ""}</div>
-      <table><thead><tr><th>#</th>${anyPh ? "<th>الصورة</th>" : ""}<th>الطقم</th><th>العيار</th>
-      <th>الوزن القائم</th><th>الوزن</th>${anyDia ? "<th>💎 الماس (جم)</th>" : ""}<th>الأجور (ريال)</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-      ${qr}<div class="sum">
-        <div class="box"><b>إجمالي الوزن</b><span>${f2(G.g(inv.totalW18, k))} جم ${k}</span></div>
-        <div class="box"><b>إجمالي الأجور</b><span>${f2(inv.wages)} ريال</span></div>
-        ${inv.vat ? `<div class="box"><b>ضريبة القيمة المضافة 15%</b><span>${f2(inv.vatAmt)} ريال</span></div>
-        <div class="box"><b>الإجمالي شامل الضريبة</b><span>${f2(inv.grand)} ريال</span></div>` : ""}
-      </div>${bal}
-      ${inv.desc ? `<div class="note">البيان: ${esc(inv.desc)}</div>` : ""}
-      <div class="foot">${esc(st.settings.name || APP)} · ${ltr(inv.no)}</div>`;
+      T("<div class=\"party\"><div><b>{0}:</b> {1}</div>\n       {2}\n       {3}</div>\n      <table><thead><tr><th>#</th>{4}<th>الطقم</th><th>العيار</th>\n      <th>الوزن القائم</th><th>الوزن</th>{5}<th>الأجور (ريال)</th></tr></thead>\n      <tbody>{6}</tbody></table>\n      {7}<div class=\"sum\">\n        <div class=\"box\"><b>إجمالي الوزن</b><span>{8} جم {9}</span></div>\n        <div class=\"box\"><b>إجمالي الأجور</b><span>{10} ريال</span></div>\n        {11}\n      </div>{12}\n      {13}\n      <div class=\"foot\">{14} · {15}</div>", PARTY_WORD[inv.kind] || T("الحساب"), esc(shop.name), shop.phone ? `<div>${ltr(shop.phone)}</div>` : "", inv.vat && st.settings.vatNo ? T("<div class=\"muted\">الرقم الضريبي: {0}</div>", ltr(st.settings.vatNo)) : "", anyPh ? T("<th>الصورة</th>") : "", anyDia ? T("<th>💎 الماس (جم)</th>") : "", rows, qr, f2(G.g(inv.totalW18, k)), k, f2(inv.wages), inv.vat ? T("<div class=\"box\"><b>ضريبة القيمة المضافة 15%</b><span>{0} ريال</span></div>\n        <div class=\"box\"><b>الإجمالي شامل الضريبة</b><span>{1} ريال</span></div>", f2(inv.vatAmt), f2(inv.grand)) : "", bal, inv.desc ? T("<div class=\"note\">البيان: {0}</div>", esc(inv.desc)) : "", esc(st.settings.name || APP), ltr(inv.no));
     return page(`${title} ${inv.no}`, body);
   }
 
@@ -192,29 +177,21 @@
     const shop = D.shopById(st, v.shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
     const k = D.partyKarat(D.shopById(st, v.shopId), st.settings.viewKarat || 18);
-    const title = v.kind === "receipt" ? "سند تحصيل" : D.isFactory(shop) ? "سند سداد للمصنع" : "سند صرف";
+    const title = v.kind === "receipt" ? T("سند تحصيل") : D.isFactory(shop) ? T("سند سداد للمصنع") : T("سند صرف");
     let rows = "", n = 0;
     for (const r of v.rows) {
       n++;
       rows += r.kind === "gold"
-        ? `<tr><td>${n}</td><td>ذهب</td><td>${f2(r.weight)} جم عيار ${r.karat}</td>
-           <td>${f2(r.equiv)} جم عيار 18</td><td>—</td><td class="t">${esc(r.notes)}</td></tr>`
-        : `<tr><td>${n}</td><td>نقد</td><td>—</td><td>—</td><td>${f2(r.amount)}</td><td class="t">${esc(r.notes)}</td></tr>`;
+        ? T("<tr><td>{0}</td><td>ذهب</td><td>{1} جم عيار {2}</td>\n           <td>{3} جم عيار 18</td><td>—</td><td class=\"t\">{4}</td></tr>", n, f2(r.weight), r.karat, f2(r.equiv), esc(r.notes))
+        : T("<tr><td>{0}</td><td>نقد</td><td>—</td><td>—</td><td>{1}</td><td class=\"t\">{2}</td></tr>", n, f2(r.amount), esc(r.notes));
     }
-    if (v.discGold18) rows += `<tr><td>—</td><td>خصم مسموح وزناً</td><td>—</td><td>${f2(v.discGold18)} جم عيار 18</td><td>—</td><td></td></tr>`;
-    if (v.discCash) rows += `<tr><td>—</td><td>خصم مسموح نقداً</td><td>—</td><td>—</td><td>${f2(v.discCash)}</td><td></td></tr>`;
-    if (v.netDiff) rows += `<tr><td>—</td><td>فرق الصافي</td><td>—</td><td>—</td><td>${f2(v.netDiff, { sign: true })}</td><td></td></tr>`;
-    rows += `<tr class="tot"><td colspan="3">الإجمالي</td><td>${f2(v.gold18)} جم عيار 18</td><td>${f2(v.cash)}</td><td></td></tr>`;
+    if (v.discGold18) rows += T("<tr><td>—</td><td>خصم مسموح وزناً</td><td>—</td><td>{0} جم عيار 18</td><td>—</td><td></td></tr>", f2(v.discGold18));
+    if (v.discCash) rows += T("<tr><td>—</td><td>خصم مسموح نقداً</td><td>—</td><td>—</td><td>{0}</td><td></td></tr>", f2(v.discCash));
+    if (v.netDiff) rows += T("<tr><td>—</td><td>فرق الصافي</td><td>—</td><td>—</td><td>{0}</td><td></td></tr>", f2(v.netDiff, { sign: true }));
+    rows += T("<tr class=\"tot\"><td colspan=\"3\">الإجمالي</td><td>{0} جم عيار 18</td><td>{1}</td><td></td></tr>", f2(v.gold18), f2(v.cash));
     const { after } = D.balanceAround(st, v);
     const body = header(st, title, v.no, v.date) +
-      `<div class="party"><div><b>${v.kind === "receipt" ? "من" : "إلى"}:</b> ${esc(shop.name)}</div>
-       ${shop.phone ? `<div>${ltr(shop.phone)}</div>` : ""}</div>
-      <table><thead><tr><th>#</th><th>النوع</th><th>الوزن الفعلي</th><th>المكافئ</th><th>النقد (ريال)</th><th>البيان</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-      <div class="sum"><div class="box"><b>رصيد الذهب بعد السند (عيار ${k})</b><span>${balTxt(G.g(after.gold18, k), "جم")}</span></div>
-      <div class="box"><b>رصيد النقد بعد السند</b><span>${balTxt(after.cash, "ريال")}</span></div></div>
-      ${v.notes ? `<div class="note">البيان: ${esc(v.notes)}</div>` : ""}
-      <div class="foot">${esc(st.settings.name || APP)} · ${ltr(v.no)}</div>`;
+      T("<div class=\"party\"><div><b>{0}:</b> {1}</div>\n       {2}</div>\n      <table><thead><tr><th>#</th><th>النوع</th><th>الوزن الفعلي</th><th>المكافئ</th><th>النقد (ريال)</th><th>البيان</th></tr></thead>\n      <tbody>{3}</tbody></table>\n      <div class=\"sum\"><div class=\"box\"><b>رصيد الذهب بعد السند (عيار {4})</b><span>{5}</span></div>\n      <div class=\"box\"><b>رصيد النقد بعد السند</b><span>{6}</span></div></div>\n      {7}\n      <div class=\"foot\">{8} · {9}</div>", v.kind === "receipt" ? T("من") : T("إلى"), esc(shop.name), shop.phone ? `<div>${ltr(shop.phone)}</div>` : "", rows, k, balTxt(G.g(after.gold18, k), T("جم")), balTxt(after.cash, T("ريال")), v.notes ? T("<div class=\"note\">البيان: {0}</div>", esc(v.notes)) : "", esc(st.settings.name || APP), ltr(v.no));
     return page(`${title} ${v.no}`, body);
   }
 
@@ -224,15 +201,15 @@
     // عيار حساب العميل/المصنع
     const k = D.partyKarat(D.shopById(st, shopId), st.settings.viewKarat || 18);
     const fac = D.isFactory(shop);
-    const period = from || to ? `من ${from ? dmy(from) : "البداية"} إلى ${to ? dmy(to) : "اليوم"}` : "كل الفترات";
+    const period = from || to ? T("من {0} إلى {1}", from ? dmy(from) : T("البداية"), to ? dmy(to) : T("اليوم")) : T("كل الفترات");
     const sgn = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + f2(Math.abs(v));
-    const op = (r) => `${esc(r.label)}${r.no ? `<small>${ltr(r.no)}</small>` : ""}${r.desc ? `<small>${esc(r.desc)}</small>` : ""}`;
+    const op = (r) => `${esc(T(r.label))}${r.no ? `<small>${ltr(r.no)}</small>` : ""}${r.desc ? `<small>${esc(r.desc)}</small>` : ""}`;
     // التاريخ يوماً وشهراً، والسنة تحته — فيتّسع الجدول لعرض الجوال
     const dt = (iso) => iso ? `${ltr(iso.slice(8, 10) + "-" + iso.slice(5, 7))}<small>${iso.slice(0, 4)}</small>` : "";
     // الحركة فوق، والرصيد بعدها في الخانة نفسها
     const cell = (mv, bal, word) => `<td class="m">${mv ? `<span class="mv" dir="ltr">${mv}</span>` : ""}<b>${bal}</b>${word ? `<span class="w">${word}</span>` : ""}</td>`;
-    const partyRow = `<div class="party"><div><b>${fac ? "المصنع" : "العميل"}:</b> ${esc(shop.name)}</div>
-      <div class="muted">${period}${mode === "diamond" ? " · الماس بالجرام" : ` · الذهب بعيار ${k}`}</div></div>`;
+    const partyRow = `<div class="party"><div><b>${fac ? T("المصنع") : T("العميل")}:</b> ${esc(shop.name)}</div>
+      <div class="muted">${period}${mode === "diamond" ? T(" · الماس بالجرام") : T(" · الذهب بعيار {0}", k)}</div></div>`;
     let body;
     if (mode === "diamond") {
       const s = D.diamondStatement(st, shopId, from, to);
@@ -241,35 +218,26 @@
       let rows = "";
       for (const r of s.rows) {
         const v = f * (r.dd - r.dc);
-        const sets = r.sets.map((x) => `${x.name ? esc(x.name) : "طقم"} (${f2(x.diamond)})`).join("، ");
+        const sets = r.sets.map((x) => `${x.name ? esc(x.name) : T("طقم")} (${f2(x.diamond)})`).join(T("، "));
         rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td><td class="t">${sets || "—"}</td>
           ${cell(r.kind === "prev" ? "" : sgn(v), f2(f * r.bal), "")}</tr>`;
       }
-      body = header(st, "كشف حساب الماس", "", to || D.today()) + partyRow +
-        `<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس)</th><th>الماس (جم)<small>الحركة · الصافي</small></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4">لا ماس في الفترة</td></tr>`}</tbody></table>
-        <div class="sum">
-          <div class="box"><b>${fac ? "البضاعة" : "المبيعات"}</b><span>${f2(fac ? s.minus : s.plus)} جم</span></div>
-          <div class="box"><b>${fac ? "الإرجاع" : "المرتجع"}</b><span>${f2(fac ? s.plus : s.minus)} جم</span></div>
-          <div class="box" style="grid-column:span 2"><b>صافي الماس</b><span>${f2(f * s.diamond)} جم</span></div></div>
-        <div class="note">الماس للعرض والمعرفة: لا يدخل الوزن ولا رصيد الذهب.</div>`;
+      body = header(st, T("كشف حساب الماس"), "", to || D.today()) + partyRow +
+        T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس)</th><th>الماس (جم)<small>الحركة · الصافي</small></th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} جم</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} جم</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>صافي الماس</b><span>{5} جم</span></div></div>\n        <div class=\"note\">الماس للعرض والمعرفة: لا يدخل الوزن ولا رصيد الذهب.</div>", rows || T("<tr><td colspan=\"4\">لا ماس في الفترة</td></tr>"), fac ? T("البضاعة") : T("المبيعات"), f2(fac ? s.minus : s.plus), fac ? T("الإرجاع") : T("المرتجع"), f2(fac ? s.plus : s.minus), f2(f * s.diamond));
     } else {
       const s = D.statement(st, shopId, from, to);
       let rows = "";
       for (const r of s.rows) {
         const gv = G.g(r.gd - r.gc, k), cv = r.cd - r.cc;
         rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td>
-          ${cell(r.kind === "prev" || !gv ? "" : sgn(gv), f2(Math.abs(G.g(r.gbal, k))), Math.abs(r.gbal) < 0.0005 ? "" : r.gbal > 0 ? "عليه" : "له")}
-          ${cell(r.kind === "prev" || !cv ? "" : sgn(cv), f2(Math.abs(r.cbal)), Math.abs(r.cbal) < 0.005 ? "" : r.cbal > 0 ? "عليه" : "له")}</tr>`;
+          ${cell(r.kind === "prev" || !gv ? "" : sgn(gv), f2(Math.abs(G.g(r.gbal, k))), Math.abs(r.gbal) < 0.0005 ? "" : r.gbal > 0 ? T("عليه") : T("له"))}
+          ${cell(r.kind === "prev" || !cv ? "" : sgn(cv), f2(Math.abs(r.cbal)), Math.abs(r.cbal) < 0.005 ? "" : r.cbal > 0 ? T("عليه") : T("له"))}</tr>`;
       }
-      body = header(st, "كشف حساب", "", to || D.today()) + partyRow +
-        `<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الذهب (جم ${k})<small>الحركة · الرصيد</small></th><th>النقد (ريال)<small>الحركة · الرصيد</small></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4">لا حركة في الفترة</td></tr>`}</tbody></table>
-        <div class="sum"><div class="box"><b>رصيد الذهب (عيار ${k})</b><span>${balTxt(G.g(s.gold18, k), "جم")}</span></div>
-        <div class="box"><b>رصيد النقد</b><span>${balTxt(s.cash, "ريال")}</span></div></div>`;
+      body = header(st, T("كشف حساب"), "", to || D.today()) + partyRow +
+        T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الذهب (جم {0})<small>الحركة · الرصيد</small></th><th>النقد (ريال)<small>الحركة · الرصيد</small></th></tr></thead>\n        <tbody>{1}</tbody></table>\n        <div class=\"sum\"><div class=\"box\"><b>رصيد الذهب (عيار {2})</b><span>{3}</span></div>\n        <div class=\"box\"><b>رصيد النقد</b><span>{4}</span></div></div>", k, rows || T("<tr><td colspan=\"4\">لا حركة في الفترة</td></tr>"), k, balTxt(G.g(s.gold18, k), T("جم")), balTxt(s.cash, T("ريال")));
     }
-    body += `<div class="foot">${esc(st.settings.name || APP)} · كشف حساب ${esc(shop.name)}</div>`;
-    return page(`كشف حساب ${shop.name}`, body, true);
+    body += T("<div class=\"foot\">{0} · كشف حساب {1}</div>", esc(st.settings.name || APP), esc(shop.name));
+    return page(T("كشف حساب {0}", shop.name), body, true);
   }
 
   // نصٌّ قصير للمشاركة في واتساب
@@ -278,11 +246,11 @@
     // عيار حساب العميل/المصنع
     const k = D.partyKarat(D.shopById(st, inv.shopId), st.settings.viewKarat || 18);
     const { after } = D.balanceAround(st, inv);
-    return [`${INV_TITLE[inv.kind] || "فاتورة"} ${inv.no} — ${dmy(inv.date)}`,
+    return [`${INV_TITLE[inv.kind] || T("فاتورة")} ${inv.no} — ${dmy(inv.date)}`,
       `${shop.name}`,
-      `الوزن: ${f2(G.g(inv.totalW18, k))} جم عيار ${k}`,
-      `الأجور: ${f2(inv.wages)} ريال` + (inv.vat ? ` + ضريبة ${f2(inv.vatAmt)} = ${f2(inv.grand)}` : ""),
-      `الرصيد بعدها: ذهب ${balTxt(G.g(after.gold18, k), "جم")} · أجور ${balTxt(after.cash, "ريال")}`,
+      T("الوزن: {0} جم عيار {1}", f2(G.g(inv.totalW18, k)), k),
+      T("الأجور: {0} ريال", f2(inv.wages)) + (inv.vat ? T(" + ضريبة {0} = {1}", f2(inv.vatAmt), f2(inv.grand)) : ""),
+      T("الرصيد بعدها: ذهب {0} · أجور {1}", balTxt(G.g(after.gold18, k), T("جم")), balTxt(after.cash, T("ريال"))),
     ].join("\n");
   }
 

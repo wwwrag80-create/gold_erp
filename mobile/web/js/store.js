@@ -4,6 +4,7 @@
  */
 (function (root) {
   "use strict";
+  const T = (...a) => root.I18N.T(...a);
   const DB_NAME = "jadeite_mobile", VER = 2;
   const STORES = ["shops", "invoices", "vouchers", "held", "meta"];
   // صور الأطقم في مخزنٍ وحده (الإصدار 2): لا تُحمَّل مع الحالة ولا تثقلها
@@ -70,7 +71,7 @@
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error("تعذّر الحفظ"));
+      tx.onabort = () => reject(tx.error || new Error(T("تعذّر الحفظ")));
     });
   }
 

@@ -560,3 +560,13 @@ body.no-tabs .web-bk { bottom: calc(16px + env(safe-area-inset-bottom)); }
 .net-row.head span:first-child { text-align: start; }
 .open-cta { display: flex; align-items: center; gap: 8px; width: 100%; text-align: start; font: inherit; color: var(--ink);
   cursor: pointer; margin-bottom: 12px; }
+
+/* ══ English (اتجاه من اليسار) — الأنماط أعلاه كُتبت للعربية؛ هنا ما ينقلب ══ */
+[dir="ltr"] .ic-chevron svg, [dir="ltr"] .ic-back svg { transform: scaleX(-1); }
+[dir="ltr"] .preview iframe { transform-origin: top left; }
+[dir="ltr"] .line .vals b.num, [dir="ltr"] .list-item.col .grid3 b, [dir="ltr"] .stat .v { text-align: left; }
+[dir="ltr"] .box-v { direction: ltr; }
+[dir="ltr"] .net-row b, [dir="ltr"] .net-row.head span { text-align: right; }
+[dir="ltr"] .net-row.head span:first-child { text-align: left; }
+.lang-top { display: flex; justify-content: flex-end; }
+.lang-chip { display: inline-flex; align-items: center; gap: 4px; }

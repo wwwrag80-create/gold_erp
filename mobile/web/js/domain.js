@@ -32,6 +32,8 @@
   const Num = root.Num || require("./num.js");
   const Gold = root.Gold || require("./gold.js");
   const R = Num.pyRound;
+  // نصوص الأخطاء بلغة الواجهة (i18n.js) — وفي الفحوص (node) بالعربية كما هي
+  const T = (s, ...a) => (root.I18N ? root.I18N.T(s, ...a) : a.length ? s.replace(/\{(\d+)\}/g, (m, i) => String(a[+i])) : s);
 
   const KIND_LABEL = {
     sale: "فاتورة بيع", sale_return: "مرتجع",
@@ -85,11 +87,11 @@
     const type = data.type === "factory" ? "factory" : "shop";
     const word = type === "factory" ? "المصنع" : "العميل";
     const name = String(data.name || "").trim();
-    if (!name) throw new Error(`اكتب اسم ${word}`);
+    if (!name) throw new Error(T("اكتب اسم {0}", word));
     const dup = st.shops.find((s) => s.name.trim() === name && s.id !== data.id);
-    if (dup) throw new Error(`يوجد ${isFactory(dup) ? "مصنعٌ" : "عميلٌ"} بالاسم نفسه: ${name}`);
+    if (dup) throw new Error(T("يوجد {0} بالاسم نفسه: {1}", isFactory(dup) ? T("مصنعٌ") : T("عميلٌ"), name));
     const old = data.id ? shopById(st, data.id) : null;
-    if (old && (old.type || "shop") !== type) throw new Error("لا يتحوّل العميل مصنعاً ولا العكس");
+    if (old && (old.type || "shop") !== type) throw new Error(T("لا يتحوّل العميل مصنعاً ولا العكس"));
     const rec = {
       id: data.id || uid(type === "factory" ? "fa_" : "sh_"), type,
       name, phone: String(data.phone || "").trim(),
@@ -115,7 +117,7 @@
   function deleteShop(st, id) {
     const used = st.invoices.some((d) => d.shopId === id) ||
       st.vouchers.some((d) => d.shopId === id);
-    if (used) throw new Error("للحساب فواتير أو سندات — احذفها أولاً أو أبقِ الحساب");
+    if (used) throw new Error(T("للحساب فواتير أو سندات — احذفها أولاً أو أبقِ الحساب"));
     st.shops = st.shops.filter((s) => s.id !== id);
   }
 
@@ -125,7 +127,7 @@
     const k = parseInt(e.karat || 18, 10);
     if (e.wageOnly) {
       const amount = R(Number(e.amount || 0), 2);
-      if (amount <= 0) throw new Error("أدخل مبلغ الأجر لسطر «أجر فقط»");
+      if (amount <= 0) throw new Error(T("أدخل مبلغ الأجر لسطر «أجر فقط»"));
       return { wageOnly: true, amount, wages: amount, note: String(e.note || "").trim(),
         wo: "", model: "", karat: 0, reg18: 0, gold18: 0, small18: 0, big18: 0,
         after18: 0, standing18: 0, diamond: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
@@ -143,7 +145,7 @@
           wo: "", model: "", karat: 0, reg18: 0, gold18: 0, small18: 0, big18: 0,
           after18: 0, standing18: 0, diamond: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
       }
-      throw new Error(wo ? `أدخل وزن الطقم ${wo} أو أجوره أو ماسه` : "أدخل الوزن أو الأجور أو الماس");
+      throw new Error(wo ? T("أدخل وزن الطقم {0} أو أجوره أو ماسه", wo) : T("أدخل الوزن أو الأجور أو الماس"));
     }
     // الوزن المقترح (من مرتجعٍ أو بيعٍ سابق) يُعتمد بدقّته المخزَّنة ما دام
     // لم يُغيَّر — كـ`_reg_exact` في البرنامج: الخانة تعرض منزلتين، وعيار
@@ -234,20 +236,20 @@
   }
 
   function checkLines(lines) {
-    if (!lines.length) throw new Error("أضف طقماً واحداً على الأقل");
+    if (!lines.length) throw new Error(T("أضف طقماً واحداً على الأقل"));
     const seen = new Set();
     const srcs = new Set();
     for (const li of lines) {
       if (li.wageOnly) continue;
       if (li.src) {
-        if (srcs.has(li.src)) throw new Error("الطقم نفسه مضافٌ مرتين في الفاتورة — احذف السطر المكرّر.");
+        if (srcs.has(li.src)) throw new Error(T("الطقم نفسه مضافٌ مرتين في الفاتورة — احذف السطر المكرّر."));
         srcs.add(li.src);
       }
       const key = (li.wo || "").trim();
       if (!key) continue;
       if (seen.has(key)) {
-        throw new Error(`الطقم ${key} مكرّر في الفاتورة — القطعة الواحدة لا تُباع ` +
-          "مرتين في مستندٍ واحد. احذف السطر المكرّر.");
+        throw new Error(T("الطقم {0} مكرّر في الفاتورة — القطعة الواحدة لا تُباع ", key) +
+          T("مرتين في مستندٍ واحد. احذف السطر المكرّر."));
       }
       seen.add(key);
     }
@@ -256,14 +258,14 @@
   function saveInvoice(st, draft) {
     const party = shopById(st, draft.shopId);
     const forFactory = FACTORY_KINDS.includes(draft.kind);
-    if (!SHOP_KINDS.includes(draft.kind) && !forFactory) throw new Error("نوع الفاتورة غير صحيح");
-    if (!party || isFactory(party) !== forFactory) throw new Error(forFactory ? "اختر المصنع" : "اختر العميل");
+    if (!SHOP_KINDS.includes(draft.kind) && !forFactory) throw new Error(T("نوع الفاتورة غير صحيح"));
+    if (!party || isFactory(party) !== forFactory) throw new Error(forFactory ? T("اختر المصنع") : T("اختر العميل"));
     const lines = draft.lines || [];
     checkLines(lines);
     const t = totals(lines, !!draft.vat);
     const old = draft.id ? st.invoices.find((d) => d.id === draft.id) : null;
     if (old && old.kind !== draft.kind) {
-      throw new Error("لا يتغيّر نوع الفاتورة بعد حفظها — احذفها وأصدر الصحيح");
+      throw new Error(T("لا يتغيّر نوع الفاتورة بعد حفظها — احذفها وأصدر الصحيح"));
     }
     const rec = {
       id: old ? old.id : uid("in_"),
@@ -289,7 +291,7 @@
       if ((r.kind || "gold") === "gold") {
         const v = Gold.voucherGold(r.weight, r.karat);
         if (v.weight <= 0) continue;
-        if (!Gold.KARATS.includes(v.karat)) throw new Error(`عيار غير مدعوم: ${v.karat}`);
+        if (!Gold.KARATS.includes(v.karat)) throw new Error(T("عيار غير مدعوم: {0}", v.karat));
         out.push({ kind: "gold", weight: v.weight, karat: v.karat, equiv: v.equiv,
           amount: 0, notes: String(r.notes || "").trim() });
       } else {
@@ -304,24 +306,24 @@
 
   function saveVoucher(st, draft) {
     const party = shopById(st, draft.shopId);
-    if (!["receipt", "payment"].includes(draft.kind)) throw new Error("نوع سند غير صحيح");
+    if (!["receipt", "payment"].includes(draft.kind)) throw new Error(T("نوع سند غير صحيح"));
     // التحصيل من العملاء، والدفع للمصانع (ودفعٌ قديم لعميلٍ يبقى كما رُحّل)
-    if (draft.kind === "receipt" && (!party || isFactory(party))) throw new Error("اختر العميل");
-    if (draft.kind === "payment" && !party) throw new Error("اختر المصنع");
+    if (draft.kind === "receipt" && (!party || isFactory(party))) throw new Error(T("اختر العميل"));
+    if (draft.kind === "payment" && !party) throw new Error(T("اختر المصنع"));
     const rows = voucherRows(draft.rows);
     const discCash = R(Number(draft.discCash || 0), 2);
     const discGold18 = R(Number(draft.discGold18 || 0), 3);
     const netDiff = R(Number(draft.netDiff || 0), 2);
-    for (const v of [discCash, discGold18]) if (v < 0) throw new Error("الخصومات لا تقبل السالب");
+    for (const v of [discCash, discGold18]) if (v < 0) throw new Error(T("الخصومات لا تقبل السالب"));
     if (draft.kind === "payment" && (discCash || discGold18)) {
-      throw new Error("الخصومات المسموحة تخص التحصيل فقط");
+      throw new Error(T("الخصومات المسموحة تخص التحصيل فقط"));
     }
     if (!rows.length && !discCash && !discGold18 && !netDiff) {
-      throw new Error("أضف سطراً واحداً على الأقل في السند");
+      throw new Error(T("أضف سطراً واحداً على الأقل في السند"));
     }
     const old = draft.id ? st.vouchers.find((d) => d.id === draft.id) : null;
     if (old && old.kind !== draft.kind) {
-      throw new Error("لا يتغيّر نوع السند بعد حفظه — احذفه وأصدر الصحيح");
+      throw new Error(T("لا يتغيّر نوع السند بعد حفظه — احذفه وأصدر الصحيح"));
     }
     let eq = 0, cash = 0;
     for (const r of rows) { eq += r.equiv; cash += r.amount; }
@@ -637,20 +639,20 @@
     const gold = {};
     for (const k of Gold.KARATS) {
       const w = R(Number((data.gold || {})[k] || 0), 3);
-      if (!isFinite(w) || w < 0) throw new Error(`وزنٌ غير صحيح لعيار ${k}`);
+      if (!isFinite(w) || w < 0) throw new Error(T("وزنٌ غير صحيح لعيار {0}", k));
       if (w) gold[k] = w;
     }
     const cash = R(Number(data.cash || 0), 2);
-    if (!isFinite(cash) || cash < 0) throw new Error("مبلغ النقد غير صحيح");
+    if (!isFinite(cash) || cash < 0) throw new Error(T("مبلغ النقد غير صحيح"));
     const names = new Set();
     const sets = [];
     for (const x of data.sets || []) {
       const k = parseInt(x.karat, 10);
-      if (!Gold.KARATS.includes(k)) throw new Error(`عيار غير مدعوم: ${x.karat}`);
+      if (!Gold.KARATS.includes(k)) throw new Error(T("عيار غير مدعوم: {0}", x.karat));
       const w = Number(x.weight || 0);
-      if (!(w > 0)) throw new Error("اكتب وزن كل طقم (أو احذف سطره)");
+      if (!(w > 0)) throw new Error(T("اكتب وزن كل طقم (أو احذف سطره)"));
       const name = String(x.name || "").trim();
-      if (name && names.has(name)) throw new Error(`الطقم ${name} مكرّر`);
+      if (name && names.has(name)) throw new Error(T("الطقم {0} مكرّر", name));
       if (name) names.add(name);
       sets.push({ id: x.id || uid("os"), name, karat: k, w18: Gold.store(w, k), photos: cleanPhotos(x.photos) });
     }
@@ -659,7 +661,7 @@
     for (const o of openHold(st).sets) {
       const id = "op:" + o.id;
       if (!kept.has(id) && st.invoices.some((d) => d.lines.some((l) => l.src === id))) {
-        throw new Error(`الطقم ${o.name || "الذي بلا اسم"} خرج بفاتورة — لا يُحذف من الرصيد الافتتاحي (احذف فاتورته أولاً)`);
+        throw new Error(T("الطقم {0} خرج بفاتورة — لا يُحذف من الرصيد الافتتاحي (احذف فاتورته أولاً)", o.name || T("الذي بلا اسم")));
       }
     }
     st.settings.openHold = { date: data.date || today(), gold, cash, sets };
@@ -851,7 +853,7 @@
   }
   function fromBackup(obj) {
     if (!obj || obj.format !== BACKUP_FORMAT) {
-      throw new Error("الملف ليس نسخةً احتياطية من هذا التطبيق");
+      throw new Error(T("الملف ليس نسخةً احتياطية من هذا التطبيق"));
     }
     const st = newState();
     Object.assign(st.settings, obj.settings || {});

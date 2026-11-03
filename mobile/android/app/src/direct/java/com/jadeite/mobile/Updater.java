@@ -288,9 +288,9 @@ final class Updater {
         if (Build.VERSION.SDK_INT < 26) return;
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return;
-        NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "تحديثات التطبيق",
+        NotificationChannel ch = new NotificationChannel(CHANNEL_ID, Lang.t(c, "تحديثات التطبيق", "App updates"),
                 NotificationManager.IMPORTANCE_DEFAULT);
-        ch.setDescription("إشعارٌ حين يجهز إصدارٌ جديد من التطبيق للتثبيت");
+        ch.setDescription(Lang.t(c, "إشعارٌ حين يجهز إصدارٌ جديد من التطبيق للتثبيت", "A notice when a new version is ready to install"));
         nm.createNotificationChannel(ch);
     }
 
@@ -310,8 +310,8 @@ final class Updater {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(c, CHANNEL_ID) : new Notification.Builder(c);
         b.setSmallIcon(R.drawable.ic_stat_update)
-                .setContentTitle("تحديث نظام الذهب " + p.optString("version") + " جاهز")
-                .setContentText("اضغط للتثبيت — بياناتك تبقى كما هي")
+                .setContentTitle(Lang.t(c, "تحديث ÀUR " + p.optString("version") + " جاهز", "ÀUR update " + p.optString("version") + " is ready"))
+                .setContentText(Lang.t(c, "اضغط للتثبيت — بياناتك تبقى كما هي", "Tap to install — your data stays as it is"))
                 .setAutoCancel(true)
                 .setContentIntent(pi);
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);

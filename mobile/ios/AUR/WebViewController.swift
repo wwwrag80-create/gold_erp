@@ -85,6 +85,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
           window.__iosState = { version: \(jsonString(version)), backupFolder: \(folder), ads: {} };
           window.AndroidBridge = {
             appVersion: function () { return window.__iosState.version; },
+            setLang: function () {},
             setAds: function (on) { post("setAds", [!!on]); },
             adsState: function () { return JSON.stringify(window.__iosState.ads || {}); },
             adsPrivacy: function () { post("adsPrivacy"); },

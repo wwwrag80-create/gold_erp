@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
                 if (image && params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
                     i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
                 }
-                Intent chooser = Intent.createChooser(i, image ? "صورة الطقم" : "اختر ملف النسخة الاحتياطية");
+                Intent chooser = Intent.createChooser(i, image ? Lang.t(MainActivity.this, "صورة الطقم", "Set photo") : Lang.t(MainActivity.this, "اختر ملف النسخة الاحتياطية", "Choose the backup file"));
                 if (image) {
                     // الكاميرا بجانب المعرض: الصورة تُكتب في ملفٍ مؤقت داخل التطبيق
                     try {
@@ -271,7 +271,7 @@ public class MainActivity extends Activity {
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, u));
             } catch (ActivityNotFoundException e) {
-                toast("لا يوجد تطبيق يفتح هذا الرابط");
+                toast(Lang.t(MainActivity.this, "لا يوجد تطبيق يفتح هذا الرابط", "No app can open this link"));
             }
             return true;
         }
@@ -352,9 +352,9 @@ public class MainActivity extends Activity {
             try (OutputStream os = getContentResolver().openOutputStream(uri)) {
                 if (os == null) throw new Exception("تعذّر فتح الملف");
                 os.write(bytes);
-                toast("حُفظت النسخة الاحتياطية");
+                toast(Lang.t(MainActivity.this, "حُفظت النسخة الاحتياطية", "Backup saved"));
             } catch (Exception e) {
-                toast("تعذّر الحفظ: " + e.getMessage());
+                toast(Lang.t(MainActivity.this, "تعذّر الحفظ: ", "Couldn't save: ") + e.getMessage());
             }
         } else if (req == REQ_TREE) {
             if (res != RESULT_OK || uri == null) {
@@ -445,7 +445,7 @@ public class MainActivity extends Activity {
             // صورةٌ أطول من هذا تُثقل ذاكرة الجوال — والكشف الطويل له «طباعة / PDF»
             if (h > 9000) {
                 h = 9000;
-                toast("المستند طويل: الصورة تعرض أوله — استعمل «طباعة / PDF» للكامل");
+                toast(Lang.t(MainActivity.this, "المستند طويل: الصورة تعرض أوله — استعمل «طباعة / PDF» للكامل", "Long document: the image shows its start — use “Print / PDF” for all of it"));
             }
             v.setLayoutParams(new FrameLayout.LayoutParams(widthPx, h));
             v.measure(View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
@@ -461,9 +461,9 @@ public class MainActivity extends Activity {
                     java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
                     bmp.compress(Bitmap.CompressFormat.PNG, 100, bo);
                     bmp.recycle();
-                    sendFile(shareFile(name + ".png", bo.toByteArray()), "image/png", "مشاركة المستند");
+                    sendFile(shareFile(name + ".png", bo.toByteArray()), "image/png", Lang.t(MainActivity.this, "مشاركة المستند", "Share the document"));
                 } catch (Throwable e) {
-                    toast("تعذّر تجهيز الصورة: " + e.getMessage());
+                    toast(Lang.t(MainActivity.this, "تعذّر تجهيز الصورة: ", "Couldn't prepare the image: ") + e.getMessage());
                 } finally {
                     root.removeView(v);
                     v.destroy();
@@ -512,7 +512,7 @@ public class MainActivity extends Activity {
         ui.post(() -> {
             if (!canInstall()) {
                 pendingInstall = f;
-                toast("اسمح للتطبيق بتثبيت التحديثات، ثم ارجع");
+                toast(Lang.t(MainActivity.this, "اسمح للتطبيق بتثبيت التحديثات، ثم ارجع", "Allow the app to install updates, then come back"));
                 try {
                     startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                             Uri.parse("package:" + getPackageName())));
@@ -526,6 +526,11 @@ public class MainActivity extends Activity {
     }
 
     class Bridge {
+        @JavascriptInterface
+        public void setLang(String lang) {
+            Lang.set(MainActivity.this, lang);
+        }
+
         @JavascriptInterface
         public String appVersion() {
             return BuildConfig.VERSION_NAME;
@@ -554,7 +559,7 @@ public class MainActivity extends Activity {
                 Intent i = new Intent(Intent.ACTION_SEND);
                 i.setType("text/plain");
                 i.putExtra(Intent.EXTRA_TEXT, text);
-                startActivity(Intent.createChooser(i, "مشاركة"));
+                startActivity(Intent.createChooser(i, Lang.t(MainActivity.this, "مشاركة", "Share")));
             });
         }
 
@@ -604,9 +609,9 @@ public class MainActivity extends Activity {
             ui.post(() -> {
                 try {
                     sendFile(MainActivity.this.shareFile(name, Base64.decode(b64, Base64.DEFAULT)), mime,
-                            "حفظ النسخة الاحتياطية");
+                            Lang.t(MainActivity.this, "حفظ النسخة الاحتياطية", "Save the backup"));
                 } catch (Exception e) {
-                    toast("تعذّر تجهيز الملف: " + e.getMessage());
+                    toast(Lang.t(MainActivity.this, "تعذّر تجهيز الملف: ", "Couldn't prepare the file: ") + e.getMessage());
                 }
             });
         }

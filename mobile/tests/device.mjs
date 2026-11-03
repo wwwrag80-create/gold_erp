@@ -441,6 +441,25 @@ async function main() {
     check("تجربة التنزيل (يلزمها UNSIGNED_URL و UNSIGNED_SHA)", false, "missing env");
   }
 
+  // ══ English (1.10): الصفحة والجهاز يتبدّلان معاً — ثم العودة للعربية ══
+  await ev(`(() => { I18N.setLang("en"); return 1; })()`);
+  ws.close();
+  adb("shell", "am", "force-stop", PKG);
+  ({ ws, ev } = await relaunch());
+  await sleep(800);
+  check("English: لغة الصفحة واتجاهها والشريط السفلي", await ev(`document.documentElement.dir === "ltr" &&
+    document.querySelector("#tabs").innerText.includes("Holdings") && document.querySelector(".op-tile .op-t").innerText === "Sale to customer"`));
+  let langPref = "";
+  try { langPref = adb("shell", "run-as", PKG, "cat", "shared_prefs/aur_lang.xml").toString(); } catch (e) { /* */ }
+  check("English: والجهاز يعرفها (رسائله وإشعاراته بها)", /name="lang">en</.test(langPref), langPref);
+  shot("english_home");
+  await ev(`(() => { I18N.setLang("ar"); return 1; })()`);
+  ws.close();
+  adb("shell", "am", "force-stop", PKG);
+  ({ ws, ev } = await relaunch());
+  await sleep(800);
+  check("والعودة للعربية من اليمين", await ev(`document.documentElement.dir === "rtl" && document.querySelector("#tabs").innerText.includes("الممتلكات")`));
+
   // البيانات تبقى بعد إغلاق التطبيق
   ws.close();
   adb("shell", "am", "force-stop", PKG);

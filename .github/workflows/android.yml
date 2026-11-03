@@ -37,6 +37,7 @@ jobs:
           python mobile/tests/parity_gen.py > "$RUNNER_TEMP/cases.json"
           node mobile/tests/parity.js "$RUNNER_TEMP/cases.json"
           node mobile/tests/domain.test.js
+          node mobile/tests/i18n.test.js
 
       - uses: actions/setup-java@v4
         with:

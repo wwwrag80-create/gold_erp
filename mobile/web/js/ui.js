@@ -2,6 +2,7 @@
 (function (root) {
   "use strict";
   const { f2, parseNum } = root.Num;
+  const T = root.I18N.T;
 
   function h(tag, props, ...kids) {
     const el = document.createElement(tag);
@@ -34,7 +35,8 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.style.display = "none"; }, kind === "err" ? 5200 : 2600);
   }
-  function err(e) { toast((e && e.message) || String(e), "err"); }
+  // رسائل الجهاز الأصلي تصل بالعربية — تُترجم هنا إن عُرفت (i18n.js)
+  function err(e) { toast(root.I18N.TX((e && e.message) || String(e)), "err"); }
 
   // إغلاق نافذةٍ يرجع خطوةً في السجل (history.back) — وحدث الرجوع يصل بعد
   // لحظة؛ فالنافذة التالية تنتظره، وإلا التقطته فأُغلقت فور فتحها
@@ -100,11 +102,11 @@
   function confirmSheet(msg, ok, danger) {
     return sheet((box, close) => {
       box.append(
-        h("h3", { text: "تأكيد" }),
+        h("h3", { text: T("تأكيد") }),
         h("div", { style: { whiteSpace: "pre-line", lineHeight: "1.7" }, text: msg }),
         h("div", { class: "actions" },
-          h("button", { class: "btn" + (danger ? " danger" : ""), onclick: () => close(true) }, ok || "موافق"),
-          h("button", { class: "btn ghost", onclick: () => close(false) }, "إلغاء")));
+          h("button", { class: "btn" + (danger ? " danger" : ""), onclick: () => close(true) }, ok || T("موافق")),
+          h("button", { class: "btn ghost", onclick: () => close(false) }, T("إلغاء"))));
     }).then((v) => !!v);
   }
 
@@ -114,7 +116,7 @@
     const o = opts || {};
     return sheet((box, close) => {
       const list = h("div");
-      const q = h("input", { class: "in", placeholder: o.placeholder || "ابحث…", type: "search" });
+      const q = h("input", { class: "in", placeholder: o.placeholder || T("ابحث…"), type: "search" });
       const render = () => {
         const t = q.value.trim();
         list.innerHTML = "";
@@ -125,7 +127,7 @@
               it.subNode ? h("div", { class: "muted small" }, it.subNode) : it.sub ? h("div", { class: "muted small", text: it.sub }) : null),
             it.badge || null));
         }
-        if (!hits.length) list.appendChild(h("div", { class: "empty", text: o.empty || "لا نتائج" }));
+        if (!hits.length) list.appendChild(h("div", { class: "empty", text: o.empty || T("لا نتائج") }));
       };
       q.addEventListener("input", render);
       box.append(h("h3", { text: title }), q, h("div", { style: { height: "10px" } }));
