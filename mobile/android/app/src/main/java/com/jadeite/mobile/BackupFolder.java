@@ -365,7 +365,7 @@ final class BackupFolder {
         if (best == null) return null;
         try (InputStream is = c.getContentResolver().openInputStream(best.getUri())) {
             if (is == null) return null;
-            return new String[]{best.getName(), Updater.readAll(is)};
+            return new String[]{best.getName(), Streams.readAll(is)};
         }
     }
 }

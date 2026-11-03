@@ -5,10 +5,12 @@
 - الجذر: صفحة التثبيت (mobile/site/index.html) وسياسة الخصوصية وملفا ads.txt/app-ads.txt.
 - app/: التطبيق نفسه (mobile/web) يعمل من الشاشة الرئيسية وبلا إنترنت؛ sw.js يُكتب فيه رقم
   الإصدار وقائمة الملفات (فيُنزَّل الإصدار الجديد وينتظر «حدّث الآن»).
-- تطبيق أندرويد: آخر إصدارٍ منشور (mobile/dist/versions.json) يُنسخ إلى الموقع باسم AUR.apk.
+- تطبيق أندرويد: آخر إصدارٍ منشور (mobile/dist/versions.json) يُنسخ إلى الموقع باسم AUR.apk. وحين يُنشر
+  في Google Play (site/config.json ← "play_live": true) يصير زرّ أندرويد رابط المتجر، والملف بديلاً تحته.
 """
 import hashlib
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -39,11 +41,15 @@ def main(out: Path) -> None:
     sw = sw.replace("const FILES = [];", "const FILES = " + json.dumps(["./"] + files, ensure_ascii=False) + ";")
     (app / "sw.js").write_text(sw, encoding="utf-8")
 
-    # الصفحات
+    # الصفحات — أندرويد: ملف التثبيت، أو Google Play حين يُنشر فيه (site/config.json: play_live)
+    cfg = json.loads((ROOT / "site" / "config.json").read_text(encoding="utf-8"))
+    keep, drop = ("play", "apk") if cfg.get("play_live") else ("apk", "play")
     for name in ("index.html", "privacy.html"):
         html = (ROOT / "site" / name).read_text(encoding="utf-8")
+        html = re.sub(rf"<!--{drop}-->.*?<!--/{drop}-->", "", html, flags=re.S)
+        html = html.replace(f"<!--{keep}-->", "").replace(f"<!--/{keep}-->", "")
         html = (html.replace("{{APK_URL}}", apk_url).replace("{{APK_VERSION}}", apk["version"])
-                .replace("{{WEB_VERSION}}", ver["name"]))
+                .replace("{{WEB_VERSION}}", ver["name"]).replace("{{PLAY_URL}}", cfg["play_url"]))
         assert "{{" not in html, name
         (out / name).write_text(html, encoding="utf-8")
     for name in ("ads.txt", "app-ads.txt"):

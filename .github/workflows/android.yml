@@ -61,14 +61,20 @@ jobs:
           java -jar "$RUNNER_TEMP/bundletool.jar" dump manifest --bundle="$AAB" > "$RUNNER_TEMP/play-manifest.xml"
           grep -o 'targetSdkVersion="[0-9]*"' "$RUNNER_TEMP/play-manifest.xml"
           grep -q 'targetSdkVersion="36"' "$RUNNER_TEMP/play-manifest.xml"
-          ! grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/play-manifest.xml"
+          # (فحصٌ بـ if: سطر «! grep» لا يُفشل الخطوة في bash -e — يُتجاهَل الأمر المعكوس)
+          if grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/play-manifest.xml"; then echo "::error::إذن تثبيت في حزمة Play"; exit 1; fi
+          # ولا خدمة التحديث الذاتي (سياسة Play: التحديث من المتجر وحده) — هي في نسخة الرابط وحدها
+          if grep -q "UpdateJobService" "$RUNNER_TEMP/play-manifest.xml"; then echo "::error::خدمة التحديث الذاتي في حزمة Play"; exit 1; fi
           grep -q "com.google.android.gms.ads.APPLICATION_ID" "$RUNNER_TEMP/play-manifest.xml"
           echo "AAB ok"
           # ملف المتاجر (APK) من النسخة نفسها: لا إذن تثبيت فيه
           APK=mobile/android/app/build/outputs/apk/play/release/app-play-release-unsigned.apk
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
           "$AAPT" dump permissions "$APK" | tee "$RUNNER_TEMP/play-apk-perms.txt"
-          ! grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/play-apk-perms.txt"
+          if grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/play-apk-perms.txt"; then echo "::error::إذن تثبيت في ملف المتاجر"; exit 1; fi
+          if "$AAPT" dump xmltree --file AndroidManifest.xml "$APK" | grep -q "UpdateJobService"; then echo "::error::خدمة التحديث الذاتي في ملف المتاجر"; exit 1; fi
+          # ونسخة الرابط ما زالت تحدّث نفسها
+          "$AAPT" dump xmltree --file AndroidManifest.xml mobile/android/app/build/outputs/apk/direct/release/app-direct-release-unsigned.apk | grep -q "UpdateJobService"
           "$AAPT" dump badging "$APK" | grep -E "^package:|targetSdkVersion"
           echo "store APK ok"
 
