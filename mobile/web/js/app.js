@@ -34,8 +34,8 @@
   function goldBal(w18, fac) { return balSpan(G.g(w18, vk()), "جم", fac); }
   function cashBal(c, fac) { return balSpan(c, "ريال", fac); }
   const APP_NAME = "ÀUR";
-  // رابط ÀUR للجميع: الآيفون (يُضاف إلى الشاشة الرئيسية) وتحميل أندرويد — Netlify
-  const SITE_URL = "https://deluxe-chebakia-749799.netlify.app";
+  // رابط ÀUR للجميع: الآيفون (يُضاف إلى الشاشة الرئيسية) وتحميل أندرويد — Cloudflare Pages
+  const SITE_URL = "https://gold-erp.pages.dev";
 
   // الانتقال بعد أن يكتمل رجوع السجل الذي يتبع إغلاق نافذةٍ سفلية — وإلا ألغاه
   function go(path) { root.UI.idle().then(() => { location.hash = "#/" + path; }); }

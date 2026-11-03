@@ -8,7 +8,7 @@ on:
       url:
         description: "رابط الموقع"
         required: false
-        default: "https://deluxe-chebakia-749799.netlify.app"
+        default: "https://gold-erp.pages.dev"
 
 permissions:
   contents: read

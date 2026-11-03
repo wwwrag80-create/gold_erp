@@ -46,7 +46,7 @@
 - **بعد النشر**: `site/config.json` ← `"play_live": true` (زرّ أندرويد في الموقع يصير رابط المتجر، والملف بديلاً)،
   وربط AdMob بالمتجر.
 - **استهداف API 36** (أندرويد 16) — مطلوبٌ للتطبيقات الجديدة وتحديثاتها.
-- **سياسة الخصوصية**: https://deluxe-chebakia-749799.netlify.app/privacy.html
+- **سياسة الخصوصية**: https://gold-erp.pages.dev/privacy.html
 - **Data safety** (إجابات جاهزة):
   - يجمع أو يشارك بيانات؟ **نعم** (مكتبة إعلانات Google).
   - مشفّرة أثناء النقل؟ **نعم**. يستطيع المستخدم طلب الحذف؟ لا حساب في التطبيق — بياناته في جهازه.
@@ -85,7 +85,7 @@ Mac/Xcode يلزم فقط لمن أراد فتح المشروع وتعديله �
   `app/` (يُضاف إلى الشاشة الرئيسية من سفاري، ويعمل بلا إنترنت، والتحديث بنافذة «يوجد تحديث جديد»)، ورابط تطبيق
   أندرويد، وسياسة الخصوصية، و`ads.txt`/`app-ads.txt`.
 - مكانه: **Cloudflare Pages** (مجاني، بلا أي شعارٍ في الصفحات، ويسمح بالاستخدام التجاري) برابطٍ محايد
-  `<اسم-المشروع>.pages.dev`. الربط مرةً واحدة من حساب المالك: dash.cloudflare.com ← Workers & Pages ← Create ←
+  **https://gold-erp.pages.dev** (المشروع gold-erp). الربط مرةً واحدة من حساب المالك: dash.cloudflare.com ← Workers & Pages ← Create ←
   Pages ← Connect to Git ← gold_erp ← الفرع `main` ← Framework: None ← Build command:
   `python3 tools/build_site.py site-dist` ← Build output: `site-dist` ← Root directory: `mobile` ← Save and Deploy.
   يُبنى من جديد مع كل دفعٍ إلى main.
