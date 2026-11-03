@@ -84,11 +84,15 @@ Mac/Xcode يلزم فقط لمن أراد فتح المشروع وتعديله �
 - الموقع يُبنى بـ `python3 mobile/tools/build_site.py OUT` وفيه: صفحة التثبيت (`mobile/site`)، والتطبيق نفسه في
   `app/` (يُضاف إلى الشاشة الرئيسية من سفاري، ويعمل بلا إنترنت، والتحديث بنافذة «يوجد تحديث جديد»)، ورابط تطبيق
   أندرويد، وسياسة الخصوصية، و`ads.txt`/`app-ads.txt`.
-- مكانه: **Netlify** (مجاني) برابطٍ محايد: **https://deluxe-chebakia-749799.netlify.app** (يمكن تغيير اسمه من
-  Site configuration ← Change site name — ثم يُحدَّث `SITE_URL` في `mobile/web/js/app.js` و`site-check.yml`) — `netlify.toml` في جذر المستودع يبنيه
-  من `mobile/` عند كل دفعٍ إلى main (فيصل كل إصدارٍ وحده)، ومعه ملف أندرويد `AUR.apk` من الموقع نفسه.
-  الربط مرةً واحدة: netlify.com ← Sign up بـ GitHub ← Add new site ← Import ← GitHub ← gold_erp ← Deploy،
-  ثم Site configuration ← Change site name ← `aur-gold`.
+- مكانه: **Cloudflare Pages** (مجاني، بلا أي شعارٍ في الصفحات، ويسمح بالاستخدام التجاري) برابطٍ محايد
+  `<اسم-المشروع>.pages.dev`. الربط مرةً واحدة من حساب المالك: dash.cloudflare.com ← Workers & Pages ← Create ←
+  Pages ← Connect to Git ← gold_erp ← الفرع `main` ← Framework: None ← Build command:
+  `python3 tools/build_site.py site-dist` ← Build output: `site-dist` ← Root directory: `mobile` ← Save and Deploy.
+  يُبنى من جديد مع كل دفعٍ إلى main.
+- **Netlify** (المكان الأول، https://deluxe-chebakia-749799.netlify.app): خطته المجانية تضع شعار «Powered by
+  Netlify» ولا يُطفأ إلا باشتراك. بعد الانتقال: `site/config.json` ← `"moved_to": "<الرابط الجديد>"`، فيبني Netlify
+  تحويلاً فقط (301 لكل رابطٍ قديم إلى مكانه في الجديد — بلا صفحةٍ ولا شعار)، ويُحدَّث `SITE_URL` في
+  `mobile/web/js/app.js` ورابط `site-check.yml`. ثم يُحذف مشروع Netlify متى شاء المالك (بعد أن تتحدّث التطبيقات).
 - الحفظ: البيانات تُحفظ في الجوال فوراً؛ وبعد كل تغييرٍ بثوانٍ (وعند الفتح) يظهر «احفظ نسخة» — لمسةٌ تحفظ الملف في
   «الملفات»/iCloud (المتصفح لا يكتب خارج نفسه وحده — قاعدة Apple). والاسترجاع من الملف في أول فتح.
 - فحص الموقع كما يراه المستخدم: Actions ← «فحص موقع ÀUR» (الصفحات، وبصمة AUR.apk، والتطبيق بلا إنترنت).

@@ -1,4 +1,4 @@
-"""يبني موقع ÀUR (رابط نسخة الآيفون) في مجلدٍ واحد يُنشر كما هو على GitHub Pages:
+"""يبني موقع ÀUR (رابط نسخة الآيفون) في مجلدٍ واحد يُنشر كما هو (Cloudflare Pages، وNetlify قبله):
 
     python3 mobile/tools/build_site.py OUT_DIR
 
@@ -10,6 +10,7 @@
 """
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -18,10 +19,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]           # mobile/
 
 
+def moved_site(out: Path, to: str) -> None:
+    """الموقع انتقل (site/config.json ← moved_to): كل رابطٍ قديم يُحوَّل إلى مكانه نفسه في الموقع الجديد —
+    تحويلٌ من الخادم (301) فلا صفحة تُعرض هنا، ولا شعار استضافة."""
+    to = to.rstrip("/")
+    (out / "_redirects").write_text(f"/*  {to}/:splat  301!\n", encoding="utf-8")
+    (out / "index.html").write_text(
+        f'<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={to}/">'
+        f'<title>ÀUR</title><a href="{to}/">ÀUR</a>\n', encoding="utf-8")
+    print(f"✔ {out} — تحويلٌ إلى {to}")
+
+
 def main(out: Path) -> None:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
+    cfg = json.loads((ROOT / "site" / "config.json").read_text(encoding="utf-8"))
+    # على Netlify (المكان القديم) بعد الانتقال: تحويلٌ وحده. والمكان الجديد يُبنى كاملاً كالعادة
+    if cfg.get("moved_to") and os.environ.get("NETLIFY") == "true":
+        moved_site(out, cfg["moved_to"])
+        return
     ver = json.loads((ROOT / "web" / "version.json").read_text(encoding="utf-8"))
     dist = json.loads((ROOT / "dist" / "versions.json").read_text(encoding="utf-8"))
     apk = dist[-1]
@@ -42,7 +59,6 @@ def main(out: Path) -> None:
     (app / "sw.js").write_text(sw, encoding="utf-8")
 
     # الصفحات — أندرويد: ملف التثبيت، أو Google Play حين يُنشر فيه (site/config.json: play_live)
-    cfg = json.loads((ROOT / "site" / "config.json").read_text(encoding="utf-8"))
     keep, drop = ("play", "apk") if cfg.get("play_live") else ("apk", "play")
     for name in ("index.html", "privacy.html"):
         html = (ROOT / "site" / name).read_text(encoding="utf-8")
