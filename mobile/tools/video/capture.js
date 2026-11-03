@@ -135,8 +135,19 @@ function invoicePaper() {
     let box = null;
     if (target) {
       await target.scrollIntoViewIfNeeded();
+      // مع عنصرٍ آخر تحته: يُنزَل حتى يظهر هو أيضاً
+      for (const more of o.union || []) await more.scrollIntoViewIfNeeded();
+      // أو إلى أعلى الشاشة تحت الشريط (فيظهر ما تحته فوق الشريط السفلي)
+      if (o.top) await target.evaluate((el) => window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 66));
       await wait(250);
       box = await target.boundingBox();
+      // إطارٌ واحد يجمع العنصر مع غيره (مثل لوحتي «حساباتي» معاً)
+      for (const more of o.union || []) {
+        const b = await more.boundingBox();
+        if (!b || !box) continue;
+        const x = Math.min(box.x, b.x), y = Math.min(box.y, b.y);
+        box = { x, y, width: Math.max(box.x + box.width, b.x + b.width) - x, height: Math.max(box.y + box.height, b.y + b.height) - y };
+      }
     }
     await wait(o.settle || 350);
     const file = `${String(shots.length + 1).padStart(2, "0")}_${id}.png`;
@@ -202,11 +213,12 @@ function invoicePaper() {
     "اُكْتُبِ اسْمَكَ أَوِ اسْمَ مُؤَسَّسَتِكَ فِي خَانَةِ «الِاسْمِ»، وَرَقْمَ جَوَّالِكَ فِي خَانَةِ «الْجَوَّالِ». تَظْهَرُ هَذِهِ الْبَيَانَاتُ فِي رَأْسِ كُلِّ فَاتُورَةٍ.",
     field("الاسم"));
   await snap("settings_save", "اضغط «حفظ الإعدادات»", "ثُمَّ انْقُرْ عَلَى زِرِّ «حِفْظِ الْإِعْدَادَاتِ».", btn("حفظ الإعدادات"), press);
-  // الرصيد الافتتاحي للممتلكات: ما معك الآن قبل أول عملية
-  await page.goto(url + "#/holdings");
-  await wait(600);
+  // الممتلكات مرةً واحدة: من أين تُفتح، ثم الرصيد الافتتاحي، ثم ما في القائمة
+  await homeNow();
+  await snap("h_tab", "اضغط «الممتلكات»",
+    "ثُمَّ انْقُرْ عَلَى «الْمُمْتَلَكَاتِ» فِي أَسْفَلِ الشَّاشَةِ؛ فِيهَا كُلُّ مَا مَعَكَ، وَمَا لَكَ، وَمَا عَلَيْكَ.", tab("holdings"), { press: true, after: 700 });
   await snap("op_cta", "سجّل ما معك الآن",
-    "ثُمَّ سَجِّلْ مَا مَعَكَ الْآنَ قَبْلَ أَوَّلِ عَمَلِيَّةٍ؛ اِفْتَحِ «الْمُمْتَلَكَاتِ»، وَانْقُرْ عَلَى «سَجِّلْ مَا مَعَكَ الْآنَ».",
+    "أَوَّلَ مَرَّةٍ، سَجِّلْ مَا مَعَكَ الْآنَ قَبْلَ أَوَّلِ عَمَلِيَّةٍ؛ اُنْقُرْ عَلَى «سَجِّلْ مَا مَعَكَ الْآنَ».",
     page.locator(".open-cta"), { press: true, after: 700 });
   await fill("عيار 21 (جم)", "15");
   await fill("عيار 18 (جم)", "8.5");
@@ -223,6 +235,17 @@ function invoicePaper() {
     "اُكْتُبْ وَزْنَ الذَّهَبِ الَّذِي مَعَكَ لِكُلِّ عِيَارٍ، وَالنَّقْدَ، وَالْأَطْقُمَ الَّتِي فِي يَدِكَ. تَكْتُبُهَا مَرَّةً وَاحِدَةً فَقَطْ.",
     page.locator(".card", { hasText: "ذهبٌ في يدي" }).first(), { s: 1.2 });
   await snap("op_save", "اضغط «حفظ»", "ثُمَّ انْقُرْ عَلَى «حِفْظ».", footerBtn("حفظ"), { press: true, after: 800 });
+  await page.waitForURL(/#\/holdings/);
+  await wait(500);
+  await snap("h_net0", "«صافي ما لي»",
+    "فِي أَعْلَى الْمُمْتَلَكَاتِ «صَافِي مَا لِي»: مَا فِي يَدِكَ، وَالْأَطْقُمُ، وَمَا لَكَ عِنْدَ الْعُمَلَاءِ، نَاقِصًا مَا عَلَيْكَ لِلْمَصَانِعِ. وَبِلَمْسَةٍ تَرَاهُ بِأَيِّ عِيَارٍ.",
+    page.locator(".net-card"), { s: 1.15 });
+  await snap("h_boxes0", "«معي الآن»",
+    "وَتَحْتَهُ «مَعِي الْآنَ»: صُنْدُوقٌ لِكُلِّ عِيَارٍ بِوَزْنِهِ، وَالنَّقْدُ، وَالْأَطْقُمُ الَّتِي فِي يَدِكَ.",
+    page.locator(".boxes"), { union: [page.locator(".wide-tile.sets")], top: true, s: 1.1 });
+  await snap("h_acc0", "«حساباتي»",
+    "ثُمَّ «حِسَابَاتِي»: مَا لَكَ عِنْدَ الْعُمَلَاءِ، وَمَا عَلَيْكَ لِلْمَصَانِعِ؛ وَلَمْسُ أَيٍّ مِنْهُمَا يَعْرِضُ كُلَّ حِسَابٍ بِعِيَارِهِ.",
+    page.locator(".wide-tile.cus"), { union: [page.locator(".wide-tile.fac")], top: true, s: 1.15 });
 
   // ══ 2. العملاء والمصانع ══
   chap("العملاء والمصانع", "أضفهم مرةً واحدة", "الدَّرْسُ الثَّانِي: الْعُمَلَاءُ وَالْمَصَانِعُ.");
