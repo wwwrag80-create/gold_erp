@@ -16,6 +16,7 @@ DATA_TABLES = [
     "journal_lines", "journal_entries",
     "invoice_items", "invoices",
     "voucher_lines", "vouchers",
+    "wo_weight_edits", "wo_batch_lines",
     "work_orders", "wo_adjust",
     "melting_ops", "melting_lines",
     "fixing_ops", "purchases",

@@ -608,7 +608,7 @@ def flip_invoice_kind(conn, invoice_id, username, notes=""):
 # ══════════════════════════════════════════════════════════════════
 
 def edit_supply(conn, wo_id, gold, small_stones, big_stones, username,
-                wage_per_gram=None, notes=""):
+                wage_per_gram=None, notes="", model_no=None):
     """يعدّل أوزان عملية توريد فيتحدّث الرصيد **في الخزنتين معاً**.
 
     التوريد يُنقص خزينة التصنيع ويزيد الذهب المشغول بنفس الوزن المقيد،
@@ -619,4 +619,4 @@ def edit_supply(conn, wo_id, gold, small_stones, big_stones, username,
     from models import inventory
     return inventory.edit_supply_item(
         conn, wo_id, gold, small_stones, big_stones, username,
-        wage_per_gram=wage_per_gram, notes=notes)
+        wage_per_gram=wage_per_gram, notes=notes, model_no=model_no)

@@ -399,6 +399,21 @@ CREATE TABLE IF NOT EXISTS wo_batch_lines(
 );
 CREATE INDEX IF NOT EXISTS idx_wbl_entry ON wo_batch_lines(entry_id);
 
+-- تعديل وزن توريد طقمٍ **له حركة** (بيع أو مرتجع): حركاته السابقة تبقى
+-- كما هي، والفرق يدخل سلسلته من يوم التعديل (`models.wo_moves`). فإن
+-- كان في الخزنة زاد باقيه أو نقص بالفرق، وإن كان مباعاً لم يتغيّر.
+CREATE TABLE IF NOT EXISTS wo_weight_edits(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
+  entry_id INTEGER REFERENCES journal_entries(id),
+  edit_date TEXT NOT NULL,
+  delta REAL NOT NULL,
+  old_weight REAL, new_weight REAL,
+  created_by TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_wwe_wo ON wo_weight_edits(work_order_id);
+
 -- فهارس الأداء: كشوف الحسابات والتقارير تُرشّح بالتاريخ والحساب معاً،
 -- وبدونها يُمسح جدول القيود كاملاً في كل استعلام.
 CREATE INDEX IF NOT EXISTS idx_entries_date   ON journal_entries(entry_date);

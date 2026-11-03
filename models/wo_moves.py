@@ -22,12 +22,19 @@
 
 الرقم التجميعي رصيدٌ وزني لا قطعة — خارج هذا كله، وكذلك الطقم الخدمي.
 """
+import sqlite3
 from itertools import groupby
 
 from services.audit import log_action
 from services import numfmt as _nf
 
 SALE, RETURN = "sale", "sale_return"
+# تعديل وزن التوريد بعد أن تحرّك الطقم (`wo_weight_edits`): حلقةٌ في
+# السلسلة يوم التعديل، لا فاتورة. ما قبلها من حركات يبقى كما كان، وبعدها
+# يُعتمد الوزن الجديد: الطقم في الخزنة يزيد باقيه أو ينقص بالفرق، والمباع
+# كله لا يتغيّر (فاتورة بيعه قائمة). ووزن البطاقة هو الجديد دائماً، فبداية
+# السلسلة = وزن البطاقة − مجموع هذه الفروق.
+ADJ = "adj"
 IN_STOCK, SOLD = "in_stock", "sold"
 LABEL = {IN_STOCK: "في الخزنة", SOLD: "عند المندوب"}
 
@@ -70,6 +77,7 @@ def _start(moves):
     عميل لم تُسجَّل فاتورة خروجه — `create_return_stub`): وعلامته أن
     مرتجعاته أكثر من مبيعاته، أو أن يومه الأول مرتجعٌ بلا بيع.
     """
+    moves = [m for m in moves if m["kind"] != ADJ]
     sales = sum(1 for m in moves if m["kind"] == SALE)
     rets = len(moves) - sales
     if rets > sales:
@@ -86,9 +94,13 @@ def _by_date(moves):
 
 
 def _init(moves, start=None, full=None):
-    """(في الخزنة، عند الجهات) يوم وُلد الطقم."""
+    """(في الخزنة، عند الجهات) يوم وُلد الطقم — بوزنه قبل تعديلات توريده
+    اللاحقة (`ADJ`)، فتلك تدخل السلسلة في أيامها لا من أولها."""
     st = start or _start(_by_date(moves))
     f = float(full) if full not in (None, "") and float(full) > EPS else 1.0
+    adj = sum(_w(m) for m in moves if m["kind"] == ADJ)
+    if abs(adj) > EPS and f - adj > EPS:
+        f -= adj
     return (f, 0.0) if st == IN_STOCK else (0.0, f)
 
 
@@ -104,6 +116,8 @@ def _valid(state, m):
     يحتاج وزناً خارجها — وجزءٌ لا يتجاوز ما بقي إلا بفرق ميزان."""
     rem, out = state
     w = _w(m)
+    if m["kind"] == ADJ:
+        return True
     if m["kind"] == SALE:
         if rem <= EPS:
             return False
@@ -116,6 +130,12 @@ def _valid(state, m):
 def _apply(state, m):
     rem, out = state
     w = _w(m)
+    if m["kind"] == ADJ:
+        # في الخزنة منه شيء ← يزيد باقيه أو ينقص بالفرق (ولا ينزل عن
+        # الصفر). خرج كله ← لا يتغيّر: حركة المباع لا تُمسّ
+        if rem > EPS:
+            return (max(rem + w, 0.0), out)
+        return state
     if not _valid(state, m):
         # حركةٌ لا تسمح بها حالتها (بقيت بعد حذف سابقتها مثلاً): تُطبَّق
         # على ما هو موجودٌ فعلاً فلا تخلق وزناً من عدم — بيعٌ ولا شيء في
@@ -146,18 +166,42 @@ def order(moves, start=None, full=None):
     وبين الجائز يُقدَّم الأقدم إصداراً. وإن لم يجز شيء (بيانات شاذة)
     أُخذ الأقدم كما هو — فلا تضيع حركة.
 
-    `moves`: [{"id", "kind", "date", "w"?}] بأي ترتيب."""
+    `moves`: [{"id", "kind", "date", "w"?, "c"?}] بأي ترتيب.
+
+    وتعديل الوزن (`ADJ`) في يومه يقع بين ما سُجّل قبله وما سُجّل بعده
+    (`c` وقت التسجيل): فبيعٌ بعد التعديل في اليوم نفسه يأخذ الوزن الجديد،
+    ومرتجعٌ قبله في يومه يسبقه."""
     moves = _by_date(moves)
     state = _init(moves, start, full)
     out = []
     for _d, day in groupby(moves, key=lambda m: m["date"] or ""):
         left = list(day)
         while left:
-            pick = next((m for m in left if _valid(state, m)), left[0])
+            ok = _ready(left)
+            pick = next((m for m in ok if _valid(state, m)), ok[0])
             left.remove(pick)
             out.append(pick)
             state = _apply(state, pick)
     return out
+
+
+def _c(m):
+    # حركةٌ بلا وقت تسجيل (الجديدة التي تُفحص قبل حفظها) آخرُ يومها
+    return str(m.get("c") or "9999")
+
+
+def _ready(left):
+    """حركات اليوم التي يجوز أن تأتي الآن: الفاتورة بعد تعديلات الوزن
+    المسجّلة قبلها، والتعديل بعد الفواتير المسجّلة قبله. وفي الثانية
+    نفسها يسبق التعديلُ الفاتورة (الوقت بالثانية: لا يُعرف أيهما أول، وما
+    يُكتب بعد تعديلٍ مباشرةً هو الأغلب)."""
+    adj = [m for m in left if m["kind"] == ADJ]
+    if not adj:
+        return left
+    real = [m for m in left if m["kind"] != ADJ]
+    ok = [m for m in real if not any(_c(a) <= _c(m) for a in adj)]
+    ok += [a for a in adj if not any(_c(m) < _c(a) for m in real)]
+    return ok or left
 
 
 def replay(moves, start=None, full=None):
@@ -325,7 +369,8 @@ def refusal(conn, wo, kind, date, weight=None):
     now = rem if kind == SALE else out
     if now <= EPS:
         return "none-left"
-    last = max(m["date"] or "" for m in mv)
+    inv = invoice_moves(mv)
+    last = max((m["date"] or "" for m in inv), default="")
     seq = order(mv + [new], b, full)
     at = _pos(seq, init, _NEW)
     at_part = at[0] if kind == SALE else at[1]
@@ -333,7 +378,7 @@ def refusal(conn, wo, kind, date, weight=None):
         # في تاريخه كان منه شيءٌ — فالمانع الوزن
         return _weight_why(wo, kind, at, w)
     if new["date"] < last:
-        later = sorted((m for m in mv if (m["date"] or "") > new["date"]),
+        later = sorted((m for m in inv if (m["date"] or "") > new["date"]),
                        key=lambda m: (m["date"] or "", m["id"]))
         m0 = later[0]
         no = _inv_no(conn, m0["id"])
@@ -344,7 +389,7 @@ def refusal(conn, wo, kind, date, weight=None):
     # سلسلةٌ مكسورةٌ أصلاً في يومها (حركتان متعارضتان قائمتان): ترتيب
     # الجديدة بينها لا يُقطع به، وقبولها قد يُبقي الطقم «في الخزنة» بعد
     # بيعه — فيُدلّ على الحركات المعارضة لتُصحَّح أولاً
-    broken = sorted(i for i in (before | after) if i != _NEW)
+    broken = sorted(i for i in (before | after) if i != _NEW and i > 0)
     if broken:
         nos = "، ".join(str(_inv_no(conn, i)) for i in broken)
         return (f"الطقم {wo['work_order_no']}: حركته غير منتظمة أصلاً"
@@ -395,9 +440,10 @@ def bad_ids(conn, wo_ids):
 
 
 def last_move(conn, wo_id):
-    """آخر حركةٍ في السلسلة المنظّمة: {id, kind, date, w} أو None."""
+    """آخر فاتورةٍ في السلسلة المنظّمة: {id, kind, date, w} أو None."""
     wo = _wo(conn, wo_id)
-    seq = order(moves_of(conn, wo_id), birth(wo), _full(wo))
+    seq = [m for m in order(moves_of(conn, wo_id), birth(wo), _full(wo))
+           if m["kind"] != ADJ]
     return seq[-1] if seq else None
 
 
@@ -459,23 +505,50 @@ def days_ar(n):
 # حركة كل فاتورة على الطقم بوزنها (مجموع أسطره فيها)
 _MOVES_SQL = (
     "SELECT it.work_order_id wid, i.id, i.kind, i.invoice_date date,"
-    " SUM(it.registered_weight) w"
+    " SUM(it.registered_weight) w, i.created_at c"
     " FROM invoice_items it JOIN invoices i ON i.id=it.invoice_id"
     " WHERE i.is_deleted=0 AND i.kind IN ('sale','sale_return')")
 _MOVES_GROUP = " GROUP BY it.work_order_id, i.id"
 
 
+def adj_moves(conn, wo_ids=None):
+    """{معرّف الطقم: [تعديلات وزن توريده بعد أن تحرّك]} — حلقاتٌ في سلسلته
+    بمعرّفٍ سالب فلا تختلط بالفواتير."""
+    sql = ("SELECT work_order_id wid, -id id, 'adj' kind, edit_date date,"
+           " delta w, created_at c FROM wo_weight_edits")
+    args = []
+    if wo_ids is not None:
+        ids = sorted({int(i) for i in wo_ids if i})
+        if not ids:
+            return {}
+        sql += f" WHERE work_order_id IN ({','.join('?' * len(ids))})"
+        args = ids
+    out = {}
+    try:
+        for r in conn.execute(sql, args):
+            out.setdefault(r["wid"], []).append(dict(r))
+    except sqlite3.OperationalError:     # قاعدةٌ قبل الجدول: لا تعديلات
+        return {}
+    return out
+
+
 def moves_of(conn, wo_id):
+    """حركات الطقم: فواتيره، وتعديلات وزن توريده إن وُجدت (`ADJ`)."""
     return [dict(r) for r in conn.execute(
         _MOVES_SQL + " AND it.work_order_id=?" + _MOVES_GROUP,
-        (int(wo_id),))]
+        (int(wo_id),))] + adj_moves(conn, [wo_id]).get(int(wo_id), [])
+
+
+def invoice_moves(moves):
+    """الفواتير وحدها من حركات الطقم."""
+    return [m for m in moves if m["kind"] != ADJ]
 
 
 def ordered_ids(conn, wo_id):
     """معرّفات فواتير الطقم بترتيبها الحقيقي."""
     wo = _wo(conn, wo_id)
     return [m["id"] for m in order(moves_of(conn, wo_id), birth(wo),
-                                   _full(wo))]
+                                   _full(wo)) if m["kind"] != ADJ]
 
 
 def is_last(conn, wo_id, invoice_id):
@@ -515,6 +588,10 @@ def resync(conn, wo_ids=None, username="system"):
     for r in conn.execute(sql + _MOVES_GROUP, args):
         if r["wid"] in wos:
             by.setdefault(r["wid"], []).append(dict(r))
+    for wid, adj in adj_moves(conn, list(wos)
+                              if wo_ids is not None else None).items():
+        if wid in wos:
+            by.setdefault(wid, []).extend(adj)
     fixed = []
     for wid, w in wos.items():
         mv = by.get(wid)
@@ -565,6 +642,9 @@ def irregular(conn, limit=200):
     for r in conn.execute(_MOVES_SQL + _MOVES_GROUP):
         if r["wid"] in wos:
             by.setdefault(r["wid"], []).append(dict(r))
+    for wid, adj in adj_moves(conn).items():
+        if wid in by:                # بلا فاتورة لا كسر
+            by[wid].extend(adj)
     out = []
     for wid, mv in by.items():
         w = wos[wid]

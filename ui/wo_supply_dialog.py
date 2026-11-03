@@ -73,6 +73,10 @@ class SupplyEditDialog(QtWidgets.QDialog):
         self.wage.setValue(kv.rate(self.wo["wage_per_gram"]))
         for w in (self.gold, self.small, self.big):
             w.valueChanged.connect(self.recalc)
+        # رقم الموديل: تصحيحه هنا يصل دليل الموديلات وتقرير الوارد
+        self.model = kit.LineEdit()
+        self.model.setText(str(self.wo.get("model_no") or ""))
+        self.model.setPlaceholderText("بلا موديل")
         self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("سبب التعديل (يُسجَّل في التدقيق)")
 
@@ -82,6 +86,7 @@ class SupplyEditDialog(QtWidgets.QDialog):
         fl.addRow(f"الفصوص ({kv.unit()}):", self.small)
         fl.addRow(f"الأحجار ({kv.unit()}):", self.big)
         fl.addRow(f"الأجر/جم {kv.active()}:", self.wage)
+        fl.addRow("رقم الموديل:", self.model)
         fl.addRow("السبب:", self.notes)
 
         self.preview = big_label("")
@@ -121,21 +126,20 @@ class SupplyEditDialog(QtWidgets.QDialog):
             f"الأثر المحاسبي:\n"
             f"   خزينة التصنيع  {_nf.f2(-diff, sign=True)} {u}\n"
             f"   الذهب المشغول  {_nf.f2(diff, sign=True)} {u}\n"
-            f"يُعكس القيد القديم ويُرحَّل الجديد داخل معاملة واحدة.")
+            f"يُعدَّل قيد الدفعة نفسه بتاريخها."
+            + ("\nالطقم مباع: فاتورة بيعه تبقى كما هي."
+               if self.wo["status"] != "in_stock" else ""))
 
     def save(self):
         try:
-            if self.wo["status"] != "in_stock":
-                raise ValueError(
-                    f"الطقم {self.wo['work_order_no']} مباع حالياً — "
-                    f"أعد فاتورته أولاً ثم عدّل التوريد")
             with db() as conn:
                 r = operations.edit_supply(
                     conn, self.wo_id, kv.store(self.gold.value()),
                     kv.store(self.small.value()),
                     kv.store(self.big.value()), self.user["username"],
                     wage_per_gram=kv.rate_store(self.wage.value()),
-                    notes=self.notes.text().strip())
+                    notes=self.notes.text().strip(),
+                    model_no=self.model.text().strip())
             info(self, f"عُدِّل توريد {r['wo_no']}.\n"
                        f"الوزن المقيد: {_nf.f2(r['old_reg'])} → "
                        f"{_nf.f2(r['new_reg'])} جم\n\n"

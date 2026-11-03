@@ -1109,9 +1109,17 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 if res.get("kept_sold"):
                     parts.append(
                         f"{len(res['kept_sold'])} مباع بقي كما هو")
+                if res.get("sold_edited"):
+                    parts.append(
+                        f"منها {len(res['sold_edited'])} مباع: تغيّر توريده"
+                        " وفواتير بيعه كما هي")
                 lines = ("   ·   ".join(parts)
                          + f"\nصافي التغيّر في مخزن الوجهة: "
-                           f"{_nf.f2(kv.g(res['delta']), sep=False, sign=True)} {kv.unit()}")
+                           f"{_nf.f2(kv.g(res['delta']), sep=False, sign=True)} {kv.unit()}"
+                         + " — بتاريخ الدفعة نفسه"
+                         + ("\nوما في الخزنة من أطقمٍ لها فواتير سابقة يأخذ"
+                            " وزنه الجديد من اليوم، وفواتيرها كما هي."
+                            if res.get("updated") else ""))
                 if res.get("moved_dest"):
                     lines += (f"\nوحساب الوجهة نُقل من "
                               f"{res['moved_dest'][0]} إلى "

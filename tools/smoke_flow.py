@@ -2051,6 +2051,155 @@ def main():
     check("والإضافة سُجّلت طقماً جديداً", _ed["added"] == ["SB-3"],
           str(_ed["added"]))
 
+    step("28ب2) تعديل توريدٍ فيه مباع ومباعٌ جزئياً ومُرتجَع")
+    # ══ ما طلبه المستخدم ══
+    # تعديل وزن طقمٍ في دفعة التوريد: الدفعة تعتمد وزنها الجديد بتاريخها
+    # والذهب المشغول يتغيّر بالفرق نفسه — أيّاً كان الطقم. وحركات المباع
+    # لا تُمسّ، وما في الخزنة يأخذ وزنه الجديد من يوم التعديل وحركاته
+    # السابقة كما هي. ورقم الموديل يُصحَّح في الدليل والوارد معاً.
+    # كان المباع يُتجاهل تعديله بصمت («مباع بقي كما هو») فلا تتغيّر
+    # الدفعة، والمُرتجَع يُعاد باقيه من سلسلته بالوزن القديم.
+    import datetime as _dt2b
+    from models import wo_moves as _wm2b
+    from models import models_catalog as _mc2b
+    from models.invoices import create_sale_return as _csr2b
+    from models.inventory import _batch_rows as _rows2b
+    from models.inventory import item_history as _ih2b
+    from models.inventory import update_supply_batch as _usb2b
+    _today2b = _dt2b.date.today().isoformat()
+
+    def _g2b(conn, code):
+        return conn.execute(
+            "SELECT ROUND(COALESCE(SUM(l.gold_debit-l.gold_credit),0),3)"
+            " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+            " AND e.is_deleted=0 WHERE l.account_id=?",
+            (acc_id(conn, code),)).fetchone()[0]
+
+    with db() as conn:
+        _b2b = _batch(conn, [
+            {"wo_no": "RW-A", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "RWM1"},
+            {"wo_no": "RW-B", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "RWM1"},
+            {"wo_no": "RW-D", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "RWM2"},
+            {"wo_no": "RW-E", "gold": 10.0, "wage_per_gram": 10.0,
+             "model_no": "RWM2"}], "2026-04-10", "admin")
+        _e2b = _b2b["entry_id"]
+        _i2b = {r[1]: r[0] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'RW-%'")}
+        create_sale(conn, cust, [{"work_order_id": _i2b["RW-B"]}],
+                    "2026-04-12", "admin", apply_vat=False)
+        create_sale(conn, cust, [{"work_order_id": _i2b["RW-D"],
+                                  "weight": 4.0}],
+                    "2026-04-12", "admin", apply_vat=False)
+        create_sale(conn, cust, [{"work_order_id": _i2b["RW-E"]}],
+                    "2026-04-12", "admin", apply_vat=False)
+        _csr2b(conn, cust, [{"work_order_id": _i2b["RW-E"]}],
+               "2026-04-14", "admin", apply_vat=False)
+        _w0 = _g2b(conn, "1200")
+        _inv0 = conn.execute(
+            "SELECT COUNT(*), ROUND(SUM(registered_weight),3)"
+            " FROM invoice_items").fetchone()
+        _rows = _rows2b(conn, _e2b)
+        for _r in _rows:
+            _r["gold"] = {"RW-A": 12.0, "RW-B": 12.0, "RW-D": 12.0,
+                          "RW-E": 8.0}[_r["wo_no"]]
+            if _r["wo_no"] == "RW-B":
+                _r["model_no"] = "RWM9"
+        _res2b = _usb2b(conn, _e2b, _rows, "2026-04-10", "admin")
+    with db(readonly=True) as conn:
+        _deb = conn.execute(
+            "SELECT SUM(gold_debit), MAX(e.entry_date) FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id WHERE l.entry_id=?",
+            (_e2b,)).fetchone()
+        _st = {n: _wm2b.state(conn, conn.execute(
+            "SELECT * FROM work_orders WHERE id=?", (i,)).fetchone())
+            for n, i in _i2b.items()}
+        _stat = {r[0]: r[1] for r in conn.execute(
+            "SELECT work_order_no, status FROM work_orders"
+            " WHERE work_order_no LIKE 'RW-%'")}
+        _inv1 = conn.execute(
+            "SELECT COUNT(*), ROUND(SUM(registered_weight),3)"
+            " FROM invoice_items").fetchone()
+        _w1 = _g2b(conn, "1200")
+        _g, _c, _gv, _cv = ledger_balanced(conn)
+        _cat = {m["model"]: m for m in _mc2b.list_models(conn)}
+        _rcv = {m["model"]: [i["wo"] for i in m["items"]]
+                for m in _mc2b.received(conn, "2026-04-01",
+                                        "2026-04-30")["models"]}
+        _bl = conn.execute(
+            "SELECT model_no FROM wo_batch_lines WHERE work_order_id=?",
+            (_i2b["RW-B"],)).fetchone()[0]
+    check("الدفعة تعتمد وزنها الجديد بتاريخها — والمباع منها كذلك",
+          abs(_deb[0] - 44.0) < 0.001 and _deb[1] == "2026-04-10"
+          and abs(_res2b["delta"] - 4.0) < 0.001
+          and _res2b["sold_edited"] == ["RW-B"],
+          f"{_deb[0]} · {_deb[1]} · فرق {_res2b['delta']}")
+    check("والذهب المشغول يتغيّر بالفرق نفسه، والدفتر متوازن",
+          abs((_w1 - _w0) - 4.0) < 0.001 and _g and _c,
+          f"{_w0} ← {_w1}")
+    check("وفواتير البيع والمرتجع لا تُمسّ", tuple(_inv0) == tuple(_inv1),
+          f"{tuple(_inv0)} ← {tuple(_inv1)}")
+    check("المباع يبقى مباعاً بوزن فاتورته — لا باقٍ وهمي في الخزنة",
+          _stat["RW-B"] == "sold" and _st["RW-B"]["rem"] == 0
+          and abs(_st["RW-B"]["out"] - 10.0) < 0.001, str(_st["RW-B"]))
+    check("والمباع جزئياً: باقيه في الخزنة يزيد بالفرق (6 ← 8)",
+          abs(_st["RW-D"]["rem"] - 8.0) < 0.001
+          and abs(_st["RW-D"]["out"] - 4.0) < 0.001, str(_st["RW-D"]))
+    check("والمُرتجَع إلى الخزنة يأخذ وزنه الجديد (10 ← 8)",
+          _stat["RW-E"] == "in_stock"
+          and abs(_st["RW-E"]["rem"] - 8.0) < 0.001, str(_st["RW-E"]))
+    check("وما لا حركة له وزنه الجديد كاملاً",
+          abs(_st["RW-A"]["rem"] - 12.0) < 0.001, str(_st["RW-A"]))
+    check("ورقم الموديل يُصحَّح في الدليل وفي سطر الدفعة والوارد",
+          _bl == "RWM9" and "RWM9" in _cat
+          and _cat["RWM9"]["out_count"] == 1
+          and _cat["RWM1"]["count"] == 1
+          and "RW-B" in _rcv.get("RWM9", [])
+          and "RW-B" not in _rcv.get("RWM1", []),
+          f"{_bl} · {sorted(_rcv)}")
+
+    # النقص أكثر مما في الخزنة يُرفض: ما خرج بفواتيره لا يُنقص من هنا
+    def _too_much():
+        with db() as conn:
+            _rr = _rows2b(conn, _e2b)
+            for _r in _rr:
+                if _r["wo_no"] == "RW-D":
+                    _r["gold"] = 3.0
+            _usb2b(conn, _e2b, _rr, "2026-04-10", "admin")
+    expect_error("نقص الطقم أكثر من باقيه في الخزنة يُرفض", _too_much,
+                 "الباقي منه في الخزنة")
+
+    # بعد التعديل: يُباع باقي RW-D بوزنه الجديد كاملاً اليوم، ويُرتجع
+    # RW-B بوزن فاتورته — كلٌّ في سلسلةٍ منتظمة
+    with db() as conn:
+        create_sale(conn, cust, [{"work_order_id": _i2b["RW-D"],
+                                  "weight": 8.0}],
+                    _today2b, "admin", apply_vat=False)
+        _csr2b(conn, cust, [{"work_order_id": _i2b["RW-B"],
+                             "weight": 10.0}],
+               _today2b, "admin", apply_vat=False)
+    with db(readonly=True) as conn:
+        _d = _wm2b.state(conn, conn.execute(
+            "SELECT * FROM work_orders WHERE id=?",
+            (_i2b["RW-D"],)).fetchone())
+        _bb = _wm2b.state(conn, conn.execute(
+            "SELECT * FROM work_orders WHERE id=?",
+            (_i2b["RW-B"],)).fetchone())
+        _bad = _wm2b.bad_ids(conn, list(_i2b.values()))
+        _hist = _ih2b(conn, "RW-D")[1]
+    check("بيع الباقي بوزنه الجديد يُخرجه كله — بلا كسرٍ في سلسلته",
+          _d["rem"] == 0 and abs(_d["out"] - 12.0) < 0.001 and not _bad,
+          f"{_d} · {_bad}")
+    check("والمباع يعود بوزن فاتورة مرتجعه", abs(_bb["rem"] - 10.0) < 0.001,
+          str(_bb))
+    check("وحركة الطقم تُظهر تعديل التوريد في يومه",
+          any(r["kind"] == "تعديل توريد" and r["date"] >= "2026-04-14"
+              for r in _hist),
+          str([r["kind"] for r in _hist]))
+
     step("28ج) تعديل فاتورة لا يبيع طقماً مباعاً مرتين")
     # ══ الخلل: الذهب يخرج مرة ويُحاسَب عليه عميلان ══
     # عند تعديل فاتورة كان الإعفاء من فحص حالة الطقم يشمل السلة كلها

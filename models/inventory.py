@@ -925,7 +925,7 @@ def item_history(conn, wo_no):
         "left": (wo["registered_weight"] if not wo["is_bulk"]
                  and wo["entry_id"] else ""),
         "type": wo["item_type"] or "—"})
-    _left, _bad = {}, set()
+    _left, _bad, _rank = {}, set(), {}
     # المبيعات والمرتجعات من بنود الفواتير — بترتيب السلسلة المنظّمة
     # (4.75): حركات اليوم الواحد بالتناوب بيع ← مرتجع، لا بمعرّف الفاتورة
     _its = conn.execute(
@@ -944,7 +944,16 @@ def item_history(conn, wo_no):
                                             "date": r["invoice_date"],
                                             "w": 0.0})
                 m["w"] += float(r["rw"] or 0)
-        _tr = wo_moves.trail(list(_mv.values()), wo_moves.birth(wo),
+        # وقت تسجيل كل فاتورة وتعديلات وزن التوريد: موضعها في السلسلة
+        _adj = wo_moves.adj_moves(conn, [wo["id"]]).get(wo["id"], [])
+        if _adj and _mv:
+            q = ",".join("?" * len(_mv))
+            for r in conn.execute(f"SELECT id, created_at FROM invoices"
+                                  f" WHERE is_deleted=0 AND id IN ({q})",
+                                  list(_mv)):
+                _mv[r["id"]]["c"] = r["created_at"]
+        _all = list(_mv.values()) + _adj
+        _tr = wo_moves.trail(_all, wo_moves.birth(wo),
                              wo["registered_weight"])
         _rank = {m["id"]: n for n, (m, _r, _o) in enumerate(_tr)}
         # 4.82: ما بقي في الخزنة بعد كل حركة — بيعُ جزءٍ يُرى باقيه
@@ -952,7 +961,22 @@ def item_history(conn, wo_no):
         # 4.85: الحركة التي لا تسمح بها حالتها تُعلَّم — رسالة الرفض تُحيل
         # إليها هنا بأرقام فواتيرها
         _bad = {m["id"] for m in wo_moves.violations(
-            list(_mv.values()), wo_moves.birth(wo), wo["registered_weight"])}
+            _all, wo_moves.birth(wo), wo["registered_weight"])}
+        # وزن التوريد بعد أن تحرّك الطقم: من يومه (لا من أول السلسلة)
+        if _adj:
+            for a in _adj:
+                rows.append({
+                    "kind": "تعديل توريد", "date": a["date"],
+                    "party": ("زيادة" if a["w"] > 0 else "نقص")
+                    + " في وزن التوريد — حركاته السابقة كما هي",
+                    "gold": "", "small": "", "big": "",
+                    "reg": round(float(a["w"]), 3),
+                    "left": _left.get(a["id"], ""),
+                    "_rank": _rank.get(a["id"], 10 ** 9),
+                    "type": wo["item_type"] or "—"})
+            # صفّ التوريد يبدأ بوزنه يوم وُرّد
+            rows[0]["left"] = round(float(wo["registered_weight"] or 0)
+                                    - sum(float(a["w"]) for a in _adj), 3)
         _its = sorted(_its, key=lambda r: (r["invoice_date"] or "",
                                            _rank.get(r["id"], 10 ** 9),
                                            r["id"]))
@@ -962,7 +986,7 @@ def item_history(conn, wo_no):
             "date": it["invoice_date"], "party": it["party"] or "—",
             "gold": "", "small": "", "big": "", "reg": it["rw"],
             "left": _left.get(it["id"], ""), "inv": it["invoice_no"],
-            "bad": it["id"] in _bad,
+            "bad": it["id"] in _bad, "_rank": _rank.get(it["id"], 10 ** 9),
             "type": wo["item_type"] or "—"})
     # تسويات الوزن على هذا الطقم
     for a in conn.execute(
@@ -976,7 +1000,8 @@ def item_history(conn, wo_no):
             "type": wo["item_type"] or "—"})
     # أصل الطقم أولاً دائماً (4.85): المُدخَل بمرتجعٍ مؤرَّخٍ قبل إنشاء
     # بطاقته كان يظهر أصله بعد حركاته
-    rows[1:] = sorted(rows[1:], key=lambda r: r["date"] or "")
+    rows[1:] = sorted(rows[1:], key=lambda r: (r["date"] or "",
+                                               r.pop("_rank", 10 ** 9)))
     return wo, rows
 
 
@@ -1381,20 +1406,19 @@ def _batch_rows(conn, entry_id):
 
 
 def edit_supply_item(conn, wo_id, gold, small_stones, big_stones, username,
-                     wage_per_gram=None, notes=None):
+                     wage_per_gram=None, notes=None, model_no=None):
     """يعدّل توريد طقمٍ واحد **في مكانه** داخل دفعته (4.75).
 
     كان التعديل يعكس قيد الدفعة كلها ويُعيد إنشاء الطقم برقمٍ داخلي
     جديد: فيُحذف إخوته في الدفعة معه، وتنقطع فواتيره القديمة عنه فتبقى
-    «حركته» معلّقةً بلا أصل. الآن يُعدَّل سطره وحده والقيد بالفرق.
+    «حركته» معلّقةً بلا أصل. الآن يُعدَّل سطره وحده والقيد بالفرق —
+    والمباع كذلك: فاتورة بيعه لا تُمسّ (`update_supply_batch`).
+    `model_no`: رقم موديلٍ جديد (None = يبقى كما هو).
     """
     wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
                       (wo_id,)).fetchone()
     if not wo:
         raise ValueError("الطقم غير موجود")
-    if wo["status"] != "in_stock":
-        raise ValueError(f"الطقم {wo['work_order_no']} مباع حالياً — "
-                         f"أعد فاتورته أولاً ثم عدّل التوريد")
     if not wo["entry_id"]:
         raise ValueError("لا قيد توريد لهذا الطقم — عدّله بتسوية الوزن")
     rows = _batch_rows(conn, wo["entry_id"])
@@ -1406,6 +1430,8 @@ def edit_supply_item(conn, wo_id, gold, small_stones, big_stones, username,
                 r["wage_per_gram"] = wage_per_gram
             if notes:
                 r["notes"] = notes
+            if model_no is not None:
+                r["model_no"] = str(model_no).strip() or None
     d = conn.execute("SELECT entry_date FROM journal_entries WHERE id=?",
                      (wo["entry_id"],)).fetchone()
     update_supply_batch(conn, wo["entry_id"], rows,
@@ -1457,6 +1483,50 @@ def delete_supply_item(conn, wo_id, username, notes=""):
     return {"wo_no": wo["work_order_no"], "batch_kept": others}
 
 
+def _reweigh(conn, wo, d, entry_id, username):
+    """فرق وزن توريد طقمٍ مفرد `d` — من يوم التعديل لا من أوله.
+
+    بلا حركة: لا شيء هنا، فوزن بطاقته الجديد هو وزنه من أوله. وله حركة
+    (بيعٌ أو مرتجع): يُسجَّل الفرق حلقةً في سلسلته بتاريخ اليوم — أو
+    بتاريخ آخر فواتيره إن كان بعد اليوم — فلا تتغيّر حركاته السابقة: ما في
+    الخزنة منه يزيد أو ينقص بالفرق، والمباع كله يبقى كما هو.
+    """
+    import datetime as _dt
+    from models import wo_moves as _wm
+    inv = _wm.invoice_moves(_wm.moves_of(conn, wo["id"]))
+    if not inv:
+        return
+    st = _wm.state(conn, wo)
+    if st["rem"] > _wm.EPS and st["rem"] + d < -0.001:
+        raise ValueError(
+            f"الطقم {wo['work_order_no']}: الباقي منه في الخزنة "
+            f"{_nf.f2(st['rem'])} جم فقط، والتعديل ينقصه "
+            f"{_nf.f2(-d)} جم — ما خرج منه بفواتيره لا يُنقص من هنا.\n"
+            "صحّح فاتورة بيعه أولاً، أو اجعل النقص في حدود الباقي.")
+    day = max([_dt.date.today().isoformat()]
+              + [str(m["date"] or "")[:10] for m in inv])
+    conn.execute(
+        "INSERT INTO wo_weight_edits(work_order_id,entry_id,edit_date,delta,"
+        "old_weight,new_weight,created_by) VALUES(?,?,?,?,?,?,?)",
+        (wo["id"], entry_id, day, d,
+         float(wo["registered_weight"] or 0),
+         round(float(wo["registered_weight"] or 0) + d, 3), username))
+
+
+def _follow_models(conn, renamed):
+    """صورة الموديل تتبع اسمه الجديد حين لم يبقَ للقديم طقم — تصحيح رقم
+    موديلٍ كُتب خطأً لا يُفقد صورته في الدليل."""
+    from models import models_catalog as _mc
+    for old, new in dict.fromkeys(renamed):
+        if not old or not new or old == new:
+            continue
+        left = conn.execute(
+            "SELECT 1 FROM work_orders WHERE TRIM(model_no)=? AND"
+            " is_deleted=0 LIMIT 1", (old,)).fetchone()
+        if not left:
+            _mc._move_images(old, new)
+
+
 def update_supply_batch(conn, entry_id, rows, entry_date, username,
                         dest_account_id=None, scrap_karat=None,
                         reference=None):
@@ -1467,9 +1537,13 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
 
     المنطق الصحيح محاسبياً:
 
-      • طقم **مباع**: يبقى كما هو، ولا يُمسّ وزنه (فاتورته قائمة عليه)
-      • طقم **بالمخزن تغيّر وزنه**: يُعدَّل وزنه، والفرق يُرحَّل على
-        الذهب المشغول
+      • طقم **تغيّر وزنه** — بالمخزن أو مباعاً: سطره في الدفعة يُعدَّل،
+        والفرق يُرحَّل على الذهب المشغول في قيد الدفعة نفسه بتاريخها.
+        وحركاته السابقة (فواتير بيعه ومرتجعه) لا تُمسّ: ما في الخزنة منه
+        يزيد أو ينقص بالفرق من يوم التعديل، والمباع كله يبقى كما هو
+        (`_reweigh` و`wo_moves.ADJ`)
+      • **رقم الموديل** يُعدَّل في البطاقة والسطر معاً — فيتحدّث دليل
+        الموديلات وتقرير الوارد، وتتبعه صورته إن لم يبقَ للقديم طقم
       • طقم **جديد**: يُنشأ ويُضاف كاملاً للذهب المشغول
       • طقم **حُذف من الدفعة** وما زال بالمخزن: يُحذف ويُخصم
 
@@ -1525,6 +1599,8 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
 
     delta = 0.0          # صافي التغيّر في الوزن المقيد
     added, updated, removed, kept_sold = [], [], [], []
+    sold_edited = []     # مباعٌ عُدّل توريده: الدفعة تتغيّر وحركته لا
+    renamed = []         # (الموديل القديم، الجديد) — لدليل الموديلات
     seen = set()
 
     for i, r in enumerate(rows):
@@ -1583,43 +1659,69 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
 
         wo, ln = cur["wo"], cur["line"]
         old_reg = float(ln["registered_weight"] or 0)
-        if abs(reg - old_reg) < 0.001 and (wo["model_no"] or "") == \
-                (model_no or ""):
+        d = round(reg - old_reg, 3)
+        notes = r.get("notes", "") or ""
+        karat = int(r.get("karat") or 0)
+        _lk = ln.keys()
+        same = (abs(d) < 0.001
+                and (wo["model_no"] or "") == (model_no or "")
+                and (ln["model_no"] or "") == (model_no or "")
+                and all(abs(float(ln[k] or 0) - v) < 0.0005 for k, v in (
+                    ("gold", gold), ("small_stones", small),
+                    ("big_stones", big), ("discount_rate", rate),
+                    ("wage_per_gram", wage)))
+                and (ln["notes"] or "") == notes
+                and (int(ln["karat"] or 0) if "karat" in _lk else 0) == karat)
+        if same:
             if wo["status"] == "sold":
                 kept_sold.append(no)
             continue
 
-        if wo["status"] == "sold":
-            # ── مباع: وزنه مرتبط بفاتورته فلا يُمسّ ──
-            # لكن الموديل تصنيف وصفي فيُحدَّث بلا أثر مالي
-            if (wo["model_no"] or "") != (model_no or ""):
-                conn.execute("UPDATE work_orders SET model_no=?"
-                             " WHERE id=?", (model_no, wo["id"]))
-            kept_sold.append(no)
-            continue
-
-        # ── بالمخزن: يُعدَّل وزنه والفرق يُرحَّل ──
+        # ══ يُعدَّل الطقم — بالخزنة كان أو مباعاً (4.x) ══
+        # الدفعة تعتمد وزنه الجديد بتاريخها، والفرق يدخل الذهب المشغول.
+        # وحركاته السابقة (فواتير بيعه ومرتجعه) لا تُمسّ: إن كان له حركة
+        # سُجّل التعديل حلقةً في سلسلته يوم التعديل (`wo_moves.ADJ`)، فما
+        # في الخزنة منه يزيد أو ينقص بالفرق، والمباع كله يبقى كما هو.
         if wo["is_bulk"]:
-            adjust_bulk_wo(conn, reg - old_reg, username, wo_id=wo["id"])
+            if abs(d) >= 0.001:
+                adjust_bulk_wo(conn, d, username, wo_id=wo["id"])
         else:
+            if abs(d) >= 0.001:
+                _reweigh(conn, wo, d, entry_id, username)
+            # البطاقة بالفرق لا بوزن السطر: تسويةُ وزنٍ سابقة عليها (قيدها
+            # قائم) تبقى كما هي
+            c_gold = round(float(wo["gold_weight"] or 0) + gold
+                           - float(ln["gold"] or 0), 3)
+            c_small = round(float(wo["small_stones"] or 0) + small
+                            - float(ln["small_stones"] or 0), 3)
+            c_big = round(float(wo["big_stones"] or 0) + big
+                          - float(ln["big_stones"] or 0), 3)
+            c_reg = round(float(wo["registered_weight"] or 0) + d, 3)
+            c_stand = gold_math.standing_gold(c_gold, c_small, c_big)
             conn.execute(
                 "UPDATE work_orders SET model_no=?, gold_weight=?,"
                 " small_stones=?, big_stones=?, stones_after_discount=?,"
                 " standing_gold=?, gross_weight=?, stones_weight=?,"
                 " discount_rate=?, registered_weight=?, wage_per_gram=?,"
                 " item_type=?, notes=? WHERE id=?",
-                (model_no, gold, small, big, after, standing, standing,
-                 round(small + big, 3), rate, reg, wage,
-                 classify_item(no, gold, small, big),
-                 r.get("notes", ""), wo["id"]))
+                (model_no, c_gold, c_small, c_big,
+                 gold_math.stones_after_discount(c_big, rate), c_stand,
+                 c_stand, round(c_small + c_big, 3), rate, c_reg, wage,
+                 classify_item(no, c_gold, c_small, c_big),
+                 notes, wo["id"]))
+            if (wo["model_no"] or "").strip() != (model_no or ""):
+                renamed.append(((wo["model_no"] or "").strip(),
+                                model_no or ""))
         conn.execute(
             "UPDATE wo_batch_lines SET model_no=?, gold=?, small_stones=?,"
             " big_stones=?, discount_rate=?, registered_weight=?,"
             " wage_per_gram=?, notes=?, karat=?, seq=? WHERE id=?",
             (model_no, gold, small, big, rate, reg, wage,
-             r.get("notes", ""), int(r.get("karat") or 0), i, ln["id"]))
-        delta += (reg - old_reg)
+             notes, karat, i, ln["id"]))
+        delta += d
         updated.append(no)
+        if wo["status"] == "sold":
+            sold_edited.append(no)
 
     # ── أطقم حُذفت من الدفعة ──
     for no, cur in by_no.items():
@@ -1740,7 +1842,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     log_action(conn, username, "update", "work_orders", entry_id,
                f"تعديل دفعة توريد: +{len(added)} · ~{len(updated)} · "
                f"-{len(removed)} · مباع محفوظ {len(set(kept_sold))} · "
-               f"صافي الوزن {_nf.f2(delta, sep=False, sign=True)} جم")
+               + (f"مباع عُدّل توريده {len(sold_edited)} · "
+                  if sold_edited else "")
+               + f"صافي الوزن {_nf.f2(delta, sep=False, sign=True)} جم")
     _de.record(conn, "work_orders", entry_id, username, _before,
                doc_no=entry["doc_no"] or "", entry_id=entry_id,
                kind="inplace", before_html=_before_html,
@@ -1753,9 +1857,12 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     # تدلّ على شيء، ويظنّ أن التعديل لم يتمّ فيعيده.
     # ويُقرأ من القاعدة لا يُجمَع من السطور: هو وزن الدفعة كما صارت
     # بعد التعديل — بما فيها الأطقم المباعة التي بقيت كما هي.
+    # من سطور الدفعة لا من البطاقات: البطاقة قد تحمل تسويةً بقيدٍ آخر،
+    # والرقم التجميعي رصيدٌ تراكمي لكل دفعاته — والقيد وزن سطورها هي.
     total_reg = conn.execute(
-        "SELECT COALESCE(SUM(registered_weight),0) t FROM work_orders"
-        " WHERE entry_id=? AND is_deleted=0", (entry_id,)).fetchone()["t"]
+        "SELECT COALESCE(SUM(l.registered_weight),0) t FROM wo_batch_lines l"
+        " JOIN work_orders w ON w.id=l.work_order_id AND w.is_deleted=0"
+        " WHERE l.entry_id=?", (entry_id,)).fetchone()["t"]
     # حركة صندوق الكسر تُكتب من إجمالي الدفعة **بعد** التعديل لا
     # بفرقه: استبدالٌ لسطرٍ واحد، فلا يتراكم إدخالان لدفعةٍ عُدِّلت.
     _dline = batch_dest_line(conn, entry_id)
@@ -1767,10 +1874,13 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     # وزن البطاقة تغيّر: الباقي في الخزنة يُعاد من سلسلة الحركة (4.82)
     from models import wo_moves as _wm
     _wm.resync(conn, [r["id"] for r in conn.execute(
-        "SELECT id FROM work_orders WHERE entry_id=? AND is_deleted=0",
-        (entry_id,))], username)
+        "SELECT id FROM work_orders WHERE entry_id=? AND is_deleted=0"
+        " UNION SELECT work_order_id FROM wo_batch_lines WHERE entry_id=?",
+        (entry_id, entry_id))], username)
+    _follow_models(conn, renamed)
     return {"entry_id": entry_id, "added": added, "updated": updated,
             "removed": removed, "kept_sold": sorted(set(kept_sold)),
+            "sold_edited": sold_edited,
             "delta": delta, "moved_dest": moved_dest, "reference": _ref,
             "dest_account_id": (_dline["account_id"] if _dline else None),
             "scrap_karat": _k,
