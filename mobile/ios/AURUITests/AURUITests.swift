@@ -109,7 +109,8 @@ final class AURUITests: XCTestCase {
         accounts.tap()
         snap("05_accounts")
         button("الممتلكات").tap()
-        XCTAssertTrue(anyText("الأطقم التي معي").waitForExistence(timeout: 10), "الممتلكات")
+        // 1.11: الممتلكات تبدأ بلوحة «المديونية والذهب الذي معي» (والأطقم في الرئيسية)
+        XCTAssertTrue(anyText("المديونية والذهب الذي معي").waitForExistence(timeout: 10), "الممتلكات")
         snap("06_holdings")
     }
 }

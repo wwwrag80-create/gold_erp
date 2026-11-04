@@ -27,9 +27,13 @@ const PKG = "com.jadeite.mobile";
 const PHOTO = "data:image/jpeg;base64,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";
 
 // نوافذ النظام (اختيار المجلد، الإذن) تُلمس بنصّ أزرارها من شجرة الواجهة
+// والمحاكي قد يقتل أداة uiautomator (137) بعد أن تكتب الملف أو قبله: يُحذف القديم أولاً،
+// ويُقرأ الجديد إن اكتمل — وإلا رُمي الخطأ فتعيد المحاولةَ tapText
 function uiNodes() {
-  adb("shell", "uiautomator", "dump", "/sdcard/ui.xml");
+  try { adb("shell", "rm", "-f", "/sdcard/ui.xml"); } catch (e) { /* */ }
+  try { adb("shell", "uiautomator", "dump", "/sdcard/ui.xml"); } catch (e) { /* يُقرأ إن كُتب */ }
   const xml = adb("shell", "cat", "/sdcard/ui.xml").toString();
+  if (!xml.includes("</hierarchy>")) throw new Error("ui dump incomplete");
   const out = [];
   for (const m of xml.matchAll(/<node [^>]*?text="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)) {
     out.push({ text: m[1], x: Math.round((+m[2] + +m[4]) / 2), y: Math.round((+m[3] + +m[5]) / 2) });
@@ -493,9 +497,11 @@ async function main() {
     (await ev("__t.text().includes('ابدأ من جديد بلا بيانات')")) && !(await ev("[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'ابدأ')")));
   n0 = await evCount(ev, "restore");
   await run(ev, found ? `t.click("استرجاع بياناتي");` : `t.click("عندي بيانات سابقة");`);
-  // ما زال الملف للتطبيق (يُقرأ مباشرة بلا نافذة) — أو نافذة المجلد تُفتح على «ÀUR»: استخدامه ثم سماح
-  const picked2 = bi2.readable ? true : await chooseFolder("restore");
-  const rs = await waitEv(ev, "restore", n0, 15000);
+  // ما زال الملف للتطبيق (يُقرأ مباشرة بلا نافذة) — أو نافذة المجلد تُفتح على «ÀUR»: استخدامه ثم سماح.
+  // وإن رآه النظام عند عرض الترحيب ثم منع قراءته عند اللمس، فتحت النافذة بدله (1.11)
+  let rs = bi2.readable ? await waitEv(ev, "restore", n0, 6000) : null;
+  let picked2 = true;
+  if (!rs) { picked2 = await chooseFolder("restore"); rs = await waitEv(ev, "restore", n0, 15000); }
   check("المجلد نفسه يُقرأ: gold-data.json", picked2 && rs && rs.ok && rs.file === "gold-data.json",
     JSON.stringify(rs && { ok: rs.ok, file: rs.file, error: rs.error }));
   await sleep(800);

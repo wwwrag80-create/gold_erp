@@ -636,19 +636,21 @@ public class MainActivity extends Activity {
                     "readable", "found".equals(m) && BackupFolder.autoReadable(MainActivity.this)).toString();
         }
 
-        /** الاسترجاع من ملف «ÀUR» مباشرة (حين ما زال للتطبيق) — حدث restore كالمجلد */
+        /** الاسترجاع من ملف «ÀUR» مباشرة (حين ما زال للتطبيق) — حدث restore كالمجلد.
+         *  وبعد إعادة التثبيت قد يرى النظامُ الملفَّ لحظةَ عرض الترحيب ثم يمنع قراءته
+         *  عند اللمس: حينها تُفتح نافذة المجلد على «ÀUR» نفسه — فلا ينتهي «استرجاع
+         *  بياناتي» برسالة خطأ ونسختُه موجودة. */
         @JavascriptInterface
         public void restoreAuto() {
             bg.execute(() -> {
+                String[] r = null;
                 try {
-                    String[] r = BackupFolder.autoReadLatest(MainActivity.this);
-                    if (r == null) {
-                        emit("restore", obj("ok", false, "error", "لا توجد نسخةٌ من بيانات التطبيق في ملف «" + BackupFolder.AUTO_NAME + "»"));
-                    } else {
-                        emit("restore", obj("ok", true, "file", r[0], "text", r[1], "name", BackupFolder.AUTO_NAME));
-                    }
-                } catch (Exception e) {
-                    emit("restore", obj("ok", false, "error", String.valueOf(e.getMessage())));
+                    r = BackupFolder.autoReadLatest(MainActivity.this);
+                } catch (Exception ignored) { }
+                if (r == null) {
+                    ui.post(() -> openTree(REQ_RESTORE, "restore"));
+                } else {
+                    emit("restore", obj("ok", true, "file", r[0], "text", r[1], "name", BackupFolder.AUTO_NAME));
                 }
             });
         }
