@@ -79,7 +79,10 @@ function check(name, cond, detail) {
     check(`${name}: no Arabic left`, !ar.length, ar.slice(0, 6).join(" | "));
     const w = await wide();
     check(`${name}: fits the phone width`, w <= 1, `${w}px wider`);
+    // لقطات المتجر بلا رسالة «حُفظ» العابرة
+    await page.evaluate(() => { const t = document.getElementById("toast"); if (t) t.style.display = "none"; });
     await shot(name);
+    await page.evaluate(() => { const t = document.getElementById("toast"); if (t) t.style.display = ""; });
   };
 
   await page.goto(url);
