@@ -37,9 +37,23 @@ async function connect() {
 }
 
 // حدود WebView التطبيق على الشاشة (بكسل) من شجرة الواجهة — الأطول بينها (الإعلان WebView صغيرٌ أيضاً)
+// المحاكي قد يقتل أداة uiautomator (137) وقد كتبت الملف أو لم تكتبه: تُعاد حتى ثلاث
+// مرات، ويُقرأ الملف إن وُجد — وتفشل التجربة إن لم تُقرأ الشجرة أبداً
+function dumpUi() {
+  let last;
+  for (let i = 0; i < 3; i++) {
+    try { adb("shell", "rm", "-f", "/sdcard/ui.xml"); } catch (e) { /* */ }
+    try { adb("shell", "uiautomator", "dump", "/sdcard/ui.xml"); } catch (e) { last = e; }
+    try {
+      const xml = adb("shell", "cat", "/sdcard/ui.xml").toString();
+      if (xml.includes("</hierarchy>")) return xml;
+    } catch (e) { last = e; }
+    execFileSync("sleep", ["2"]);
+  }
+  throw last || new Error("uiautomator dump: no hierarchy");
+}
 function webBounds() {
-  adb("shell", "uiautomator", "dump", "/sdcard/ui.xml");
-  const xml = adb("shell", "cat", "/sdcard/ui.xml").toString();
+  const xml = dumpUi();
   const all = [...xml.matchAll(/class="android\.webkit\.WebView"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)]
     .map((m) => ({ l: +m[1], t: +m[2], r: +m[3], b: +m[4] }));
   return all.sort((a, b) => (b.b - b.t) - (a.b - a.t))[0] || null;
