@@ -68,6 +68,11 @@
   td.m .mv{display:block;font-size:12px;color:#4A443A}
   td.m b{display:inline-block;font-size:14px}
   td.m .w{font-size:11px;color:#4A443A;margin-inline-start:3px}
+  td.m .gl,td.m .cl{display:block;white-space:nowrap}
+  td.m .cl{font-size:12px;color:#4A443A;margin-top:2px}
+  tr.tot td.m .cl,tr.tot td.m .w,tr.tot td small{color:#E9E2D2}
+  td.z{color:#9A9384;text-align:center}
+  .legend{font-size:12px;color:#4A443A;margin:-4px 0 8px}
   .sum{grid-template-columns:repeat(2,1fr);gap:8px}
   .box span{font-size:16px}
   `;
@@ -196,7 +201,7 @@
   }
 
   // كشف الحساب بعرض الجوال: «gold» الذهب والنقد، أو «diamond» الماس
-  function statementHtml(st, shopId, from, to, mode) {
+  function statementHtml(st, shopId, from, to, mode, filter) {
     const shop = D.shopById(st, shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
     const k = D.partyKarat(D.shopById(st, shopId), st.settings.viewKarat || 18);
@@ -225,19 +230,47 @@
       body = header(st, T("كشف حساب الماس"), "", to || D.today()) + partyRow +
         T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس)</th><th>الماس (جم)<small>الحركة · الصافي</small></th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} جم</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} جم</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>صافي الماس</b><span>{5} جم</span></div></div>\n        <div class=\"note\">الماس للعرض والمعرفة: لا يدخل الوزن ولا رصيد الذهب.</div>", rows || T("<tr><td colspan=\"4\">لا ماس في الفترة</td></tr>"), fac ? T("البضاعة") : T("المبيعات"), f2(fac ? s.minus : s.plus), fac ? T("الإرجاع") : T("المرتجع"), f2(fac ? s.plus : s.minus), f2(f * s.diamond));
     } else {
-      const s = D.statement(st, shopId, from, to);
+      // «عليه · له · الرصيد» (1.11): الذهب فوق والنقد تحته في كل خانة، ثم صفّ
+      // الإجمالي: مجموع ما عليه، ومجموع ما له، والباقي — والفرز نوعٌ واحدٌ ومجموعه
+      const s = D.statementView(st, shopId, from, to, filter);
+      const fl = s.filter ? filterLabel(fac, s.filter) : "";
+      const word = (v, eps) => (Math.abs(v) < eps ? "" : v > 0 ? T("عليه") : T("له"));
+      const amt = (g18, c) => {
+        const gv = G.g(g18, k);
+        if (Math.abs(gv) < 0.005 && Math.abs(c) < 0.005) return `<td class="z">—</td>`;
+        return `<td class="m"><span class="gl"><b>${Math.abs(gv) < 0.005 ? "—" : f2(gv)}</b></span><span class="cl">${Math.abs(c) < 0.005 ? "—" : f2(c)}</span></td>`;
+      };
+      const balc = (g18, c, cum) => {
+        const gv = G.g(g18, k);
+        const wg = cum ? "" : word(gv, 0.005), wc = cum ? "" : word(c, 0.005);
+        return `<td class="m"><span class="gl"><b>${f2(Math.abs(gv))}</b>${wg ? `<span class="w">${wg}</span>` : ""}</span>` +
+          `<span class="cl">${f2(Math.abs(c))}${wc ? `<span class="w">${wc}</span>` : ""}</span></td>`;
+      };
       let rows = "";
       for (const r of s.rows) {
-        const gv = G.g(r.gd - r.gc, k), cv = r.cd - r.cc;
-        rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td>
-          ${cell(r.kind === "prev" || !gv ? "" : sgn(gv), f2(Math.abs(G.g(r.gbal, k))), Math.abs(r.gbal) < 0.0005 ? "" : r.gbal > 0 ? T("عليه") : T("له"))}
-          ${cell(r.kind === "prev" || !cv ? "" : sgn(cv), f2(Math.abs(r.cbal)), Math.abs(r.cbal) < 0.005 ? "" : r.cbal > 0 ? T("عليه") : T("له"))}</tr>`;
+        rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td>${amt(r.gd, r.cd)}${amt(r.gc, r.cc)}${balc(r.gbal, r.cbal, !!s.filter)}</tr>`;
       }
-      body = header(st, T("كشف حساب"), "", to || D.today()) + partyRow +
-        T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الذهب (جم {0})<small>الحركة · الرصيد</small></th><th>النقد (ريال)<small>الحركة · الرصيد</small></th></tr></thead>\n        <tbody>{1}</tbody></table>\n        <div class=\"sum\"><div class=\"box\"><b>رصيد الذهب (عيار {2})</b><span>{3}</span></div>\n        <div class=\"box\"><b>رصيد النقد</b><span>{4}</span></div></div>", k, rows || T("<tr><td colspan=\"4\">لا حركة في الفترة</td></tr>"), k, balTxt(G.g(s.gold18, k), T("جم")), balTxt(s.cash, T("ريال")));
+      const t = s.totals;
+      if (s.rows.length) {
+        rows += `<tr class="tot"><td colspan="2">${s.filter ? T("إجمالي {0}", fl) : T("الإجمالي")}<small>${s.filter ? T("{0} عملية", s.rows.length) : T("عليه − له = الباقي")}</small></td>` +
+          `${amt(t.gd, t.cd)}${amt(t.gc, t.cc)}${balc(t.gbal, t.cbal, !!s.filter)}</tr>`;
+      }
+      const sums = s.filter
+        ? T("<div class=\"sum\"><div class=\"box\"><b>إجمالي {0} ذهباً (عيار {1})</b><span>{2} جم</span></div>\n        <div class=\"box\"><b>إجمالي {3} نقداً</b><span>{4} ريال</span></div></div>", fl, k, f2(Math.abs(G.g(t.gbal, k))), fl, f2(Math.abs(t.cbal)))
+        : T("<div class=\"sum\"><div class=\"box\"><b>رصيد الذهب (عيار {0})</b><span>{1}</span></div>\n        <div class=\"box\"><b>رصيد النقد</b><span>{2}</span></div></div>", k, balTxt(G.g(s.gold18, k), T("جم")), balTxt(s.cash, T("ريال")));
+      body = header(st, s.filter ? T("كشف حساب — {0}", fl) : T("كشف حساب"), "", to || D.today()) + partyRow +
+        T("<div class=\"legend\">في كل خانة: الذهب (جم عيار {0}) فوق، والنقد (ريال) تحته.</div>", k) +
+        T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>عليه</th><th>له</th><th>{0}</th></tr></thead>\n        <tbody>{1}</tbody></table>", s.filter ? T("المجموع") : T("الرصيد"), rows || T("<tr><td colspan=\"5\">لا حركة في الفترة</td></tr>")) + sums;
     }
     body += T("<div class=\"foot\">{0} · كشف حساب {1}</div>", esc(st.settings.name || APP), esc(shop.name));
     return page(T("كشف حساب {0}", shop.name), body, true);
+  }
+
+  // اسم الفرز: للعميل المبيعات · المرتجعات · التحصيل، وللمصنع البضاعة · الإرجاع · السداد
+  function filterLabel(fac, f) {
+    const m = fac ? { sales: T("البضاعة"), returns: T("الإرجاع"), collect: T("السداد") }
+      : { sales: T("المبيعات"), returns: T("المرتجعات"), collect: T("التحصيل") };
+    return m[f] || T("الكل");
   }
 
   // نصٌّ قصير للمشاركة في واتساب
@@ -254,5 +287,5 @@
     ].join("\n");
   }
 
-  root.PrintDoc = { invoiceHtml, voucherHtml, statementHtml, invoiceText, zatcaB64, balTxt, dmy };
+  root.PrintDoc = { invoiceHtml, voucherHtml, statementHtml, filterLabel, invoiceText, zatcaB64, balTxt, dmy };
 })(window);

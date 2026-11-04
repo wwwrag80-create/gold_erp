@@ -371,12 +371,15 @@ async function main() {
 
   await run(ev, `location.hash = "#/holdings"; await t.sleep(700);`);
   const hd = await ev("(() => { const h = Domain.holdings(App.state); return { b21: (h.boxes.find((b) => b.karat === 21) || {}).weight, cash: h.cash.amount, n: h.pieces.length }; })()");
-  // الطقم بلا اسم من البضاعة لم يُبع (السطر 5 جم كُتب بوزنه لا باختياره)
-  check("الممتلكات: صندوق 21 فيه 1.00 جم، والنقد 20، وطقمٌ واحد معي", hd.b21 === 1 && hd.cash === 20 && hd.n === 1, JSON.stringify(hd));
+  // T1 بِيع؛ وسطر البضاعة 20 جم بلا اسمٍ بضاعةٌ بالوزن لا طقم (1.11) — فلا طقم معي
+  check("الممتلكات: صندوق 21 فيه 1.00 جم، والنقد 20، ولا طقم معي", hd.b21 === 1 && hd.cash === 20 && hd.n === 0, JSON.stringify(hd));
   check("بلا لوحة «صافي ما لي»", await ev("document.querySelectorAll('.net-card').length === 0"));
-  check("ثم صناديقها، والأطقم التي معي · لي عند العملاء · عليّ للمصانع", (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
-    (await ev("document.querySelectorAll('.wide-tile.big').length")) === 3 &&
-    (await ev("document.querySelector('.wide-tile.sets').innerText")).includes("الأطقم التي معي (1)"));
+  check("لوحة «المديونية والذهب الذي معي» أولاً، ثم صناديقها، ثم لي عند العملاء · عليّ للمصانع — والأطقم ليست هنا",
+    (await ev("document.querySelector('#view .card') === document.querySelector('.debt-card')")) &&
+    (await ev("document.querySelector('.debt-card').innerText")).includes("عيار 21") &&
+    (await ev("document.querySelectorAll('.box-tile').length")) === 2 &&
+    (await ev("document.querySelectorAll('.wide-tile.big').length")) === 2 &&
+    (await ev("document.querySelectorAll('#view .wide-tile.sets').length")) === 0);
   // التطبيق يقرأ الملف من main؛ والتجربة تقرؤه بالطريق نفسه من النسخة المُختبَرة
   // (فالملف الجديد لا يصل إلى main إلا بعد نجاحها)
   const promoMain = await ev("Promo.url");

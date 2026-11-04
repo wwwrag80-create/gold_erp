@@ -430,6 +430,37 @@
     return { rows, gold18: gb, cash: cb };
   }
 
+  // كشف «عليه · له · الرصيد» (1.11): كل عمليةٍ في خانتها — ما عليه (مدين) وما له
+  // (دائن)، ذهباً ونقداً — والرصيد بعدها. والرصيد السابق يُكتب في خانته بإشارته،
+  // فيكون مجموع «عليه» − مجموع «له» = الباقي (رصيد الحساب نفسه) بلا فرق.
+  // والفرز (`filter`): sales · returns · collect — للعميل: البيع · المرتجع ·
+  // التحصيل، وللمصنع: البضاعة · الإرجاع · السداد — يعرض ذلك النوع وحده،
+  // وعمودُ الرصيد فيه مجموعُه الجاري (لا رصيد الحساب)
+  const ST_FILTERS = ["sales", "returns", "collect"];
+  function filterKinds(fac, filter) {
+    const m = fac ? { sales: ["purchase"], returns: ["purchase_return"], collect: ["payment"] }
+      : { sales: ["sale"], returns: ["sale_return"], collect: ["receipt"] };
+    return m[filter] || null;
+  }
+  function statementView(st, shopId, from, to, filter) {
+    const shop = shopById(st, shopId);
+    const kinds = filterKinds(isFactory(shop), filter);
+    const base = statement(st, shopId, from, to);
+    const rows = [];
+    let gd = 0, gc = 0, cd = 0, cc = 0, gb = 0, cb = 0;
+    for (const r of base.rows) {
+      if (kinds && !kinds.includes(r.kind)) continue;
+      const x = r.kind === "prev"
+        ? { gd: Math.max(r.gbal, 0), gc: Math.max(-r.gbal, 0), cd: Math.max(r.cbal, 0), cc: Math.max(-r.cbal, 0) }
+        : { gd: r.gd, gc: r.gc, cd: r.cd, cc: r.cc };
+      gd = R(gd + x.gd, 3); gc = R(gc + x.gc, 3); cd = R(cd + x.cd, 2); cc = R(cc + x.cc, 2);
+      gb = R(gb + x.gd - x.gc, 3); cb = R(cb + x.cd - x.cc, 2);
+      rows.push(Object.assign({}, r, x, kinds ? { gbal: gb, cbal: cb } : {}));
+    }
+    return { rows, filter: kinds ? filter : "", fac: isFactory(shop),
+      totals: { gd, gc, cd, cc, gbal: gb, cbal: cb }, gold18: base.gold18, cash: base.cash };
+  }
+
   function balance(st, shopId, exclude) {
     const s = statement(st, shopId, null, null, exclude);
     return { gold18: s.gold18, cash: s.cash };
@@ -651,6 +682,10 @@
       const w = Number(x.weight || 0);
       if (!(w > 0)) throw new Error(T("اكتب وزن كل طقم (أو احذف سطره)"));
       const name = String(x.name || "").trim();
+      // الطقم الذي معي هو المسمّى (1.11): ما يُكتب وزناً بلا اسمٍ ليس طقماً —
+      // إلا طقماً قديماً خرج بفاتورةٍ قبلها (يبقى أصلاً لما بِيع)
+      const sold = x.id && st.invoices.some((d) => d.lines.some((l) => l.src === "op:" + x.id));
+      if (!name && !sold) throw new Error(T("اكتب اسم كل طقم (أو احذف سطره) — الطقم الذي معي هو المسمّى"));
       if (name && names.has(name)) throw new Error(T("الطقم {0} مكرّر", name));
       if (name) names.add(name);
       sets.push({ id: x.id || uid("os"), name, karat: k, w18: Gold.store(w, k), photos: cleanPhotos(x.photos) });
@@ -740,7 +775,10 @@
         }
       });
     }
-    const list = [...pieces.values()].sort((x, y) => docOrder(y.doc, x.doc));
+    // «الأطقم التي معي» هي المسمّاة وحدها (1.11): ما دخل وزناً بلا اسمٍ في خانة
+    // الطقم (بضاعةٌ بالوزن) ليس طقماً معي — لا يُعدّ ولا يُختار من «أطقمي»
+    const list = [...pieces.values()].filter((p) => p.name)
+      .sort((x, y) => docOrder(y.doc, x.doc));
     let setsW18 = 0;
     for (const p of list) setsW18 = R(setsW18 + p.w18, 3);
     const boxList = Object.values(boxes).filter((b) => b.moves.length)
@@ -780,6 +818,31 @@
     customers.sort((a, b) => (b.gold18 - a.gold18) || (b.cash - a.cash));
     return { factories, customers, facGold18: R(facGold18, 3), facCash: R(facCash, 2),
       cusGold18: R(cusGold18, 3), cusCash: R(cusCash, 2) };
+  }
+  // لوحة «المديونية والذهب الذي معي» (1.11): لكل عيارٍ ما معي منه (الكسر في
+  // صندوقه)، وما لي عند العملاء، وما عليّ للمصانع — كلٌّ في عيار حسابه — ثم
+  // النقد كذلك. لا صافيَ يُطرح: كلُّ رقمٍ في خانته
+  function debtSummary(st, fallbackK) {
+    const hd = holdings(st);
+    const ex = exposure(st);
+    const by = {};
+    const row = (k) => (by[k] = by[k] || { karat: +k, inHand: 0, cust: 0, fac: 0 });
+    for (const b of hd.boxes) row(b.karat).inHand = R(row(b.karat).inHand + b.weight, 3);
+    for (const c of ex.customers) {
+      if (!(c.gold18 > 0.0005)) continue;
+      const k = partyKarat(c.party, fallbackK);
+      row(k).cust = R(row(k).cust + Gold.g(c.gold18, k), 3);
+    }
+    for (const f of ex.factories) {
+      if (!(f.owe18 > 0.0005)) continue;
+      const k = partyKarat(f.party, fallbackK);
+      row(k).fac = R(row(k).fac + Gold.g(f.owe18, k), 3);
+    }
+    const rows = Object.values(by).filter((r) => Math.abs(r.inHand) > 0.0005 || r.cust || r.fac)
+      .sort((a, b) => b.karat - a.karat);
+    // والمجموع بمكافئ 18 (يُعرض بعيار المجاميع) — كلُّ خانةٍ وحدها
+    return { rows, cash: { inHand: hd.cash.amount, cust: ex.cusCash, fac: ex.facCash },
+      total18: { inHand: hd.gold18, cust: ex.cusGold18, fac: ex.facGold18 } };
   }
   function pieceById(st, id) {
     return holdings(st).pieces.find((p) => p.id === id) || null;
@@ -853,9 +916,9 @@
     shopById, isFactory, shopsOnly, factoriesOnly, saveShop, deleteShop,
     buildLine, lineToEntry, totals, checkLines, saveInvoice, deleteInvoice,
     voucherRows, saveVoucher, deleteVoucher,
-    effects, docsOf, statement, balance, balanceAround, allBalances,
+    effects, docsOf, statement, statementView, ST_FILTERS, balance, balanceAround, allBalances,
     woHistory, woLast, setTracks, searchSets, searchKey, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
-    GRADES, grade, boardSide, board, hasMovement, holdings, pieceById, docOrder,
+    GRADES, grade, boardSide, board, hasMovement, holdings, debtSummary, pieceById, docOrder,
     partyKarat, openHold, saveOpenHold,
     diamondOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };

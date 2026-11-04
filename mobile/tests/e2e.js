@@ -67,8 +67,8 @@ function check(name, cond, detail) {
   const tiles = await page.locator(".op-tile .op-t").allInnerTexts();
   check("الرئيسية: ستّ لوحاتٍ بالترتيب", tiles.join("،") ===
     "بيع للعميل،مرتجع للعميل،بضاعة من مصنع،إرجاع للمصنع،تحصيل من العميل،سداد للمصنع", tiles.join("،"));
-  check("ثم «كشف حساب» ثم «بحث عن طقم» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
-    "كشف حساب،بحث عن طقم،عمليات اليوم (0)" && (await page.locator(".kpis").count()) === 0);
+  check("ثم «كشف حساب» ثم «بحث عن طقم» ثم «الأطقم التي معي» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
+    "كشف حساب،بحث عن طقم،الأطقم التي معي (0)،عمليات اليوم (0)" && (await page.locator(".kpis").count()) === 0);
   check("الاسم: ÀUR، والشعار في الشريط", (await text("#bar h1")).includes("ÀUR") &&
     (await page.locator("#bar img.bar-logo").count()) === 1);
   check("خمسة أزرار سفلية بأيقونات: الحسابات والممتلكات", (await page.locator("#tabs button .i svg").count()) === 5 &&
@@ -147,17 +147,28 @@ function check(name, cond, detail) {
   await page.waitForTimeout(500);
   await shot("purchase_doc");
 
-  // الممتلكات: الطقمان في يدي
+  // الممتلكات (1.11): لوحة «المديونية والذهب الذي معي» أولاً، ولا لوحة أطقمٍ فيها
   await tap("#tabs button[data-tab=holdings]");
   await page.waitForURL(/#\/holdings/);
   await page.waitForTimeout(200);
+  check("الأطقم التي معي ليست في الممتلكات", (await page.locator("#view .wide-tile.sets").count()) === 0 &&
+    !(await text("#view")).includes("الأطقم التي معي"));
+  const dc = (await text(".debt-card")).replace(/\s+/g, " ");
+  check("لوحة المديونية أعلى الممتلكات (قبل «معي الآن»): عيار 18 — عليّ للمصانع 82.00",
+    (await page.evaluate(() => document.querySelector("#view > .card, #view > .debt-card") === document.querySelector(".debt-card"))) &&
+    dc.includes("المديونية والذهب الذي معي") && dc.includes("معي (كسر)") && dc.includes("لي عند العملاء") && dc.includes("عيار 18") && dc.includes("82.00"), dc);
+  await shot("holdings_debt");
+  // الرئيسية: «الأطقم التي معي» — المسمّى وحده (T1 12.00)، والسطر بلا اسم (20 جم) ليس طقماً
+  await tap("#tabs button[data-tab=home]");
+  await page.waitForURL(/#\/home/);
+  await page.waitForTimeout(200);
   const stt = (await text(".wide-tile.sets")).replace(/\s+/g, " ");
-  check("الأطقم التي معي: (2) ووزنها 32.00", stt.includes("الأطقم التي معي (2)") && stt.includes("32.00"), stt);
+  check("في الرئيسية: الأطقم التي معي (1) ووزنها 12.00 — بلا الوزن غير المسمّى", stt.includes("الأطقم التي معي (1)") && stt.includes("12.00"), stt);
   await page.locator(".wide-tile.sets").click();
   await page.waitForSelector(".sheet .pc-row");
-  check("ولمسها يعرض كل طقم: T1 بـ«معاينة» والآخر بلا صورة", (await page.locator(".sheet .pc-row").count()) === 2 &&
+  check("ولمسها يعرض الطقم T1 بـ«معاينة» — ولا «طقمٌ بلا اسم»", (await page.locator(".sheet .pc-row").count()) === 1 &&
     (await page.locator(".sheet .pc-row", { hasText: "T1" }).locator(".prev-btn").count()) === 1 &&
-    (await page.locator(".sheet .pc-row", { hasText: "طقمٌ بلا اسم" }).locator(".no-ph").count()) === 1);
+    !(await text(".sheet")).includes("طقمٌ بلا اسم"));
   await page.locator(".sheet .pc-row", { hasText: "T1" }).locator(".prev-btn").click();
   await page.waitForFunction(() => document.querySelectorAll(".sheet").length === 2 &&
     [...document.querySelectorAll(".sheet .photo-fig img")].filter((x) => (x.src || "").startsWith("data:image")).length === 2);
@@ -167,8 +178,10 @@ function check(name, cond, detail) {
   await shot("set_photos");
   await page.goBack();
   await page.waitForTimeout(250);
-  check("والرجوع يغلق الصور وحدها وتبقى قائمة الأطقم", (await page.locator(".sheet").count()) === 1 && (await page.locator(".sheet .pc-row").count()) === 2);
+  check("والرجوع يغلق الصور وحدها وتبقى قائمة الأطقم", (await page.locator(".sheet").count()) === 1 && (await page.locator(".sheet .pc-row").count()) === 1);
   await page.goBack();
+  await page.waitForTimeout(250);
+  await page.goto(url + "#/holdings");
   await page.waitForTimeout(250);
   const ft = (await text(".wide-tile.fac")).replace(/\s+/g, " ");
   check("عليّ للمصانع: 82.00 (50 سابق + 32 بضاعة)", ft.includes("عليّ للمصانع") && ft.includes("82.00"), ft);
@@ -179,18 +192,21 @@ function check(name, cond, detail) {
   await page.goBack();
   await page.waitForTimeout(200);
 
-  // بيعٌ لمحل: الطقم بلا اسم من الممتلكات، وسطرٌ بوزنٍ فقط
+  // بيعٌ لمحل: الوزن غير المسمّى (20 جم) بالوزن مباشرةً — لا يُختار من الأطقم — وسطرٌ بوزنٍ فقط
   await page.goto(url + "#/invoice/new?kind=sale");
   await page.waitForSelector(".sheet");
   check("اختيار المحل يعرض المحلات وحدها", (await page.locator(".sheet .list-item").count()) === 2);
   await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
   await page.waitForTimeout(150);
-  await tap("button:has-text('اختر من الطقوم التي معي (2)')");
+  await tap("button:has-text('اختر من الطقوم التي معي (1)')");
   await page.waitForSelector(".sheet");
-  await page.locator(".sheet .list-item", { hasText: "طقمٌ بلا اسم" }).click();
-  await page.waitForTimeout(200);
-  check("اختياره يعبّئ وزنه 20 ولا يأخذ أجر المصنع",
-    (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "20.00" &&
+  check("الاختيار من الأطقم: T1 وحده — والوزن بلا اسم ليس فيها", (await page.locator(".sheet .list-item").count()) === 1 &&
+    (await text(".sheet")).includes("T1") && !(await text(".sheet")).includes("طقمٌ بلا اسم"));
+  await page.goBack();
+  await page.waitForTimeout(250);
+  await fill("الوزن (جم)", "20");
+  check("الوزن يُكتب مباشرةً 20 ولا يأخذ أجر المصنع",
+    (await page.locator(".sheet").count()) === 0 &&
     (await page.locator("label.f", { hasText: "الأجور" }).locator("input").inputValue()) === "");
   check("والأجور المتفق عليها تُقترح للوزن (20 × 20 = 400)", (await page.locator("label.f", { hasText: "الأجور" }).locator("input").getAttribute("placeholder")) === "تلقائي 400.00");
   check("الرأس: «فاتورة بيع» واسم العميل والتاريخ — بلا خانات", (await text("#bar h1")).includes("فاتورة بيع") &&
@@ -327,8 +343,8 @@ function check(name, cond, detail) {
     const x = document.querySelector(".preview iframe").srcdoc; return x.includes("<th>الصورة</th>") && x.includes('class="phs"') && x.includes("💎 الماس (جم)"); }));
   check("وتحتها كل صورةٍ وحدها كاملة", (await page.locator("#view .photo-fig").count()) === 2);
   await shot("sale_doc_photo");
-  check("رُحّلت S-00002، وبقي معي طقمٌ واحد (المرتجع)", (await text("#bar h1")).includes("S-00002") &&
-    (await page.evaluate(() => Domain.holdings(App.state).pieces.length)) === 1);
+  check("رُحّلت S-00002، ولا طقم معي (المرتجع بالوزن بلا اسمٍ ليس طقماً)", (await text("#bar h1")).includes("S-00002") &&
+    (await page.evaluate(() => Domain.holdings(App.state).pieces.length)) === 0);
 
   // البحث عن طقم من الرئيسية: الاقتراحات من أول حرف، وبالوزن، ومع من هو الآن (1.6)
   await page.goto(url + "#/home");
@@ -398,6 +414,35 @@ function check(name, cond, detail) {
   const kp = await text(".st-bal");
   // ذهب 25 − 5 − 7 = 13 عليه · أجور 500 − 100 − 300 = 100 عليه
   check("كشف المحل: 13.00 جم و100.00 ريال عليه", kp.includes("13.00 جم عليه") && kp.includes("100.00 ريال عليه"), kp);
+  // 1.11: «عليه · له · الرصيد» وصفّ الإجمالي آخر الجدول
+  check("الأعمدة: التاريخ · العملية · عليه · له · الرصيد", (await page.locator(".st-table th").allInnerTexts()).join("،") === "التاريخ،العملية،عليه،له،الرصيد",
+    (await page.locator(".st-table th").allInnerTexts()).join("،"));
+  const rr = (await page.locator(".st-table tr.tap", { hasText: "R-00001" }).locator("td").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim());
+  check("المرتجع R-00001 في «له»: 5.00 جم و100.00 ريال — و«عليه» فارغ", rr[2] === "—" && rr[3] === "5.00 100.00", rr);
+  const tot = (await page.locator(".st-table tr.tot td").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim());
+  check("صفّ الإجمالي: عليه 25.00 و500.00 · له 12.00 و400.00 · الباقي 13.00 عليه و100.00 عليه",
+    tot[0].includes("الإجمالي") && tot[1] === "25.00 500.00" && tot[2] === "12.00 400.00" && tot[3] === "13.00 عليه 100.00 عليه", tot);
+  check("الفرز: الكل · المبيعات · المرتجعات · التحصيل", (await page.locator(".st-kinds .chip").allInnerTexts()).join("،") === "الكل،المبيعات،المرتجعات،التحصيل");
+  await page.locator(".st-kinds .chip", { hasText: "التحصيل" }).click();
+  await page.waitForURL(/f=collect/);
+  await page.waitForTimeout(250);
+  const cot = (await page.locator(".st-table tr.tot td").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim());
+  check("فرز التحصيل: سند RV-00001 وحده، وإجماليه في «له» 7.00 و300.00", (await page.locator(".st-table tr.tap").count()) === 1 &&
+    (await text(".st-table")).includes("RV-00001") && cot[0].includes("إجمالي التحصيل") && cot[2] === "7.00 300.00" && cot[1] === "—", cot);
+  check("وأعلاه إجمالي التحصيل، ورصيد الحساب كله كما هو", (await text(".st-bal")).includes("إجمالي التحصيل") &&
+    (await text(".st-bal")).includes("13.00 جم عليه"));
+  check("والمشاركة والطباعة تتبعان الفرز", await page.evaluate((id) => {
+    const x = PrintDoc.statementHtml(App.state, id, null, null, "gold", "collect");
+    return x.includes("كشف حساب — التحصيل") && x.includes("RV-00001") && !x.includes("S-00001") && x.includes("إجمالي التحصيل"); }, shopId));
+  await shot("statement_filter");
+  await page.locator(".st-kinds .chip", { hasText: "المبيعات" }).click();
+  await page.waitForURL(/f=sales/);
+  await page.waitForTimeout(250);
+  check("فرز المبيعات: S-00001 وحدها — 25.00 جم و500.00 ريال", (await page.locator(".st-table tr.tap").count()) === 1 &&
+    (await text(".st-table tr.tot")).replace(/\s+/g, " ").includes("25.00 500.00"));
+  await page.locator(".st-kinds .chip", { hasText: "الكل" }).click();
+  await page.waitForTimeout(250);
+  check("و«الكل» يعيد العمليات الثلاث", (await page.locator(".st-table tr.tap").count()) === 3 && !page.url().includes("f="));
   await page.locator(".st-table tr.tap", { hasText: "R-00001" }).click();
   await page.waitForSelector(".sheet .preview iframe");
   await page.waitForTimeout(300);
@@ -579,8 +624,16 @@ function check(name, cond, detail) {
     oh.sets.length === 1 && oh.sets[0].name === "OP1" && oh.sets[0].w18 === 8.167, JSON.stringify(oh));
   const b21o = (await page.locator(".box-tile", { hasText: "عيار 21" }).innerText()).replace(/\s+/g, " ");
   check("صندوق 21: 2 + 10 افتتاحي = 12.00", b21o.includes("12.00") && b21o.includes("افتتاحي 10.00"), b21o);
-  check("والأطقم التي معي زادت OP1", (await text(".wide-tile.sets")).includes("OP1") || (await page.evaluate(() =>
-    Domain.holdings(App.state).pieces.some((p) => p.name === "OP1" && p.fromKind === "opening"))));
+  check("والأطقم التي معي زادت OP1", await page.evaluate(() =>
+    Domain.holdings(App.state).pieces.some((p) => p.name === "OP1" && p.fromKind === "opening")));
+  const dc2 = (await text(".debt-card")).replace(/\s+/g, " ");
+  check("ولوحة المديونية: عيار 21 معي 12.00 · والنقد بالريال · والمجموع بعيار المجاميع", dc2.includes("عيار 21") && dc2.includes("12.00") &&
+    dc2.includes("النقد") && dc2.includes("المجموع"), dc2);
+  await page.locator(".debt-tbl tr", { hasText: "عيار 21" }).locator("td.tap").first().click();
+  await page.waitForSelector(".sheet");
+  check("ولمس «معي» لعيار 21 يفتح صندوقه", (await text(".sheet")).includes("صندوق ذهب عيار 21"));
+  await page.goBack();
+  await page.waitForTimeout(200);
   const hd1 = await page.evaluate(() => { const h = Domain.holdings(App.state); return { g: h.gold18, s: h.setsW18, c: h.cash.amount }; });
   check("وما معي زاد: 10×21/18 = 11.667 ذهباً · OP1 8.167 · و500 نقداً",
     Math.abs(hd1.g - hd0.g - 11.667) < 0.0015 && Math.abs(hd1.s - hd0.s - 8.167) < 0.0015 && Math.abs(hd1.c - hd0.c - 500) < 0.005, JSON.stringify([hd0, hd1]));

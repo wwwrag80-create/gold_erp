@@ -424,6 +424,14 @@
       h("span", { class: "op-ic" }, ico("search", 24)),
       h("span", { class: "grow" }, h("span", { class: "op-t" }, T("بحث عن طقم")), h("span", { class: "op-h" }, T("باسمه أو وزنه — ومع من هو الآن"))),
       ico("chevron", 20, "muted")));
+    // الأطقم التي معي (1.11): المسمّاة وحدها — عددها ووزنها، ولمسها يعرض كل طقمٍ وصوره
+    const hd = D.holdings(s), sk = vk();
+    v.append(h("button", { class: "wide-tile sets", onclick: () => piecesSheet(D.holdings(st())) },
+      h("span", { class: "op-ic" }, ico("gem", 24)),
+      h("span", { class: "grow" }, h("span", { class: "op-t" }, T("الأطقم التي معي ({0})", hd.pieces.length)),
+        h("span", { class: "op-h" }, hd.pieces.length ? T("{0} جم عيار {1} — اضغط لترى كل طقم وصوره", gw(hd.setsW18, sk), sk)
+          : T("لا أطقم معك الآن — الطقم هو ما سجّلت له اسماً في خانة «الطقم»"))),
+      ico("chevron", 20, "muted")));
     // عمليات اليوم
     const todays = [...s.invoices, ...s.vouchers].filter((d) => d.date === t);
     let tw = 0, tg = 0;
@@ -1532,14 +1540,18 @@
     const fac = D.isFactory(shop);
     const mode = q.view === "diamond" ? "diamond" : "gold";
     const from = q.from || "", to = q.to || "";
+    // الفرز (1.11): الكل · المبيعات · المرتجعات · التحصيل (وللمصنع: البضاعة · الإرجاع · السداد)
+    const filter = mode === "gold" && D.ST_FILTERS.includes(q.f) ? q.f : "";
     const k = pk(shop);
     const url = (o) => {
-      const x = Object.assign({ id, from, to, view: mode === "diamond" ? "diamond" : "" }, o);
-      const qs = ["from", "to", "view"].filter((key) => x[key]).map((key) => `${key}=${encodeURIComponent(x[key])}`).join("&");
+      const x = Object.assign({ id, from, to, view: mode === "diamond" ? "diamond" : "", f: filter }, o);
+      if (x.view === "diamond") x.f = "";
+      const qs = ["from", "to", "view", "f"].filter((key) => x[key]).map((key) => `${key}=${encodeURIComponent(x[key])}`).join("&");
       return `statement/${x.id}` + (qs ? "?" + qs : "");
     };
-    const html = P.statementHtml(s, id, from || null, to || null, mode);
-    const name = T("كشف {0}{1}", shop.name, mode === "diamond" ? T(" — الماس") : "");
+    const html = P.statementHtml(s, id, from || null, to || null, mode, filter);
+    const fl = filter ? P.filterLabel(fac, filter) : "";
+    const name = T("كشف {0}{1}", shop.name, mode === "diamond" ? T(" — الماس") : fl ? " — " + fl : "");
     // الشريط: الحساب يُبدَّل بلمسة، والمشاركة صورةً والطباعة أيقونتان
     setBar(T("كشف حساب"), h("span", { class: "sub bar-chips" },
       h("button", { type: "button", class: "chip-btn party", onclick: pickPartyThen(null, (nid) => replace(url({ id: nid }))) },
@@ -1575,6 +1587,10 @@
       h("div", { class: "seg sm" },
         h("button", { class: mode === "gold" ? "on" : "", onclick: () => replace(url({ view: "" })) }, T("ذهب")),
         h("button", { class: mode === "diamond" ? "on" : "", onclick: () => replace(url({ view: "diamond" })) }, T("💎 ماس")))));
+    if (mode === "gold") {
+      v.append(h("div", { class: "chips st-kinds" }, ["", ...D.ST_FILTERS].map((key) =>
+        h("button", { class: "chip" + (key === filter ? " on" : ""), onclick: () => replace(url({ f: key })) }, P.filterLabel(fac, key)))));
+    }
 
     // خانات الجدول: التاريخ يوماً وشهراً والسنة تحته؛ والحركة فوق رصيدها
     const sgn = (x) => (x > 0 ? "+" : "−") + f2(Math.abs(x));
@@ -1604,25 +1620,51 @@
       bal = h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("صافي الماس")),
         h("b", { class: "num" }, T("{0} جم", f2(f * res.diamond))));
     } else {
-      const res = D.statement(s, id, from || null, to || null);
+      // «عليه · له · الرصيد» (1.11): في كل خانةٍ الذهب فوق والنقد تحته — ثم صفّ
+      // الإجمالي: كم عليه، وكم له، وكم الباقي (عليه − له). وبالفرز: النوع وحده ومجموعه
+      const res = D.statementView(s, id, from || null, to || null, filter);
+      const cum = !!res.filter;
+      const amt = (g18, c) => {
+        const gv = G.g(g18, k);
+        const hg = Math.abs(gv) >= 0.005, hc = Math.abs(c) >= 0.005;
+        if (!hg && !hc) return h("td", { class: "m z" }, "—");
+        return h("td", { class: "m" }, h("span", { class: "gl num", dir: "ltr" }, hg ? f2(gv) : "—"),
+          h("span", { class: "cl num", dir: "ltr" }, hc ? f2(c) : "—"));
+      };
+      const balc = (g18, c) => {
+        const gv = G.g(g18, k);
+        const w = (x) => (cum || Math.abs(x) < 0.005 ? null : [" ", h("span", { class: "w" }, balWord(x, fac))]);
+        return h("td", { class: "m b" }, h("span", { class: "gl" }, h("b", { class: "num" }, f2(Math.abs(gv))), w(gv)),
+          h("span", { class: "cl" }, h("span", { class: "num" }, f2(Math.abs(c))), w(c)));
+      };
       for (const r of res.rows) {
-        const gv = G.g(r.gd - r.gc, k), cv = r.cd - r.cc;
-        const gb = G.g(r.gbal, k);
-        row(r, [dt(r.date), opCell(r),
-          mcell(r.kind === "prev" || Math.abs(gv) < 0.0005 ? "" : sgn(gv), f2(Math.abs(gb)), Math.abs(gb) < 0.005 ? "" : balWord(gb, fac)),
-          mcell(r.kind === "prev" || Math.abs(cv) < 0.005 ? "" : sgn(cv), f2(Math.abs(r.cbal)), Math.abs(r.cbal) < 0.005 ? "" : balWord(r.cbal, fac))]);
+        row(r, [dt(r.date), opCell(r), amt(r.gd, r.cd), amt(r.gc, r.cc), balc(r.gbal, r.cbal)]);
         if (r.doc) n++;
       }
-      head = [T("التاريخ"), T("العملية"), T("الذهب ({0})", k), T("النقد")];
-      bal = h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("الرصيد")),
-        goldBal(res.gold18, fac, k), h("span", { class: "muted" }, "·"), cashBal(res.cash, fac));
+      if (res.rows.length) {
+        const t = res.totals;
+        tbody.append(h("tr", { class: "tot" },
+          h("td", { class: "op", colspan: "2" }, h("b", null, cum ? T("إجمالي {0}", fl) : T("الإجمالي")),
+            h("small", null, cum ? T("{0} عملية", res.rows.length) : T("عليه − له = الباقي"))),
+          amt(t.gd, t.cd), amt(t.gc, t.cc), balc(t.gbal, t.cbal)));
+      }
+      head = [T("التاريخ"), T("العملية"), T("عليه"), T("له"), cum ? T("المجموع") : T("الرصيد")];
+      bal = cum
+        ? h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("إجمالي {0}", fl)),
+          h("b", { class: "num" }, T("{0} جم", gw(Math.abs(res.totals.gbal), k))), h("span", { class: "muted" }, "·"),
+          h("b", { class: "num" }, T("{0} ريال", f2(Math.abs(res.totals.cbal)))),
+          h("span", { class: "muted small st-all" }, T("رصيد الحساب كله: "), goldBal(res.gold18, fac, k), " · ", cashBal(res.cash, fac)))
+        : h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("الرصيد")),
+          goldBal(res.gold18, fac, k), h("span", { class: "muted" }, "·"), cashBal(res.cash, fac));
     }
     v.append(bal);
     if (!tbody.children.length) {
-      v.append(h("div", { class: "empty" }, mode === "diamond" ? T("لا ماس في الفترة") : T("لا حركة في الفترة")));
+      v.append(h("div", { class: "empty" }, mode === "diamond" ? T("لا ماس في الفترة")
+        : filter ? T("لا شيء من «{0}» في الفترة", fl) : T("لا حركة في الفترة")));
       return;
     }
-    v.append(h("table", { class: "st-table" + (mode === "diamond" ? " dia" : "") },
+    if (mode === "gold") v.append(h("div", { class: "muted small st-legend" }, T("في كل خانة: الذهب (جم عيار {0}) فوق، والنقد (ريال) تحته.", k)));
+    v.append(h("table", { class: "st-table" + (mode === "diamond" ? " dia" : " gold") },
       h("thead", null, h("tr", null, ...head.map((x) => h("th", null, x)))), tbody));
     if (n) v.append(h("div", { class: "muted small st-hint" }, T("اضغط على أي عملية لمعاينتها وصورها، ومنها تعديلها")));
   }
@@ -1993,7 +2035,12 @@
         ico("chevron", 18, "muted")));
     }
 
-    // ── معي الآن: صندوقٌ لكل عيار بوزنه في عياره، والنقد، والأطقم ──
+    // ── لوحة «المديونية والذهب الذي معي» (1.11): لكل عيارٍ ما معي (الكسر)، وما لي
+    // عند العملاء، وما عليّ للمصانع — ثم النقد، ثم المجموع بعيار المجاميع ──
+    const ex = D.exposure(s);
+    v.append(debtCard(s, hd, ex, k));
+
+    // ── معي الآن: صندوقٌ لكل عيار بوزنه في عياره، والنقد ──
     const tile = (icon, title, val, unit, sub, onclick, neg, cls) => h("button", { class: "box-tile" + (cls ? " " + cls : ""), onclick },
       h("div", { class: "spread" }, h("span", { class: "box-ic" }, ico(icon, 20)), ico("chevron", 18, "muted")),
       h("div", { class: "box-t" }, title),
@@ -2015,18 +2062,15 @@
       v.append(h("div", { class: "note-bar info", style: { margin: "0 0 12px" } },
         T("ما تحصّله من العملاء يظهر هنا في صندوق عياره، والنقد في صندوقه. وما تسدّده للمصانع يُخصم منها.")));
     }
-    // الأطقم التي معي: وزنها وعددها — ولمسها يعرض كل طقمٍ بزرّ «معاينة» لصوره
+    // (الأطقم التي معي انتقلت إلى لوحات الرئيسية — 1.11)
     const big = (cls, icon, title, val, unit, sub, onclick) => h("button", { class: "wide-tile big " + cls, onclick },
       h("span", { class: "op-ic" }, ico(icon, 24)),
       h("span", { class: "grow" }, h("span", { class: "op-t" }, title),
         h("span", { class: "big-v" }, h("span", { class: "num" }, val), h("span", { class: "u" }, unit)),
         h("span", { class: "op-h" }, sub)),
       ico("chevron", 20, "muted"));
-    v.append(big("sets", "gem", T("الأطقم التي معي ({0})", hd.pieces.length), gw(hd.setsW18, k), T(" جم عيار {0}", k),
-      hd.pieces.length ? T("{0} طقم — اضغط لترى كل طقم وصوره", hd.pieces.length) : T("لا أطقم معك الآن"), () => piecesSheet(hd)));
 
     // ── حساباتي: لي عند العملاء، وعليّ للمصانع — كلٌّ بعياره داخل القائمة ──
-    const ex = D.exposure(s);
     const facN = ex.factories.filter((x) => x.owe18 > 0.0005 || x.oweCash > 0.005).length;
     const cusN = ex.customers.filter((x) => x.gold18 > 0.0005 || x.cash > 0.005).length;
     v.append(h("div", { class: "sec-title" }, T("حساباتي")),
@@ -2040,6 +2084,46 @@
       quickBtn("coins", T("الرصيد الافتتاحي"), () => go("opening"))));
   }
 
+  // لوحة المديونية: جدولٌ صغير — العيار · معي (كسر) · لي عند العملاء · عليّ للمصانع.
+  // ولمس الخانة يفتح تفصيلها: صندوق العيار، أو العملاء، أو المصانع
+  function debtCard(s, hd, ex, k) {
+    const ds = D.debtSummary(s, k);
+    const cell = (val, dec, onclick) => {
+      const z = Math.abs(val) < (dec === 2 ? 0.005 : 0.0005);
+      return h("td", { class: (z ? "z" : val < 0 ? "neg" : "") + (onclick && !z ? " tap" : ""), onclick: z ? null : onclick },
+        z ? "—" : h("span", { class: "num", dir: "ltr" }, (val < 0 ? "−" : "") + f2(Math.abs(val))));
+    };
+    const tbody = h("tbody");
+    for (const r of ds.rows) {
+      const box = hd.boxes.find((b) => b.karat === r.karat);
+      tbody.append(h("tr", null, h("td", { class: "k" }, T("عيار {0}", r.karat), h("small", null, T("جم"))),
+        cell(r.inHand, 3, box ? () => boxSheet(box) : null),
+        cell(r.cust, 3, () => customersSheet(ex)), cell(r.fac, 3, () => factoriesSheet(ex))));
+    }
+    const c = ds.cash;
+    if (Math.abs(c.inHand) > 0.005 || c.cust > 0.005 || c.fac > 0.005) {
+      tbody.append(h("tr", { class: "cash" }, h("td", { class: "k" }, T("النقد"), h("small", null, T("ريال"))),
+        cell(c.inHand, 2, hd.cash.moves.length ? () => cashSheet(hd.cash) : null),
+        cell(c.cust, 2, () => customersSheet(ex)), cell(c.fac, 2, () => factoriesSheet(ex))));
+    }
+    // المجموع بعيار المجاميع حين تتعدّد العيارات (لا يُطرح منه شيء: كلٌّ في خانته)
+    if (ds.rows.length > 1) {
+      const t = ds.total18, g = (x) => G.g(x, k);
+      tbody.append(h("tr", { class: "tot" }, h("td", { class: "k" }, T("المجموع"), h("small", null, T("جم عيار {0}", k))),
+        cell(g(t.inHand), 3), cell(g(t.cust), 3), cell(g(t.fac), 3)));
+    }
+    const card = h("div", { class: "card debt-card" }, h("h2", null, ico("scale", 18), T("المديونية والذهب الذي معي")));
+    if (!tbody.children.length) {
+      card.append(h("div", { class: "muted small" }, T("لا ذهب معك ولا ديون بعد — يظهر هنا كل عيارٍ وحده: ما معك، وما لك عند العملاء، وما عليك للمصانع.")));
+      return card;
+    }
+    card.append(h("table", { class: "debt-tbl" },
+      h("thead", null, h("tr", null, h("th", null, T("العيار")), h("th", null, T("معي (كسر)")),
+        h("th", null, T("لي عند العملاء")), h("th", null, T("عليّ للمصانع")))), tbody),
+      h("div", { class: "muted small debt-hint" }, T("كل عيارٍ بوزنه في عياره — والعميل والمصنع في عيار حسابه. اضغط على أي رقمٍ لتفصيله.")));
+    return card;
+  }
+
   // ══ الرصيد الافتتاحي للممتلكات: ما كان معي قبل أول عملية في التطبيق ══
   function openingScreen() {
     const s = st();
@@ -2050,7 +2134,7 @@
     const goldIns = {};
     for (const x of G.KARATS) goldIns[x] = numInput({ value: oh.gold[x] || 0 });
     const cashIn = numInput({ value: oh.cash });
-    // الأطقم: اسمٌ اختياري، وعيار، ووزن (بعياره) — وما خرج منها بفاتورةٍ لا يُحذف
+    // الأطقم: اسمٌ (الطقم هو المسمّى — 1.11)، وعيار، ووزن (بعياره) — وما خرج منها بفاتورةٍ لا يُحذف
     const used = new Set();
     for (const d of s.invoices) for (const l of d.lines) if (l.src && l.src.startsWith("op:")) used.add(l.src.slice(3));
     const rows = oh.sets.map((x) => ({ id: x.id, name: x.name, karat: x.karat, weight: G.g(x.w18, x.karat), photos: x.photos }));
@@ -2059,7 +2143,7 @@
       setsBox.innerHTML = "";
       if (!rows.length) setsBox.append(h("div", { class: "muted small", style: { margin: "4px 0 8px" } }, T("لا أطقم — اضغط «+ طقم» لكل طقمٍ في يدك.")));
       rows.forEach((r, i) => {
-        const nm = h("input", { class: "in", value: r.name || "", placeholder: T("اسم الطقم (اختياري)"), dir: "auto",
+        const nm = h("input", { class: "in", value: r.name || "", placeholder: T("اسم الطقم"), dir: "auto",
           oninput: (e) => { r.name = e.target.value; } });
         const ks = h("select", { class: "in" }, G.KARATS.map((x) => h("option", { value: x, text: T("عيار {0}", x) })));
         ks.value = String(r.karat);
@@ -2084,7 +2168,8 @@
       h("div", { class: "card" }, h("h2", null, ico("coins", 18), T("ذهبٌ في يدي (كل عيارٍ بوزنه)")),
         h("div", { class: "grid2" }, ...G.KARATS.map((x) => field(T("عيار {0} (جم)", x), goldIns[x])))),
       h("div", { class: "card" }, h("h2", null, ico("receipt", 18), T("نقدٌ في يدي")), field(T("المبلغ (ريال)"), cashIn)),
-      h("div", { class: "card" }, h("h2", null, ico("gem", 18), T("أطقمٌ في يدي")), setsBox,
+      h("div", { class: "card" }, h("h2", null, ico("gem", 18), T("أطقمٌ في يدي")),
+        h("div", { class: "muted small", style: { marginBottom: "6px" } }, T("الطقم يُعرف باسمه — وما معك وزناً بلا اسمٍ اكتبه في «ذهبٌ في يدي» بعياره.")), setsBox,
         h("button", { class: "btn ghost block", onclick: () => { rows.push({ name: "", karat: vk(), weight: 0 }); renderSets(); } }, T("+ طقم"))),
       h("div", { class: "card" }, field(T("بتاريخ"), date),
         h("div", { class: "row", style: { marginTop: "10px", flexWrap: "wrap" } },

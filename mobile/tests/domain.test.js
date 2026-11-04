@@ -101,6 +101,31 @@ const sb = D.statement(st, b.id);
 check("الرصيد الافتتاحي أول سطرٍ في الكشف", sb.rows[0].kind === "opening" && sb.rows[0].gbal === -5, sb.rows[0]);
 check("ثم البيع فوقه", sb.gold18 === 7 && sb.cash === 340, [sb.gold18, sb.cash]);
 
+// ── كشف «عليه · له · الرصيد» والإجمالي والفرز (1.11) ──
+{
+  const all = D.statementView(st, a.id);
+  const t = all.totals;
+  check("الكل: مجموع «عليه» − مجموع «له» = الباقي = رصيد الحساب (ذهباً ونقداً)",
+    Num.pyRound(t.gd - t.gc, 3) === stm.gold18 && Num.pyRound(t.cd - t.cc, 2) === stm.cash && t.gbal === stm.gold18 && t.cbal === stm.cash, t);
+  check("وكل سطرٍ برصيده كما في الكشف", all.rows.length === stm.rows.length && all.rows.every((r, i) => r.gbal === stm.rows[i].gbal && r.cbal === stm.rows[i].cbal));
+  const pv = D.statementView(st, a.id, "2026-10-05", "2026-10-07");
+  check("بفترة: الرصيد السابق 33 في خانة «عليه»، والمجموع يطابق الباقي",
+    pv.rows[0].kind === "prev" && pv.rows[0].gd === 33 && pv.rows[0].gc === 0 && Num.pyRound(pv.totals.gd - pv.totals.gc, 3) === part.gold18, pv.totals);
+  const sales = D.statementView(st, a.id, null, null, "sales");
+  const saleW = Num.pyRound(st.invoices.filter((d) => d.shopId === a.id && d.kind === "sale").reduce((x, d) => x + d.totalW18, 0), 3);
+  check("فرز المبيعات: البيع وحده، ومجموعه = أوزان فواتير البيع", sales.filter === "sales" && sales.rows.length > 0 &&
+    sales.rows.every((r) => r.kind === "sale") && sales.totals.gd === saleW && sales.totals.gc === 0 && sales.totals.gbal === saleW, sales.totals);
+  const col = D.statementView(st, a.id, null, null, "collect");
+  check("فرز التحصيل: سندات التحصيل وحدها في «له»", col.rows.every((r) => r.kind === "receipt") && col.rows.length ===
+    st.vouchers.filter((v) => v.shopId === a.id && v.kind === "receipt").length && col.totals.gd === 0);
+  check("وفرزٌ غير معروف = الكل", D.statementView(st, a.id, null, null, "x").rows.length === all.rows.length && D.statementView(st, a.id, null, null, "x").filter === "");
+  const ob = D.statementView(st, b.id);
+  check("الرصيد الافتتاحي (له 5) في خانة «له»، والبيع في «عليه»: 12 − 5 = 7", ob.rows[0].gc === 5 && ob.rows[0].gd === 0 &&
+    ob.totals.gd === 12 && ob.totals.gc === 5 && ob.totals.gbal === 7, ob.totals);
+  check("وفرز المرتجعات بلا مرتجع: لا سطور ومجموعٌ صفر", D.statementView(st, b.id, null, null, "returns").rows.length === 0 &&
+    D.statementView(st, b.id, null, null, "returns").totals.gd === 0);
+}
+
 // ── تعديل الفاتورة يبقي رقمها، والحذف يلغي أثرها ──
 const edited = D.saveInvoice(st, { ...s2, lines: [...s2.lines, D.buildLine({ wageOnly: true, amount: 50 })] });
 check("التعديل يبقي الرقم ويضيف «أجر فقط»", edited.no === "S-00002" && edited.wages === 290, [edited.no, edited.wages]);
@@ -177,12 +202,13 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   let fb = D.balance(t, fac.id);
   check("عليّ للمصنع: 50 + 32 = 82 جم، و1000 + 160 = 1160 ريال", fb.gold18 === -82 && fb.cash === -1160, fb);
   let hd = D.holdings(t);
-  check("الطقمان في يدي من المصنع", hd.pieces.length === 2 && hd.pieces.every((p) => p.party.id === fac.id) && hd.setsW18 === 32, hd.pieces.map((p) => p.name));
+  // الطقم الذي معي هو المسمّى وحده (1.11): سطر الوزن بلا اسمٍ بضاعةٌ بالوزن لا طقم
+  check("طقمٌ واحد في يدي من المصنع (T1) — والسطر بلا اسم ليس طقماً", hd.pieces.length === 1 && hd.pieces[0].name === "T1" &&
+    hd.pieces[0].party.id === fac.id && hd.setsW18 === 20, hd.pieces.map((p) => p.name));
 
-  // بيع الطقم المسمّى بالاسم، وغير المسمّى باختياره من الممتلكات
-  const unnamed = hd.pieces.find((p) => !p.name);
+  // بيع الطقم المسمّى بالاسم، والوزن الآخر بالوزن مباشرةً
   const s1 = D.saveInvoice(t, { kind: "sale", shopId: shopA.id, date: "2026-02-02",
-    lines: [D.buildLine({ wo: "T1", reg: 20, wage: 12 }), D.buildLine({ reg: 12, wage: 12, src: unnamed.id })] });
+    lines: [D.buildLine({ wo: "T1", reg: 20, wage: 12 }), D.buildLine({ reg: 12, wage: 12 })] });
   hd = D.holdings(t);
   check("بعد بيعهما لا طقم في يدي", hd.pieces.length === 0, hd.pieces);
   check("والمحل عليه 32 جم و384 ريال", D.balance(t, shopA.id).gold18 === 32 && D.balance(t, shopA.id).cash === 384);
@@ -363,8 +389,9 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("ونقدٌ غير صحيح مرفوض", throws(() => D.saveOpenHold(t, { cash: "x" }), /النقد/));
   check("وطقمٌ بلا وزن مرفوض", throws(() => D.saveOpenHold(t, { sets: [{ name: "ط1", karat: 18, weight: 0 }] }), /اكتب وزن كل طقم/));
   check("وطقمٌ مكرّر الاسم مرفوض", throws(() => D.saveOpenHold(t, { sets: [{ name: "ط1", karat: 18, weight: 1 }, { name: "ط1", karat: 21, weight: 2 }] }), /مكرّر/));
+  check("وطقمٌ بلا اسم مرفوض — الطقم الذي معي هو المسمّى", throws(() => D.saveOpenHold(t, { sets: [{ name: " ", karat: 18, weight: 4 }] }), /اكتب اسم كل طقم/));
   D.saveOpenHold(t, { date: "2026-01-01", gold: { 21: 12, 18: 0, 24: 1.5 }, cash: 1000,
-    sets: [{ name: "T9", karat: 21, weight: 7 }, { name: "", karat: 18, weight: 4 }] });
+    sets: [{ name: "T9", karat: 21, weight: 7 }, { name: "T10", karat: 18, weight: 4 }] });
   const oh = D.openHold(t);
   check("يُحفظ: ذهب 21 = 12 و24 = 1.5 (والصفر لا يُحفظ) ونقد 1000", oh.gold[21] === 12 && oh.gold[24] === 1.5 && !(18 in oh.gold) && oh.cash === 1000);
   check("والأطقم بمكافئ 18: T9 7 جم ع21 = 8.167", oh.sets[0].w18 === 8.167 && oh.sets[0].karat === 21 && oh.sets[1].w18 === 4);
@@ -380,10 +407,10 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
 
   // التحصيل يزيد الصندوق، وبيع طقمٍ افتتاحي يُخرجه من يدي
   D.saveVoucher(t, { kind: "receipt", shopId: c21.id, date: "2026-02-01", rows: [{ kind: "gold", weight: 3, karat: 21 }, { kind: "cash", amount: 200 }] });
-  const unnamed = D.holdings(t).pieces.find((p) => !p.name);
+  const t10 = D.holdings(t).pieces.find((p) => p.name === "T10");
   D.saveInvoice(t, { kind: "sale", shopId: c21.id, date: "2026-02-02", lines: [
     D.buildLine({ wo: "T9", karat: 21, reg: 7, wages: 70 }),
-    D.buildLine({ reg: 4, wages: 40, src: unnamed.id })] });
+    D.buildLine({ wo: "T10", reg: 4, wages: 40, src: t10.id })] });
   hd = D.holdings(t);
   check("صندوق 21: 12 + 3 = 15 · والنقد 1200", hd.boxes.find((b) => b.karat === 21).weight === 15 && hd.cash.amount === 1200);
   check("بيع T9 باسمه والآخر باختياره: لا أطقم في يدي", hd.pieces.length === 0);
@@ -394,6 +421,50 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
 
   check("والرصيد الافتتاحي يبقى بعد النسخ والاسترجاع",
     D.openHold(D.fromBackup(JSON.parse(JSON.stringify(D.toBackup(t))))).sets.length === 2);
+}
+
+// ══ 1.11: الأطقم المسمّاة وحدها · لوحة «المديونية والذهب الذي معي» ══
+{
+  const t = D.newState();
+  const c21 = D.saveShop(t, { name: "عميل 21", karat: 21, openGold18: 7, openCash: 300, openDate: "2026-01-01" });
+  const c18 = D.saveShop(t, { name: "عميل 18", openGold18: 2.5, openDate: "2026-01-01" });
+  D.saveShop(t, { name: "عميل دائن", openGold18: -4, openDate: "2026-01-01" });
+  D.saveShop(t, { name: "مصنع 22", type: "factory", karat: 22, openGold18: -11, openCash: -150, openDate: "2026-01-01" });
+  const f18 = D.saveShop(t, { name: "مصنع 18", type: "factory", openGold18: -5, openDate: "2026-01-01" });
+  D.saveOpenHold(t, { date: "2026-01-01", gold: { 21: 12, 24: 1.5 }, cash: 1000, sets: [{ name: "OP1", karat: 21, weight: 7 }] });
+  D.saveVoucher(t, { kind: "receipt", shopId: c18.id, date: "2026-02-01", rows: [{ kind: "gold", weight: 3, karat: 18 }] });
+  const ds = D.debtSummary(t, 18);
+  const at = (k) => ds.rows.find((r) => r.karat === k) || {};
+  check("لكل عيارٍ صفّ — الأعلى أولاً: 24 · 22 · 21 · 18", ds.rows.map((r) => r.karat).join() === "24,22,21,18", ds.rows);
+  check("عيار 21: معي 12 · لي عند العملاء 6.00 (7 مكافئ 18) · عليّ 0", at(21).inHand === 12 && at(21).cust === 6 && at(21).fac === 0, at(21));
+  check("عيار 18: معي 3 (تحصيل) · وعميل 18 بعد التحصيل لا شيء عليه · وعليّ لمصنع 18: 5", at(18).inHand === 3 && at(18).cust === 0 && at(18).fac === 5, at(18));
+  check("عيار 22: عليّ لمصنع 22: 11 مكافئ 18 = 9.00 جم عيار 22", at(22).fac === 9 && at(22).inHand === 0, at(22));
+  check("عيار 24: معي 1.5 فقط", at(24).inHand === 1.5 && !at(24).cust && !at(24).fac);
+  check("العميل الدائن (له عندي) لا يُحسب في «لي عند العملاء»", ds.rows.every((r) => r.cust >= 0));
+  check("النقد: معي 1000 · لي عند العملاء 300 · عليّ للمصانع 150", ds.cash.inHand === 1000 && ds.cash.cust === 300 && ds.cash.fac === 150, ds.cash);
+  check("ولا تدخل الأطقم في اللوحة (الكسر وحده في «معي»)", at(21).inHand === 12);
+
+  // بيانات قديمة: طقمٌ افتتاحي بلا اسم — لا يُعدّ معي، ويُحفظ الرصيد إن كان خرج بفاتورة
+  t.settings.openHold = { date: "2026-01-01", gold: {}, cash: 0,
+    sets: [{ id: "old", name: "", karat: 18, w18: 4, photos: [] }, { id: "n1", name: "OP1", karat: 21, w18: 8.167, photos: [] }] };
+  let hd = D.holdings(t);
+  check("الطقم الافتتاحي القديم بلا اسم ليس معي: طقمٌ واحد OP1", hd.pieces.length === 1 && hd.pieces[0].name === "OP1" && hd.setsW18 === 8.167, hd.pieces);
+  D.saveInvoice(t, { kind: "sale", shopId: c21.id, date: "2026-02-03", lines: [D.buildLine({ reg: 4, wages: 40, src: "op:old" })] });
+  check("وإعادة حفظ الرصيد الافتتاحي تقبله بلا اسم ما دام خرج بفاتورة",
+    !throws(() => D.saveOpenHold(t, { date: "2026-01-01", sets: [{ id: "old", name: "", karat: 18, weight: 4 }, { id: "n1", name: "OP1", karat: 21, weight: 7 }] })));
+  check("لكن طقمٌ جديد بلا اسم مرفوض", throws(() => D.saveOpenHold(t, { date: "2026-01-01", sets: [{ id: "old", name: "", karat: 18, weight: 4 },
+    { name: "", karat: 21, weight: 1 }] }), /اكتب اسم كل طقم/));
+  // بضاعةٌ بالوزن من المصنع بلا اسم: تزيد ما عليّ للمصنع، ولا تظهر في الأطقم ولا في اختيار البيع
+  D.saveInvoice(t, { kind: "purchase", shopId: f18.id, date: "2026-02-04", lines: [D.buildLine({ reg: 30, wages: 100 }), D.buildLine({ wo: "NEW", reg: 9, wages: 10 })] });
+  hd = D.holdings(t);
+  check("بضاعة بلا اسم ليست طقماً معي — وNEW طقم", hd.pieces.map((p) => p.name).sort().join() === "NEW,OP1", hd.pieces.map((p) => p.name));
+  check("وما عليّ لمصنع 18 زاد 39: 5 + 39 = 44", D.debtSummary(t, 18).rows.find((r) => r.karat === 18).fac === 44);
+  // فرز كشف المصنع: البضاعة = فواتير البضاعة وحدها (في «له»)
+  const fv = D.statementView(t, f18.id, null, null, "sales");
+  check("كشف المصنع — فرز البضاعة: P وحدها في «له» 39", fv.fac && fv.rows.length === 1 && fv.rows[0].kind === "purchase" &&
+    fv.totals.gc === 39 && fv.totals.gd === 0, fv.totals);
+  const fa = D.statementView(t, f18.id);
+  check("والكل: الافتتاحي 5 + البضاعة 39 في «له»، والباقي −44 (عليّ)", fa.totals.gc === 44 && fa.totals.gbal === -44 && fa.gold18 === -44, fa.totals);
 }
 
 console.log(`\n${fail ? "✘" : "✔"} ${pass} نجح · ${fail} فشل`);

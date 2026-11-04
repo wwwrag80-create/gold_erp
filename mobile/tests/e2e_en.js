@@ -88,6 +88,7 @@ function check(name, cond, detail) {
   check("Tabs in English", (await page.locator("#tabs").innerText()).includes("Holdings") && (await page.locator("#tabs").innerText()).includes("Accounts"));
   check("Home tiles in English", (await page.locator(".op-tile .op-t").allInnerTexts()).join(",") ===
     "Sale to customer,Customer return,Goods from factory,Return to factory,Collect from customer,Pay factory");
+  check("“Sets I have” is a home tile", (await page.locator(".wide-tile.sets .op-t").innerText()).includes("Sets I have (0)"));
   const chev = await page.evaluate(() => { const s = document.querySelector(".ic-chevron svg"); return s ? getComputedStyle(s).transform : ""; });
   check("Chevrons point right (flipped)", /matrix\(-1/.test(chev), chev);
   await screen("home", null);
@@ -171,6 +172,10 @@ function check(name, cond, detail) {
   await page.waitForTimeout(300);
   check("Holdings: what I have now, no net position card", (await page.locator(".net-card").count()) === 0 &&
     (await page.locator(".boxes").innerText()).includes("Gold 21K"));
+  const debt = await page.locator(".debt-card").innerText();
+  check("Holdings starts with “Debts and the gold I have” per karat", debt.includes("Debts and the gold I have") &&
+    debt.includes("I have (scrap)") && debt.includes("Owed by customers") && debt.includes("I owe factories") && debt.includes("21K"), debt);
+  check("Sets are not in holdings", (await page.locator("#view .wide-tile.sets").count()) === 0);
   await screen("holdings", null);
   await screen("holdings_boxsheet", null, async () => { await page.locator(".box-tile").first().click(); await page.waitForSelector(".sheet"); });
   await page.goBack();

@@ -475,7 +475,25 @@ details.opts .in { margin-top: 6px; }
 .no-ph { flex: 0 0 auto; }
 .sheet .actions.doc-acts { margin: 4px 0 10px; gap: 6px; }
 .sheet .actions.doc-acts .btn { padding: 8px 6px; gap: 4px; white-space: nowrap; min-width: 0; font-size: 15px; }
-.wide-tile.big.sets .op-ic { background: var(--goldSoft); color: var(--goldDim); }
+.wide-tile.sets .op-ic { background: var(--goldSoft2); color: var(--goldDim); border: 1px solid var(--sumEdge); }
+
+/* ══ الممتلكات: لوحة «المديونية والذهب الذي معي» — كل عيارٍ صفّ (1.11) ══ */
+.debt-card { padding: 12px 10px; }
+.debt-tbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.debt-tbl th { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 2px 6px; text-align: center; line-height: 1.35; vertical-align: bottom; }
+.debt-tbl th:first-child, .debt-tbl td.k { width: 22%; text-align: start; }
+.debt-tbl td { padding: 9px 2px; border-top: 1px solid var(--line); text-align: center; font-size: 15px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.debt-tbl td.k { font-size: 13px; color: var(--goldDim); white-space: normal; }
+.debt-tbl td.k small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+.debt-tbl td.z { color: var(--muted); font-weight: 400; }
+.debt-tbl td.neg { color: var(--red); }
+.debt-tbl td.tap { cursor: pointer; border-radius: 8px; }
+.debt-tbl td.tap:active { background: var(--hover); }
+.debt-tbl tr.cash td { border-top-style: dashed; }
+.debt-tbl tr.tot td { background: var(--sumBg); color: var(--sumInk); border-top: 1px solid var(--sumEdge); }
+.debt-tbl tr.tot td.k { color: var(--sumInk); }
+.debt-hint { margin-top: 8px; }
 
 /* ══ كشف الحساب: جدولٌ واحد بسيط ══ */
 .st-filters { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
@@ -509,6 +527,23 @@ details.opts .in { margin-top: 6px; }
 .st-table tr.tap { cursor: pointer; }
 .st-table tr.tap:active td { background: var(--hover); }
 .st-hint { text-align: center; margin: 8px 0 4px; }
+/* «عليه · له · الرصيد» (1.11): الذهب فوق والنقد تحته، وصفّ الإجمالي آخر الجدول */
+.st-kinds { margin: -2px 0 10px; }
+.st-legend { margin: -2px 0 8px; }
+.st-bal .st-all { flex-basis: 100%; }
+.st-table.gold th:nth-child(3), .st-table.gold th:nth-child(4) { width: 20%; }
+.st-table.gold th:nth-child(5) { width: 27%; }
+.st-table.gold td { padding: 8px 3px; }
+.st-table.gold td.m .gl, .st-table.gold td.m .cl { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-table.gold td.m .gl { font-size: 13px; font-weight: 600; }
+.st-table.gold td.m .gl b { font-size: 13px; }
+.st-table.gold td.m .cl { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.st-table.gold td.m.z { color: var(--muted); }
+.st-table.gold th:nth-child(n+3), .st-table.gold td.m, .st-table.gold td.m .gl, .st-table.gold td.m .cl { text-align: center; }
+.st-table.gold td.b .w { font-size: 10.5px; margin-inline-start: 2px; }
+.st-table tr.tot td { background: var(--sumBg); color: var(--sumInk); border-top: 1px solid var(--sumEdge); }
+.st-table tr.tot td.op small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.st-table tr.tot td.m .gl, .st-table tr.tot td.m .gl b { font-weight: 700; }
 .nowrap { white-space: nowrap; }
 
 /* نافذة «يوجد تحديث جديد» في وسط الشاشة */
