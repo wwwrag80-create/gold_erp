@@ -2200,6 +2200,82 @@ def main():
               for r in _hist),
           str([r["kind"] for r in _hist]))
 
+    step("28ب3) حذف رقم تشغيل من دليل الموديلات ولوحة التحكم")
+    # طلب المستخدم: يُحذف رقم التشغيل من الدليل أو من «أرقام التشغيل
+    # المتاحة» فيختفي من الاثنين. والحذف حذفٌ لتوريده كأنه لم يدخل —
+    # لا إخفاءٌ وهو قائمٌ في الذهب المشغول.
+    from models import dash_panels as _dp2c
+    from models.inventory import (delete_work_order as _dwo2c,
+                                  work_order_delete_info as _dwi2c)
+    with db() as conn:
+        _b2c = _batch(conn, [
+            {"wo_no": "DEL-1", "gold": 11.0, "wage_per_gram": 10.0,
+             "model_no": "DELM"},
+            {"wo_no": "DEL-2", "gold": 9.0, "wage_per_gram": 10.0,
+             "model_no": "DELM"},
+            {"wo_no": "DEL-3", "gold": 7.0, "wage_per_gram": 10.0,
+             "model_no": "DELX"}], "2026-04-20", "admin")
+        _i2c = {r[1]: r[0] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'DEL-%'")}
+        create_sale(conn, cust, [{"work_order_id": _i2c["DEL-2"]}],
+                    "2026-04-22", "admin", apply_vat=False)
+        _w0c = _g2b(conn, "1200")
+        _t0c = _g2b(conn, "1100")
+    with db(readonly=True) as conn:
+        _inf = _dwi2c(conn, _i2c["DEL-1"])
+        _inf_sold = _dwi2c(conn, _i2c["DEL-2"])
+    check("قبل الحذف: يُعرف وزنه وموديله ودفعته، وأن معه أطقماً أخرى",
+          not _inf["blocked"] and abs(_inf["weight"] - 11.0) < 0.001
+          and _inf["model"] == "DELM" and _inf["others"] == 2
+          and _inf["date"] == "2026-04-20" and _inf["model_left"] == 1,
+          str(_inf))
+    check("والطقم المباع لا يُحذف — ويُقال رقم فاتورته",
+          bool(_inf_sold["blocked"]) and "فواتير" in _inf_sold["blocked"],
+          (_inf_sold["blocked"] or "")[:80])
+    with db() as conn:
+        _r2c = _dwo2c(conn, _i2c["DEL-1"], "admin")
+    with db(readonly=True) as conn:
+        _cat2c = _mc2b.full_catalog(conn)
+        _stk2c = [r["wo"] for r in _dp2c.stock_rows(conn)]
+        _deb2c = conn.execute(
+            "SELECT SUM(gold_debit) FROM journal_lines WHERE entry_id=?",
+            (_b2c["entry_id"],)).fetchone()[0]
+        _w1c, _t1c = _g2b(conn, "1200"), _g2b(conn, "1100")
+        _gc, _cc, _gvc, _cvc = ledger_balanced(conn)
+    check("حُذف من دليل الموديلات ومن «أرقام التشغيل المتاحة»",
+          "DEL-1" not in [i["wo"] for g in _cat2c.values()
+                          for b in g.values() for i in b]
+          and "DEL-1" not in _stk2c and "DEL-3" in _stk2c,
+          str(_stk2c[-5:]))
+    check("وخرج وزنه من دفعة توريده بتاريخها: الذهب المشغول −11 والخزينة +11",
+          abs(_deb2c - 16.0) < 0.001 and abs((_w0c - _w1c) - 11.0) < 0.001
+          and abs((_t1c - _t0c) - 11.0) < 0.001 and _gc and _cc,
+          f"قيد {_deb2c} · مشغول {_w0c}←{_w1c} · خزينة {_t0c}←{_t1c}")
+    def _del_sold():
+        with db() as conn:
+            _dwo2c(conn, _i2c["DEL-2"], "admin")
+    expect_error("والمباع يُرفض حذفه", _del_sold, "فواتير")
+    # آخر طقمٍ في موديله: يختفي الموديل نفسه من الدليل، وقيد الدفعة باقٍ
+    with db() as conn:
+        _dwo2c(conn, _i2c["DEL-3"], "admin")
+    with db(readonly=True) as conn:
+        _names2c = [m["model"] for m in _mc2b.list_models(conn)]
+        _deb2c2 = conn.execute(
+            "SELECT SUM(gold_debit) FROM journal_lines WHERE entry_id=?",
+            (_b2c["entry_id"],)).fetchone()[0]
+    check("حذف آخر طقمٍ في موديلٍ يُخرج الموديل من الدليل",
+          "DELX" not in _names2c and "DELM" in _names2c
+          and abs(_deb2c2 - 9.0) < 0.001, f"{_deb2c2}")
+    # الرقم التجميعي لا يُحذف من هنا
+    from models.inventory import get_or_create_bulk_wo as _gb2c
+    with db() as conn:
+        _blk = _gb2c(conn, "admin")
+    with db(readonly=True) as conn:
+        _bi = _dwi2c(conn, _blk["id"])
+    check("والرقم التجميعي لا يُحذف من الدليل", bool(_bi["blocked"])
+          and "تجميعي" in _bi["blocked"], (_bi["blocked"] or "")[:60])
+
     step("28ج) تعديل فاتورة لا يبيع طقماً مباعاً مرتين")
     # ══ الخلل: الذهب يخرج مرة ويُحاسَب عليه عميلان ══
     # عند تعديل فاتورة كان الإعفاء من فحص حالة الطقم يشمل السلة كلها

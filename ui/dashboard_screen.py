@@ -149,13 +149,21 @@ class DashboardScreen(QtWidgets.QWidget):
         self.btn_edit_wo.setToolTip(
             "يعدّل موديل الطقم أو رقم تشغيله (نقر مزدوج على الصف)")
         self.btn_edit_wo.clicked.connect(self.edit_stock_item)
-        self._stock_tools = [self.stock_search, self.btn_edit_wo]
+        self.btn_del_wo = kit.PushButton("🗑 حذف الطقم")
+        self.btn_del_wo.setObjectName("ghost")
+        self.btn_del_wo.setToolTip(
+            "يحذف رقم التشغيل المحدَّد (توريده) فيختفي من هنا ومن دليل"
+            " الموديلات — ويُخصم وزنه من حسابه في قيد دفعته")
+        self.btn_del_wo.clicked.connect(self.delete_stock_item)
+        self._stock_tools = [self.stock_search, self.btn_edit_wo,
+                             self.btn_del_wo]
 
         tools = QtWidgets.QHBoxLayout()
         tools.setSpacing(6)
         tools.addWidget(self.tbl_title, 1)
         tools.addWidget(self.stock_search)
         tools.addWidget(self.btn_edit_wo)
+        tools.addWidget(self.btn_del_wo)
         tools.addWidget(btn_up)
         tools.addWidget(btn_dn)
         tools.addWidget(btn_add_acc)
@@ -1022,6 +1030,19 @@ class DashboardScreen(QtWidgets.QWidget):
                        + "\n\nلا أثر محاسبي — الأوزان والأرصدة كما هي.")
         except Exception as e:
             err(self, e)
+
+    def delete_stock_item(self, *_):
+        """يحذف رقم التشغيل المحدَّد — فيختفي من هنا ومن دليل الموديلات."""
+        try:
+            if not self._is_stock():
+                raise ValueError("الحذف للوحة أرقام التشغيل المتاحة وحدها")
+            r = self._stock_row()
+        except Exception as e:
+            err(self, e)
+            return
+        from ui.wo_delete import delete_wo
+        if delete_wo(self, r["id"], self.user):
+            self.refresh()
 
     def _fill(self, cols, data, bold_last=False, weights=None,
               red_neg=False):

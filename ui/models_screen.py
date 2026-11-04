@@ -189,6 +189,12 @@ class ModelsScreen(QtWidgets.QWidget):
         self.tree.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
+        self.tree.setToolTip("انقر بالزر الأيمن على رقم تشغيل لتغيير موديله"
+                             " أو حذفه (أو حدّده واضغط Delete)")
+        sc = QtWidgets.QShortcut(QtGui.QKeySequence(QtGui.QKeySequence.Delete),
+                                 self.tree)
+        sc.setContext(QtCore.Qt.WidgetShortcut)
+        sc.activated.connect(self._delete_selected)
         self.model = QtGui.QStandardItemModel()
         self.model.setHorizontalHeaderLabels(HEADERS)
         self.tree.setModel(self.model)
@@ -759,7 +765,26 @@ class ModelsScreen(QtWidgets.QWidget):
         elif kind == "wo":
             m.addAction("✎ تغيير موديل هذا الطقم",
                         lambda: self.assign_model(val))
+            m.addSeparator()
+            m.addAction("🗑 حذف رقم التشغيل",
+                        lambda: self.delete_wo(val))
         m.exec_(self.tree.viewport().mapToGlobal(pos))
+
+    def delete_wo(self, wo_id):
+        """يحذف رقم التشغيل (توريده) فيختفي من الدليل ولوحة التحكم."""
+        from ui.wo_delete import delete_wo
+        if delete_wo(self, wo_id, self.user):
+            self.refresh(force=True)
+
+    def _delete_selected(self):
+        """زر Delete على رقم تشغيلٍ محدَّد في الشجرة."""
+        idx = self.tree.currentIndex()
+        if not idx.isValid():
+            return
+        item = self.model.itemFromIndex(idx.siblingAtColumn(0))
+        d = item.data(QtCore.Qt.UserRole) if item is not None else None
+        if d and d[0] == "wo":
+            self.delete_wo(d[1])
 
     # ══════════ صور الموديلات ══════════
     def add_image(self, model_no):

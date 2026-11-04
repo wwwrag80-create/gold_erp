@@ -1483,6 +1483,86 @@ def delete_supply_item(conn, wo_id, username, notes=""):
     return {"wo_no": wo["work_order_no"], "batch_kept": others}
 
 
+def work_order_delete_info(conn, wo_id):
+    """ما سيحدث لو حُذف رقم التشغيل — أو لماذا لا يُحذف (`blocked`).
+
+    للسؤال قبل الحذف من دليل الموديلات أو لوحة التحكم: الطقم ووزنه
+    وموديله، ودفعة توريده وتاريخها والحساب الذي دخله، وهل معه أطقم
+    أخرى في دفعته."""
+    from models import wo_moves
+    wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
+                      (wo_id,)).fetchone()
+    if not wo:
+        raise ValueError("رقم التشغيل غير موجود أو محذوف مسبقاً")
+    no = wo["work_order_no"]
+    keys = wo.keys()
+    blocked = None
+    if wo["is_bulk"] or is_bulk_no(no):
+        blocked = (f"الرقم {no} رصيدٌ تجميعي لكل دفعات توريده — لا يُحذف من"
+                   " هنا. عدّل دفعات توريده من «الوارد من التصنيع» أو من"
+                   " كشف حساب خزينة التصنيع.")
+    elif "is_service" in keys and wo["is_service"]:
+        blocked = f"{no} طقمٌ خدمي («أجر») يتبع فواتيره — لا يُحذف من هنا."
+    else:
+        moved = wo_moves.with_moves(conn, [wo_id]).get(no)
+        if moved:
+            blocked = (f"لا يُحذف الطقم {no}: له فواتير بيعٍ أو مرتجع"
+                       f" ({'، '.join(str(x) for x in moved)}).\n\n"
+                       "احذف هذه الفواتير أولاً فيعود كأنه لم يتحرّك، ثم"
+                       " احذفه. وإن كان موديله هو الخطأ فانقله لموديلٍ آخر"
+                       " بدل حذفه.")
+        elif wo["status"] != "in_stock":
+            blocked = f"الطقم {no} مباع — أعد فاتورته أولاً ثم احذفه."
+    entry = conn.execute(
+        "SELECT entry_date FROM journal_entries WHERE id=? AND is_deleted=0",
+        (wo["entry_id"],)).fetchone() if wo["entry_id"] else None
+    others = conn.execute(
+        "SELECT COUNT(*) FROM work_orders WHERE entry_id=? AND is_deleted=0"
+        " AND id<>?", (wo["entry_id"], wo_id)).fetchone()[0] \
+        if wo["entry_id"] else 0
+    dest = None
+    if entry:
+        dl = batch_dest_line(conn, wo["entry_id"])
+        if dl:
+            from models.accounts import account_name
+            dest = account_name(conn, dl["account_id"])
+    model = (wo["model_no"] or "").strip()
+    left = conn.execute(
+        "SELECT COUNT(*) FROM work_orders WHERE is_deleted=0 AND id<>?"
+        " AND TRIM(COALESCE(model_no,''))=?", (wo_id, model)).fetchone()[0] \
+        if model else 0
+    return {"id": wo_id, "wo_no": no, "model": model,
+            "weight": round(float(wo["registered_weight"] or 0), 3),
+            "date": entry["entry_date"] if entry else "",
+            "dest": dest or "", "others": others,
+            "model_left": left, "blocked": blocked}
+
+
+def delete_work_order(conn, wo_id, username, reason=""):
+    """يحذف رقم تشغيل من دليل الموديلات ولوحة التحكم — **بحذف توريده**.
+
+    الطقم لا يُخفى وهو قائمٌ في الحسابات: لو اختفى من الدليل وبقي وزنه
+    في الذهب المشغول لاختلف رصيد الحساب عن مجموع الأطقم. فحذفه هو حذف
+    توريده كأنه لم يدخل (`delete_supply_item`): يُخرج سطره من دفعته
+    ويُعدَّل قيدها بالفرق بتاريخها — أو يُحذف القيد إن كان وحده فيها.
+
+    ولا يُحذف ما تحرّك (له فاتورة بيعٍ أو مرتجع)، ولا الرقم التجميعي ولا
+    الطقم الخدمي: يُرفض بسببه (`work_order_delete_info`)."""
+    from services.audit import log_action
+    info = work_order_delete_info(conn, wo_id)
+    if info["blocked"]:
+        raise ValueError(info["blocked"])
+    r = delete_supply_item(conn, wo_id, username, notes=reason)
+    conn.execute("DELETE FROM wo_weight_edits WHERE work_order_id=?",
+                 (wo_id,))
+    log_action(conn, username, "delete", "work_orders", wo_id,
+               f"حذف رقم التشغيل {info['wo_no']}"
+               + (f" من الموديل {info['model']}" if info["model"] else "")
+               + f" · {_nf.f2(info['weight'], sep=False)} جم"
+               + (f" | {reason}" if reason else ""))
+    return {**info, "batch_kept": r["batch_kept"]}
+
+
 def _reweigh(conn, wo, d, entry_id, username):
     """فرق وزن توريد طقمٍ مفرد `d` — من يوم التعديل لا من أوله.
 
