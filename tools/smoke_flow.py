@@ -2334,6 +2334,120 @@ def main():
     check("والتوريد التالي بالرقم نفسه يبدأ رصيداً جديداً بموديله",
           abs(_nb[0] - 4.0) < 0.001 and _nb[1] == _IT2c, str(tuple(_nb)))
 
+    step("28ب4) حساب «ايطالي / نواعم» — كشف 0010 و00010 (5.1.9)")
+    # طلب المستخدم: في لوحة الصناديق حسابٌ خاص بالرقمين التجميعيين يعرض
+    # الوارد والمبيعات والمرتجعات ومن أين وإلى أين، مديناً ودائناً ورصيداً
+    # — صحيحاً بلا خطأٍ قائم أو قادم.
+    from models import italian as _it4
+    from models import dash_panels as _dp4
+    from models import invoices as _inv4
+    from models.entities import add_entity as _ae4
+    with db(readonly=True) as conn:
+        _s0 = _it4.statement(conn)
+    with db() as conn:
+        _c4 = _ae4(conn, "عميل ايطالي", "customer", username="admin")
+        _batch(conn, [{"wo_no": "00010", "gold": 30.0, "wage_per_gram": 8.0},
+                      {"wo_no": "00010", "gold": 10.0, "wage_per_gram": 8.0}],
+               "2026-05-01", "admin")
+        _w10 = conn.execute("SELECT id FROM work_orders WHERE"
+                            " work_order_no='00010' AND is_deleted=0"
+                            ).fetchone()["id"]
+        _sa4 = _inv4.create_sale(conn, _c4, [{"work_order_id": _w10,
+                                              "weight": 5.0}],
+                                 "2026-05-03", "admin", apply_vat=False)
+        _inv4.create_sale_return(conn, _c4, [{"work_order_id": _w10,
+                                              "weight": 2.0}],
+                                 "2026-05-04", "admin", apply_vat=False)
+        _inv4.create_sale(conn, _c4, [{"work_order_id": _w10,
+                                       "weight": 1.0}],
+                          "2026-05-05", "admin", apply_vat=False)
+    with db(readonly=True) as conn:
+        _s1 = _it4.statement(conn)
+        _new = [r for r in _s1["rows"] if r["date"] >= "2026-05-01"
+                and r["date"] <= "2026-05-05"]
+    check("الكشف: توريدان ثم بيعٌ إلى العميل ثم مرتجعٌ منه ثم بيع — بترتيبها",
+          [r["label"] for r in _new] == ["توريد", "توريد", "بيع", "مرتجع",
+                                         "بيع"]
+          and _new[2]["party"] == "إلى عميل ايطالي"
+          and _new[3]["party"] == "من عميل ايطالي"
+          and _new[0]["party"] == "من خزينة التصنيع",
+          str([(r["label"], r["party"]) for r in _new]))
+    check("مدينه الوارد ودائنه الصادر، والرصيد = رصيد البطاقتين بلا فرق",
+          abs((_s1["debit"] - _s0["debit"]) - 42.0) < 0.001
+          and abs((_s1["credit"] - _s0["credit"]) - 6.0) < 0.001
+          and abs(_s1["closing"] - _s1["card_total"]) < 0.001
+          and abs(_s1["gap"]) < 0.001,
+          f"مدين +{_s1['debit'] - _s0['debit']} · دائن"
+          f" +{_s1['credit'] - _s0['credit']} · فرق {_s1['gap']}")
+    # الخطأ القائم: تعديل بيعٍ قديمٍ من التجميعي (ليس آخر حركاته) لم يكن
+    # يُحرّك رصيده — فيختلف عن مستنداته
+    with db(readonly=True) as conn:
+        _it_old = _inv4.get_invoice_full(conn, _sa4["id"])[1][0]
+    with db() as conn:
+        _inv4.update_invoice(conn, _sa4["id"], [
+            {"work_order_id": _w10, "item_id": _it_old["item_id"],
+             "weight": 7.0}], "admin")
+    with db(readonly=True) as conn:
+        _s2 = _it4.statement(conn)
+    check("تعديل بيعٍ قديمٍ من 00010 (5 ← 7) يُنقص رصيده بالفرق — ولا فرقٌ"
+          " بينه وبين مستنداته",
+          abs((_s1["card_total"] - _s2["card_total"]) - 2.0) < 0.001
+          and abs(_s2["gap"]) < 0.001,
+          f"{_s1['card_total']} ← {_s2['card_total']} · فرق {_s2['gap']}")
+    with db(readonly=True) as conn:
+        _row4 = _dp4.account_rows(conn, ["1100", _dp4.ITALIAN])
+        _per4 = _it4.statement(conn, "2026-05-03", "2026-05-04")
+    check("صفّه في اللوحة برصيده، ولا يدخل إجماليها",
+          _row4[-1].get("virtual")
+          and abs(_row4[-1]["gold_balance"] - _s2["closing"]) < 0.001
+          and abs(_dp4.totals(_row4)["gold_balance"]
+                  - _row4[0]["gold_balance"]) < 0.001)
+    check("وبفترة: رصيد أولٌ ثم حركاتها وحدها",
+          [r["label"] for r in _per4["rows"]] == ["بيع", "مرتجع"]
+          and abs(_per4["closing"] - (_per4["opening"] - 7.0 + 2.0)) < 0.001,
+          f"أول {_per4['opening']} · آخر {_per4['closing']}")
+    # فرقٌ قديم بلا مستند (رصيدٌ قبل تفصيل الدفعات): سطرٌ أول باسمه
+    with db() as conn:
+        conn.execute("UPDATE work_orders SET registered_weight="
+                     "registered_weight+3 WHERE id=?", (_w10,))
+    with db(readonly=True) as conn:
+        _s3 = _it4.statement(conn)
+    check("وفرقٌ بلا مستند يظهر سطراً أول «رصيد سابق غير مفصّل» — فيطابق"
+          " آخرُ الكشف لوحةَ التحكم",
+          _s3["rows"][0]["label"] == "رصيد سابق غير مفصّل"
+          and abs(_s3["gap"] - 3.0) < 0.001
+          and abs(_s3["closing"] - _s3["card_total"]) < 0.001)
+    with db() as conn:
+        conn.execute("UPDATE work_orders SET registered_weight="
+                     "registered_weight-3 WHERE id=?", (_w10,))
+    _html4 = _pm.build_body("italian_statement", 0)
+    check("وورقةُ الكشف تُطبع بالأعمدة والإجمالي",
+          "كشف ايطالي / نواعم" in _html4 and "عميل ايطالي" in _html4
+          and "مدين — وارد" in _html4, f"{len(_html4)} حرفاً")
+    # يُزرع في لوحة الصناديق مرةً واحدة — وإن حُذف لا يعود
+    import json as _js4
+    _cfg4 = _dp4._cfg_path()
+    _seed4 = _dp4._seed_path()
+    _keep = (_cfg4.read_text(encoding="utf-8") if _cfg4.exists() else None,
+             _seed4.read_text(encoding="utf-8") if _seed4.exists() else None)
+    _cfg4.write_text(_js4.dumps([{"key": "boxes", "title": "صناديق الذهب"
+                                  " والنقد", "accounts": ["1400", "1100"]}],
+                                ensure_ascii=False), encoding="utf-8")
+    _seed4.write_text(_js4.dumps(["stock_wos"]), encoding="utf-8")
+    _p4 = _dp4.load_panels()
+    _box4 = next(p for p in _p4 if p["key"] == "boxes")
+    _box4["accounts"].remove(_dp4.ITALIAN)
+    _dp4.save_panels(_p4)
+    _p4b = _dp4.load_panels()
+    check("يُزرع «ايطالي / نواعم» في لوحة الصناديق القائمة مرةً واحدة",
+          _dp4.ITALIAN not in next(p for p in _p4b
+                                   if p["key"] == "boxes")["accounts"])
+    for _f, _v in ((_cfg4, _keep[0]), (_seed4, _keep[1])):
+        if _v is None:
+            _f.unlink()
+        else:
+            _f.write_text(_v, encoding="utf-8")
+
     step("28ج) تعديل فاتورة لا يبيع طقماً مباعاً مرتين")
     # ══ الخلل: الذهب يخرج مرة ويُحاسَب عليه عميلان ══
     # عند تعديل فاتورة كان الإعفاء من فحص حالة الطقم يشمل السلة كلها

@@ -968,7 +968,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
       ✔ إجمالي الفاتورة
       ✔ حساب الجهة والقيد (بالفرق الصافي)
       ✘ حالة الطقم (مباع/بالمخزن) — تبقى كما هي اليوم
-      ✘ رصيد الرقم التجميعي — يبقى كما هو
+      ✔ رصيد الرقم التجميعي — يتبع وزن الفاتورة دائماً (5.1.9): رصيدٌ
+        وزني لا حالة، فتعديل بيعٍ قديم منه يُغيّر رصيده بالفرق
 
     فالدفتر يصحّ، والمخزون يبقى على حقيقته. وإن أردت تحريك المخزون
     فعلاً فالأداة الصحيحة فاتورة جديدة أو تسوية وزن، لا تعديل مستند
@@ -1189,15 +1190,17 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
                 stock_home.bind(conn, wid, _src)
             # بند مُضاف: يحرّك المخزون فقط إن كانت هذه الفاتورة آخر
             # حركة للطقم — وإلا فحالته اليوم نتيجة حركة أحدث.
-            if preserve_stock and is_last_movement(conn, wid, invoice_id):
-                if wo["is_bulk"]:
-                    adjust_bulk_wo(
-                        conn, w if kind == "sale_return" else -w, username,
-                        wo_id=wid)
-                else:
-                    conn.execute(
-                        "UPDATE work_orders SET status=? WHERE id=?",
-                        (out_status, wid))
+            # والرقم التجميعي رصيدٌ وزني لا حالة (5.1.9): كل فاتورةٍ تحرّكه
+            # أيّاً كان تاريخها، وإلا اختلف رصيده عن مستنداته
+            if preserve_stock and wo["is_bulk"]:
+                adjust_bulk_wo(
+                    conn, w if kind == "sale_return" else -w, username,
+                    wo_id=wid)
+                touched.append(wo["work_order_no"])
+            elif preserve_stock and is_last_movement(conn, wid, invoice_id):
+                conn.execute(
+                    "UPDATE work_orders SET status=? WHERE id=?",
+                    (out_status, wid))
                 touched.append(wo["work_order_no"])
             dw += w
             dg += wages
@@ -1216,8 +1219,7 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
             "UPDATE invoice_items SET registered_weight=?,"
             " wage_per_gram=?, wages=?, karat=?, line_note=? WHERE id=?",
             (w, wage, wages, int(li.get("karat") or 0), _note, prev["id"]))
-        if wo["is_bulk"] and preserve_stock \
-                and is_last_movement(conn, wid, invoice_id):
+        if wo["is_bulk"] and preserve_stock:
             d = (w - ow)
             adjust_bulk_wo(
                 conn, d if kind == "sale_return" else -d, username,
@@ -1237,14 +1239,14 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
         # الفاتورة آخر حركة له — فيصير متاحاً للبيع فوراً.
         if prev["is_service"]:
             pass                     # أجرٌ فقط: لا مخزون يعود
+        elif preserve_stock and prev["is_bulk"]:
+            adjust_bulk_wo(
+                conn, -ow if kind == "sale_return" else ow, username,
+                wo_id=wid)
+            touched.append(prev["wno"])
         elif preserve_stock and is_last_movement(conn, wid, invoice_id):
-            if prev["is_bulk"]:
-                adjust_bulk_wo(
-                    conn, -ow if kind == "sale_return" else ow, username,
-                    wo_id=wid)
-            else:
-                conn.execute("UPDATE work_orders SET status=? WHERE id=?",
-                             (back_status, wid))
+            conn.execute("UPDATE work_orders SET status=? WHERE id=?",
+                         (back_status, wid))
             touched.append(prev["wno"])
         conn.execute("DELETE FROM invoice_items WHERE id=?",
                      (prev["id"],))

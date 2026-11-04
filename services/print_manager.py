@@ -1998,7 +1998,7 @@ _REPORT_TYPES = {
     "balance_tree", "equity_changes", "doc_edits", "stock_aging",
     "dossier", "scrap_karat", "party_group", "party_groups_all",
     "models_catalog", "models_received", "orders_production",
-    "mfg_target", "mfg_salary", "mfg_summary"}
+    "mfg_target", "mfg_salary", "mfg_summary", "italian_statement"}
 
 
 def as_shown(parent, doc_type, doc_id, kw):
@@ -2031,6 +2031,7 @@ def as_shown(parent, doc_type, doc_id, kw):
 
 
 DOC_TITLES = {
+    "italian_statement": "كشف ايطالي / نواعم",
     "balances": "أرصدة الحسابات", "turnover": "حركة الأطقم",
     "aging": "أعمار الديون", "tax_sales_register": "سجل المبيعات الضريبية",
     "purchases_register": "سجل المشتريات", "day_close": "إقفال اليوم",
@@ -2123,6 +2124,9 @@ def build_body(doc_type, doc_id, **kw):
                                         kw.get("per_page", 4),
                                         kw.get("with_bg", False),
                                         kw.get("only")))
+        if doc_type == "italian_statement":
+            return en(_tpl_italian(conn, 0, kw.get("date_from"),
+                                   kw.get("date_to")))
         if doc_type == "dash_panel":
             return en(_tpl_dash_panel(
                 conn, doc_id, kw.get("title", ""),
@@ -3615,6 +3619,48 @@ def _tpl_invoice_models(conn, invoice_id=0, per_page=4):
             + meta + pages)
 
 
+def _tpl_italian(conn, _id=0, date_from=None, date_to=None, **_kw):
+    """كشف «ايطالي / نواعم» (0010 · 00010) — كما تعرضه نافذته (5.1.9)."""
+    from models import italian
+    today = _qd(QtCore.QDate.currentDate())
+    st = italian.statement(conn, date_from, date_to)
+    rows = ""
+    if st["date_from"]:
+        rows += "<tr>" + cells(
+            "<td></td>", '<td class="r"><b>رصيد أول الفترة</b></td>',
+            "<td></td>", "<td></td>", "<td></td>", "<td></td>", "<td></td>",
+            f'<td><b>{_gw(st["opening"])}</b></td>') + "</tr>"
+    for r in st["rows"]:
+        rows += "<tr>" + cells(
+            f'<td>{en(r["date"]) or "—"}</td>',
+            f'<td class="r">{r["label"]}</td>',
+            f'<td class="r">{en(r["doc"]) or "—"}</td>',
+            f'<td>{en(r["no"]) or "—"}</td>',
+            f'<td class="r">{r["party"]}</td>',
+            f'<td>{_gw(r["debit"]) if r["debit"] else "—"}</td>',
+            f'<td>{_gw(r["credit"]) if r["credit"] else "—"}</td>',
+            f'<td>{_gw(r["balance"])}</td>') + "</tr>"
+    if not st["rows"]:
+        rows += f'<tr><td {TD} colspan="8">لا حركة في الفترة</td></tr>'
+    head = cells(thw("التاريخ", 10), thw("العملية", 10), thw("المستند", 13),
+                 thw("الرقم", 7), thw("من / إلى", 24),
+                 thw(f"مدين — وارد ({_kunit()})", 12),
+                 thw(f"دائن — صادر ({_kunit()})", 12),
+                 thw(f"الرصيد ({_kunit()})", 12))
+    foot = cells(thw("الإجمالي"), thw(""), thw(""), thw(""), thw(""),
+                 thw(_gw(st["debit"])), thw(_gw(st["credit"])),
+                 thw(_gw(st["closing"])))
+    table = f"{TBL}<tr>{head}</tr>{rows}<tr>{foot}</tr></table>"
+    per = " · ".join(f"{c['no']}: {_gw(c['balance'])}" for c in st["cards"])
+    span = (f' &nbsp;·&nbsp; الفترة: <b>{en(st["date_from"] or "البداية")}</b>'
+            f' إلى <b>{en(st["date_to"] or "الآن")}</b>'
+            if st["date_from"] or st["date_to"] else "")
+    note = (f'<div {WIDE}>الرقمان التجميعيان 0010 و00010 — الوارد مدين'
+            f' والصادر دائن. الرصيد الحالي: {per or "—"}{span}</div>')
+    return (_header("كشف ايطالي / نواعم", "—", today, show_meta=False)
+            + note + table)
+
+
 def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
                     ratios=None, date_from=None, date_to=None,
                     search=""):
@@ -3689,7 +3735,7 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
         rows = dp.profit_view(rows)
     body = "".join(
         "<tr>" + cells(
-            f'<td class="r">{r["code"]} — {r["name"]}</td>',
+            f'<td class="r">{r["name"] if r.get("virtual") else str(r["code"]) + " — " + r["name"]}</td>',
             f'<td>{_gw(r["gold_debit"])}</td>',
             f'<td>{_gw(r["gold_credit"])}</td>',
             f'<td>{_gw(r["gold_balance"])}</td>',
@@ -4934,6 +4980,7 @@ BUILDERS = {
     "model_order": _tpl_model_order,
     "orders_production": _tpl_orders_production,
     "dash_panel": _tpl_dash_panel,
+    "italian_statement": _tpl_italian,
     "model_photos": _tpl_model_photos,
     "aging": _tpl_aging,
     "day_close": _tpl_day_close,

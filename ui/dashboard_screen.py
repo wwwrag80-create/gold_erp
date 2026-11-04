@@ -24,6 +24,11 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err,
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
 
+def _acc_label(r):
+    """اسم الصف: «الرمز — الاسم» للحساب، والاسم وحده لصفّ «ايطالي / نواعم»."""
+    return r["name"] if r.get("virtual") else f"{r['code']} — {r['name']}"
+
+
 def ACC_COLS_NOW():
     """عناوين أعمدة الأرصدة بعيار المصنع الفعّال."""
     return ["الاسم", f"رصيد الذهب ({kv.unit()})", "الرصيد النقدي (ريال)"]
@@ -426,6 +431,8 @@ class DashboardScreen(QtWidgets.QWidget):
             dlg.setWindowTitle("إضافة حساب للجدول")
             dlg.setMinimumWidth(460)
             cb = search_combo("اكتب رقم الحساب أو اسمه…")
+            # صفّ «ايطالي / نواعم» (0010 · 00010) — كشفٌ من المستندات
+            cb.addItem("ايطالي / نواعم — الرقمان 0010 و00010", dp.ITALIAN)
             for a in accs:
                 cb.addItem(f"{a['code']} — {a['name']}", a["code"])
             cb.clear_selection()
@@ -694,6 +701,8 @@ class DashboardScreen(QtWidgets.QWidget):
             if p.get("kind") == "scrap" and self._rows[i].get("karat"):
                 return self._open_scrap_karat(self._rows[i]["karat"])
             code = self._rows[i].get("code")
+            if code == dp.ITALIAN:
+                return self.open_italian(p)
             if code and self.on_drill_code:
                 self.on_drill_code(code)
         except Exception:
@@ -806,7 +815,7 @@ class DashboardScreen(QtWidgets.QWidget):
                     f"{x['title']}: "
                     + ("—" if x["pct"] is None else f"{x['pct']:,.1f}%")
                     for x in bl) or "—"
-                data.append((txt, f"{r['code']} — {r['name']}",
+                data.append((txt, _acc_label(r),
                              money(kv.g(r['gold_balance'])),
                              money(r['cash_balance'])))
             vals = [x["pct"] for x in bars if x["pct"] is not None]
@@ -817,7 +826,7 @@ class DashboardScreen(QtWidgets.QWidget):
             self._fill(cols, data, bold_last=True,
                        weights=[26, 34, 20, 20], red_neg=pnl)
         else:
-            data = [(f"{r['code']} — {r['name']}",
+            data = [(_acc_label(r),
                      money(kv.g(r['gold_balance'])),
                      money(r['cash_balance'])) for r in rows]
             data.append(("الإجمالي", money(kv.g(t['gold_balance'])),
@@ -831,7 +840,10 @@ class DashboardScreen(QtWidgets.QWidget):
             f"الإجمالي — رصيد الذهب: {money(kv.g(t['gold_balance']))} "
             f"جم {kv.label()}"
             f"   ·   الرصيد النقدي: {money(t['cash_balance'])} ريال"
-            + ("   ·   الموجب ربح والسالب خسارة" if pnl else ""))
+            + ("   ·   الموجب ربح والسالب خسارة" if pnl else "")
+            + ("   ·   «ايطالي / نواعم» خارج الإجمالي (وزنه داخل الذهب"
+               " المشغول) — انقر عليه مرتين لكشفه"
+               if any(r.get("virtual") for r in rows) else ""))
         self._render_ratios(rows, p)      # الصفوف بإشارتها المعروضة
 
     def _render_compare(self, conn, p, d1, d2):
@@ -850,7 +862,7 @@ class DashboardScreen(QtWidgets.QWidget):
         data = []
         for r in rows:
             data.append((
-                f"{r['code']} — {r['name']}",
+                _acc_label(r),
                 f"{_nf.f2(kv.g(r['gold']))}", f"{_nf.f2(kv.g(r['gold_prev']))}",
                 f"{_nf.f2(kv.g(r['gold_diff']), sign=True)}", _pct(r["gold_pct"]),
                 f"{_nf.f2(r['cash'])}", f"{_nf.f2(r['cash_prev'])}",
@@ -1047,6 +1059,16 @@ class DashboardScreen(QtWidgets.QWidget):
         from ui.wo_delete import delete_wo
         if delete_wo(self, r["id"], self.user):
             self.refresh()
+
+    def open_italian(self, p=None):
+        """كشف «ايطالي / نواعم» بفترة اللوحة المعروضة."""
+        try:
+            from ui.italian_statement import ItalianStatementDialog
+            p = p or self.panels[min(self.current, len(self.panels) - 1)]
+            ItalianStatementDialog(self, p.get("date_from") or None,
+                                   p.get("date_to") or None).exec_()
+        except Exception as e:
+            err(self, e)
 
     def _fill(self, cols, data, bold_last=False, weights=None,
               red_neg=False):

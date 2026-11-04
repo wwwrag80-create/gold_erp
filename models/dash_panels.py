@@ -12,9 +12,11 @@ import json
 from pathlib import Path
 
 # اللوحات الافتراضية عند أول تشغيل
+ITALIAN = "@italian"        # صفّ «ايطالي / نواعم» (models.italian) — لا حساب
+
 DEFAULTS = [
     {"key": "boxes", "title": "الصناديق",
-     "accounts": ["1400", "1500", "1100"], "unit": "cash"},
+     "accounts": ["1400", "1500", "1100", ITALIAN], "unit": "cash"},
     {"key": "loss", "title": "الذهب الفاقد",
      "accounts": ["5110"]},
     {"key": "sales", "title": "المبيعات",
@@ -30,6 +32,9 @@ DEFAULTS = [
 # والزرع يُسجَّل في ملفٍ مجاور، فإن حذف اللوحة لم تعد تُزرع ثانية —
 # وهو الفرق بين «أضِف ما ينقص» و«أعِد ما حُذف».
 SEEDED = ["stock_wos"]
+# وصفوفٌ تُزرع مرةً واحدة في لوحةٍ قائمة (5.1.9): «ايطالي / نواعم» في لوحة
+# الصناديق — وإن حذفه المستخدم لم يُزرع ثانية
+SEEDED_ROWS = {"italian_row": ITALIAN}
 
 
 def _cfg_path():
@@ -54,6 +59,14 @@ def _seed_new(panels):
         done = []
     have = {str(x.get("key") or "") for x in panels}
     added = False
+    for key, code in SEEDED_ROWS.items():
+        if key in done:
+            continue
+        box = _boxes_panel(panels)
+        if box is not None and code not in box["accounts"]:
+            box["accounts"].append(code)
+            added = True
+        done.append(key)
     for key in SEEDED:
         if key in done or key in have:
             continue
@@ -71,6 +84,19 @@ def _seed_new(panels):
     if added:
         save_panels(panels)
     return panels
+
+
+def _boxes_panel(panels):
+    """لوحة الصناديق: بمفتاحها، أو باسمٍ فيه «صناديق»، أو بحساب خزينة
+    التصنيع أو النقدية."""
+    acc = [p for p in panels if (p.get("kind") or "accounts") == "accounts"]
+    for test in (lambda p: p.get("key") == "boxes",
+                 lambda p: "صناديق" in str(p.get("title") or ""),
+                 lambda p: "1100" in p["accounts"] or "1400" in p["accounts"]):
+        hit = next((p for p in acc if test(p)), None)
+        if hit is not None:
+            return hit
+    return None
 
 
 # ══ الفترة: يُختار اسمُها فتُحسب تواريخها تلقائياً (4.49) ══
@@ -232,6 +258,10 @@ def account_rows(conn, codes, date_from=None, date_to=None):
     """
     out = []
     for code in codes:
+        if code == ITALIAN:
+            from models import italian
+            out.append(italian.panel_row(conn, date_from, date_to))
+            continue
         ids = _subtree_ids(conn, code)
         if not ids:
             continue
@@ -410,6 +440,8 @@ def pnl_range(per="year", m=0, start=None, today=None):
 
 
 def totals(rows):
+    # صفّ «ايطالي / نواعم» للعرض: وزنه داخل الذهب المشغول، فلا يُجمع
+    rows = [r for r in rows if not r.get("virtual")]
     return {
         "gold_debit": round(sum(r["gold_debit"] for r in rows), 3),
         "gold_credit": round(sum(r["gold_credit"] for r in rows), 3),
@@ -545,7 +577,7 @@ def compare_rows(conn, codes, date_from, date_to):
         cur_c = round(c["cash_debit"] + c["cash_credit"], 2)
         prev_c = round(p["cash_debit"] + p["cash_credit"], 2)
         out.append({
-            "code": code, "name": c["name"],
+            "code": code, "name": c["name"], "virtual": c.get("virtual"),
             "gold": cur_g, "gold_prev": prev_g,
             "gold_diff": round(cur_g - prev_g, 3),
             "gold_pct": _pct(cur_g, prev_g),
@@ -558,6 +590,7 @@ def compare_rows(conn, codes, date_from, date_to):
 
 def compare_totals(rows):
     """إجمالي المقارنة — صف الإجمالي أسفل الجدول."""
+    rows = [r for r in rows if not r.get("virtual")]
     cg = round(sum(r["gold"] for r in rows), 3)
     pg = round(sum(r["gold_prev"] for r in rows), 3)
     cc = round(sum(r["cash"] for r in rows), 2)
