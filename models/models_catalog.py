@@ -327,12 +327,27 @@ def model_names(conn):
         " AND TRIM(model_no)<>'' ORDER BY m")]
 
 
+def _italian_guard(old=None, new=None):
+    """موديل «ايطاليات» للرقمين التجميعيين وحدهما (5.1.8): لا يُعاد
+    تسميته ولا يُحذف ولا يُعطى لغيرهما."""
+    from models.inventory import BULK_LABEL, ITALIAN_MODEL
+    if old is not None and str(old).strip() == ITALIAN_MODEL:
+        raise ValueError(
+            f"موديل «{ITALIAN_MODEL}» ثابتٌ للرقمين التجميعيين {BULK_LABEL}"
+            " — لا يُعاد تسميته ولا يُحذف.")
+    if new is not None and str(new).strip() == ITALIAN_MODEL:
+        raise ValueError(
+            f"موديل «{ITALIAN_MODEL}» خاصٌّ بالرقمين التجميعيين {BULK_LABEL}"
+            " — اختر اسماً آخر.")
+
+
 def rename_model(conn, old_no, new_no, username):
     """يعيد تسمية موديل — تصنيف وصفي، بلا أي أثر مالي."""
     from services.audit import log_action
     new_no = str(new_no or "").strip()
     if not new_no:
         raise ValueError("أدخل رقم الموديل الجديد")
+    _italian_guard(old=old_no, new=new_no)
     cur = conn.execute(
         "UPDATE work_orders SET model_no=? WHERE TRIM(model_no)=?"
         " AND is_deleted=0", (new_no, str(old_no).strip()))
@@ -373,10 +388,18 @@ def assign_model(conn, wo_id, model_no, username):
     from services.audit import log_action
     m = str(model_no or "").strip() or None
     wo = conn.execute(
-        "SELECT work_order_no FROM work_orders WHERE id=? AND is_deleted=0",
-        (wo_id,)).fetchone()
+        "SELECT work_order_no, is_bulk, model_no FROM work_orders"
+        " WHERE id=? AND is_deleted=0", (wo_id,)).fetchone()
     if not wo:
         raise ValueError("الطقم غير موجود")
+    from models.inventory import ITALIAN_MODEL, is_bulk_no, model_for
+    if wo["is_bulk"] or is_bulk_no(wo["work_order_no"]):
+        if m != ITALIAN_MODEL:
+            raise ValueError(
+                f"رقم التشغيل {wo['work_order_no']} موديله «{ITALIAN_MODEL}»"
+                " دائماً — لا يقبل موديلاً آخر.")
+    else:
+        m = model_for(wo["work_order_no"], m)
     conn.execute("UPDATE work_orders SET model_no=? WHERE id=?", (m, wo_id))
     log_action(conn, username, "update", "work_orders", wo_id,
                f"ربط الطقم {wo['work_order_no']} بالموديل {m or '—'}")
@@ -759,6 +782,7 @@ def delete_model(conn, model_no, username, reason=""):
     name = str(model_no or "").strip()
     if not name:
         raise ValueError("حدّد الموديل المراد حذفه")
+    _italian_guard(old=name)
     n = conn.execute(
         "SELECT COUNT(*) c FROM work_orders"
         " WHERE is_deleted=0 AND TRIM(COALESCE(model_no,''))=?",

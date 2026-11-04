@@ -152,8 +152,8 @@ class DashboardScreen(QtWidgets.QWidget):
         self.btn_del_wo = kit.PushButton("🗑 حذف الطقم")
         self.btn_del_wo.setObjectName("ghost")
         self.btn_del_wo.setToolTip(
-            "يحذف رقم التشغيل المحدَّد (توريده) فيختفي من هنا ومن دليل"
-            " الموديلات — ويُخصم وزنه من حسابه في قيد دفعته")
+            "يحذف رقم التشغيل المحدَّد (والتجميعي كذلك) فيختفي من هنا ومن"
+            " دليل الموديلات — بلا أي أثر على الأرصدة")
         self.btn_del_wo.clicked.connect(self.delete_stock_item)
         self._stock_tools = [self.stock_search, self.btn_edit_wo,
                              self.btn_del_wo]
@@ -990,6 +990,10 @@ class DashboardScreen(QtWidgets.QWidget):
             if r["bulk"]:
                 e_wo.setEnabled(False)
                 e_wo.setToolTip(f"الرقم {r['wo']} محجوز للرصيد التجميعي")
+                from models.inventory import ITALIAN_MODEL
+                cb.setCurrentText(ITALIAN_MODEL)
+                cb.setEnabled(False)
+                cb.setToolTip(f"موديل الرقم التجميعي «{ITALIAN_MODEL}» دائماً")
             note = QtWidgets.QLabel(
                 "رقم التشغيل والموديل تصنيفٌ وصفي — تعديلهما لا يمسّ "
                 "أي رصيد أو قيد. ويتبع الرقمَ الجديدُ بياناتُ القيود "

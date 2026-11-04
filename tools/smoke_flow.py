@@ -2200,13 +2200,17 @@ def main():
               for r in _hist),
           str([r["kind"] for r in _hist]))
 
-    step("28ب3) حذف رقم تشغيل من دليل الموديلات ولوحة التحكم")
-    # طلب المستخدم: يُحذف رقم التشغيل من الدليل أو من «أرقام التشغيل
-    # المتاحة» فيختفي من الاثنين. والحذف حذفٌ لتوريده كأنه لم يدخل —
-    # لا إخفاءٌ وهو قائمٌ في الذهب المشغول.
+    step("28ب3) حذف رقم تشغيل — حذفاً فقط بلا أثر على الأرصدة (5.1.8)")
+    # طلب المستخدم: أي طقمٍ أو رقمٍ تجميعي أو رقم تشغيل يُحذف من دليل
+    # الموديلات ولوحة التحكم فيختفي منهما، ولا تتأثر خزينة التصنيع ولا
+    # الذهب المشغول — قيد التوريد والفواتير كما هي.
     from models import dash_panels as _dp2c
+    from models import invoices as _inv2c
     from models.inventory import (delete_work_order as _dwo2c,
-                                  work_order_delete_info as _dwi2c)
+                                  update_supply_batch as _usb2c,
+                                  work_order_delete_info as _dwi2c,
+                                  get_or_create_bulk_wo as _gb2c,
+                                  ITALIAN_MODEL as _IT2c)
     with db() as conn:
         _b2c = _batch(conn, [
             {"wo_no": "DEL-1", "gold": 11.0, "wage_per_gram": 10.0,
@@ -2218,63 +2222,117 @@ def main():
         _i2c = {r[1]: r[0] for r in conn.execute(
             "SELECT id, work_order_no FROM work_orders"
             " WHERE work_order_no LIKE 'DEL-%'")}
-        create_sale(conn, cust, [{"work_order_id": _i2c["DEL-2"]}],
-                    "2026-04-22", "admin", apply_vat=False)
-        _w0c = _g2b(conn, "1200")
-        _t0c = _g2b(conn, "1100")
+        _s2c = create_sale(conn, cust, [{"work_order_id": _i2c["DEL-2"]}],
+                           "2026-04-22", "admin", apply_vat=False)
+
+    def _snap2c():
+        with db(readonly=True) as conn:
+            return (_g2b(conn, "1200"), _g2b(conn, "1100"),
+                    conn.execute("SELECT SUM(gold_debit) FROM journal_lines"
+                                 " WHERE entry_id=?",
+                                 (_b2c["entry_id"],)).fetchone()[0])
+    _before2c = _snap2c()
     with db(readonly=True) as conn:
-        _inf = _dwi2c(conn, _i2c["DEL-1"])
-        _inf_sold = _dwi2c(conn, _i2c["DEL-2"])
-    check("قبل الحذف: يُعرف وزنه وموديله ودفعته، وأن معه أطقماً أخرى",
-          not _inf["blocked"] and abs(_inf["weight"] - 11.0) < 0.001
-          and _inf["model"] == "DELM" and _inf["others"] == 2
-          and _inf["date"] == "2026-04-20" and _inf["model_left"] == 1,
-          str(_inf))
-    check("والطقم المباع لا يُحذف — ويُقال رقم فاتورته",
-          bool(_inf_sold["blocked"]) and "فواتير" in _inf_sold["blocked"],
-          (_inf_sold["blocked"] or "")[:80])
+        _inf = _dwi2c(conn, _i2c["DEL-2"])
+    check("المباع يُحذف كغيره، ويُعرض قبل الحذف وزنه وفاتورته",
+          not _inf["blocked"] and _inf["sold"]
+          and _inf["invoices"] == [_s2c["invoice_no"]]
+          and _inf["model"] == "DELM", str(_inf))
     with db() as conn:
-        _r2c = _dwo2c(conn, _i2c["DEL-1"], "admin")
-    with db(readonly=True) as conn:
-        _cat2c = _mc2b.full_catalog(conn)
-        _stk2c = [r["wo"] for r in _dp2c.stock_rows(conn)]
-        _deb2c = conn.execute(
-            "SELECT SUM(gold_debit) FROM journal_lines WHERE entry_id=?",
-            (_b2c["entry_id"],)).fetchone()[0]
-        _w1c, _t1c = _g2b(conn, "1200"), _g2b(conn, "1100")
-        _gc, _cc, _gvc, _cvc = ledger_balanced(conn)
-    check("حُذف من دليل الموديلات ومن «أرقام التشغيل المتاحة»",
-          "DEL-1" not in [i["wo"] for g in _cat2c.values()
-                          for b in g.values() for i in b]
-          and "DEL-1" not in _stk2c and "DEL-3" in _stk2c,
-          str(_stk2c[-5:]))
-    check("وخرج وزنه من دفعة توريده بتاريخها: الذهب المشغول −11 والخزينة +11",
-          abs(_deb2c - 16.0) < 0.001 and abs((_w0c - _w1c) - 11.0) < 0.001
-          and abs((_t1c - _t0c) - 11.0) < 0.001 and _gc and _cc,
-          f"قيد {_deb2c} · مشغول {_w0c}←{_w1c} · خزينة {_t0c}←{_t1c}")
-    def _del_sold():
-        with db() as conn:
-            _dwo2c(conn, _i2c["DEL-2"], "admin")
-    expect_error("والمباع يُرفض حذفه", _del_sold, "فواتير")
-    # آخر طقمٍ في موديله: يختفي الموديل نفسه من الدليل، وقيد الدفعة باقٍ
-    with db() as conn:
+        _dwo2c(conn, _i2c["DEL-1"], "admin")
+        _dwo2c(conn, _i2c["DEL-2"], "admin")
         _dwo2c(conn, _i2c["DEL-3"], "admin")
     with db(readonly=True) as conn:
+        _cat2c = _mc2b.full_catalog(conn)
         _names2c = [m["model"] for m in _mc2b.list_models(conn)]
-        _deb2c2 = conn.execute(
-            "SELECT SUM(gold_debit) FROM journal_lines WHERE entry_id=?",
-            (_b2c["entry_id"],)).fetchone()[0]
-    check("حذف آخر طقمٍ في موديلٍ يُخرج الموديل من الدليل",
-          "DELX" not in _names2c and "DELM" in _names2c
-          and abs(_deb2c2 - 9.0) < 0.001, f"{_deb2c2}")
-    # الرقم التجميعي لا يُحذف من هنا
-    from models.inventory import get_or_create_bulk_wo as _gb2c
+        _stk2c = [r["wo"] for r in _dp2c.stock_rows(conn)]
+        _gc, _cc, _gvc, _cvc = ledger_balanced(conn)
+        _inv_full = _inv2c.get_invoice_full(conn, _s2c["id"])[1]
+    _all2c = [i["wo"] for g in _cat2c.values() for b in g.values() for i in b]
+    check("اختفت من دليل الموديلات ولوحة التحكم — ومعها موديلاها",
+          not any(n in _all2c or n in _stk2c
+                  for n in ("DEL-1", "DEL-2", "DEL-3"))
+          and "DELM" not in _names2c and "DELX" not in _names2c)
+    check("ولم يتغيّر أي رصيد: الذهب المشغول والخزينة وقيد التوريد كما هي",
+          _snap2c() == _before2c and _gc and _cc,
+          f"{_before2c} ← {_snap2c()}")
+    check("وفاتورة بيع المحذوف باقيةٌ بسطرها",
+          len(_inv_full) == 1 and _inv_full[0]["work_order_no"] == "DEL-2")
+    # وتُعدَّل كما كانت: سطرها القائم يُقبل وإن حُذف طقمه من القوائم
     with db() as conn:
-        _blk = _gb2c(conn, "admin")
+        _inv2c.update_invoice(conn, _s2c["id"], [
+            {"work_order_id": _i2c["DEL-2"], "item_id": _inv_full[0]["item_id"],
+             "weight": _inv_full[0]["registered_weight"],
+             "wage_override": 12.0}], "admin")
     with db(readonly=True) as conn:
-        _bi = _dwi2c(conn, _blk["id"])
-    check("والرقم التجميعي لا يُحذف من الدليل", bool(_bi["blocked"])
-          and "تجميعي" in _bi["blocked"], (_bi["blocked"] or "")[:60])
+        _wg2c = conn.execute("SELECT wage_per_gram FROM invoice_items"
+                             " WHERE invoice_id=?", (_s2c["id"],)).fetchone()[0]
+    check("وتُعدَّل فاتورته بعد حذفه", abs(_wg2c - 12.0) < 0.001, str(_wg2c))
+    # تعديل دفعة توريده لا يُعيد إنشاءه ولا يُرحّل وزنه مرةً ثانية
+    with db() as conn:
+        _usb2c(conn, _b2c["entry_id"], [
+            {"wo_no": "DEL-1", "gold": 11.0, "wage_per_gram": 10.0},
+            {"wo_no": "DEL-4", "gold": 5.0, "wage_per_gram": 10.0}],
+            "2026-04-20", "admin")
+    with db(readonly=True) as conn:
+        _n2c = conn.execute("SELECT COUNT(*) FROM work_orders WHERE"
+                            " work_order_no='DEL-1' AND is_deleted=0"
+                            ).fetchone()[0]
+    _after2c = _snap2c()
+    check("تعديل دفعته بعد الحذف: يُضاف الجديد وحده (+5) ولا يعود المحذوف",
+          _n2c == 0 and abs(_after2c[2] - (_before2c[2] + 5.0)) < 0.001,
+          f"{_before2c[2]} ← {_after2c[2]}")
+
+    # ══ الرقم التجميعي: موديله «ايطاليات» ثابتاً، ويُحذف حذفاً فقط ══
+    with db() as conn:
+        _bi2c = _batch(conn, [{"wo_no": "00010", "gold": 30.0,
+                               "wage_per_gram": 10.0,
+                               "model_no": "أي موديل"}],
+                       "2026-04-25", "admin")
+        _bw = _gb2c(conn, "admin")
+        _bl2c = conn.execute("SELECT model_no FROM wo_batch_lines"
+                             " WHERE entry_id=?", (_bi2c["entry_id"],)
+                             ).fetchone()[0]
+    check("توريد 00010 يأخذ موديل «ايطاليات» وإن كُتب غيره",
+          _bw["model_no"] == _IT2c and _bl2c == _IT2c,
+          f"{_bw['model_no']} · {_bl2c}")
+    def _bulk_other():
+        with db() as conn:
+            _mc2b.assign_model(conn, _bw["id"], "موديل آخر", "admin")
+    expect_error("ولا يقبل الرقم التجميعي موديلاً آخر", _bulk_other,
+                 _IT2c)
+    def _italian_single():
+        with db() as conn:
+            _batch(conn, [{"wo_no": "IT-1", "gold": 5.0,
+                           "model_no": _IT2c}], "2026-04-25", "admin")
+    expect_error("ولا يُعطى «ايطاليات» لطقمٍ مفرد", _italian_single,
+                 "خاصٌّ بالرقمين")
+    def _rename_it():
+        with db() as conn:
+            _mc2b.rename_model(conn, _IT2c, "X", "admin")
+    expect_error("ولا يُعاد تسمية «ايطاليات»", _rename_it, "ثابتٌ")
+    with db(readonly=True) as conn:
+        _bi = _dwi2c(conn, _bw["id"])
+    _before_b = (_snap2c()[0], _snap2c()[1])
+    with db() as conn:
+        _dwo2c(conn, _bw["id"], "admin")
+    with db(readonly=True) as conn:
+        _stk_b = [r["wo"] for r in _dp2c.stock_rows(conn)]
+        _names_b = [m["model"] for m in _mc2b.list_models(conn)]
+    check("والرقم التجميعي يُحذف من اللوحة والدليل بلا أثر على الأرصدة",
+          not _bi["blocked"] and _bi["bulk"] and "00010" not in _stk_b
+          and _IT2c not in _names_b
+          and (_snap2c()[0], _snap2c()[1]) == _before_b,
+          f"{_before_b} ← {(_snap2c()[0], _snap2c()[1])}")
+    with db() as conn:
+        _batch(conn, [{"wo_no": "00010", "gold": 4.0, "wage_per_gram": 10.0}],
+               "2026-04-26", "admin")
+    with db(readonly=True) as conn:
+        _nb = conn.execute("SELECT registered_weight, model_no FROM"
+                           " work_orders WHERE work_order_no='00010'"
+                           " AND is_deleted=0").fetchone()
+    check("والتوريد التالي بالرقم نفسه يبدأ رصيداً جديداً بموديله",
+          abs(_nb[0] - 4.0) < 0.001 and _nb[1] == _IT2c, str(tuple(_nb)))
 
     step("28ج) تعديل فاتورة لا يبيع طقماً مباعاً مرتين")
     # ══ الخلل: الذهب يخرج مرة ويُحاسَب عليه عميلان ══
@@ -3537,8 +3595,16 @@ def main():
         _days = {d["date"]: d for d in _mcat.received_days(conn)}
     _m3 = {m["model"]: m for m in _d3["models"]}["موديل الوارد"]
     _by = {i["wo"]: i for i in _m3["items"]}
-    check("وارد اليوم يُفصَّل موديلاً موديلاً بأرقام تشغيله",
-          sorted(_by) == sorted(["00010", _r1, _r2]), f"{sorted(_by)}")
+    # 5.1.8: الرقم التجميعي موديله «ايطاليات» ولو كُتب له غيره
+    from models.inventory import ITALIAN_MODEL as _IT9
+    _it3 = {i["wo"]: i for i in
+            {m["model"]: m for m in _d3["models"]}[_IT9]["items"]}
+    _by["00010"] = _it3["00010"]
+    check("وارد اليوم يُفصَّل موديلاً موديلاً بأرقام تشغيله — والتجميعي"
+          " تحت «ايطاليات»",
+          sorted(_by) == sorted(["00010", _r1, _r2])
+          and sorted(i["wo"] for i in _m3["items"]) == sorted([_r1, _r2]),
+          f"{sorted(_by)}")
     check("والمباعة تحمل اسم الجهة التي هي عندها الآن",
           _by[_r1]["holder"] == "مشترٍ من دفعة اليوم"
           and not _by[_r1]["safe"], _by[_r1]["holder"])
@@ -3549,7 +3615,7 @@ def main():
           abs(_by["00010"]["reg"] - 70.0) < 0.011
           and abs({i["wo"]: i for i in
                    {m["model"]: m for m in _d11["models"]}
-                   ["موديل الوارد"]["items"]}["00010"]["reg"] - 15.0) < 0.011,
+                   [_IT9]["items"]}["00010"]["reg"] - 15.0) < 0.011,
           f"{_by['00010']['reg']} ثم 15")
     check("ووارد يومٍ لا يختلط بوارد غيره",
           all(i["wo"] != "R903" for i in _m3["items"])

@@ -1519,6 +1519,19 @@ def migrate_schema() -> None:
         from services import branding as _br
         _br.ensure_initial(conn)
 
+        # 5.1.8: الرقمان التجميعيان موديلهما «ايطاليات» — على البطاقة وعلى
+        # سطورهما في دفعات التوريد (فيظهران به في الدليل والوارد). وصفٌ لا
+        # يمسّ وزناً ولا قيداً. والرقمان والاسم نصّاً هنا كما في (22).
+        conn.execute(
+            "UPDATE work_orders SET model_no='ايطاليات' WHERE is_bulk=1"
+            " AND work_order_no IN ('00010','0010')"
+            " AND COALESCE(model_no,'')<>'ايطاليات'")
+        conn.execute(
+            "UPDATE wo_batch_lines SET model_no='ايطاليات'"
+            " WHERE COALESCE(model_no,'')<>'ايطاليات' AND work_order_id IN"
+            " (SELECT id FROM work_orders WHERE is_bulk=1"
+            "  AND work_order_no IN ('00010','0010'))")
+
 
 def run_migrations_files():
     """ينفّذ ملفات الهجرة المرقّمة مرة واحدة لكل إصدار.

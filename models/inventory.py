@@ -38,6 +38,24 @@ def is_bulk_no(no):
     return str(no or "").strip() in BULK_WO_NOS
 
 
+# موديل الرقمين التجميعيين (5.1.8): «ايطاليات» لهما وحدهما ولا يقبلان
+# غيره — في التوريد والبيع والمرتجع والدليل. ولا يُعطى لطقمٍ مفرد.
+ITALIAN_MODEL = "ايطاليات"
+
+
+def model_for(no, model_no):
+    """الموديل الذي يُحفظ لرقم التشغيل: «ايطاليات» للتجميعي دائماً، وما
+    كُتب لغيره — ويُرفض «ايطاليات» لطقمٍ مفرد."""
+    m = str(model_no or "").strip() or None
+    if is_bulk_no(no):
+        return ITALIAN_MODEL
+    if m == ITALIAN_MODEL:
+        raise ValueError(
+            f"موديل «{ITALIAN_MODEL}» خاصٌّ بالرقمين التجميعيين"
+            f" {BULK_LABEL} — اختر لرقم التشغيل {no} موديلاً آخر")
+    return m
+
+
 def assert_not_legacy(no):
     """الرقم التجميعي القديم لا يُستعمل لطقمٍ مفرد.
 
@@ -82,6 +100,10 @@ def get_or_create_bulk_wo(conn, username, wo_no=BULK_WO_NO):
             raise ValueError(
                 f"الرقم {wo_no} مستعملٌ لطقمٍ مفرد لا لرصيدٍ تجميعي —\n"
                 "صحّح رقم ذلك الطقم أولاً من «حركة الطقم».")
+        if (wo["model_no"] or "").strip() != ITALIAN_MODEL:
+            conn.execute("UPDATE work_orders SET model_no=? WHERE id=?",
+                         (ITALIAN_MODEL, wo["id"]))
+            wo = get_wo_by_no(conn, wo_no)
         return wo
     # المواصفات من الرقم الأول إن وُجد: الثاني «بمواصفاته نفسها»
     twin = next((get_wo_by_no(conn, n) for n in BULK_WO_NOS
@@ -92,9 +114,10 @@ def get_or_create_bulk_wo(conn, username, wo_no=BULK_WO_NO):
         "INSERT INTO work_orders(work_order_no,gross_weight,stones_weight,"
         "gold_weight,small_stones,big_stones,stones_after_discount,"
         "standing_gold,discount_rate,registered_weight,wage_per_gram,is_bulk,"
-        "item_type,notes,created_by)"
-        " VALUES(?,0,0,0,0,0,0,0,0,0,?,1,'إيطالي',?,?)",
-        (wo_no, wage, "رصيد تجميعي بالوزن — لا يمثل قطعة مفردة", username))
+        "item_type,notes,created_by,model_no)"
+        " VALUES(?,0,0,0,0,0,0,0,0,0,?,1,'إيطالي',?,?,?)",
+        (wo_no, wage, "رصيد تجميعي بالوزن — لا يمثل قطعة مفردة", username,
+         ITALIAN_MODEL))
     return get_wo_by_no(conn, wo_no)
 
 
@@ -281,9 +304,9 @@ def create_work_orders_batch(conn, rows, entry_date, username,
         _wg = r.get("wage_per_gram")
         wage = float(config.DEFAULT_WAGE_PER_GRAM if _wg is None or _wg == ""
                      else _wg)
-        model_no = str(r.get("model_no") or "").strip() or None
         if not wo_no:
             raise ValueError("رقم تشغيل فارغ في أحد أسطر الدفعة")
+        model_no = model_for(wo_no, r.get("model_no"))
         if gold < 0 or small < 0 or big < 0:
             raise ValueError(f"الأوزان لا تقبل السالب للطقم {wo_no}")
         if gold + small + big <= 0:
@@ -1484,11 +1507,10 @@ def delete_supply_item(conn, wo_id, username, notes=""):
 
 
 def work_order_delete_info(conn, wo_id):
-    """ما سيحدث لو حُذف رقم التشغيل — أو لماذا لا يُحذف (`blocked`).
+    """ما يُعرض قبل حذف رقم التشغيل — أو لماذا لا يُحذف (`blocked`).
 
-    للسؤال قبل الحذف من دليل الموديلات أو لوحة التحكم: الطقم ووزنه
-    وموديله، ودفعة توريده وتاريخها والحساب الذي دخله، وهل معه أطقم
-    أخرى في دفعته."""
+    الطقم ووزنه وموديله وحالته (في الخزنة أو مباع) وعدد فواتيره، ودفعة
+    توريده وتاريخها. والحذف لا يمسّ رصيداً (`delete_work_order`)."""
     from models import wo_moves
     wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
                       (wo_id,)).fetchone()
@@ -1496,71 +1518,61 @@ def work_order_delete_info(conn, wo_id):
         raise ValueError("رقم التشغيل غير موجود أو محذوف مسبقاً")
     no = wo["work_order_no"]
     keys = wo.keys()
+    bulk = bool(wo["is_bulk"]) or is_bulk_no(no)
     blocked = None
-    if wo["is_bulk"] or is_bulk_no(no):
-        blocked = (f"الرقم {no} رصيدٌ تجميعي لكل دفعات توريده — لا يُحذف من"
-                   " هنا. عدّل دفعات توريده من «الوارد من التصنيع» أو من"
-                   " كشف حساب خزينة التصنيع.")
-    elif "is_service" in keys and wo["is_service"]:
-        blocked = f"{no} طقمٌ خدمي («أجر») يتبع فواتيره — لا يُحذف من هنا."
-    else:
-        moved = wo_moves.with_moves(conn, [wo_id]).get(no)
-        if moved:
-            blocked = (f"لا يُحذف الطقم {no}: له فواتير بيعٍ أو مرتجع"
-                       f" ({'، '.join(str(x) for x in moved)}).\n\n"
-                       "احذف هذه الفواتير أولاً فيعود كأنه لم يتحرّك، ثم"
-                       " احذفه. وإن كان موديله هو الخطأ فانقله لموديلٍ آخر"
-                       " بدل حذفه.")
-        elif wo["status"] != "in_stock":
-            blocked = f"الطقم {no} مباع — أعد فاتورته أولاً ثم احذفه."
+    if "is_service" in keys and wo["is_service"]:
+        blocked = (f"{no} سجلٌّ خدمي لأسطر «أجر فقط» في الفواتير، لا طقم —"
+                   " لا يُحذف.")
+    invs = conn.execute(
+        "SELECT DISTINCT i.invoice_no FROM invoice_items it"
+        " JOIN invoices i ON i.id=it.invoice_id AND i.is_deleted=0"
+        " WHERE it.work_order_id=? ORDER BY i.invoice_date, i.id",
+        (wo_id,)).fetchall()
     entry = conn.execute(
         "SELECT entry_date FROM journal_entries WHERE id=? AND is_deleted=0",
         (wo["entry_id"],)).fetchone() if wo["entry_id"] else None
-    others = conn.execute(
-        "SELECT COUNT(*) FROM work_orders WHERE entry_id=? AND is_deleted=0"
-        " AND id<>?", (wo["entry_id"], wo_id)).fetchone()[0] \
-        if wo["entry_id"] else 0
-    dest = None
-    if entry:
-        dl = batch_dest_line(conn, wo["entry_id"])
-        if dl:
-            from models.accounts import account_name
-            dest = account_name(conn, dl["account_id"])
     model = (wo["model_no"] or "").strip()
     left = conn.execute(
         "SELECT COUNT(*) FROM work_orders WHERE is_deleted=0 AND id<>?"
         " AND TRIM(COALESCE(model_no,''))=?", (wo_id, model)).fetchone()[0] \
         if model else 0
-    return {"id": wo_id, "wo_no": no, "model": model,
-            "weight": round(float(wo["registered_weight"] or 0), 3),
+    if bulk:
+        weight = float(wo["registered_weight"] or 0)
+    else:
+        weight = wo_moves.state(conn, wo)["rem"] \
+            if wo["status"] == "in_stock" else float(
+                wo["registered_weight"] or 0)
+    return {"id": wo_id, "wo_no": no, "model": model, "bulk": bulk,
+            "weight": round(weight, 3),
+            "sold": wo["status"] != "in_stock" and not bulk,
+            "invoices": [r[0] for r in invs],
             "date": entry["entry_date"] if entry else "",
-            "dest": dest or "", "others": others,
             "model_left": left, "blocked": blocked}
 
 
 def delete_work_order(conn, wo_id, username, reason=""):
-    """يحذف رقم تشغيل من دليل الموديلات ولوحة التحكم — **بحذف توريده**.
+    """يحذف رقم تشغيل — **حذفاً فقط، بلا أي أثر على الأرصدة** (5.1.8).
 
-    الطقم لا يُخفى وهو قائمٌ في الحسابات: لو اختفى من الدليل وبقي وزنه
-    في الذهب المشغول لاختلف رصيد الحساب عن مجموع الأطقم. فحذفه هو حذف
-    توريده كأنه لم يدخل (`delete_supply_item`): يُخرج سطره من دفعته
-    ويُعدَّل قيدها بالفرق بتاريخها — أو يُحذف القيد إن كان وحده فيها.
+    طلب صاحب النظام: أي طقمٍ أو رقمٍ تجميعي أو رقم تشغيل يُحذف فيختفي من
+    دليل الموديلات ولوحة التحكم وقوائم البيع، ولا تتأثر خزينة التصنيع ولا
+    الذهب المشغول: قيد توريده يبقى بوزنه وتاريخه، وفواتير بيعه ومرتجعه
+    تبقى كما هي وتُفتح وتُطبع وتُعدَّل. فرقه عن حذف التوريد
+    (`delete_supply_item`) أن ذاك يُخرج وزنه من الحسابات وهذا لا يمسّها.
 
-    ولا يُحذف ما تحرّك (له فاتورة بيعٍ أو مرتجع)، ولا الرقم التجميعي ولا
-    الطقم الخدمي: يُرفض بسببه (`work_order_delete_info`)."""
+    والرقم التجميعي إن حُذف بدأ التوريد التالي برقمه رصيداً جديداً.
+    ورقم الطقم المحذوف يعود متاحاً لطقمٍ جديد."""
     from services.audit import log_action
     info = work_order_delete_info(conn, wo_id)
     if info["blocked"]:
         raise ValueError(info["blocked"])
-    r = delete_supply_item(conn, wo_id, username, notes=reason)
-    conn.execute("DELETE FROM wo_weight_edits WHERE work_order_id=?",
-                 (wo_id,))
-    log_action(conn, username, "delete", "work_orders", wo_id,
-               f"حذف رقم التشغيل {info['wo_no']}"
-               + (f" من الموديل {info['model']}" if info["model"] else "")
+    conn.execute("UPDATE work_orders SET is_deleted=1 WHERE id=?", (wo_id,))
+    log_action(conn, username, "soft_delete", "work_orders", wo_id,
+               f"حذف رقم التشغيل {info['wo_no']} من القوائم — بلا أثر على"
+               " الأرصدة"
+               + (f" · الموديل {info['model']}" if info["model"] else "")
                + f" · {_nf.f2(info['weight'], sep=False)} جم"
                + (f" | {reason}" if reason else ""))
-    return {**info, "batch_kept": r["batch_kept"]}
+    return info
 
 
 def _reweigh(conn, wo, d, entry_id, username):
@@ -1670,12 +1682,15 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
             " ORDER BY seq, id", (entry_id,)).fetchall()
 
     by_no = {}
+    gone = set()         # أطقمٌ حُذفت من القوائم (5.1.8): سطورها باقيةٌ كما هي
     for ln in old_lines:
         wo = conn.execute(
             "SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
             (ln["work_order_id"],)).fetchone()
         if wo:
             by_no[wo["work_order_no"]] = {"line": ln, "wo": wo}
+        else:
+            gone.add(str(ln["wo_no"] or "").strip())
 
     delta = 0.0          # صافي التغيّر في الوزن المقيد
     added, updated, removed, kept_sold = [], [], [], []
@@ -1698,9 +1713,18 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
         reg = gold_math.registered_weight(gold, small, big, rate)
         standing = gold_math.standing_gold(gold, small, big)
         after = gold_math.stones_after_discount(big, rate)
-        model_no = str(r.get("model_no") or "").strip() or None
-
         cur = by_no.get(no)
+        if cur is None and no in gone:
+            # طقمٌ حُذف من القوائم وسطره في هذه الدفعة: لا يُعاد إنشاؤه ولا
+            # يُرحَّل وزنه مرةً ثانية — الحذف لا يمسّ القيد
+            continue
+        _m = str(r.get("model_no") or "").strip() or None
+        if (cur is not None and _m == ITALIAN_MODEL and not is_bulk_no(no)
+                and (cur["line"]["model_no"] or "").strip() == ITALIAN_MODEL):
+            model_no = _m             # كما كان قبل القاعدة — لا يُرفض حفظه
+        else:
+            model_no = model_for(no, _m)
+
         if cur is None:
             # ── طقم جديد يُضاف للدفعة ──
             if is_bulk_no(no):
@@ -1939,9 +1963,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     # بعد التعديل — بما فيها الأطقم المباعة التي بقيت كما هي.
     # من سطور الدفعة لا من البطاقات: البطاقة قد تحمل تسويةً بقيدٍ آخر،
     # والرقم التجميعي رصيدٌ تراكمي لكل دفعاته — والقيد وزن سطورها هي.
+    # وسطور الأطقم المحذوفة من القوائم داخلةٌ فيه: قيدها باقٍ بوزنها (5.1.8)
     total_reg = conn.execute(
         "SELECT COALESCE(SUM(l.registered_weight),0) t FROM wo_batch_lines l"
-        " JOIN work_orders w ON w.id=l.work_order_id AND w.is_deleted=0"
         " WHERE l.entry_id=?", (entry_id,)).fetchone()["t"]
     # حركة صندوق الكسر تُكتب من إجمالي الدفعة **بعد** التعديل لا
     # بفرقه: استبدالٌ لسطرٍ واحد، فلا يتراكم إدخالان لدفعةٍ عُدِّلت.

@@ -1775,6 +1775,8 @@ class SalesScreen(QtWidgets.QWidget):
         try:
             self.barcode.clear()
             self.model_no.setCurrentText("")
+            self.model_no.setEnabled(True)
+            self.model_no.setToolTip("")
             for w in (self.line_reg, self.line_standing,
                       self.line_gold, self.line_small, self.line_big,
                       self.line_after, self.line_diamond):
@@ -1798,6 +1800,16 @@ class SalesScreen(QtWidgets.QWidget):
         self._calc = True
         try:
             mn = (wo["model_no"] if "model_no" in wo.keys() else "") or ""
+            # 5.1.8: الرقم التجميعي موديله «ايطاليات» ثابتاً في البيع
+            # والمرتجع — لا يُكتب له غيره
+            bulk = bool(wo["is_bulk"]) or inventory.is_bulk_no(
+                wo["work_order_no"])
+            if bulk:
+                mn = inventory.ITALIAN_MODEL
+            self.model_no.setEnabled(not bulk)
+            self.model_no.setToolTip(
+                f"موديل الرقم التجميعي «{inventory.ITALIAN_MODEL}» دائماً"
+                if bulk else "")
             if mn:
                 self.model_no.setCurrentText(str(mn))
             if wo["is_bulk"]:
@@ -2699,6 +2711,8 @@ class SalesScreen(QtWidgets.QWidget):
             typed = self.model_no.currentText().strip()
             if not typed:
                 return
+            if wo["is_bulk"] or inventory.is_bulk_no(wo["work_order_no"]):
+                return            # «ايطاليات» ثابت للرقم التجميعي (5.1.8)
             cur = (wo["model_no"] if "model_no" in wo.keys() else "") or ""
             if cur.strip() == typed:
                 return

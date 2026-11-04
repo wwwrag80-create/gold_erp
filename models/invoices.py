@@ -129,6 +129,13 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
             continue
         wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
                           (c["work_order_id"],)).fetchone()
+        if not wo and c.get("item_id"):
+            # طقمٌ حُذف من القوائم (5.1.8) وهو سطرٌ قائم في هذه الفاتورة:
+            # حذفه لا يمسّ فواتيره، فتبقى تُعدَّل كما كانت
+            wo = conn.execute(
+                "SELECT w.* FROM work_orders w JOIN invoice_items it"
+                " ON it.work_order_id=w.id WHERE w.id=? AND it.id=?",
+                (c["work_order_id"], c["item_id"])).fetchone()
         if not wo:
             raise ValueError("طقم غير موجود")
         # الأجر صفر قيمة صحيحة — `or` كان يستبدله بأجر الطقم الأصلي

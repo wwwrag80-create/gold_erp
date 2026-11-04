@@ -298,6 +298,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.model_no.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         self.model_no.lineEdit().setPlaceholderText("رقم الموديل")
         self.wo_no = kit.LineEdit()
+        # 5.1.8: الرقمان التجميعيان موديلهما «ايطاليات» ثابتاً
+        self.wo_no.textChanged.connect(self._lock_italian)
         # المقيد والقائم **مشتقّان** من المكوّنات لا يُكتبان: إدخالهما
         # يدوياً يجعل السطر يناقض نفسه (مجموعٌ لا يساوي أجزاءه).
         self.reg = wspin()
@@ -429,6 +431,19 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                     require={self.wo_no:
                              lambda: bool(self.wo_no.text().strip())})
         return box
+
+    def _lock_italian(self, *_):
+        """رقم تشغيلٍ تجميعي ⇒ موديله «ايطاليات» لا يُغيَّر؛ وغيره حرّ."""
+        bulk = inventory.is_bulk_no(self.wo_no.text())
+        if bulk:
+            self.model_no.setCurrentText(inventory.ITALIAN_MODEL)
+        elif (self.model_no.currentText().strip()
+              == inventory.ITALIAN_MODEL and not self.model_no.isEnabled()):
+            self.model_no.setCurrentText("")
+        self.model_no.setEnabled(not bulk)
+        self.model_no.setToolTip(
+            f"الرقمان {inventory.BULK_LABEL} موديلهما «{inventory.ITALIAN_MODEL}»"
+            " دائماً" if bulk else "")
 
     # ══ صورة الموديل (4.82) ══
     def _schedule_pic(self, *_):
@@ -785,7 +800,8 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
             if self.gold.value() + self.small.value() + self.big.value() <= 0:
                 raise ValueError("أدخل وزناً واحداً على الأقل")
             self.batch.append({
-                "model_no": self.model_no.currentText().strip(),
+                "model_no": inventory.model_for(
+                    wo_no, self.model_no.currentText()) or "",
                 "wo_no": wo_no, "gold": self.gold.value(),
                 "small_stones": self.small.value(),
                 "big_stones": self.big.value(), "discount_rate": self.rate,
@@ -818,6 +834,9 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         dlg.setWindowTitle(f"تعديل السطر — {b['wo_no']}")
         dlg.setMinimumWidth(460)
         w_model = kit.LineEdit(str(b.get("model_no") or ""))
+        if inventory.is_bulk_no(b["wo_no"]):
+            w_model.setText(inventory.ITALIAN_MODEL)
+            w_model.setEnabled(False)
         w_no = kit.LineEdit(str(b["wo_no"]))
         w_karat = kit.ComboBox()
         for kk in config.KARATS:
@@ -883,8 +902,13 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         if w_gold.value() + w_small.value() + w_big.value() <= 0:
             err(self, "أدخل وزناً واحداً على الأقل")
             return
+        try:
+            _model = inventory.model_for(no, w_model.text()) or ""
+        except ValueError as e:
+            err(self, e)
+            return
         b.update({
-            "model_no": w_model.text().strip(),
+            "model_no": _model,
             "wo_no": no, "gold": w_gold.value(),
             "small_stones": w_small.value(), "big_stones": w_big.value(),
             "discount_rate": w_rate.value() / 100.0,
@@ -1194,8 +1218,12 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                 # نقرأ **حصة الدفعة** من سطورها المحفوظة لا من رصيد
                 # الطقم: الرقم التجميعي تراكمي، فرصيده يشمل كل
                 # الدفعات السابقة ولا يمثل ما أُدخل هنا.
+                # الطقم المحذوف من القوائم (5.1.8) لا يظهر هنا — وسطره
+                # باقٍ في الدفعة بوزنه فلا يتغيّر قيدها بالحفظ
                 lines = conn.execute(
                     "SELECT * FROM wo_batch_lines WHERE entry_id=?"
+                    " AND work_order_id IN (SELECT id FROM work_orders"
+                    "  WHERE is_deleted=0)"
                     " ORDER BY seq, id", (wo["entry_id"],)).fetchall()
                 if lines:
                     rows = lines

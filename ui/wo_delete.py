@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """حذف رقم تشغيل — من دليل الموديلات ومن لوحة التحكم بالسؤال نفسه.
 
-الحذف حذفٌ لتوريد الطقم كأنه لم يدخل (`inventory.delete_work_order`):
-يُخصم وزنه من حساب الوجهة ويعود لخزينة التصنيع في قيد دفعته نفسه
-بتاريخها، فيختفي من الدليل ومن لوحة التحكم ولا يبقى له أثرٌ في الأرصدة.
-وما لا يُحذف (له فاتورة بيعٍ أو مرتجع، أو رقمٌ تجميعي) يُقال سببه.
+الحذف **حذفٌ فقط** (5.1.8): يختفي الطقم أو الرقم التجميعي من الدليل
+ولوحة التحكم وقوائم البيع، ولا يتغيّر أي رصيد — خزينة التصنيع والذهب
+المشغول وقيد التوريد وفواتير البيع والمرتجع كما هي
+(`inventory.delete_work_order`).
 """
 from database.database import db
 from models import inventory
@@ -19,36 +19,32 @@ def delete_wo(parent, wo_id, user):
         with db(readonly=True) as conn:
             d = inventory.work_order_delete_info(conn, wo_id)
         if d["blocked"]:
-            warn(parent, d["blocked"], "لا يُحذف هذا الطقم")
+            warn(parent, d["blocked"], "لا يُحذف هذا الرقم")
             return False
         w = f"{_nf.f2(kv.g(d['weight']))} {kv.unit()}"
-        lines = [f"حذف رقم التشغيل {d['wo_no']} نهائياً؟", ""]
+        what = "الرقم التجميعي" if d["bulk"] else "رقم التشغيل"
+        lines = [f"حذف {what} {d['wo_no']}؟", ""]
         lines.append(f"• الموديل: {d['model'] or '— بلا موديل —'}"
-                     + ("  (آخر طقمٍ فيه، فيختفي الموديل من الدليل)"
+                     + ("  (آخر رقمٍ فيه، فيختفي الموديل من الدليل)"
                         if d["model"] and not d["model_left"] else ""))
-        lines.append(f"• وزنه المقيد: {w}")
-        if d["date"]:
-            if d["others"]:
-                lines.append(f"• يُخرج من دفعة توريده بتاريخ {d['date']}:"
-                             f" يُخصم وزنه من {d['dest'] or 'الذهب المشغول'}"
-                             " ويعود لخزينة التصنيع — وبقية أطقم الدفعة"
-                             " كما هي.")
-            else:
-                lines.append(f"• هو وحده في دفعة توريده بتاريخ {d['date']}:"
-                             " يُحذف قيدها كله، فيُخصم وزنه من "
-                             f"{d['dest'] or 'الذهب المشغول'} ويعود لخزينة"
-                             " التصنيع.")
-        lines.append("• يختفي من دليل الموديلات ومن لوحة التحكم.")
-        lines += ["", "لا رجوع عن الحذف إلا بإدخاله من جديد في «الوارد من"
-                  " التصنيع»."]
-        if not ask(parent, "\n".join(lines), "حذف رقم تشغيل"):
+        if d["bulk"]:
+            lines.append(f"• رصيده الحالي: {w} — والتوريد القادم بهذا الرقم"
+                         " يبدأ رصيداً جديداً")
+        elif d["sold"]:
+            lines.append(f"• مباع ({w})")
+        else:
+            lines.append(f"• في الخزنة: {w}")
+        if d["invoices"]:
+            lines.append(f"• فواتيره ({len(d['invoices'])}) تبقى كما هي")
+        lines.append("• يختفي من دليل الموديلات ولوحة التحكم وقوائم البيع.")
+        lines += ["", "لا يتغيّر أي رصيد: خزينة التصنيع والذهب المشغول وقيد"
+                  " التوريد والفواتير كما هي."]
+        if not ask(parent, "\n".join(lines), f"حذف {what}"):
             return False
         with db() as conn:
             r = inventory.delete_work_order(conn, wo_id, user["username"])
-        info(parent, f"حُذف رقم التشغيل {r['wo_no']}"
-                     f" ({_nf.f2(kv.g(r['weight']))} {kv.unit()}).\n"
-                     "خرج من دليل الموديلات ولوحة التحكم، وعُدّل قيد توريده"
-                     " بتاريخه.")
+        info(parent, f"حُذف {what} {r['wo_no']} من القوائم.\n"
+                     "ولم يتغيّر أي رصيد.")
         return True
     except Exception as e:
         err(parent, e)
