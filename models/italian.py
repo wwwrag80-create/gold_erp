@@ -15,6 +15,7 @@
 فيتطابق آخر الكشف مع ما تعرضه الشاشات، ولا يُخفى الفرق.
 """
 from models.inventory import BULK_WO_NOS
+from models.accounts import ITALIAN_GOLD as ACC_CODE   # 1210 (5.2.0)
 
 CODE = "@italian"                      # رمزه في لوحات لوحة التحكم
 NAME = "ايطالي / نواعم"
@@ -144,3 +145,106 @@ def panel_row(conn, date_from=None, date_to=None):
             "gold_debit": deb, "gold_credit": cred, "gold_balance": bal,
             "cash_debit": 0.0, "cash_credit": 0.0, "cash_balance": 0.0,
             "virtual": True}
+
+
+# ══════════════════════════════════════════════════════════════════
+#  5.2.0 — حساب «ايطالي / نواعم» رسمي في المخزون (1210)
+# ------------------------------------------------------------------
+#  كان وزن الرقمين داخل الذهب المشغول (1200). الترقية — مرةً واحدة —
+#  تفصله في حسابه بتاريخه، لا بقيدٍ واحد يخفي الحركة:
+#   ١) بنود الفواتير القائمة على 0010 و00010 (الخارجة من المشغول) تُنسب
+#      إلى حساب الإيطالي، ويُعاد بناء قيد كل فاتورة منها.
+#   ٢) حصتهما في قيود التوريد والرصيد الافتتاحي تُنقل إلى سطرٍ على حسابه.
+#   ٣) ما بقي فرقاً بين رصيد البطاقتين ورصيد الحساب (رصيدٌ قديم بلا
+#      مستندات) يُنقل بقيد تحويلٍ ظاهر من الذهب المشغول.
+#  فيكون رصيد الحساب = رصيد البطاقتين، ويخلو الذهب المشغول من الإيطالي.
+#  لا فاتورة تُحذف ولا يتغيّر رقمها، ولا يتغيّر مجموع المخزون.
+# ══════════════════════════════════════════════════════════════════
+MIGRATION_KEY = "italian_account_5_2_0"
+
+
+def account_id(conn):
+    r = conn.execute("SELECT id FROM accounts WHERE code=?",
+                     (ACC_CODE,)).fetchone()
+    return int(r["id"]) if r else None
+
+
+def account_balance(conn):
+    a = account_id(conn)
+    if not a:
+        return 0.0
+    r = conn.execute(
+        "SELECT COALESCE(SUM(l.gold_debit),0)-COALESCE(SUM(l.gold_credit),0) b"
+        " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+        " WHERE e.is_deleted=0 AND l.account_id=?", (a,)).fetchone()
+    return round(float(r["b"] or 0), 3)
+
+
+def migrate(conn, username="system", today=None):
+    """الترقية مرةً واحدة — يعيد ملخّصها، أو None إن سبقت."""
+    import datetime as _dt
+    from models.fiscal import get_setting, set_setting
+    from models.accounts import acc_id, FINISHED_GOLD
+    if get_setting(conn, MIGRATION_KEY):
+        return None
+    ita = account_id(conn)
+    if not ita:
+        return None
+    fin = acc_id(conn, FINISHED_GOLD)
+    bulk_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM work_orders WHERE is_bulk=1")]
+    out = {"invoices": 0, "entries": 0, "transfer": 0.0}
+    if bulk_ids:
+        q = ",".join("?" * len(bulk_ids))
+        # ١) الفواتير — ما خرج من المشغول أو عاد إليه
+        items = conn.execute(
+            "SELECT it.id, it.invoice_id FROM invoice_items it"
+            " JOIN invoices i ON i.id=it.invoice_id AND i.is_deleted=0"
+            f" WHERE it.work_order_id IN ({q})"
+            " AND COALESCE(it.stock_account_id, i.source_account_id, ?)=?",
+            bulk_ids + [fin, fin]).fetchall()
+        invs = sorted({r["invoice_id"] for r in items})
+        for r in items:
+            conn.execute("UPDATE invoice_items SET stock_account_id=?"
+                         " WHERE id=?", (ita, r["id"]))
+        from models.invoices import _rebuild_invoice_entry
+        for iid in invs:
+            if conn.execute("SELECT entry_id FROM invoices WHERE id=?",
+                            (iid,)).fetchone()["entry_id"]:
+                _rebuild_invoice_entry(conn, iid)
+        out["invoices"] = len(invs)
+        # ٢) التوريد والرصيد الافتتاحي — من سطر الذهب المشغول وحده
+        from models.inventory import split_italian_line
+        for r in conn.execute(
+                "SELECT DISTINCT l.entry_id FROM wo_batch_lines l"
+                " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
+                f" WHERE l.work_order_id IN ({q})", bulk_ids).fetchall():
+            if abs(split_italian_line(conn, r["entry_id"],
+                                      only_from=fin)) > 0.0005:
+                out["entries"] += 1
+    # ٣) ما بقي: رصيد البطاقتين − رصيد الحساب
+    card = round(sum(c["balance"] for c in cards(conn)), 3)
+    diff = round(card - account_balance(conn), 3)
+    if abs(diff) > 0.0005:
+        from services.accounting_engine import post_entry
+        day = today or _dt.date.today().isoformat()
+        desc = "تحويل رصيد ايطالي / نواعم (0010 · 00010) من الذهب المشغول"
+        if diff > 0:
+            lines = [{"account_id": ita, "gold_debit": diff,
+                      "line_desc": "رصيد الرقمين التجميعيين قبل تفصيل الحركة"},
+                     {"account_id": fin, "gold_credit": diff,
+                      "line_desc": "خروج وزن الإيطالي من الذهب المشغول"}]
+        else:
+            lines = [{"account_id": fin, "gold_debit": -diff,
+                      "line_desc": "عودة فرق الإيطالي إلى الذهب المشغول"},
+                     {"account_id": ita, "gold_credit": -diff,
+                      "line_desc": "تسوية حساب الإيطالي برصيد البطاقتين"}]
+        post_entry(conn, day, desc, lines,
+                   username=username, note="ترقية 5.2.0")
+        out["transfer"] = diff
+    set_setting(conn, MIGRATION_KEY, (today or _dt.date.today().isoformat()),
+                username)
+    from services.audit import log_action
+    log_action(conn, username, "update", "accounts", ita,
+               f"ترقية حساب الإيطالي: {out}")
+    return out

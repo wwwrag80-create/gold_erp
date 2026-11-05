@@ -201,9 +201,9 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
                     # عيار الإدخال: وصفٌ لا حساب — الوزن والأجر
                     # وصلا هنا بمكافئ 18 على أي حال.
                     "karat": int(c.get("karat") or 0),
-                    # بيت الطقم: منه يخرج وإليه يعود (stock_home)
-                    "acc": (stock_home.home_account(conn, wo)
-                            if stock_home.home_of(wo) else None),
+                    # بيت الطقم: منه يخرج وإليه يعود (stock_home) —
+                    # والرقم التجميعي من حساب الإيطالي (5.2.0)
+                    "acc": stock_home.line_account(conn, wo),
                     "note": str(c.get("note") or "").strip()})
     return out
 
@@ -599,20 +599,72 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
             "customer_name": ent["name"]}
 
 
+# ══════════════════════════════════════════════════════════════════
+#  فصل الإيطاليات عن الأطقم (5.2.0)
+# ------------------------------------------------------------------
+#  سلةٌ فيها أطقمٌ والرقمان التجميعيان (0010 · 00010) تُرحَّل **فاتورتين**:
+#  فاتورة الأطقم تمسّ الذهب المشغول (أو بيت كل طقم) وحده، وفاتورة
+#  الإيطالي تمسّ حساب «ايطالي / نواعم» (1210) وحده. الطرف والتاريخ
+#  والضريبة والبيان واحدٌ للاثنتين، ولكلٍّ رقمها وقيدها. وسطور «أجر
+#  فقط» تتبع فاتورة الأطقم.
+# ══════════════════════════════════════════════════════════════════
+def split_cart(conn, cart):
+    """(أطقم + أجور، إيطالي) إن اجتمع النوعان في السلة — وإلا None."""
+    italian, sets, wage = [], [], []
+    for c in cart or []:
+        if c.get("wage_only"):
+            wage.append(c)
+            continue
+        r = conn.execute("SELECT is_bulk FROM work_orders WHERE id=?",
+                         (c.get("work_order_id"),)).fetchone()
+        (italian if r and r["is_bulk"] else sets).append(c)
+    if italian and sets:
+        return sets + wage, italian
+    return None
+
+
+def _save_split(conn, kind, entity_id, cart, invoice_date, username,
+                apply_vat, description, qr_enabled, source_account_id,
+                scrap_karat):
+    parts = split_cart(conn, cart)
+    if not parts:
+        # فاتورة إيطالي وحده: حسابها في رأسها حساب الإيطالي كسطورها
+        goods = [c for c in cart or [] if not c.get("wage_only")]
+        if goods and all((conn.execute(
+                "SELECT is_bulk FROM work_orders WHERE id=?",
+                (c.get("work_order_id"),)).fetchone() or {"is_bulk": 0})
+                ["is_bulk"] for c in goods):
+            source_account_id = (stock_home.italian_account(conn)
+                                 or source_account_id)
+            scrap_karat = None
+        return _save(conn, kind, entity_id, cart, invoice_date, username,
+                     apply_vat, description, qr_enabled, source_account_id,
+                     scrap_karat)
+    sets_cart, italian_cart = parts
+    res = _save(conn, kind, entity_id, sets_cart, invoice_date, username,
+                apply_vat, description, qr_enabled, source_account_id,
+                scrap_karat)
+    ita = stock_home.italian_account(conn)
+    res["split"] = _save(conn, kind, entity_id, italian_cart, invoice_date,
+                         username, apply_vat, description, qr_enabled,
+                         ita or source_account_id, None)
+    return res
+
+
 def create_sale(conn, entity_id, cart, invoice_date, username,
                 apply_vat=True, description="", qr_enabled=False,
                 source_account_id=None, scrap_karat=None):
-    return _save(conn, "sale", entity_id, cart, invoice_date, username,
-                apply_vat, description, qr_enabled, source_account_id,
-                scrap_karat)
+    return _save_split(conn, "sale", entity_id, cart, invoice_date,
+                       username, apply_vat, description, qr_enabled,
+                       source_account_id, scrap_karat)
 
 
 def create_sale_return(conn, entity_id, cart, invoice_date, username,
                        apply_vat=True, description="", qr_enabled=False,
                        source_account_id=None, scrap_karat=None):
-    return _save(conn, "sale_return", entity_id, cart, invoice_date, username,
-                apply_vat, description, qr_enabled, source_account_id,
-                scrap_karat)
+    return _save_split(conn, "sale_return", entity_id, cart, invoice_date,
+                       username, apply_vat, description, qr_enabled,
+                       source_account_id, scrap_karat)
 
 
 # ملاحظة: `update_sale` القديمة أُزيلت في 4.6.0.

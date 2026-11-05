@@ -12,7 +12,8 @@ import json
 from pathlib import Path
 
 # اللوحات الافتراضية عند أول تشغيل
-ITALIAN = "@italian"        # صفّ «ايطالي / نواعم» (models.italian) — لا حساب
+ITALIAN = "@italian"        # صفّ «ايطالي / نواعم» (5.1.9) — صار حساباً (5.2.0)
+ITALIAN_ACC = "1210"        # حسابه الرسمي في المخزون: صفّه كأي حساب
 
 DEFAULTS = [
     {"key": "boxes", "title": "الصناديق",
@@ -259,9 +260,13 @@ def account_rows(conn, codes, date_from=None, date_to=None):
     out = []
     for code in codes:
         if code == ITALIAN:
-            from models import italian
-            out.append(italian.panel_row(conn, date_from, date_to))
-            continue
+            # 5.2.0: حسابٌ رسمي — رصيده من القيود كغيره، ويدخل المجاميع
+            code = ITALIAN_ACC
+            if not conn.execute("SELECT 1 FROM accounts WHERE code=?",
+                                (code,)).fetchone():
+                from models import italian
+                out.append(italian.panel_row(conn, date_from, date_to))
+                continue
         ids = _subtree_ids(conn, code)
         if not ids:
             continue

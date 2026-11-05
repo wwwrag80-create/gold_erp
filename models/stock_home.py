@@ -134,8 +134,35 @@ def home_of(wo):
     return int(v) if v else None
 
 
+def italian_account(conn):
+    """حساب «ايطالي / نواعم» (1210) — أو None إن لم يُنشأ بعد."""
+    from models.accounts import ITALIAN_GOLD
+    r = conn.execute("SELECT id FROM accounts WHERE code=? AND is_active=1",
+                     (ITALIAN_GOLD,)).fetchone()
+    return int(r["id"]) if r else None
+
+
+def line_account(conn, wo):
+    """حساب سطر الفاتورة (5.2.0): الرقم التجميعي (0010 · 00010) من حساب
+    الإيطالي دائماً، والطقم من بيته — وإلا None (يتبع حساب الفاتورة)."""
+    try:
+        bulk = bool(wo["is_bulk"])
+    except (IndexError, KeyError):
+        bulk = False
+    if bulk:
+        return italian_account(conn)
+    return home_account(conn, wo) if home_of(wo) else None
+
+
 def home_account(conn, wo, fallback_id=None):
     """الحساب الذي يخرج منه الطقم أو يعود إليه."""
+    try:
+        if wo["is_bulk"]:
+            ita = italian_account(conn)
+            if ita:
+                return ita
+    except (IndexError, KeyError):
+        pass
     h = home_of(wo)
     if h:
         ok = conn.execute("SELECT 1 FROM accounts WHERE id=? AND"

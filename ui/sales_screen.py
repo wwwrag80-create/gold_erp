@@ -3277,6 +3277,29 @@ class SalesScreen(QtWidgets.QWidget):
                              f"{_nf.f2(res['grand_total'])} ريال\n"
                              f"من حساب: {res.get('source_name', '—')}",
                        "invoices", res["id"])
+            # 5.2.0: الإيطاليات (0010 · 00010) فُصلت في فاتورةٍ مستقلة على
+            # حساب «ايطالي / نواعم» — تُعرض وتُنشر كالأولى
+            sp = res.get("split") if self.editing_id is None else None
+            if sp:
+                try:
+                    from services import invoice_share
+                    _sid, _co = sp["id"], config.COMPANY_NAME
+                    run_bg(lambda: invoice_share.ensure_published(_sid, _co),
+                           parent=self, text="جارٍ تجهيز صفحة الفاتورة…",
+                           stage="نشر صفحة الفاتورة", timeout=10.0)
+                except Exception:
+                    pass
+                if sp.get("vat_applied"):
+                    QRDialog(self, sp).exec_()
+                else:
+                    posted(self, f"فُصلت الإيطاليات في الفاتورة "
+                                 f"{sp['invoice_no']} — الوزن "
+                                 f"{_nf.f2(kv.g(sp['total_weight']))} "
+                                 f"{kv.unit()} · الإجمالي "
+                                 f"{_nf.f2(sp['grand_total'])} ريال\n"
+                                 f"وفاتورة الأطقم {res['invoice_no']} على "
+                                 f"{res.get('source_name', '—')}",
+                           "invoices", sp["id"])
             self.editing_id = None
             if self._held_id:
                 self._held_id = None

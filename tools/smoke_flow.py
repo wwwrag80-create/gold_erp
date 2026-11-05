@@ -2396,12 +2396,17 @@ def main():
           f"{_s1['card_total']} ← {_s2['card_total']} · فرق {_s2['gap']}")
     with db(readonly=True) as conn:
         _row4 = _dp4.account_rows(conn, ["1100", _dp4.ITALIAN])
+        _it4_acc = _it4.account_balance(conn)
         _per4 = _it4.statement(conn, "2026-05-03", "2026-05-04")
-    check("صفّه في اللوحة برصيده، ولا يدخل إجماليها",
-          _row4[-1].get("virtual")
-          and abs(_row4[-1]["gold_balance"] - _s2["closing"]) < 0.001
+    # 5.2.0: صار حساباً رسمياً (1210): صفّه رصيد الحساب ويدخل الإجمالي
+    check("صفّه في اللوحة حسابُ 1210 برصيده، ويدخل إجماليها",
+          _row4[-1].get("code") == "1210" and not _row4[-1].get("virtual")
+          and abs(_row4[-1]["gold_balance"] - _it4_acc) < 0.001
           and abs(_dp4.totals(_row4)["gold_balance"]
-                  - _row4[0]["gold_balance"]) < 0.001)
+                  - _row4[0]["gold_balance"] - _row4[-1]["gold_balance"])
+          < 0.001,
+          f"{_row4[-1].get('code')} {_row4[-1].get('gold_balance')}"
+          f" · دفتر {_it4_acc}")
     check("وبفترة: رصيد أولٌ ثم حركاتها وحدها",
           [r["label"] for r in _per4["rows"]] == ["بيع", "مرتجع"]
           and abs(_per4["closing"] - (_per4["opening"] - 7.0 + 2.0)) < 0.001,

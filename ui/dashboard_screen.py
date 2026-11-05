@@ -701,7 +701,7 @@ class DashboardScreen(QtWidgets.QWidget):
             if p.get("kind") == "scrap" and self._rows[i].get("karat"):
                 return self._open_scrap_karat(self._rows[i]["karat"])
             code = self._rows[i].get("code")
-            if code == dp.ITALIAN:
+            if code in (dp.ITALIAN, dp.ITALIAN_ACC):
                 return self.open_italian(p)
             if code and self.on_drill_code:
                 self.on_drill_code(code)

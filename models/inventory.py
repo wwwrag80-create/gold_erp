@@ -275,6 +275,97 @@ def sync_diamonds(conn, entry_id, rows):
             " wo_batch_lines WHERE entry_id=?)", (d, no, entry_id))
 
 
+def _italian_share(conn, prepared):
+    """(حساب الإيطالي، وزن الرقمين التجميعيين في الدفعة) — 5.2.0.
+    بلا حساب إيطالي (قاعدةٌ لم تُرقَّ بعد) تبقى الحصة في الوجهة كما كانت."""
+    from models import stock_home
+    ita = stock_home.italian_account(conn)
+    bulk = round(sum(p["reg"] for p in prepared if is_bulk_no(p["wo_no"])), 3)
+    return (ita, bulk) if ita and bulk > 0 else (None, 0.0)
+
+
+def split_italian_line(conn, entry_id, only_from=None):
+    """يضع حصة الرقمين التجميعيين من دفعة توريد في سطرٍ مدين على حساب
+    «ايطالي / نواعم» — منقولةً من سطر الوجهة (5.2.0).
+
+    الحصة من `wo_batch_lines` (ما ورد فعلاً من 0010 و00010)؛ والإجمالي
+    المدين لا يتغيّر، فالقيد يبقى متوازناً. `only_from`: لا يُنقل إلا من
+    سطرٍ على هذا الحساب (الترقية: من الذهب المشغول وحده).
+    يعيد الوزن المنقول (موجباً أو سالباً)."""
+    from models import stock_home
+    ita = stock_home.italian_account(conn)
+    if not ita:
+        return 0.0
+    bulk = round(float(conn.execute(
+        "SELECT COALESCE(SUM(l.registered_weight),0) t FROM wo_batch_lines l"
+        " JOIN work_orders w ON w.id=l.work_order_id AND w.is_bulk=1"
+        " WHERE l.entry_id=?", (entry_id,)).fetchone()["t"] or 0), 3)
+    il = conn.execute(
+        "SELECT id, gold_debit FROM journal_lines WHERE entry_id=?"
+        " AND account_id=? AND COALESCE(gold_debit,0)>0 ORDER BY id LIMIT 1",
+        (entry_id, ita)).fetchone()
+    have = round(float(il["gold_debit"]) if il else 0.0, 3)
+    need = round(bulk - have, 3)
+    if abs(need) < 0.0005:
+        return 0.0
+    dls = conn.execute(
+        "SELECT id, account_id, gold_debit FROM journal_lines WHERE entry_id=?"
+        " AND account_id<>? AND COALESCE(gold_debit,0)>0 ORDER BY id",
+        (entry_id, ita)).fetchall()
+    if only_from:
+        dls = [d for d in dls if int(d["account_id"]) == int(only_from)]
+    dl = dls[0] if dls else None
+    if need > 0:
+        # من سطور الوجهة بالترتيب حتى تكتمل الحصة — وإلا لا نقل
+        if sum(float(d["gold_debit"]) for d in dls) < need - 0.0005:
+            return 0.0
+        rest = need
+        for d in dls:
+            if rest <= 0.0005:
+                break
+            take = min(rest, float(d["gold_debit"]))
+            left = round(float(d["gold_debit"]) - take, 3)
+            if left > 0.0005:
+                conn.execute("UPDATE journal_lines SET gold_debit=?"
+                             " WHERE id=?", (left, d["id"]))
+            else:
+                conn.execute("DELETE FROM journal_lines WHERE id=?",
+                             (d["id"],))
+            rest = round(rest - take, 3)
+    else:
+        # نقصت حصة الإيطالي (سطرٌ حُذف أو أُنقص): يعود الفرق إلى الوجهة
+        if only_from:
+            return 0.0
+        if dl:
+            conn.execute("UPDATE journal_lines SET gold_debit=? WHERE id=?",
+                         (round(float(dl["gold_debit"]) - need, 3), dl["id"]))
+        else:
+            conn.execute(
+                "INSERT INTO journal_lines(entry_id,account_id,gold_debit,"
+                "gold_credit,cash_debit,cash_credit,line_desc)"
+                " VALUES(?,?,?,0,0,0,?)",
+                (entry_id, acc_id(conn, "1200"), -need, "توريد أطقم"))
+    new_it = round(have + need, 3)
+    if il:
+        if new_it > 0.0005:
+            conn.execute("UPDATE journal_lines SET gold_debit=? WHERE id=?",
+                         (new_it, il["id"]))
+        else:
+            conn.execute("DELETE FROM journal_lines WHERE id=?", (il["id"],))
+    elif new_it > 0.0005:
+        conn.execute(
+            "INSERT INTO journal_lines(entry_id,account_id,gold_debit,"
+            "gold_credit,cash_debit,cash_credit,line_desc)"
+            " VALUES(?,?,?,0,0,0,?)",
+            (entry_id, ita, new_it, "توريد ايطالي / نواعم (0010 · 00010)"))
+    try:
+        from models import integrity
+        integrity.mark(conn, entry_id)
+    except Exception:
+        pass
+    return need
+
+
 def create_work_orders_batch(conn, rows, entry_date, username,
                              dest_account_id=None, scrap_karat=None,
                              reference=""):
@@ -352,12 +443,19 @@ def create_work_orders_batch(conn, rows, entry_date, username,
     dest_id = resolve_dest(conn, dest_account_id)
     dest = conn.execute("SELECT code, name FROM accounts WHERE id=?",
                         (dest_id,)).fetchone()
-    lines = [
-        {"account_id": dest_id, "gold_debit": total_reg,
-         "line_desc": f"توريد دفعة ({n} طقم) إلى {dest['name']}"},
-        {"account_id": acc_id(conn, "1100"), "gold_credit": total_reg,
-         "line_desc": f"صرف لدفعة إنتاج ({n} طقم)"},
-    ]
+    # 5.2.0: حصة الرقمين التجميعيين تدخل حساب «ايطالي / نواعم» وحده،
+    # والأطقم حساب الوجهة — سطران مدينان، ودائن خزينة التصنيع بالإجمالي
+    ita_id, bulk_reg = _italian_share(conn, prepared)
+    lines = []
+    if round(total_reg - bulk_reg, 3) > 0:
+        lines.append({"account_id": dest_id,
+                      "gold_debit": round(total_reg - bulk_reg, 3),
+                      "line_desc": f"توريد دفعة ({n} طقم) إلى {dest['name']}"})
+    if bulk_reg > 0:
+        lines.append({"account_id": ita_id, "gold_debit": bulk_reg,
+                      "line_desc": "توريد ايطالي / نواعم (0010 · 00010)"})
+    lines.append({"account_id": acc_id(conn, "1100"), "gold_credit": total_reg,
+                  "line_desc": f"صرف لدفعة إنتاج ({n} طقم)"})
     _note = batch_note(reference, rows)
     entry_id = post_entry(
         conn, entry_date, f"توريد دفعة أطقم مجمّعة ({n} طقم)", lines,
@@ -731,12 +829,17 @@ def opening_stock_batch(conn, rows, entry_date, username):
 
     total_reg = round(sum(p["reg"] for p in prepared), 3)
     n = len(prepared)
-    lines = [
-        {"account_id": acc_id(conn, "1200"), "gold_debit": total_reg,
-         "line_desc": f"رصيد افتتاحي مخزني ({n} رقم تشغيل)"},
-        {"account_id": acc_id(conn, "3900"), "gold_credit": total_reg,
-         "line_desc": "مقابل أرصدة مخزنية سابقة على تشغيل النظام"},
-    ]
+    ita_id, bulk_reg = _italian_share(conn, prepared)
+    lines = []
+    if round(total_reg - bulk_reg, 3) > 0:
+        lines.append({"account_id": acc_id(conn, "1200"),
+                      "gold_debit": round(total_reg - bulk_reg, 3),
+                      "line_desc": f"رصيد افتتاحي مخزني ({n} رقم تشغيل)"})
+    if bulk_reg > 0:
+        lines.append({"account_id": ita_id, "gold_debit": bulk_reg,
+                      "line_desc": "رصيد افتتاحي — ايطالي / نواعم"})
+    lines.append({"account_id": acc_id(conn, "3900"), "gold_credit": total_reg,
+                  "line_desc": "مقابل أرصدة مخزنية سابقة على تشغيل النظام"})
     entry_id = post_entry(
         conn, entry_date, f"رصيد افتتاحي مخزني ({n} رقم تشغيل)", lines,
         source_table="work_orders", username=username)
@@ -1378,11 +1481,14 @@ def batch_dest_line(conn, entry_id):
     الدفعات القديمة (وكلها على الذهب المشغول) تُقرأ كالجديدة بلا
     ترقيةٍ ولا تخمين.
     """
+    # سطر الإيطالي (5.2.0) ليس الوجهة: حصةٌ ثابتة لحسابها لا يختارها أحد
+    from models.accounts import ITALIAN_GOLD
     return conn.execute(
         "SELECT l.id, l.account_id, l.gold_debit, a.code, a.name"
         " FROM journal_lines l JOIN accounts a ON a.id=l.account_id"
         " WHERE l.entry_id=? AND COALESCE(l.gold_debit,0) > 0"
-        " ORDER BY l.id LIMIT 1", (entry_id,)).fetchone()
+        " AND a.code<>? ORDER BY l.id LIMIT 1",
+        (entry_id, ITALIAN_GOLD)).fetchone()
 
 
 def batch_dest_karat(conn, entry_id):
@@ -1919,6 +2025,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
             raise ValueError(
                 "تعذّر تعديل القيد: أسطره غير متوقّعة — "
                 "احذف العملية وأعد إدخالها")
+
+    # 5.2.0: حصة 0010 و00010 في سطر حساب الإيطالي بعد التعديل
+    split_italian_line(conn, entry_id)
 
     if entry_date and entry_date != entry["entry_date"]:
         conn.execute("UPDATE journal_entries SET entry_date=? WHERE id=?",
