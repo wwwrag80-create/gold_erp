@@ -50,6 +50,9 @@
     return balSpan(G.g(w18, k), k === vk() ? T("جم") : T("جم ع{0}", k), fac);
   }
   function cashBal(c, fac) { return balSpan(c, T("ريال"), fac); }
+  // 1.12: سبيكة ذهب بجانب أوزان الذهب، وورقة نقد بجانب النقد والأجور
+  const icoGold = () => h("span", { class: "u", html: P.ICO_GOLD });
+  const icoCash = () => h("span", { class: "u", html: P.ICO_CASH });
   const APP_NAME = "ÀUR";
   // رابط ÀUR للجميع: الآيفون (يُضاف إلى الشاشة الرئيسية) وتحميل أندرويد — Cloudflare Pages
   const SITE_URL = "https://gold-erp.pages.dev";
@@ -1152,7 +1155,7 @@
       }
       inv.lines.forEach((li, i) => {
         const lk = li.karat || 18;
-        const cell = (label, val) => h("div", { class: "muted" }, label, h("b", { class: "num" }, val));
+        const cell = (label, val, ic) => h("div", { class: "muted" }, label, h("b", { class: "num" }, ic && val !== "—" ? ic() : null, val));
         linesBox.append(h("div", { class: "line" + (ent.editIdx === i ? " editing" : "") },
           h("div", { class: "top" },
             lineThumb(li, "sm"),
@@ -1166,24 +1169,24 @@
                   refresh();
                 }
               } }, ico("x", 17)))),
-          li.wageOnly ? h("div", { class: "vals" }, cell(T("الأجور"), f2(li.amount)))
+          li.wageOnly ? h("div", { class: "vals" }, cell(T("الأجور"), f2(li.amount), icoCash))
             : h("div", { class: "vals" },
-              cell(T("الوزن"), li.reg18 > 0 ? gw(li.reg18, lk) : "—"),
+              cell(T("الوزن"), li.reg18 > 0 ? gw(li.reg18, lk) : "—", icoGold),
               cell(T("💎 الماس"), li.diamond > 0 ? f2(li.diamond) : "—"),
-              cell(T("الأجور"), f2(li.wages)))));
+              cell(T("الأجور"), f2(li.wages), icoCash))));
       });
       const t = D.totals(inv.lines, inv.vat);
       const sets = inv.lines.filter((l) => !l.wageOnly).length;
       const dia0 = D.diamondOf(inv);
       const k = partyK();
       totalsBox.innerHTML = "";
-      const row = (a, b, cls) => h("div", { class: "spread" + (cls ? " " + cls : "") }, h("span", null, a), h("span", { class: "num" }, b));
+      const row = (a, b, cls, ic) => h("div", { class: "spread" + (cls ? " " + cls : "") }, h("span", null, a), h("span", { class: "num" }, ic ? ic() : null, b));
       totalsBox.append(row(T("عدد الأطقم"), String(sets)),
-        row(T("إجمالي الوزن (عيار {0})", k), gw(t.totalW18, k)),
+        row(T("إجمالي الوزن (عيار {0})", k), gw(t.totalW18, k), "", icoGold),
         dia0 > 0 ? row(T("💎 إجمالي الماس (جم)"), f2(dia0)) : null,
-        row(T("إجمالي الأجور"), f2(t.wages)));
-      if (inv.vat) totalsBox.append(row(T("ضريبة 15% على الأجور"), f2(t.vatAmt)));
-      totalsBox.append(row(T("الإجمالي"), f2(t.grand) + T(" ريال"), "grand"));
+        row(T("إجمالي الأجور"), f2(t.wages), "", icoCash));
+      if (inv.vat) totalsBox.append(row(T("ضريبة 15% على الأجور"), f2(t.vatAmt), "", icoCash));
+      totalsBox.append(row(T("الإجمالي"), f2(t.grand) + T(" ريال"), "grand", icoCash));
       if (inv.shopId) {
         const fac = forFactory();
         const before = D.balance(s, inv.shopId, inv.id);
@@ -1191,8 +1194,8 @@
         const g18 = Num_round3(before.gold18 + e.gd - e.gc);
         const c = Num_round2(before.cash + e.cd - e.cc);
         totalsBox.append(h("hr", { class: "sep" }),
-          h("div", { class: "spread small" }, h("span", null, T("رصيد الذهب بعدها")), goldBal(g18, fac, k)),
-          h("div", { class: "spread small" }, h("span", null, T("رصيد الأجور بعدها")), cashBal(c, fac)));
+          h("div", { class: "spread small" }, h("span", null, T("رصيد الذهب بعدها")), h("span", null, icoGold(), goldBal(g18, fac, k))),
+          h("div", { class: "spread small" }, h("span", null, T("رصيد الأجور بعدها")), h("span", null, icoCash(), cashBal(c, fac))));
       }
       renderPickBtn();
       saveDraft();
@@ -1414,9 +1417,9 @@
       try { rows = D.voucherRows(vo.rows); } catch (e) { rows = []; }
       let eq = 0, cash = 0;
       for (const r of rows) { eq += r.equiv; cash += r.amount; }
-      const row = (a, b) => h("div", { class: "spread" }, h("span", null, a), h("span", { class: "num" }, b));
-      totalsBox.append(row(T("الذهب (مكافئ عيار 18)"), f2(Num_round3(eq))),
-        k !== 18 ? row(T("الذهب (عيار {0})", k), gw(Num_round3(eq), k)) : null, row(T("النقد"), f2(Num_round2(cash)) + T(" ريال")));
+      const row = (a, b, ic) => h("div", { class: "spread" }, h("span", null, a), h("span", { class: "num" }, ic ? ic() : null, b));
+      totalsBox.append(row(T("الذهب (مكافئ عيار 18)"), f2(Num_round3(eq)), icoGold),
+        k !== 18 ? row(T("الذهب (عيار {0})", k), gw(Num_round3(eq), k), icoGold) : null, row(T("النقد"), f2(Num_round2(cash)) + T(" ريال"), icoCash));
       if (vo.shopId) {
         const fac = D.isFactory(D.shopById(s, vo.shopId));
         const dv = draft();
@@ -1427,10 +1430,10 @@
             netDiff: Num_round2(dv.netDiff) });
         } catch (x) { e = { gd: 0, gc: 0, cd: 0, cc: 0 }; }
         totalsBox.append(h("hr", { class: "sep" }),
-          h("div", { class: "spread small" }, h("span", null, T("رصيد الذهب قبل")), goldBal(before.gold18, fac, k)),
-          h("div", { class: "spread small" }, h("span", null, T("رصيد الذهب بعد")), goldBal(Num_round3(before.gold18 + e.gd - e.gc), fac, k)),
-          h("div", { class: "spread small" }, h("span", null, T("رصيد النقد قبل")), cashBal(before.cash, fac)),
-          h("div", { class: "spread small" }, h("span", null, T("رصيد النقد بعد")), cashBal(Num_round2(before.cash + e.cd - e.cc), fac)));
+          h("div", { class: "spread small" }, h("span", null, T("رصيد الذهب قبل")), h("span", null, icoGold(), goldBal(before.gold18, fac, k))),
+          h("div", { class: "spread small" }, h("span", null, T("رصيد الذهب بعد")), h("span", null, icoGold(), goldBal(Num_round3(before.gold18 + e.gd - e.gc), fac, k))),
+          h("div", { class: "spread small" }, h("span", null, T("رصيد النقد قبل")), h("span", null, icoCash(), cashBal(before.cash, fac))),
+          h("div", { class: "spread small" }, h("span", null, T("رصيد النقد بعد")), h("span", null, icoCash(), cashBal(Num_round2(before.cash + e.cd - e.cc), fac))));
       }
     }
     async function save() {
@@ -1628,14 +1631,14 @@
         const gv = G.g(g18, k);
         const hg = Math.abs(gv) >= 0.005, hc = Math.abs(c) >= 0.005;
         if (!hg && !hc) return h("td", { class: "m z" }, "—");
-        return h("td", { class: "m" }, h("span", { class: "gl num", dir: "ltr" }, hg ? f2(gv) : "—"),
-          h("span", { class: "cl num", dir: "ltr" }, hc ? f2(c) : "—"));
+        return h("td", { class: "m" }, h("span", { class: "gl" }, hg ? icoGold() : null, h("span", { class: "num", dir: "ltr" }, hg ? f2(gv) : "—")),
+          h("span", { class: "cl" }, hc ? icoCash() : null, h("span", { class: "num", dir: "ltr" }, hc ? f2(c) : "—")));
       };
       const balc = (g18, c) => {
         const gv = G.g(g18, k);
         const w = (x) => (cum || Math.abs(x) < 0.005 ? null : [" ", h("span", { class: "w" }, balWord(x, fac))]);
-        return h("td", { class: "m b" }, h("span", { class: "gl" }, h("b", { class: "num" }, f2(Math.abs(gv))), w(gv)),
-          h("span", { class: "cl" }, h("span", { class: "num" }, f2(Math.abs(c))), w(c)));
+        return h("td", { class: "m b" }, h("span", { class: "gl" }, icoGold(), h("b", { class: "num" }, f2(Math.abs(gv))), w(gv)),
+          h("span", { class: "cl" }, icoCash(), h("span", { class: "num" }, f2(Math.abs(c))), w(c)));
       };
       for (const r of res.rows) {
         row(r, [dt(r.date), opCell(r), amt(r.gd, r.cd), amt(r.gc, r.cc), balc(r.gbal, r.cbal)]);
@@ -1651,11 +1654,11 @@
       head = [T("التاريخ"), T("العملية"), T("عليه"), T("له"), cum ? T("المجموع") : T("الرصيد")];
       bal = cum
         ? h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("إجمالي {0}", fl)),
-          h("b", { class: "num" }, T("{0} جم", gw(Math.abs(res.totals.gbal), k))), h("span", { class: "muted" }, "·"),
-          h("b", { class: "num" }, T("{0} ريال", f2(Math.abs(res.totals.cbal)))),
-          h("span", { class: "muted small st-all" }, T("رصيد الحساب كله: "), goldBal(res.gold18, fac, k), " · ", cashBal(res.cash, fac)))
+          h("b", { class: "num" }, icoGold(), T("{0} جم", gw(Math.abs(res.totals.gbal), k))), h("span", { class: "muted" }, "·"),
+          h("b", { class: "num" }, icoCash(), T("{0} ريال", f2(Math.abs(res.totals.cbal)))),
+          h("span", { class: "muted small st-all" }, T("رصيد الحساب كله: "), icoGold(), goldBal(res.gold18, fac, k), " · ", icoCash(), cashBal(res.cash, fac)))
         : h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("الرصيد")),
-          goldBal(res.gold18, fac, k), h("span", { class: "muted" }, "·"), cashBal(res.cash, fac));
+          h("span", null, icoGold(), goldBal(res.gold18, fac, k)), h("span", { class: "muted" }, "·"), h("span", null, icoCash(), cashBal(res.cash, fac)));
     }
     v.append(bal);
     if (!tbody.children.length) {
@@ -1663,7 +1666,7 @@
         : filter ? T("لا شيء من «{0}» في الفترة", fl) : T("لا حركة في الفترة")));
       return;
     }
-    if (mode === "gold") v.append(h("div", { class: "muted small st-legend" }, T("في كل خانة: الذهب (جم عيار {0}) فوق، والنقد (ريال) تحته.", k)));
+    if (mode === "gold") v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: {0} الذهب (جم عيار {1}) فوق، و{2} النقد والأجور (ريال) تحته.", P.ICO_GOLD, k, P.ICO_CASH) }));
     v.append(h("table", { class: "st-table" + (mode === "diamond" ? " dia" : " gold") },
       h("thead", null, h("tr", null, ...head.map((x) => h("th", null, x)))), tbody));
     if (n) v.append(h("div", { class: "muted small st-hint" }, T("اضغط على أي عملية لمعاينتها وصورها، ومنها تعديلها")));

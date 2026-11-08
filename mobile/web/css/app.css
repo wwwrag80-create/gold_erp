@@ -589,3 +589,10 @@ body.no-tabs .web-bk { bottom: calc(16px + env(safe-area-inset-bottom)); }
 [dir="ltr"] .box-v { direction: ltr; }
 .lang-top { display: flex; justify-content: flex-end; }
 .lang-chip { display: inline-flex; align-items: center; gap: 4px; }
+
+/* 1.12: سبيكة ذهب بجانب أوزان الذهب، وورقة نقد بجانب النقد والأجور */
+.u { display: inline-flex; vertical-align: -2px; margin-inline-end: 3px; }
+.u svg { width: 13px; height: 13px; display: block; }
+.st-table.gold .u { margin-inline-end: 2px; }
+.st-table.gold .u svg { width: 12px; height: 12px; }
+.st-legend .ug, .st-legend .uc { vertical-align: -2px; }

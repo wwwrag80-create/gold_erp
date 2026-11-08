@@ -640,6 +640,7 @@ window.I18N_EN = {
 "رصيد الحساب كله: ": "Whole account balance: ",
 "لا شيء من «{0}» في الفترة": "Nothing under “{0}” in this period",
 "في كل خانة: الذهب (جم عيار {0}) فوق، والنقد (ريال) تحته.": "In each cell: gold (g, {0}K) on top, cash (SAR) below.",
+"في كل خانة: {0} الذهب (جم عيار {1}) فوق، و{2} النقد والأجور (ريال) تحته.": "In each cell: {0} gold (g, {1}K) on top, {2} cash and wages (SAR) below.",
 "كشف حساب — {0}": "Statement — {0}",
 "السداد": "Payments",
 "المرتجعات": "Returns",
