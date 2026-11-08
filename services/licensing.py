@@ -73,6 +73,8 @@ class AccountGuard(threading.Thread):
         self.first_delay = first_delay
         self._stop = threading.Event()
         self.last = {"when": "", "online": False, "active": True}
+        # سبب الإغلاق: «suspended» أوقفته الإدارة · «expired» انتهى الاشتراك
+        self.reason = ""
 
     def stop(self):
         self._stop.set()
@@ -80,7 +82,15 @@ class AccountGuard(threading.Thread):
     def check_now(self):
         st = account_status(self.username)
         self.last = dict(st, when=time.strftime("%Y-%m-%d %H:%M"))
-        if st["online"] and st["known"] and not st["active"]:
+        expired = False
+        try:
+            from services import plan
+            left = plan.days_left(plan.current())
+            expired = left is not None and left < 0
+        except Exception:
+            pass
+        if expired or (st["online"] and st["known"] and not st["active"]):
+            self.reason = "expired" if expired else "suspended"
             self._stop.set()
             try:
                 self.on_suspended()

@@ -1290,6 +1290,34 @@ def create_return_stub(conn, wo_no, gold, small_stones, big_stones,
     return get_wo_by_no(conn, wo_no)
 
 
+def create_direct_stock(conn, wo_no, gold, small_stones, big_stones,
+                        discount_rate, wage_per_gram, entry_date, username):
+    """طقمٌ يُباع مباشرةً من شاشة المبيعات بلا شاشة الوارد (نوع «عميل»).
+
+    **المنطق المحاسبي**: الطقم في يد صاحب الحساب فعلاً قبل بيعه، فيُثبت
+    في المخزون أولاً بقيد الرصيد الافتتاحي المخزني نفسه (مدين الذهب
+    المشغول / دائن الأرصدة الافتتاحية 3900) بتاريخ الفاتورة — ثم يُخرجه
+    قيدُ البيع إلى ذمة العميل كأي طقم. فلا يصير المخزون سالباً، ويبقى
+    للطقم رقمه وحركته في «حركة الطقم» والكشوف.
+    """
+    wo_no = str(wo_no).strip()
+    if not wo_no:
+        raise ValueError("أدخل رقم التشغيل")
+    if is_bulk_no(wo_no):
+        raise ValueError(f"الرقم {wo_no} محجوز للرصيد التجميعي")
+    if float(gold or 0) <= 0:
+        raise ValueError("أدخل وزن الذهب")
+    opening_stock_batch(conn, [{
+        "wo_no": wo_no, "gold": gold, "small_stones": small_stones,
+        "big_stones": big_stones,
+        "discount_rate": (config.STONE_DISCOUNT_RATE if discount_rate is None
+                          else discount_rate),
+        "wage_per_gram": wage_per_gram,
+        "notes": "طقم أُدخل مباشرةً من شاشة المبيعات"}],
+        entry_date, username)
+    return get_wo_by_no(conn, wo_no)
+
+
 # ══════════════════════════════════════════════════════════════════
 # تسويات أوزان الأطقم (حذف · زيادة · نقص)
 # ══════════════════════════════════════════════════════════════════

@@ -132,5 +132,21 @@ with db() as conn:
                      " WHERE e.is_deleted=0 AND l.account_id=?", (acc_id(conn, "1500"),)).fetchone()[0]
     check("والبنك عاد صفراً", abs(c) < 0.005, c)
     check("ولا مستند محذوف في الدفتر", conn.execute("SELECT COUNT(*) FROM journal_entries WHERE is_deleted=1").fetchone()[0] == 0)
+# تحويل سندٍ لجهةٍ أخرى من «إدارة وتحويل العمليات»: يبقى القديم برقمه ويُعكس
+from models import operations  # noqa: E402
+with db() as conn:
+    c2 = add_entity(conn, "عميل التحويل", "customer", username="t")
+    c2 = c2 if isinstance(c2, int) else c2["id"]
+    c3 = add_entity(conn, "عميل المستلم", "customer", username="t")
+    c3 = c3 if isinstance(c3, int) else c3["id"]
+    v2 = vouchers.create_voucher(conn, "receipt", "2026-11-07", "t", entity_id=c2,
+                                 rows=[{"kind": "cash", "amount": 250}])
+    r = operations.transfer_voucher(conn, v2["id"], c3, "t")
+    check("تحويل السند: القديم باق برقمه", conn.execute("SELECT is_deleted FROM vouchers WHERE id=?", (v2["id"],)).fetchone()[0] == 0)
+    rv = conn.execute("SELECT * FROM vouchers WHERE notes LIKE ?", (f"%عكس السند {v2['voucher_no']}%",)).fetchone()
+    check("ومعكوسٌ بسند صرف بتاريخه", rv is not None and rv["kind"] == "payment" and rv["voucher_date"] == "2026-11-07")
+    check("والجهة الأولى عادت صفراً", party_bal(conn, c2) == (0, 0), party_bal(conn, c2))
+    check("والمستلم عليه السند الجديد", party_bal(conn, c3)[1] == -250 and r["new_no"] != v2["voucher_no"], party_bal(conn, c3))
+    check("ولا مستند محذوف بعد التحويل", conn.execute("SELECT COUNT(*) FROM journal_entries WHERE is_deleted=1").fetchone()[0] == 0)
 print(f"\n{'✔' if not bad else '✘'} {ok} نجح · {bad} فشل")
 sys.exit(1 if bad else 0)

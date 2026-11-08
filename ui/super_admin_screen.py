@@ -21,7 +21,8 @@ from ui.widgets.common import (ask, big_label, err, fill, info, make_table,
                                title_label)
 from ui.widgets.table_fit import fit_columns
 
-USER_COLS = ["اسم المستخدم", "المصنع", "هوية المصنع", "الصلاحية", "الحالة"]
+USER_COLS = ["اسم المستخدم", "المصنع", "هوية المصنع", "الصلاحية",
+             "نوع النظام", "الاشتراك حتى", "الأجهزة", "الحالة"]
 
 
 class SuperAdminScreen(QtWidgets.QWidget):
@@ -107,7 +108,16 @@ class SuperAdminScreen(QtWidgets.QWidget):
         self.nu_pass = kit.LineEdit()
         self.nu_pass.setPlaceholderText("كلمة المرور")
         self.nu_pass.setEchoMode(QtWidgets.QLineEdit.Password)
+        # 5.2.1: نوع النظام — والشاشات والاشتراك والأجهزة تُحدَّد بعده
+        from services import plan as _plan
+        self.nu_kind = kit.ComboBox()
+        for _k, _label in _plan.TYPES:
+            self.nu_kind.addItem(_label, _k)
+        self.nu_kind.setToolTip("مصنع · محلات · عميل — بعد «إنشاء الحساب» "
+                                "تُحدَّد شاشاته ومدة اشتراكه وعدد أجهزته")
         self.nu_is_admin = kit.CheckBox("حساب مدير عام")
+        self.nu_is_admin.toggled.connect(
+            lambda on: self.nu_kind.setEnabled(not on))
         self.nu_is_admin.setToolTip(
             "المدير العام يرى شاشات الإدارة من أي نسخة")
         btn_new = kit.PushButton("➕ إنشاء الحساب")
@@ -126,6 +136,11 @@ class SuperAdminScreen(QtWidgets.QWidget):
         btn_add = kit.PushButton("➕ مستخدم إضافي لهذا المصنع")
         btn_add.setToolTip("حساب دخول ثانٍ لنفس المصنع المحدَّد")
         btn_add.clicked.connect(self.add_user_to_factory)
+        btn_plan = kit.PushButton("⚙ النوع والشاشات والاشتراك والأجهزة")
+        btn_plan.setObjectName("homeBtn")
+        btn_plan.setToolTip("نوع النظام · الشاشات الظاهرة · آخر يوم في "
+                            "الاشتراك · عدد الأجهزة — للحساب المحدَّد")
+        btn_plan.clicked.connect(self.edit_plan)
         btn_del = kit.PushButton("🗑 حذف الحساب نهائياً")
         btn_del.setObjectName("ghost")
         btn_del.clicked.connect(self.delete_user)
@@ -141,6 +156,8 @@ class SuperAdminScreen(QtWidgets.QWidget):
         row.addWidget(self.nu_user, 2)
         row.addWidget(QtWidgets.QLabel("كلمة المرور:"))
         row.addWidget(self.nu_pass, 2)
+        row.addWidget(QtWidgets.QLabel("النوع:"))
+        row.addWidget(self.nu_kind)
         row.addWidget(self.nu_is_admin)
         row.addWidget(btn_new)
 
@@ -150,6 +167,7 @@ class SuperAdminScreen(QtWidgets.QWidget):
 
         row2 = QtWidgets.QHBoxLayout()
         row2.addWidget(btn_load)
+        row2.addWidget(btn_plan)
         row2.addWidget(btn_add)
         row2.addWidget(btn_toggle)
         row2.addWidget(btn_fac_stop)
@@ -239,12 +257,30 @@ class SuperAdminScreen(QtWidgets.QWidget):
                 self.nu_is_admin.setChecked(False)
                 self.load_users()
                 return
+            # الخطة تُختار قبل الإنشاء — فلا يُنشأ حسابٌ ثم يُنسى ضبطه
+            from ui.plan_dialog import PlanDialog
+            dlg = PlanDialog(self, f"الحساب الجديد «{fac}» — الشاشات "
+                                   "والاشتراك والأجهزة")
+            # النوع المختار في السطر ← شاشاته الافتراضية (سنة · جهاز واحد)
+            dlg.kind.setCurrentIndex(max(0, dlg.kind.findData(
+                self.nu_kind.currentData())))
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            pv = dlg.values()
             r = cloud_auth.create_user(usr, pwd,
                                        role=cloud_auth.ROLE_FACTORY,
                                        full_name=fac, factory_name=fac)
-            info(self, f"أُنشئ حساب المصنع «{fac}».\n\n"
+            plan_msg = ""
+            try:
+                cloud_auth.set_plan(r["tenant_id"], pv["type"], pv["screens"],
+                                    pv["expires_at"], pv["max_devices"])
+                plan_msg = "\n" + _plan_text(pv)
+            except Exception as pe:
+                plan_msg = (f"\n\n⚠ لم تُحفظ الخطة: {pe}\n"
+                            "اضبطها لاحقاً من «⚙ النوع والشاشات…».")
+            info(self, f"أُنشئ حساب «{fac}».\n\n"
                        f"اسم المستخدم : {r['username']}\n"
-                       f"هوية المصنع  : {r['tenant_id']}\n\n"
+                       f"هوية المصنع  : {r['tenant_id']}{plan_msg}\n\n"
                        f"سلّم العميل الملف التنفيذي مع اسم المستخدم "
                        f"وكلمة المرور فقط.")
             self.nu_factory.clear()
@@ -258,7 +294,45 @@ class SuperAdminScreen(QtWidgets.QWidget):
         try:
             from services import cloud_auth
             self.users = cloud_auth.list_users()
+            try:
+                self.plans = cloud_auth.list_plans()
+            except Exception:
+                self.plans = {}       # خادمٌ لم يُرقَّ بعد — بلا خطط
             self._fill_users()
+        except Exception as e:
+            err(self, e)
+
+    def edit_plan(self):
+        """نوع النظام والشاشات والاشتراك والأجهزة — للحساب المحدَّد."""
+        try:
+            from services import cloud_auth
+            from ui.plan_dialog import PlanDialog
+            u = self._selected_user()
+            if u.get("role") == "super_admin":
+                raise ValueError("المدير العام بلا قيود — اختر حساب مصنع")
+            tid = u.get("tenant_id")
+            cur = (getattr(self, "plans", {}) or {}).get(tid)
+            name = u.get("full_name") or tid
+
+            def reset():
+                if not ask(self, f"تفريغ قائمة أجهزة «{name}»؟\n\n"
+                                 "يُسجَّل كل جهازٍ من جديد عند دخوله التالي "
+                                 "(حتى العدد المسموح)."):
+                    return False
+                cloud_auth.reset_devices(tid)
+                return True
+            dlg = PlanDialog(self, f"«{name}» — الشاشات والاشتراك والأجهزة",
+                             current=cur,
+                             devices_used=(cur or {}).get("devices_used"),
+                             on_reset_devices=reset)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            pv = dlg.values()
+            cloud_auth.set_plan(tid, pv["type"], pv["screens"],
+                                pv["expires_at"], pv["max_devices"])
+            info(self, f"حُفظت خطة «{name}».\n\n{_plan_text(pv)}\n\n"
+                       "تنطبق عند دخوله التالي.")
+            self.load_users()
         except Exception as e:
             err(self, e)
 
@@ -268,14 +342,20 @@ class SuperAdminScreen(QtWidgets.QWidget):
             getattr(self, "users", []) or [],
             key=lambda u: (u.get("role") == "super_admin",
                            u.get("full_name") or "", u.get("username", "")))
-        fill(self.users_table, USER_COLS,
-             [(u.get("username", ""), u.get("full_name") or "—",
-               u.get("tenant_id", ""),
-               "المدير العام" if u.get("role") == "super_admin"
-               else "مصنع",
-               "نشط" if u.get("is_active") else "موقوف")
-              for u in self.users])
-        fit_columns(self.users_table, [20, 30, 24, 14, 12])
+        from ui.plan_dialog import summary
+        plans = getattr(self, "plans", {}) or {}
+        rows = []
+        for u in self.users:
+            sup = u.get("role") == "super_admin"
+            pk, pe, pd = (("—", "—", "—") if sup
+                          else summary(plans.get(u.get("tenant_id"))))
+            rows.append((u.get("username", ""), u.get("full_name") or "—",
+                         u.get("tenant_id", ""),
+                         "المدير العام" if sup else "حساب",
+                         pk, pe, pd,
+                         "نشط" if u.get("is_active") else "موقوف"))
+        fill(self.users_table, USER_COLS, rows)
+        fit_columns(self.users_table, [16, 22, 18, 10, 10, 14, 10, 8])
 
     def delete_user(self):
         """يحذف حساب مصنع نهائياً من السحابة."""
@@ -669,3 +749,13 @@ class SuperAdminScreen(QtWidgets.QWidget):
             self.load_users()
         except Exception:
             pass
+
+
+def _plan_text(pv):
+    """وصفٌ مقروء للخطة في رسائل التأكيد."""
+    from services import plan
+    n = len(pv.get("screens") or []) or len(plan.ALL_SCREENS)
+    return (f"نوع النظام : {plan.TYPE_LABEL.get(pv['type'], pv['type'])}\n"
+            f"الشاشات    : {n} شاشة\n"
+            f"الاشتراك حتى: {pv.get('expires_at') or 'بلا نهاية'}\n"
+            f"الأجهزة    : {pv.get('max_devices') or 'بلا حد'}")

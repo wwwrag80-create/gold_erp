@@ -9665,7 +9665,7 @@ def main():
           "auth_login2" in _sql119 and "auth_salt" in _sql119
           and "failed_logins" in _sql119
           and "NULL::TEXT, u.tenant_id" in _sql119
-          and _ca119.RPC_EXPECTED == "3.0.0"
+          and _ca119.RPC_EXPECTED in ("3.0.0", "3.1.0")
           and "_secure_login" in _in119.getsource(_ca119.login))
     _sa119 = (Path(ROOT) / "ui" / "super_admin_screen.py").read_text(
         encoding="utf-8")

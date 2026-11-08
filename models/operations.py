@@ -437,9 +437,14 @@ def transfer_voucher(conn, voucher_id, new_entity_id, username, notes=""):
     old_name = _entity_name(conn, v["customer_id"]) if v["customer_id"] else "—"
     new_name = _entity_name(conn, new_entity_id)
 
-    _void(conn, v["entry_id"], username,
-          f"تحويل السند {v['voucher_no']} من {old_name} إلى {new_name}")
-    conn.execute("UPDATE vouchers SET is_deleted=1 WHERE id=?", (voucher_id,))
+    # 5.2.1: لا حذف — السند القديم يبقى برقمه ويُعكس بسندٍ مقابل (قبض ⇄
+    # صرف) بتاريخه، ثم يُنشأ الجديد على الجهة الأخرى
+    from models import reversal
+    if v["entry_id"]:
+        reversal.reverse(conn, v["entry_id"], username,
+                         day=v["voucher_date"])
+    log_action(conn, username, "void", "journal_entries", v["entry_id"],
+               f"تحويل السند {v['voucher_no']} من {old_name} إلى {new_name}")
 
     res = vouchers.create_voucher(
         conn, v["kind"], v["voucher_date"], username,

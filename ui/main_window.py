@@ -530,6 +530,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sidebar.model().rowsMoved.connect(
             lambda *_: self._save_nav_layout())
         self._restore_nav_layout()
+        self._apply_plan_screens()
         self._apply_nav_icons()
         self._items[self.welcome] = None
         self.switch(0)
@@ -793,6 +794,33 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._nav_loading = False
 
+    # ══════════ شاشات الاشتراك (5.2.1) ══════════
+    def _plan_allows(self, row):
+        """هل حددت الإدارة هذه الشاشة ضمن اشتراك الحساب؟"""
+        if self.is_super or row <= 0:
+            return True
+        try:
+            from services import plan
+            key = getattr(self, "_screen_keys", {}).get(row, "")
+            return not key or plan.allowed(key)
+        except Exception:
+            return True
+
+    def _apply_plan_screens(self):
+        """يُخفي من القائمة ما لم تحدده الإدارة — ومجموعةً فرغت كلها."""
+        if self.is_super:
+            return
+        for item, _parent in list(self._iter_nav()):
+            idx = item.data(0, QtCore.Qt.UserRole)
+            if idx is not None and idx > 0 and not self._plan_allows(idx):
+                item.setHidden(True)
+        for item, _parent in list(self._iter_nav()):
+            idx = item.data(0, QtCore.Qt.UserRole)
+            if (idx is None or idx < 0) and item.childCount() and all(
+                    item.child(i).isHidden()
+                    for i in range(item.childCount())):
+                item.setHidden(True)
+
     def reset_nav_layout(self):
         """يعيد القائمة لترتيبها الافتراضي (يُحذف ملف التخصيص)."""
         try:
@@ -1003,7 +1031,8 @@ class MainWindow(QtWidgets.QMainWindow):
             k = self._screen_key(i)
             scr = self.screens[i]
             if (k and isinstance(scr, Lazy) and not scr.built
-                    and "إيقاف المصانع" not in k):
+                    and "إيقاف المصانع" not in k
+                    and self._plan_allows(i)):
                 rows[k] = i
         ranked = sorted(rows, key=lambda k: -int(use.get(k, 0)))
         ranked = [k for k in ranked if int(use.get(k, 0)) > 0]
@@ -1157,6 +1186,11 @@ class MainWindow(QtWidgets.QMainWindow):
         نهائياً، والشاشة تُبنى من جديد ببيانات محدّثة عند فتحها.
         """
         if row < 0 or row >= len(self.screens):
+            return
+        # شاشةٌ خارج اشتراك الحساب لا تُفتح — ولو من رابطٍ داخل شاشة
+        if not self._plan_allows(row):
+            info(self, "هذه الشاشة غير مفعّلة في اشتراك هذا الحساب.\n"
+                       "يرجى مراجعة الإدارة لإضافتها.")
             return
         # الشاشات الحسّاسة تُحرس برمز دخول قبل فتحها
         if not self._guard_screen(row):
@@ -2399,6 +2433,8 @@ class MainWindow(QtWidgets.QMainWindow):
         from ui.widgets import palette as pal
         items = []
         for idx, name in sorted(getattr(self, "_screen_keys", {}).items()):
+            if not self._plan_allows(idx):
+                continue
             node = self._items.get(self.screens[idx]) \
                 if 0 <= idx < len(self.screens) else None
             shown = node.text(0) if node is not None else name
@@ -2621,9 +2657,12 @@ class MainWindow(QtWidgets.QMainWindow):
             storage.make_backup("exit")
         except Exception:
             pass
+        why = ("انتهى الاشتراك" if getattr(getattr(self, "_guard", None),
+                                           "reason", "") == "expired"
+               else "أوقفت الإدارة هذا الحساب")
         QtWidgets.QMessageBox.critical(
             self, "تم إيقاف البرنامج",
-            "أوقفت الإدارة هذا الحساب — سيُغلق البرنامج الآن.\n\n"
+            f"{why} — سيُغلق البرنامج الآن.\n\n"
             "بياناتك محفوظة على هذا الجهاز كما هي ولم يُحذف منها شيء.\n"
             "للتفعيل يرجى مراجعة الإدارة.")
         self._suspended = True

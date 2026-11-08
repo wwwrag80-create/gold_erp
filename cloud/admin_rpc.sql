@@ -129,8 +129,10 @@ END $$;
 -- واحدة. (المدير العام يسجّل الخروج والدخول فيأخذ رمزه الجديد.)
 DO $$
 BEGIN
+  -- 3.1.0: الرموز تُجدَّد مرةً واحدة عند الانتقال من دوالٍ أقدم من 3.0.0
+  --        وحدها — فإعادة تشغيل هذا الملف لا تُخرج المدير من حسابه
   IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'rpc_version')
-     OR (SELECT rpc_version()) <> '3.0.0' THEN
+     OR (SELECT rpc_version()) NOT IN ('3.0.0', '3.1.0') THEN
     UPDATE factory_users SET admin_token = encode(gen_random_bytes(24), 'hex')
      WHERE role = 'super_admin';
   END IF;
@@ -246,10 +248,156 @@ BEGIN
   RETURN tok;
 END $$;
 
+-- ═══════════════════════════════════════════════════════════════
+-- 6.4) الاشتراك (3.1.0): نوع النظام · الشاشات · مدة الاشتراك · الأجهزة
+-- ───────────────────────────────────────────────────────────────
+-- لكل مصنع (حساب) خطةٌ يحددها المدير العام:
+--   plan_type   : factory (مصنع) · shop (محلات) · customer (عميل)
+--   screens     : قائمة الشاشات الظاهرة (JSON) — فارغة = كل شاشات النوع
+--   expires_at  : آخر يومٍ في الاشتراك — فارغ = بلا نهاية
+--   max_devices : عدد الأجهزة المسموح — 0 = بلا حد
+-- والأجهزة تُسجَّل عند أول دخولٍ لكل جهاز؛ ولا يُقبل جهازٌ بعد اكتمال
+-- العدد إلا إن أفرغ المدير القائمة. والخطة لا تُعطى إلا لمن أثبت
+-- كلمة مروره (كـ`auth_login2`) فلا يعبث أحدٌ بأجهزة غيره.
+-- ═══════════════════════════════════════════════════════════════
+ALTER TABLE factories
+  ADD COLUMN IF NOT EXISTS plan_type TEXT NOT NULL DEFAULT 'factory';
+ALTER TABLE factories ADD COLUMN IF NOT EXISTS screens TEXT;
+ALTER TABLE factories ADD COLUMN IF NOT EXISTS expires_at DATE;
+ALTER TABLE factories
+  ADD COLUMN IF NOT EXISTS max_devices INT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS factory_devices (
+  tenant_id   TEXT NOT NULL,
+  device_id   TEXT NOT NULL,
+  device_name TEXT DEFAULT '',
+  first_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, device_id)
+);
+-- لا قراءة ولا كتابة مباشرة بالمفتاح العام: الدوال وحدها تصل إليه
+ALTER TABLE factory_devices ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION auth_plan(
+  p_username TEXT, p_proof TEXT, p_device TEXT, p_device_name TEXT
+) RETURNS TABLE (
+  plan_type TEXT, screens TEXT, expires_at DATE, max_devices INT,
+  devices_used INT, device_ok BOOLEAN, server_today DATE
+) LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE u factory_users%ROWTYPE; f factories%ROWTYPE; n INT; known BOOLEAN;
+BEGIN
+  SELECT * INTO u FROM factory_users fu
+   WHERE fu.username = p_username LIMIT 1;
+  IF NOT FOUND THEN
+    RETURN;                                   -- لا خطة لمن لم يثبت هويته
+  END IF;
+  IF u.locked_until IS NOT NULL AND u.locked_until > now() THEN
+    RETURN;                                   -- الحساب مقفل مؤقتاً
+  END IF;
+  IF COALESCE(p_proof, '') = ''
+     OR split_part(u.password_hash, '$', 2) <> lower(p_proof) THEN
+    -- المحاولة الخاطئة تُحسب هنا أيضاً: وإلا صارت هذه الدالة باباً
+    -- لتجربة كلمات المرور بلا قفل
+    UPDATE factory_users fu
+       SET failed_logins = COALESCE(fu.failed_logins, 0) + 1,
+           locked_until = CASE WHEN COALESCE(fu.failed_logins, 0) + 1 >= 8
+                               THEN now() + interval '15 minutes'
+                               ELSE fu.locked_until END
+     WHERE fu.id = u.id;
+    RETURN;
+  END IF;
+  SELECT * INTO f FROM factories WHERE factories.tenant_id = u.tenant_id;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  known := TRUE;
+  IF u.role <> 'super_admin' AND COALESCE(p_device, '') <> '' THEN
+    known := EXISTS (SELECT 1 FROM factory_devices d
+                      WHERE d.tenant_id = f.tenant_id
+                        AND d.device_id = p_device);
+    SELECT COUNT(*) INTO n FROM factory_devices d
+     WHERE d.tenant_id = f.tenant_id;
+    IF known THEN
+      UPDATE factory_devices d SET last_seen = now(),
+             device_name = COALESCE(NULLIF(p_device_name, ''), d.device_name)
+       WHERE d.tenant_id = f.tenant_id AND d.device_id = p_device;
+    ELSIF COALESCE(f.max_devices, 0) = 0 OR n < f.max_devices THEN
+      INSERT INTO factory_devices(tenant_id, device_id, device_name)
+      VALUES (f.tenant_id, p_device, COALESCE(p_device_name, ''));
+      known := TRUE;
+    END IF;
+  END IF;
+  SELECT COUNT(*) INTO n FROM factory_devices d
+   WHERE d.tenant_id = f.tenant_id;
+  RETURN QUERY SELECT COALESCE(f.plan_type, 'factory'), f.screens,
+         f.expires_at, COALESCE(f.max_devices, 0), n, known,
+         (now() AT TIME ZONE 'Asia/Riyadh')::DATE;
+END $$;
+
+CREATE OR REPLACE FUNCTION admin_set_plan(
+  p_token TEXT, p_tenant TEXT, p_type TEXT, p_screens TEXT,
+  p_expires DATE, p_max_devices INT
+) RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE ok INT;
+BEGIN
+  SELECT COUNT(*) INTO ok FROM factory_users fu
+   WHERE fu.admin_token = p_token AND fu.role = 'super_admin'
+     AND fu.is_active;
+  IF ok = 0 THEN RAISE EXCEPTION 'رمز إداري غير صالح'; END IF;
+  IF COALESCE(p_type, '') NOT IN ('factory', 'shop', 'customer') THEN
+    RAISE EXCEPTION 'نوع النظام غير معروف';
+  END IF;
+  UPDATE factories
+     SET plan_type = p_type,
+         screens = NULLIF(TRIM(COALESCE(p_screens, '')), ''),
+         expires_at = p_expires,
+         max_devices = GREATEST(COALESCE(p_max_devices, 0), 0)
+   WHERE tenant_id = p_tenant;
+  IF NOT FOUND THEN RAISE EXCEPTION 'المصنع غير موجود'; END IF;
+  RETURN 'ok';
+END $$;
+
+CREATE OR REPLACE FUNCTION admin_list_plans(p_token TEXT)
+RETURNS TABLE (
+  tenant_id TEXT, name TEXT, plan_type TEXT, screens TEXT,
+  expires_at DATE, max_devices INT, devices_used INT
+) LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE ok INT;
+BEGIN
+  SELECT COUNT(*) INTO ok FROM factory_users fu
+   WHERE fu.admin_token = p_token AND fu.role = 'super_admin'
+     AND fu.is_active;
+  IF ok = 0 THEN RAISE EXCEPTION 'رمز إداري غير صالح'; END IF;
+  RETURN QUERY
+  SELECT f.tenant_id, f.name, COALESCE(f.plan_type, 'factory'), f.screens,
+         f.expires_at, COALESCE(f.max_devices, 0),
+         (SELECT COUNT(*)::INT FROM factory_devices d
+           WHERE d.tenant_id = f.tenant_id)
+  FROM factories f;
+END $$;
+
+CREATE OR REPLACE FUNCTION admin_reset_devices(p_token TEXT, p_tenant TEXT)
+RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE ok INT;
+BEGIN
+  SELECT COUNT(*) INTO ok FROM factory_users fu
+   WHERE fu.admin_token = p_token AND fu.role = 'super_admin'
+     AND fu.is_active;
+  IF ok = 0 THEN RAISE EXCEPTION 'رمز إداري غير صالح'; END IF;
+  DELETE FROM factory_devices d WHERE d.tenant_id = p_tenant;
+  RETURN 'ok';
+END $$;
+
+GRANT EXECUTE ON FUNCTION auth_plan(TEXT,TEXT,TEXT,TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION admin_set_plan(TEXT,TEXT,TEXT,TEXT,DATE,INT)
+  TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION admin_list_plans(TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION admin_reset_devices(TEXT,TEXT) TO anon, authenticated;
+
 -- 6.5) إصدار الدوال — يكشف تشغيل نسخة قديمة على الخادم
 CREATE OR REPLACE FUNCTION rpc_version()
 RETURNS TEXT LANGUAGE sql SECURITY DEFINER AS $$
-  SELECT '3.0.0'::TEXT;
+  SELECT '3.1.0'::TEXT;
 $$;
 GRANT EXECUTE ON FUNCTION rpc_version() TO anon, authenticated;
 

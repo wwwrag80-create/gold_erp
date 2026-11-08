@@ -29,7 +29,9 @@ ADMIN_TOKEN_FILE = config.BASE_DIR / "data" / "admin_token.json"
 OFFLINE_GRACE_DAYS = 30
 
 # إصدار دوال الخادم المتوقَّع — إن اختلف فالترقية لم تُنفَّذ
-RPC_EXPECTED = "3.0.0"
+RPC_EXPECTED = "3.1.0"
+# أدنى إصدارٍ تعمل به إدارة الحسابات (3.1.0 تضيف الخطط والأجهزة)
+RPC_MIN = "3.0.0"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -66,6 +68,8 @@ def _cache_put(username, row):
         "full_name": row.get("full_name") or username,
         "is_active": bool(row.get("is_active", True)),
         "cached_at": time.time(),
+        # 3.1.0: الخطة (النوع والشاشات والاشتراك) تنطبق بلا إنترنت أيضاً
+        "plan": row.get("plan", old.get("plan")),
     }
     _cache_write(data)
 
@@ -211,7 +215,26 @@ def _secure_login(username, password, timeout=15):
     if not row:
         return {}
     row["password_hash"] = f"{salt}${proof}"
+    if row.get("role") != ROLE_SUPER:
+        row["plan"] = fetch_plan(username, proof, timeout=timeout)
     return row
+
+
+def fetch_plan(username, proof, timeout=15):
+    """خطة الحساب (3.1.0) — ويُسجَّل هذا الجهاز ضمن أجهزته.
+
+    None إن لم تكن دوال 3.1.0 على الخادم بعد (فلا قيود)."""
+    from services import plan
+    try:
+        row = _first(_rpc("auth_plan", {
+            "p_username": username, "p_proof": proof,
+            "p_device": plan.device_id(),
+            "p_device_name": plan.device_name()}, timeout=timeout))
+    except ValueError as e:
+        if _missing_fn(e) or "auth_plan" in str(e):
+            return None
+        raise
+    return plan.normalize(row) if row else None
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -226,15 +249,22 @@ def _default_admin_allowed(username):
 
 
 def _session(username, row, online, notice=""):
+    from services import plan
     role = row.get("role") or ROLE_FACTORY
     tid = row.get("tenant_id") or ""
+    p = None if role == ROLE_SUPER else row.get("plan")
+    if p:
+        p = plan.normalize(p)
+        plan.check(p)              # اشتراكٌ منتهٍ أو جهازٌ زائد ← لا دخول
+        notice = "  ·  ".join(x for x in (notice, plan.notice(p)) if x)
+    plan.set_current(p)
     if tid:
         tenant.update(tenant_id=tid,
                       role=(ROLE_SUPER if role == ROLE_SUPER else "factory"))
     return {"username": username,
             "full_name": row.get("full_name") or username,
             "role": role, "role_local": "accountant", "tenant_id": tid,
-            "is_super": role == ROLE_SUPER,
+            "is_super": role == ROLE_SUPER, "plan": p,
             "online": online, "notice": notice}
 
 
@@ -250,6 +280,8 @@ def login(username, password):
         from services import auth as local_auth
         lu = local_auth.verify_login(username, password)
         if lu and _default_admin_allowed(username):
+            from services import plan
+            plan.set_current(None)
             tenant.update(role="super_admin")
             return {"username": lu["username"],
                     "full_name": lu.get("full_name") or lu["username"],
@@ -352,12 +384,17 @@ def server_version():
         return ""
 
 
-def _require_current_rpc():
+def _ver(v):
+    from services.licensing import _ver_tuple
+    return _ver_tuple(v or "0")
+
+
+def _require_current_rpc(minimum=RPC_MIN):
     """يمنع العمليات إن كانت دوال الخادم قديمة، ويشرح الحل."""
     v = server_version()
-    if v and v != RPC_EXPECTED:
+    if v and _ver(v) < _ver(minimum):
         raise ValueError(
-            f"دوال الخادم قديمة (إصدار {v}، المطلوب {RPC_EXPECTED}).\n\n"
+            f"دوال الخادم قديمة (إصدار {v}، المطلوب {minimum}).\n\n"
             f"افتح Supabase ← SQL Editor ← New query\n"
             f"والصق ملف admin_rpc.sql كاملاً ثم اضغط RUN.\n\n"
             f"تأكد أن الملف كامل من أول سطر إلى آخره.")
@@ -446,6 +483,49 @@ def delete_user(username):
     return True
 
 
+# ── الخطط (3.1.0) ──
+
+def list_plans(timeout=15):
+    """خطط المصانع: {tenant_id: خطة} — فارغ إن لم تُرقَّ دوال الخادم."""
+    from services import plan
+    try:
+        rows = _admin_call("admin_list_plans", {"p_token": _need_token()},
+                           timeout=timeout) or []
+    except ValueError as e:
+        if _missing_fn(e):
+            return {}
+        raise
+    out = {}
+    for r in rows:
+        p = plan.normalize(r)
+        p["name"] = r.get("name") or ""
+        out[r.get("tenant_id") or ""] = p
+    return out
+
+
+def set_plan(tenant_id, plan_type, screens, expires_at, max_devices):
+    """يحفظ خطة المصنع: النوع · الشاشات · آخر يوم · عدد الأجهزة."""
+    if not tenant_id:
+        raise ValueError("حدّد الحساب")
+    _require_current_rpc("3.1.0")
+    _admin_call("admin_set_plan", {
+        "p_token": _need_token(), "p_tenant": tenant_id,
+        "p_type": plan_type,
+        "p_screens": json.dumps(list(screens or []), ensure_ascii=False)
+        if screens else "",
+        "p_expires": expires_at or None,
+        "p_max_devices": int(max_devices or 0)})
+    return True
+
+
+def reset_devices(tenant_id):
+    """يفرّغ قائمة أجهزة المصنع — فيُسجَّل كل جهازٍ من جديد عند دخوله."""
+    _require_current_rpc("3.1.0")
+    _admin_call("admin_reset_devices", {"p_token": _need_token(),
+                                        "p_tenant": tenant_id})
+    return True
+
+
 def user_exists(username, timeout=10):
     try:
         return fetch_user(username, timeout=timeout) is not None
@@ -475,7 +555,7 @@ def diagnose():
         _rpc("auth_login", {"p_username": "__probe__"}, timeout=12)
         out["reachable"] = out["rpc"] = True
         out["rpc_version"] = server_version()
-        if out["rpc_version"] != RPC_EXPECTED:
+        if _ver(out["rpc_version"]) < _ver(RPC_EXPECTED):
             out["message"] = (
                 f"دوال الخادم قديمة ({out['rpc_version'] or 'غير معروف'}) — "
                 f"المطلوب {RPC_EXPECTED}.\n"

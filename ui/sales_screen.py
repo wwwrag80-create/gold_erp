@@ -220,7 +220,7 @@ class NewCustomerDialog(QtWidgets.QDialog):
 class NewReturnItemDialog(QtWidgets.QDialog):
     """إدخال طقم غير مسجّل عائد بمرتجع — بوزنه ومكوّناته."""
 
-    def __init__(self, parent, wo_no):
+    def __init__(self, parent, wo_no, sale=False):
         super().__init__(parent)
         self.setWindowTitle(f"طقم غير مسجّل: {wo_no}")
         self.setMinimumWidth(420)
@@ -237,7 +237,9 @@ class NewReturnItemDialog(QtWidgets.QDialog):
 
         note = QtWidgets.QLabel(
             f"رقم التشغيل {wo_no} غير مسجّل في النظام.\n"
-            f"أدخل وزنه ومكوّناته لتسجيله وإرجاعه للمخزون.")
+            + ("أدخل وزنه ومكوّناته — يُسجَّل في مخزونك ثم يُباع بهذه "
+               "الفاتورة مباشرةً (بلا شاشة الوارد)." if sale else
+               "أدخل وزنه ومكوّناته لتسجيله وإرجاعه للمخزون."))
         note.setWordWrap(True)
         f = QtWidgets.QFormLayout()
         f.addRow(note)
@@ -2290,17 +2292,22 @@ class SalesScreen(QtWidgets.QWidget):
                 if not wo and is_bulk_no(no):
                     wo = inventory.get_or_create_bulk_wo(
                         conn, self.user["username"], no)
-            if not wo and not is_sale:
+            # 5.2.1: حساب «عميل» يبيع أي طقم برقمه ووزنه بلا شاشة الوارد
+            from services import plan as _plan
+            direct_sale = is_sale and not wo and _plan.free_sets()
+            if not wo and (not is_sale or direct_sale):
                 # **مرتجع لرقم تشغيل غير مسجّل**: بضاعة قديمة تعود
                 # للمصنع قبل تشغيل النظام. تُسجَّل بمكوّناتها المكتوبة
                 # في سطر الإدخال — فيُنشأ الطقم بحالة «مباع» ثم يرجعه
                 # المرتجع للمخزون، فيبقى القيد المزدوج سليماً.
+                # **وبيعٌ مباشر** (نوع «عميل»): يُثبت الطقم في المخزون
+                # بتاريخ الفاتورة ثم يُخرجه قيد البيع كأي طقم.
                 d = {"gold": self.line_gold.value(),
                      "small": self.line_small.value(),
                      "big": self.line_big.value(),
                      "rate": self._rate, "wage": self.line_wage.value()}
                 if d["gold"] <= 0 and reg_view <= 0:
-                    dlg = NewReturnItemDialog(self, no)
+                    dlg = NewReturnItemDialog(self, no, sale=direct_sale)
                     if dlg.exec_() != QtWidgets.QDialog.Accepted:
                         return
                     d = dlg.values()
@@ -2309,11 +2316,18 @@ class SalesScreen(QtWidgets.QWidget):
                     d["gold"] = reg_view
                 with db() as conn:
                     # الطقم يُنشأ بمكافئ 18 مهما كان عيار الإدخال
-                    wo = inventory.create_return_stub(
-                        conn, no, kv.store(d["gold"], k),
-                        kv.store(d["small"], k), kv.store(d["big"], k),
-                        d["rate"], kv.rate_store(d["wage"] or 0, k),
-                        self.user["username"])
+                    if direct_sale:
+                        wo = inventory.create_direct_stock(
+                            conn, no, kv.store(d["gold"], k),
+                            kv.store(d["small"], k), kv.store(d["big"], k),
+                            d["rate"], kv.rate_store(d["wage"] or 0, k),
+                            dstr(self.date), self.user["username"])
+                    else:
+                        wo = inventory.create_return_stub(
+                            conn, no, kv.store(d["gold"], k),
+                            kv.store(d["small"], k), kv.store(d["big"], k),
+                            d["rate"], kv.rate_store(d["wage"] or 0, k),
+                            self.user["username"])
                 self._wo = wo
             if not wo:
                 raise ValueError(
