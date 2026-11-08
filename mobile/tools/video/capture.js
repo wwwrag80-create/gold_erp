@@ -282,8 +282,8 @@ function invoicePaper() {
   await snap("seg_factories", "ثم «المصانع» ← «+ مصنع»",
     "وَبِالطَّرِيقَةِ نَفْسِهَا أَضِفِ الْمَصْنَعَ الَّذِي تَأْخُذُ مِنْهُ الْبِضَاعَةَ؛ انْقُرْ عَلَى «الْمَصَانِعِ»، ثُمَّ عَلَى «زَائِدْ مَصْنَع».",
     page.locator(".seg button", { hasText: "المصانع" }), press);
-  await page.locator("#bar .icon-btn[aria-label='مصنع جديد']").click();
-  await wait(500);
+  await snap("add_factory", "اضغط «+ مصنع»", "ثُمَّ انْقُرْ عَلَى زِرِّ «زَائِدْ مَصْنَع» فِي الْأَعْلَى.",
+    page.locator("#bar .icon-btn[aria-label='مصنع جديد']"), { press: true, after: 500 });
   await fill("اسم المصنع", "مصنع الريان للذهب");
   await fill("الجوال", "0509998877");
   await fill("أجرة المصنع", "20");
