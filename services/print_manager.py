@@ -613,9 +613,14 @@ def _tpl_invoice(conn, invoice_id):
 
     def _dcell(v):
         return [tdw(_w(v, 2) if v else "")] if _dia_on else []
+    # 5.2.1: عدد الأطقم في صفّ اسم العميل — كل سطرٍ له وزن (لا «أجر فقط»)
+    n_sets = 0
     for it in items:
         wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
                           (it["work_order_id"],)).fetchone()
+        if not (wo is not None and "is_service" in wo.keys()
+                and wo["is_service"]):
+            n_sets += 1
         gold = (wo["gold_weight"] if wo else 0) or 0
         small = (wo["small_stones"] if wo else 0) or 0
         big = (wo["big_stones"] if wo else 0) or 0
@@ -736,7 +741,11 @@ def _tpl_invoice(conn, invoice_id):
       <tr><td {TH} width="18%">اسم العميل</td>
           <td style="text-align:right; border:1px solid #999; padding:6px;
                      font-weight:bold; font-size:12pt;">
-            {cust['name'] if cust else '—'}</td></tr>
+            {cust['name'] if cust else '—'}</td>
+          <td {TH} width="13%">عدد الأطقم</td>
+          <td width="9%" style="text-align:center; border:1px solid #999;
+                     padding:6px; font-weight:bold; font-size:12pt;">
+            {en(n_sets)}</td></tr>
     </table>'''
 
     body = f'''{info}{_fatoora_block(conn, inv, cust, edoc)}

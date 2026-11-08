@@ -175,7 +175,7 @@ class TransactionLogScreen(QtWidgets.QWidget):
         head.addWidget(btn)
 
         self.table = LedgerView()
-        self.btn_del = kit.PushButton("حذف منطقي للعملية المحددة وعكس أثرها")
+        self.btn_del = kit.PushButton("↩ عكس العملية المحددة بمستندٍ جديد")
         self.btn_del.setObjectName("danger")
         self.btn_del.clicked.connect(self.delete_selected)
         if user["role"] != "accountant":
@@ -232,7 +232,10 @@ class TransactionLogScreen(QtWidgets.QWidget):
         entry_id = str(vals[-1] if vals[-1] is not None else "").strip()
         if not entry_id or not entry_id.isdigit():
             return
-        if not ask(self, f"حذف منطقي للقيد رقم {entry_id} وعكس آثاره بالكامل؟"):
+        if not ask(self, f"إلغاء العملية رقم {entry_id}؟\n\nالفاتورة والسند "
+                         "والقيد لا تُحذف: تُعكس بمستندٍ جديد برقمٍ جديد "
+                         "(مرتجعٌ للبيع، وصرفٌ للقبض، وقيدٌ عكسي)، ويبقى "
+                         "الأول برقمه."):
             return
         try:
             msg = soft_delete_entry(int(entry_id), self.user["username"])

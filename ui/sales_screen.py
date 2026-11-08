@@ -802,6 +802,11 @@ class SalesScreen(QtWidgets.QWidget):
         g.addWidget(self.scrap_lbl, 0, 7)
         g.addWidget(self.scrap_karat, 0, 8)
         g.addWidget(btn_new_src, 0, 9)
+        # 5.2.1: عدد الأطقم في صفّ العميل — آخره من اليسار
+        self.sets_count = QtWidgets.QLabel("عدد الأطقم: 0")
+        self.sets_count.setObjectName("cardSub")
+        self.sets_count.setStyleSheet("font-weight:bold;")
+        g.addWidget(self.sets_count, 0, 10)
         g.addWidget(QtWidgets.QLabel("التاريخ:"), 1, 0)
         g.addWidget(self.date, 1, 1)
         g.addWidget(QtWidgets.QLabel("البيان:"), 1, 2)
@@ -813,8 +818,8 @@ class SalesScreen(QtWidgets.QWidget):
         opts.addSpacing(6)
         opts.addWidget(self.wage_note, 1)
         g.addLayout(opts, 1, 6, 1, 4)
-        g.addWidget(self.internal_note, 2, 0, 1, 10)
-        g.addWidget(self.order_note, 4, 0, 1, 10)
+        g.addWidget(self.internal_note, 2, 0, 1, 11)
+        g.addWidget(self.order_note, 4, 0, 1, 11)
         g.setColumnStretch(3, 3)
         g.setColumnStretch(6, 3)
         # ══ Enter يمضي إلى الأمام في الشاشة كلها ══
@@ -2959,6 +2964,8 @@ class SalesScreen(QtWidgets.QWidget):
             for key in ("standing", "gold", "small", "big", "after"):
                 t[key] += kv.store(p[key], k)
             t["wages"] += wages
+        if hasattr(self, "sets_count"):
+            self.sets_count.setText(f"عدد الأطقم: {n_sets}")
         if rows:
             u = kv.active()
             n_w = len(self.items) - n_sets

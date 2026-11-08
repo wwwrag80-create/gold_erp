@@ -154,7 +154,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             "يُصدر فاتورة مبيعات جديدة لجهةٍ تختارها بنفس أطقم فاتورة المرتجع"
             " المحددة وأوزانها وأجورها — والمرتجع يبقى كما هو")
         btn_resell.clicked.connect(self.resell_doc)
-        btn_del = kit.PushButton("🗑 حذف وعكس")
+        btn_del = kit.PushButton("↩ عكس بمستندٍ جديد")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_doc)
         actions = QtWidgets.QHBoxLayout()
@@ -801,8 +801,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         if not row:
             err(self, "اختر سطر مستند من الكشف أولاً")
             return
-        if not ask(self, f"حذف القيد رقم {row['eid']} وعكس أثره المالي "
-                         "والمخزني بالكامل؟ لا يمكن التراجع."):
+        if not ask(self, f"إلغاء المستند (القيد {row['eid']})؟\n\nالفاتورة "
+                         "والسند والقيد لا تُحذف: تُعكس بمستندٍ جديد برقمٍ "
+                         "جديد (مرتجعٌ للبيع، وصرفٌ للقبض، وقيدٌ عكسي)، "
+                         "ويبقى الأول برقمه في الكشف."):
             return
         try:
             info(self, soft_delete_entry(int(row["eid"]), self.user["username"]))

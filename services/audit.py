@@ -231,7 +231,17 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
 
 
 def soft_delete_entry(entry_id: int, username: str) -> str:
-    """حذف منطقي بمعاملة مستقلة (يُستدعى من الشاشات مباشرة)."""
+    """إلغاء مستند من الشاشات (بمعاملة مستقلة).
+
+    5.2.1: الفواتير والسندات والقيود اليدوية **لا تُحذف**: تُعكس بمستندٍ
+    جديد برقمٍ جديد (فاتورة مرتجع لفاتورة بيع، وسند صرف لسند قبض، وقيدٌ
+    عكسي لقيد) ويبقى الأول برقمه — فلا فجوة في تسلسل الأرقام
+    (`models.reversal`). وما سواها من عمليات داخلية يُلغى بأثره كما كان.
+    """
+    from models import reversal
+    with db() as conn:
+        if reversal.supported(conn, entry_id):
+            return reversal.reverse(conn, entry_id, username)
     with db() as conn:
         src = conn.execute(
             "SELECT source_table, source_id FROM journal_entries"

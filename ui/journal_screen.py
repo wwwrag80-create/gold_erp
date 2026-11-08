@@ -104,7 +104,7 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         btn_view = kit.PushButton("عرض أسطر القيد المحدد")
         btn_view.setObjectName("ghost")
         btn_view.clicked.connect(self.view_entry)
-        btn_del = kit.PushButton("حذف منطقي للقيد المحدد")
+        btn_del = kit.PushButton("↩ عكس القيد المحدد")
         btn_del.setObjectName("danger")
         btn_del.clicked.connect(self.delete_entry)
         # سجل القيود مخفيّ افتراضياً: بناء مئات الصفوف عند كل فتح
@@ -369,7 +369,9 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         if r < 0:
             return
         eid = cell(self.entries, r, 0)
-        if not ask(self, f"حذف منطقي للقيد رقم {eid} وعكس آثار مستنده المصدر؟"):
+        if not ask(self, f"إلغاء القيد رقم {eid}؟\n\nلا يُحذف: يُعكس بقيدٍ "
+                         "جديد برقمٍ جديد (أو بفاتورة/سندٍ مقابل إن كان "
+                         "مستنداً)، ويبقى الأول برقمه."):
             return
         try:
             info(self, soft_delete_entry(int(eid), self.user["username"]))

@@ -8843,7 +8843,11 @@ def main():
         _s106 = _iv103.create_sale(
             conn, _a105, [{"work_order_id": _w106["N106-1"]}], "2026-10-10",
             "admin", apply_vat=False)
-    _sd106(_s106["entry_id"], "admin")
+    # 5.2.1: إلغاء الفاتورة من الشاشات عكسٌ بمرتجعٍ جديد (tools/check_reversal.py)؛
+    # وهنا الإلغاء الداخلي بأثره — ما زال للعمليات الداخلية — وانتظام الحركة بعده
+    with db() as conn:
+        from services.audit import reverse_entry as _re106
+        _re106(conn, _s106["entry_id"], "admin")
     with db() as conn:
         _iv103.create_sale(conn, _b105, [{"work_order_id": _w106["N106-1"]}],
                            "2026-10-11", "admin", apply_vat=False)
