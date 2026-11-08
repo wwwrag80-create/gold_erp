@@ -19,6 +19,8 @@
     '<rect x="2" y="6.5" width="20" height="11" rx="2" fill="#2F9E5B" stroke="#1C6B3C" stroke-width="1.3"/>' +
     '<circle cx="12" cy="12" r="2.8" fill="none" stroke="#E6F7EC" stroke-width="1.5"/></svg>';
   const gI = (v) => ICO_GOLD + v, cI = (v) => ICO_CASH + v;
+  // 1.13: عيار العرض والمكافئ الواحد (يُختار أعلى الرئيسية) — للمستندات كلها
+  const vK = (st) => parseInt(st.settings.viewKarat || 18, 10);
 
   function base() {
     try { return location.href.replace(/[^/]*([?#].*)?$/, ""); } catch (e) { return ""; }
@@ -153,7 +155,7 @@
     };
     const shop = D.shopById(st, inv.shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
-    const k = D.partyKarat(D.shopById(st, inv.shopId), st.settings.viewKarat || 18);
+    const k = vK(st);
     const title = (INV_TITLE[inv.kind] || T("فاتورة")) + (inv.vat ? T(" ضريبية") : "");
     const anyDia = inv.lines.some((l) => l.diamond > 0);
     let rows = "", n = 0;
@@ -190,19 +192,19 @@
   function voucherHtml(st, v) {
     const shop = D.shopById(st, v.shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
-    const k = D.partyKarat(D.shopById(st, v.shopId), st.settings.viewKarat || 18);
+    const k = vK(st);
     const title = v.kind === "receipt" ? T("سند تحصيل") : D.isFactory(shop) ? T("سند سداد للمصنع") : T("سند صرف");
     let rows = "", n = 0;
     for (const r of v.rows) {
       n++;
       rows += r.kind === "gold"
-        ? T("<tr><td>{0}</td><td>ذهب</td><td>{1} جم عيار {2}</td>\n           <td>{3} جم عيار 18</td><td>—</td><td class=\"t\">{4}</td></tr>", n, gI(f2(r.weight)), r.karat, f2(r.equiv), esc(r.notes))
+        ? T("<tr><td>{0}</td><td>ذهب</td><td>{1} جم عيار {2}</td>\n           <td>{3} جم عيار {5}</td><td>—</td><td class=\"t\">{4}</td></tr>", n, gI(f2(r.weight)), r.karat, f2(G.g(r.equiv, k)), esc(r.notes), k)
         : T("<tr><td>{0}</td><td>نقد</td><td>—</td><td>—</td><td>{1}</td><td class=\"t\">{2}</td></tr>", n, cI(f2(r.amount)), esc(r.notes));
     }
-    if (v.discGold18) rows += T("<tr><td>—</td><td>خصم مسموح وزناً</td><td>—</td><td>{0} جم عيار 18</td><td>—</td><td></td></tr>", f2(v.discGold18));
+    if (v.discGold18) rows += T("<tr><td>—</td><td>خصم مسموح وزناً</td><td>—</td><td>{0} جم عيار {1}</td><td>—</td><td></td></tr>", f2(G.g(v.discGold18, k)), k);
     if (v.discCash) rows += T("<tr><td>—</td><td>خصم مسموح نقداً</td><td>—</td><td>—</td><td>{0}</td><td></td></tr>", f2(v.discCash));
     if (v.netDiff) rows += T("<tr><td>—</td><td>فرق الصافي</td><td>—</td><td>—</td><td>{0}</td><td></td></tr>", f2(v.netDiff, { sign: true }));
-    rows += T("<tr class=\"tot\"><td colspan=\"3\">الإجمالي</td><td>{0} جم عيار 18</td><td>{1}</td><td></td></tr>", gI(f2(v.gold18)), cI(f2(v.cash)));
+    rows += T("<tr class=\"tot\"><td colspan=\"3\">الإجمالي</td><td>{0} جم عيار {2}</td><td>{1}</td><td></td></tr>", gI(f2(G.g(v.gold18, k))), cI(f2(v.cash)), k);
     const { after } = D.balanceAround(st, v);
     const body = header(st, title, v.no, v.date) +
       T("<div class=\"party\"><div><b>{0}:</b> {1}</div>\n       {2}</div>\n      <table><thead><tr><th>#</th><th>النوع</th><th>الوزن الفعلي</th><th>المكافئ</th><th>النقد (ريال)</th><th>البيان</th></tr></thead>\n      <tbody>{3}</tbody></table>\n      <div class=\"sum\"><div class=\"box\"><b>رصيد الذهب بعد السند (عيار {4})</b><span>{5}</span></div>\n      <div class=\"box\"><b>رصيد النقد بعد السند</b><span>{6}</span></div></div>\n      {7}\n      <div class=\"foot\">{8} · {9}</div>", v.kind === "receipt" ? T("من") : T("إلى"), esc(shop.name), shop.phone ? `<div>${ltr(shop.phone)}</div>` : "", rows, k, gI(balTxt(G.g(after.gold18, k), T("جم"))), cI(balTxt(after.cash, T("ريال"))), v.notes ? T("<div class=\"note\">البيان: {0}</div>", esc(v.notes)) : "", esc(st.settings.name || APP), ltr(v.no));
@@ -213,7 +215,7 @@
   function statementHtml(st, shopId, from, to, mode, filter) {
     const shop = D.shopById(st, shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
-    const k = D.partyKarat(D.shopById(st, shopId), st.settings.viewKarat || 18);
+    const k = vK(st);
     const fac = D.isFactory(shop);
     const period = from || to ? T("من {0} إلى {1}", from ? dmy(from) : T("البداية"), to ? dmy(to) : T("اليوم")) : T("كل الفترات");
     const sgn = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + f2(Math.abs(v));
@@ -286,7 +288,7 @@
   function invoiceText(st, inv) {
     const shop = D.shopById(st, inv.shopId) || { name: "" };
     // عيار حساب العميل/المصنع
-    const k = D.partyKarat(D.shopById(st, inv.shopId), st.settings.viewKarat || 18);
+    const k = vK(st);
     const { after } = D.balanceAround(st, inv);
     return [`${INV_TITLE[inv.kind] || T("فاتورة")} ${inv.no} — ${dmy(inv.date)}`,
       `${shop.name}`,

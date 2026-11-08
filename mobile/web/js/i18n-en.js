@@ -1,5 +1,18 @@
 /* English for every Arabic UI text — generated from the T("…") calls (see i18n.js). Keys are the Arabic source text. */
 window.I18N_EN = {
+"ما معي: كل عيارٍ بوزنه في صندوقه — وما عند العملاء وما عليّ للمصانع بعيار العرض ({0}). اضغط على أي رقمٍ لتفصيله.": "In hand: each karat by its own weight in its box — customers and factories in the display karat ({0}K). Tap any number for details.",
+"عيار العرض والمكافئ": "Display & equivalent karat",
+" عيار العرض والمكافئ": " Display & equivalent karat",
+"عيار العرض": "Display karat",
+"به تظهر كل الأوزان والأرصدة والمكافئات: الكشوف والفواتير والتحصيل والسداد والممتلكات.": "All weights, balances and equivalents show in it: statements, invoices, collections, payments and holdings.",
+"العرض الآن بعيار {0}": "Now showing in {0}K",
+"= {0} جم مكافئ عيار {1}": "= {0} g equivalent {1}K",
+"الذهب (مكافئ عيار {0})": "Gold (equivalent {0}K)",
+"به يبدأ كل سطرٍ في بضاعته وسداده — والعرض كله بالعيار المختار أعلى الرئيسية.": "Each line of its goods and payments starts in this karat — everything is shown in the karat chosen at the top of Home.",
+"به يبدأ كل سطرٍ في فواتيره وتحصيله — والعرض كله بالعيار المختار أعلى الرئيسية.": "Each line of their invoices and collections starts in this karat — everything is shown in the karat chosen at the top of Home.",
+"<tr><td>{0}</td><td>ذهب</td><td>{1} جم عيار {2}</td>\n           <td>{3} جم عيار {5}</td><td>—</td><td class=\"t\">{4}</td></tr>": "<tr><td>{0}</td><td>Gold</td><td>{1} g {2}K</td>\n           <td>{3} g {5}K</td><td>—</td><td class=\"t\">{4}</td></tr>",
+"<tr><td>—</td><td>خصم مسموح وزناً</td><td>—</td><td>{0} جم عيار {1}</td><td>—</td><td></td></tr>": "<tr><td>—</td><td>Weight discount allowed</td><td>—</td><td>{0} g {1}K</td><td>—</td><td></td></tr>",
+"<tr class=\"tot\"><td colspan=\"3\">الإجمالي</td><td>{0} جم عيار {2}</td><td>{1}</td><td></td></tr>": "<tr class=\"tot\"><td colspan=\"3\">Total</td><td>{0} g {2}K</td><td>{1}</td><td></td></tr>",
 "عليّ": "you owe",
 "لي": "owes you",
 "عليه": "owes you",

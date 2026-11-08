@@ -596,3 +596,11 @@ body.no-tabs .web-bk { bottom: calc(16px + env(safe-area-inset-bottom)); }
 .st-table.gold .u { margin-inline-end: 2px; }
 .st-table.gold .u svg { width: 12px; height: 12px; }
 .st-legend .ug, .st-legend .uc { vertical-align: -2px; }
+
+/* 1.13: زرّ عيار العرض والمكافئ أعلى الرئيسية والممتلكات */
+.k-chip { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; height: 36px; padding: 0 10px;
+  border-radius: 999px; border: 1px solid var(--sumEdge); background: var(--sumBg); color: var(--goldDim);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.k-chip:active { background: var(--hover); }
+.k-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.k-grid .chip { justify-content: center; height: 44px; font-size: 15px; }

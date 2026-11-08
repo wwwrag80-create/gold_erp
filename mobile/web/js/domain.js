@@ -822,7 +822,8 @@
   // لوحة «المديونية والذهب الذي معي» (1.11): لكل عيارٍ ما معي منه (الكسر في
   // صندوقه)، وما لي عند العملاء، وما عليّ للمصانع — كلٌّ في عيار حسابه — ثم
   // النقد كذلك. لا صافيَ يُطرح: كلُّ رقمٍ في خانته
-  function debtSummary(st, fallbackK) {
+  // oneK (1.13): كل العملاء والمصانع بعيار العرض الواحد لا بعيار حساب كلٍّ منهم
+  function debtSummary(st, fallbackK, oneK) {
     const hd = holdings(st);
     const ex = exposure(st);
     const by = {};
@@ -830,12 +831,12 @@
     for (const b of hd.boxes) row(b.karat).inHand = R(row(b.karat).inHand + b.weight, 3);
     for (const c of ex.customers) {
       if (!(c.gold18 > 0.0005)) continue;
-      const k = partyKarat(c.party, fallbackK);
+      const k = oneK ? +fallbackK : partyKarat(c.party, fallbackK);
       row(k).cust = R(row(k).cust + Gold.g(c.gold18, k), 3);
     }
     for (const f of ex.factories) {
       if (!(f.owe18 > 0.0005)) continue;
-      const k = partyKarat(f.party, fallbackK);
+      const k = oneK ? +fallbackK : partyKarat(f.party, fallbackK);
       row(k).fac = R(row(k).fac + Gold.g(f.owe18, k), 3);
     }
     const rows = Object.values(by).filter((r) => Math.abs(r.inHand) > 0.0005 || r.cust || r.fac)

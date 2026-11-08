@@ -255,7 +255,8 @@ function check(name, cond, detail) {
   await page.locator("label.f", { hasText: "العيار" }).locator("select").selectOption("21");
   await tap("button:has-text('+ نقد')");
   await fill("المبلغ", "300");
-  check("مكافئ 6 جم عيار 21 = 7.00 جم عيار 18", (await page.content()).includes("= 7.00 جم عيار 18"));
+  check("مكافئ 6 جم عيار 21 = 7.00 جم بعيار العرض (18)", (await page.content()).includes("= 7.00 جم مكافئ عيار 18") &&
+    (await text(".totals")).includes("الذهب (مكافئ عيار 18)"));
   check("ولا كلمة «null» في الشاشة", !(await page.locator("#view").innerText()).includes("null"));
   await shot("collect");
   await tap(".footer-bar .btn:has-text('حفظ السند')");
@@ -666,8 +667,27 @@ function check(name, cond, detail) {
   await page.waitForTimeout(200);
   const kh = await page.evaluate(() => App.state.shops.find((x) => x.name === "عميل الخليج"));
   check("حُفظ بعيار 21 ورصيدٍ 7 مكافئ 18", kh.karat === 21 && kh.openGold18 === 7, JSON.stringify(kh));
-  check("وصفحته بعياره: «عيار 21» و6.00 جم عليه", (await text("#bar")).includes("عيار 21") &&
-    (await text(".kpis")).includes("عيار 21") && (await text(".kpis")).includes("6.00"), await text(".kpis"));
+  // 1.13: العرض كله بعيار العرض المختار أعلى الرئيسية (18 هنا) — وعيار الحساب للإدخال
+  check("وصفحته بعيار العرض: 7.00 جم عيار 18", (await text(".kpis")).includes("عيار 18") &&
+    (await text(".kpis")).includes("7.00"), await text(".kpis"));
+  await page.goto(url + "#/home");
+  await page.waitForTimeout(200);
+  check("زرّ العيار أعلى الرئيسية بجانب التحديث", (await text("#bar .k-chip")).includes("عيار 18"));
+  await tap("#bar .k-chip");
+  await page.waitForSelector(".sheet .k-grid");
+  await page.locator(".sheet .k-grid .chip", { hasText: "عيار 21" }).click();
+  await page.waitForTimeout(250);
+  check("اختيار عيار 21 يُحفظ ويظهر في الزر", (await text("#bar .k-chip")).includes("عيار 21") &&
+    (await page.evaluate(() => App.state.settings.viewKarat)) === 21);
+  await page.goto(url + `#/shop/${kh.id}`);
+  await page.waitForTimeout(200);
+  check("وصفحة العميل الآن بعيار 21: 6.00", (await text(".kpis")).includes("عيار 21") && (await text(".kpis")).includes("6.00"), await text(".kpis"));
+  await page.goto(url + "#/home");
+  await page.waitForTimeout(200);
+  await tap("#bar .k-chip");
+  await page.waitForSelector(".sheet .k-grid");
+  await page.locator(".sheet .k-grid .chip", { hasText: "عيار 18" }).click();
+  await page.waitForTimeout(250);
   // فاتورة بيعٍ له: السطر يبدأ بعياره، وOP1 يُعبّأ من الرصيد الافتتاحي باسمه
   await page.goto(url + `#/invoice/new?kind=sale&shop=${kh.id}`);
   await page.waitForTimeout(250);
@@ -678,7 +698,7 @@ function check(name, cond, detail) {
   check("OP1 يُعبّأ من الرصيد الافتتاحي: 7.00 عيار 21", (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "7.00" &&
     (await page.content()).includes("من الرصيد الافتتاحي"));
   await fill("الأجور (ريال)", "70");
-  check("إجمالي الوزن بعيار العميل", (await text(".totals")).includes("إجمالي الوزن (عيار 21)"));
+  check("إجمالي الوزن بعيار العرض", (await text(".totals")).includes("إجمالي الوزن (عيار 18)"));
   await tap(".footer-bar .btn:has-text('حفظ الفاتورة')");
   await confirm("حفظ الفاتورة");
   await page.waitForURL(/#\/doc\/inv\//);
