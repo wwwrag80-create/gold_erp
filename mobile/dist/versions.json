@@ -131,5 +131,12 @@
   "file": "jadeite-mobile-1.12.0.apk",
   "sha256": "d9f054f2abc7f6dc2b349865ffbc1d51d1938318e1da5daddabf4782cb25d159",
   "notes": "كشف الحساب والفواتير والسندات: رمز سبيكة ذهب بجانب أوزان الذهب، ورمز نقد بجانب النقد والأجور"
+ },
+ {
+  "version": "1.13.2",
+  "code": 23,
+  "file": "jadeite-mobile-1.13.2.apk",
+  "sha256": "75b20c9eaf30db0bf94311924a0a91f1f5d2c04582d1941a3f4c48a0c511c334",
+  "notes": "تحديث"
  }
 ]
