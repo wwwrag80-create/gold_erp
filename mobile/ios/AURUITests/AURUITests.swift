@@ -99,9 +99,18 @@ final class AURUITests: XCTestCase {
         XCTAssertTrue(anyText("لا طقم").waitForExistence(timeout: 5), "لا نتائج قبل أي بضاعة")
         snap("04_search")
 
-        // تُغلق لوحة المفاتيح (زرّ «تم» فوقها) فيظهر الشريط السفلي
+        // تُغلق لوحة المفاتيح (زرّ «تم» فوقها) فيظهر الشريط السفلي. اللمس بموضعه على الشاشة:
+        // `tap()` يطلب «إظهار العنصر» أولاً، ويفشل أحياناً وشريط لوحة المفاتيح ما زال يتحرّك
         let done = app.toolbars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "تم"])).firstMatch
-        if done.exists { done.tap() }
+        if done.waitForExistence(timeout: 3) {
+            Thread.sleep(forTimeInterval: 0.6)
+            done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        Thread.sleep(forTimeInterval: 0.8)
+        if app.keyboards.firstMatch.exists {
+            // لم تُغلق بعد: لمسةٌ في أعلى الشاشة (عنوانها، خارج الخانة) تُغلقها
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        }
 
         // الأزرار السفلية: الحسابات ثم الممتلكات
         let accounts = button("الحسابات")
