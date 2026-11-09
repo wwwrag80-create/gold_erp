@@ -8,6 +8,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.net.Uri;
@@ -48,6 +51,7 @@ import androidx.webkit.WebViewAssetLoader;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
@@ -81,6 +85,8 @@ public class MainActivity extends Activity {
     WebViewAssetLoader loader;
     ValueCallback<Uri[]> pickCallback;
     Uri cameraUri;                  // صورة الكاميرا المنتظرة لاختيار «صورة الطقم»
+    File cameraFile;                // ملفّها — ويُحفظ مساره فيبقى ولو أُغلق التطبيق في الخلفية
+    String pendingCameraB64;        // صورة كاميرا وصلت والصفحة لم تجهز بعد
     byte[] pendingSave;
     WebView printView;              // يبقى حيّاً حتى تنتهي الطباعة
     boolean pageReady;
@@ -134,6 +140,12 @@ public class MainActivity extends Activity {
                 openUpdateWhenReady = false;
                 emit("openUpdate", new JSONObject());
             }
+            if (pendingCameraB64 != null) {
+                final String b64 = pendingCameraB64;
+                pendingCameraB64 = null;
+                // بعد أن تُرسم شاشة الفاتورة من مسوّدتها
+                ui.postDelayed(() -> emit("cameraPhoto", obj("b64", b64)), 1500);
+            }
         }));
         web.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -142,6 +154,7 @@ public class MainActivity extends Activity {
                 if (pickCallback != null) pickCallback.onReceiveValue(null);
                 pickCallback = callback;
                 cameraUri = null;
+                cameraFile = null;
                 String[] acc = params.getAcceptTypes();
                 boolean image = acc != null && acc.length > 0 && acc[0] != null && acc[0].startsWith("image");
                 Intent i = new Intent(Intent.ACTION_GET_CONTENT);
@@ -161,15 +174,21 @@ public class MainActivity extends Activity {
                         if (old != null) for (File x : old) x.delete();
                         File f = new File(dir, "shot-" + System.currentTimeMillis() + ".jpg");
                         cameraUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", f);
+                        cameraFile = f;
+                        // بعض الجوالات تُغلق التطبيق في الخلفية والكاميرا مفتوحة (ذاكرةٌ قليلة):
+                        // مسار الصورة يُحفظ فتصل الصورة ولو أُعيد فتحه
+                        getSharedPreferences("camera", MODE_PRIVATE).edit()
+                                .putString("path", f.getAbsolutePath()).apply();
                         Intent cam = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
                         cam.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
                         cam.setClipData(ClipData.newRawUri("", cameraUri));
                         cam.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
                         if (cam.resolveActivity(getPackageManager()) != null) {
                             chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cam});
-                        } else cameraUri = null;
+                        } else { cameraUri = null; cameraFile = null; }
                     } catch (Exception e) {
                         cameraUri = null;
+                        cameraFile = null;
                     }
                 }
                 try {
@@ -325,26 +344,62 @@ public class MainActivity extends Activity {
         super.onActivityResult(req, res, data);
         Uri uri = data == null ? null : data.getData();
         if (req == REQ_PICK) {
+            // ══ صورة الكاميرا (1.13.2) ══ ملفّنا وقد كُتبت فيه الصورة هو المصدر أولاً: بعض
+            // الكاميرات تُعيد مع الصورة رابطاً لمعرضها لا يُقرأ من التطبيق، وبعضها لا تكتب في
+            // الملف وتُعيد صورةً مصغّرة في «data»، وبعض الجوالات تُغلق التطبيق في الخلفية
+            // والكاميرا مفتوحة فيضيع رابط الاختيار — فتصل الصورة الصفحةَ حدثاً
+            File cf = cameraFile;
+            if (cf == null) {
+                String cp = getSharedPreferences("camera", MODE_PRIVATE).getString("path", null);
+                if (cp != null) cf = new File(cp);
+            }
+            boolean camOk = cf != null && cf.exists() && cf.length() > 0;
+            if (!camOk && res == RESULT_OK && cf != null && data != null && data.getExtras() != null) {
+                try {
+                    Object bm = data.getExtras().get("data");
+                    if (bm instanceof Bitmap) {
+                        try (FileOutputStream fo = new FileOutputStream(cf)) {
+                            ((Bitmap) bm).compress(Bitmap.CompressFormat.JPEG, 92, fo);
+                        }
+                        camOk = cf.length() > 0;
+                    }
+                } catch (Exception ignore) { /* لا صورة */ }
+            }
             if (pickCallback != null) {
                 Uri[] got = null;
                 if (res == RESULT_OK) {
-                    // عدة صور من المعرض تأتي في ClipData، والواحدة في getData
                     ArrayList<Uri> list = new ArrayList<>();
-                    ClipData clip = data == null ? null : data.getClipData();
-                    if (clip != null) {
-                        for (int k = 0; k < clip.getItemCount() && list.size() < 10; k++) {
-                            Uri u = clip.getItemAt(k).getUri();
-                            if (u != null && !list.contains(u)) list.add(u);
+                    if (camOk) {
+                        list.add(FileProvider.getUriForFile(this, getPackageName() + ".files", cf));
+                    } else {
+                        // عدة صور من المعرض تأتي في ClipData، والواحدة في getData
+                        ClipData clip = data == null ? null : data.getClipData();
+                        if (clip != null) {
+                            for (int k = 0; k < clip.getItemCount() && list.size() < 10; k++) {
+                                Uri u = clip.getItemAt(k).getUri();
+                                if (u != null && !u.equals(cameraUri) && !list.contains(u)) list.add(u);
+                            }
                         }
+                        if (list.isEmpty() && uri != null && !uri.equals(cameraUri)) list.add(uri);
                     }
-                    if (list.isEmpty() && uri != null) list.add(uri);
-                    if (list.isEmpty() && cameraUri != null) list.add(cameraUri);   // صورة الكاميرا
                     if (!list.isEmpty()) got = list.toArray(new Uri[0]);
                 }
                 pickCallback.onReceiveValue(got);
                 pickCallback = null;
+            } else if (res == RESULT_OK && camOk) {
+                final File shot = cf;
+                bg.execute(() -> {
+                    String b64 = scaledJpegB64(shot, 1800);
+                    if (b64 == null) return;
+                    ui.post(() -> {
+                        if (pageReady) ui.postDelayed(() -> emit("cameraPhoto", obj("b64", b64)), 1500);
+                        else pendingCameraB64 = b64;
+                    });
+                });
             }
             cameraUri = null;
+            cameraFile = null;
+            getSharedPreferences("camera", MODE_PRIVATE).edit().remove("path").apply();
         } else if (req == REQ_SAVE) {
             byte[] bytes = pendingSave;
             pendingSave = null;
@@ -391,6 +446,39 @@ public class MainActivity extends Activity {
 
     void toast(String msg) {
         ui.post(() -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show());
+    }
+
+    /** صورة الكاميرا مصغّرةً (أطول ضلعٍ `max`) ومستقيمةً حسب اتجاه التصوير — JPEG بـBase64. */
+    static String scaledJpegB64(File f, int max) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+            int sample = 1;
+            while (Math.max(o.outWidth, o.outHeight) / sample > max * 2) sample *= 2;
+            BitmapFactory.Options o2 = new BitmapFactory.Options();
+            o2.inSampleSize = sample;
+            Bitmap bm = BitmapFactory.decodeFile(f.getAbsolutePath(), o2);
+            if (bm == null) return null;
+            float scale = Math.min(1f, (float) max / Math.max(bm.getWidth(), bm.getHeight()));
+            Matrix m = new Matrix();
+            m.postScale(scale, scale);
+            int rot = 0;
+            try {
+                int or = new ExifInterface(f.getAbsolutePath()).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+                rot = or == ExifInterface.ORIENTATION_ROTATE_90 ? 90
+                        : or == ExifInterface.ORIENTATION_ROTATE_180 ? 180
+                        : or == ExifInterface.ORIENTATION_ROTATE_270 ? 270 : 0;
+            } catch (Exception ignore) { /* بلا اتجاه */ }
+            if (rot != 0) m.postRotate(rot);
+            Bitmap out = Bitmap.createBitmap(bm, 0, 0, bm.getWidth(), bm.getHeight(), m, true);
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            out.compress(Bitmap.CompressFormat.JPEG, 85, bo);
+            return Base64.encodeToString(bo.toByteArray(), Base64.NO_WRAP);
+        } catch (Throwable e) {
+            return null;
+        }
     }
 
     File shareFile(String name, byte[] bytes) throws Exception {

@@ -489,6 +489,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sidebar.setFixedWidth(260)
         self.sidebar.setHeaderHidden(True)
         self.sidebar.setIndentation(14)
+        # سهمٌ ذهبيٌّ بارز بجانب كل مجموعةٍ تحتها شاشات (◂ مطويّة · ▾ مفتوحة)
+        try:
+            from ui.widgets import nav_arrow
+            nav_arrow.install(self.sidebar)
+        except Exception:
+            pass
         self.stack = QtWidgets.QStackedWidget()
         # اسمٌ يعرف به مرشّح فقرات الشرح أن الملصق داخل شاشة لا حوار
         self.stack.setObjectName("screenHost")

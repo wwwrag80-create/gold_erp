@@ -204,7 +204,9 @@ QListWidget#sidebar::item:selected, QTreeWidget#sidebar::item:selected {
   border: 1px solid @goldEdge2;
   color: @ink2;
 }
-QTreeWidget#sidebar::branch { background: transparent; }
+/* سهم الشجرة الافتراضي مخفيّ: يُرسم بدلاً منه سهمٌ ذهبي بارز (nav_arrow) */
+QTreeWidget#sidebar::branch { background: transparent; image: none;
+  border-image: none; }
 
 /* ══ الشريطان العلوي والفرعي ══ */
 QFrame#header { background: @barBg; border-bottom: 2px solid @gold; }

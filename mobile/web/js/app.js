@@ -139,6 +139,10 @@
     if (!("serviceWorker" in navigator) || !(location.protocol === "https:" || location.hostname === "localhost")) return;
     const hadController = !!navigator.serviceWorker.controller;
     let reloading = false;
+    // فُتح من زر «افتح التطبيق» في الموقع (?v=): آخر إصدارٍ يُطبَّق مباشرةً بلا سؤال
+    const fresh = /[?&]v=/.test(location.search);
+    const freshUntil = Date.now() + 30000;
+    if (fresh) try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (hadController && !reloading) { reloading = true; location.reload(); }
     });
@@ -146,8 +150,13 @@
     const watch = (reg) => {
       if (!reg || reg.__aur) return;
       reg.__aur = true;
-      const waiting = () => { if (reg.waiting && navigator.serviceWorker.controller) { webWaiting = reg.waiting; maybeUpdatePop(); } };
+      const waiting = () => {
+        if (!reg.waiting || !navigator.serviceWorker.controller) return;
+        if (fresh && Date.now() < freshUntil) { reg.waiting.postMessage("skipWaiting"); return; }
+        webWaiting = reg.waiting; maybeUpdatePop();
+      };
       waiting();
+      if (fresh) reg.update().catch(() => {});
       reg.addEventListener("updatefound", () => {
         const w = reg.installing;
         if (w) w.addEventListener("statechange", () => { if (w.state === "installed") waiting(); });
@@ -897,6 +906,12 @@
     // للتجربة الآلية على الجهاز: صورةٌ جاهزة تُربط بالسطر كما لو اختيرت
     App.attachPhotoData = async (dataUrl) => {
       const id = await savePhotoData(dataUrl);
+      ent.photos.push(id); renderPhoto(); return id;
+    };
+    // 1.13.2: صورة كاميرا وصلت بعد أن أعاد الجوالُ فتح التطبيق — كأنها اختيرت من الخانة
+    App.attachPhotoFile = async (blob) => {
+      if (ent.photos.length >= D.MAX_PHOTOS) { toast(T("حتى {0} صور للطقم", D.MAX_PHOTOS)); return null; }
+      const id = await savePhotoData(await shrinkImage(blob));
       ent.photos.push(id); renderPhoto(); return id;
     };
 
@@ -2670,6 +2685,17 @@
       for (const id of r.ids || []) { const d = await S.getPhoto(id); if (d) B.savePhoto(id, d.split(",")[1] || ""); }
     });
     B.on("photo", (r) => { if (r.id && r.b64) S.putPhoto(r.id, "data:image/jpeg;base64," + r.b64); });
+    // 1.13.2: بعض الجوالات تُغلق التطبيق في الخلفية والكاميرا مفتوحة — فتصل الصورة هنا بعد
+    // إعادة فتحه، وتُربط بسطر الفاتورة المفتوحة (من مسوّدتها) كما لو اختيرت
+    B.on("cameraPhoto", async (r) => {
+      if (!r || !r.b64) return;
+      try {
+        const blob = await (await fetch("data:image/jpeg;base64," + r.b64)).blob();
+        if (/^#\/invoice\//.test(location.hash) && App.attachPhotoFile && (await App.attachPhotoFile(blob))) {
+          toast(T("أُضيفت صورة الكاميرا"));
+        } else toast(T("التُقطت الصورة — افتح الفاتورة وأضفها من «صورة»"));
+      } catch (e) { err(e); }
+    });
     B.on("photosDone", (r) => { if (r.n) toast(T("استُرجعت {0} صورة", r.n)); });
     setTimeout(syncAllPhotos, 4000);
     // الرعاة: يُقرأ ملفهم كل 6 ساعات، وتُعاد الرئيسية إن تغيّر

@@ -1,5 +1,7 @@
 /* English for every Arabic UI text — generated from the T("…") calls (see i18n.js). Keys are the Arabic source text. */
 window.I18N_EN = {
+"أُضيفت صورة الكاميرا": "Camera photo added",
+"التُقطت الصورة — افتح الفاتورة وأضفها من «صورة»": "Photo taken — open the invoice and add it from “Photo”",
 "جم عيار {0}": "g {0}K",
 "بهذا العيار يظهر رصيد المصنع وكشفه ومكافئه في السداد، ويبدأ به كل سطرٍ في بضاعته.": "The factory's balance, statement and payment equivalent show in this karat, and each line of its goods starts in it.",
 "بهذا العيار يظهر رصيد العميل وكشفه ومكافئه في التحصيل، ويبدأ به كل سطرٍ في فواتيره.": "The customer's balance, statement and collection equivalent show in this karat, and each line of their invoices starts in it.",
