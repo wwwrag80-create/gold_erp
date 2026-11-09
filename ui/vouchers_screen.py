@@ -39,6 +39,9 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self.kind.addItem("سند قبض (نستلم)", "receipt")
         self.kind.addItem("سند صرف (ندفع)", "payment")
         self.kind.currentIndexChanged.connect(self.kind_changed)
+        # 5.2.2: القبض أخضر والصرف أحمر — في الخانة وفي شريط الشاشة
+        self.kind.currentIndexChanged.connect(lambda *_: self._apply_tone())
+        self._apply_tone(notify=False)
 
         self.target_mode = kit.ComboBox()
         self.target_mode.addItem("جهة تعامل (عميل/مورد/شريك/داخلي)", "entity")
@@ -228,6 +231,20 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         srow.addWidget(self.btn_cancel_edit)
         lay.addLayout(srow)
         self.toggle_adjustments()
+
+    # ══ لون العملية (5.2.2) ══
+    def page_tone(self):
+        """(اللون، الاسم) لشريط الشاشة: «سند قبض» أخضر · «سند صرف» أحمر."""
+        from ui.widgets import op_tone
+        if self.kind.currentData() == "payment":
+            return op_tone.OUT, "سند صرف"
+        return op_tone.IN, "سند قبض"
+
+    def _apply_tone(self, notify=True):
+        from ui.widgets import op_tone
+        op_tone.style_combo(self.kind, self.page_tone()[0])
+        if notify:
+            op_tone.notify_window(self)
 
     def kind_changed(self):
         self._sync_staff()

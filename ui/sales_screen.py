@@ -702,6 +702,9 @@ class SalesScreen(QtWidgets.QWidget):
         self.kind.currentIndexChanged.connect(self.clear_items)
         self.kind.currentIndexChanged.connect(self._clear_held)
         self.kind.currentIndexChanged.connect(self._sync_kind_labels)
+        # 5.2.2: البيع أخضر والمرتجع أحمر — في الخانة وفي شريط الشاشة
+        self.kind.currentIndexChanged.connect(lambda *_: self._apply_tone())
+        self._apply_tone(notify=False)
         self.date = date_edit()
         self.customer = search_combo("اكتب اسم العميل أو الطرف المقابل…")
         self.customer.currentIndexChanged.connect(self.customer_changed)
@@ -1370,6 +1373,20 @@ class SalesScreen(QtWidgets.QWidget):
 
     def _is_return(self):
         return self.kind.currentData() == "sale_return"
+
+    # ══ لون العملية (5.2.2) ══
+    def page_tone(self):
+        """(اللون، الاسم) لشريط الشاشة: «فاتورة بيع» أخضر · «مرتجع بيع» أحمر."""
+        from ui.widgets import op_tone
+        if self._is_return():
+            return op_tone.OUT, "مرتجع بيع"
+        return op_tone.IN, "فاتورة بيع"
+
+    def _apply_tone(self, notify=True):
+        from ui.widgets import op_tone
+        op_tone.style_combo(self.kind, self.page_tone()[0])
+        if notify:
+            op_tone.notify_window(self)
 
     def _sync_kind_labels(self, *_):
         """«من حساب» في البيع و«إلى حساب» في المرتجع — الحساب واحد.

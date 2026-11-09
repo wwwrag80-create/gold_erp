@@ -342,7 +342,7 @@ async function main() {
   await run(ev, `location.hash = "#/statement/${sid}"; await t.sleep(600);`);
   const kp = await ev("document.querySelector('.st-bal').innerText");
   // ذهب 17 − 12 − 3.5 = 1.50 عليه · أجور 340 − 240 − 50 = 50.00 عليه
-  check("كشف الحساب: 1.50 جم و50.00 ريال عليه", kp.includes("1.50 جم عليه") && kp.includes("50.00 ريال عليه"), kp);
+  check("كشف الحساب: 1.50 جم و50.00 ريال عليه", /1\.50 جم( عيار \d+)? عليه/.test(kp) && kp.includes("50.00 ريال عليه"), kp);
   check("وجدولٌ بعملياته الثلاث (بيع · مرتجع · تحصيل)",
     (await ev("document.querySelectorAll('.st-table tbody tr.tap').length")) === 3, String(await ev("document.querySelectorAll('.st-table tbody tr.tap').length")));
   shot("statement");
@@ -536,7 +536,7 @@ async function main() {
   check(`وصورة الطقم استُرجعت من المجلد (${via})`, pd && pd.n === 1 && (await ev(`Store.getPhoto(${JSON.stringify(phId)}).then((d) => !!d)`)), JSON.stringify(pd));
   await run(ev, `location.hash = "#/statement/" + App.state.shops.find((s) => s.name === "محل الأمانة").id; await t.sleep(600);`);
   const kp2 = await ev("document.querySelector('.st-bal').innerText");
-  check("وكشف الحساب كما كان: 1.50 جم و50.00 ريال عليه", kp2.includes("1.50 جم عليه") && kp2.includes("50.00 ريال عليه"), kp2);
+  check("وكشف الحساب كما كان: 1.50 جم و50.00 ريال عليه", /1\.50 جم( عيار \d+)? عليه/.test(kp2) && kp2.includes("50.00 ريال عليه"), kp2);
   shot("restored_statement");
   ws.close();
 

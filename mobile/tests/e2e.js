@@ -100,7 +100,7 @@ function check(name, cond, detail) {
   await tap(".footer-bar .btn:has-text('حفظ')");
   await page.waitForURL(/#\/shop\//);
   await page.waitForTimeout(200);
-  check("المصنع: عليّ له 50.00 جم", (await text(".kpis")).includes("50.00 جم عليّ"), await text(".kpis"));
+  check("المصنع: عليّ له 50.00 جم", (await text(".kpis")).includes("50.00 جم عيار 18 عليّ"), await text(".kpis"));
   check("أُضيف محلان ومصنع", (await page.evaluate(() => [App.state.shops.length, App.state.shops.filter((x) => x.type === "factory").length].join())) === "3,1");
   await shot("factory_page");
 
@@ -188,7 +188,7 @@ function check(name, cond, detail) {
   await page.locator(".wide-tile.fac").click();
   await page.waitForSelector(".sheet");
   const fs1 = (await text(".sheet")).replace(/\s+/g, " ");
-  check("ولكل مصنع: أخذتُ 32.00 · وعليّ 82.00", fs1.includes("مصنع الريان") && fs1.includes("أخذتُ 32.00") && fs1.includes("82.00 جم عليّ"), fs1);
+  check("ولكل مصنع: أخذتُ 32.00 · وعليّ 82.00", fs1.includes("مصنع الريان") && fs1.includes("أخذتُ 32.00") && fs1.includes("82.00 جم عيار 18 عليّ"), fs1);
   await page.goBack();
   await page.waitForTimeout(200);
 
@@ -294,7 +294,7 @@ function check(name, cond, detail) {
   await page.locator(".wide-tile.cus").click();
   await page.waitForSelector(".sheet");
   const cs1 = (await text(".sheet")).replace(/\s+/g, " ");
-  check("ولكل عميل كم عنده: الأمانة 13.00 جم عليه", cs1.includes("محل الأمانة") && cs1.includes("13.00 جم عليه"), cs1);
+  check("ولكل عميل كم عنده: الأمانة 13.00 جم عليه", cs1.includes("محل الأمانة") && cs1.includes("13.00 جم عيار 18 عليه"), cs1);
   await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
   await page.waitForURL(/#\/statement\//);
   check("واللمس يفتح كشفه", true);
@@ -397,7 +397,7 @@ function check(name, cond, detail) {
   await page.waitForTimeout(200);
   const fk = await text(".st-bal");
   // 50 + 32 − (4 جم عيار 21 = 4.667) = 77.33 عليّ · أجور 256 − 200 = 56 عليّ
-  check("كشف المصنع: 77.33 جم و56.00 ريال عليّ", fk.includes("77.33 جم عليّ") && fk.includes("56.00 ريال عليّ"), fk);
+  check("كشف المصنع: 77.33 جم و56.00 ريال عليّ", fk.includes("77.33 جم عيار 18 عليّ") && fk.includes("56.00 ريال عليّ"), fk);
   await shot("factory_statement");
 
   // كشف حساب المحل
@@ -414,7 +414,7 @@ function check(name, cond, detail) {
     (await page.locator(".st-table tr.tap", { hasText: "R-00001" }).innerText()).replace(/\s+/g, " ").includes("20.00 عليه"));
   const kp = await text(".st-bal");
   // ذهب 25 − 5 − 7 = 13 عليه · أجور 500 − 100 − 300 = 100 عليه
-  check("كشف المحل: 13.00 جم و100.00 ريال عليه", kp.includes("13.00 جم عليه") && kp.includes("100.00 ريال عليه"), kp);
+  check("كشف المحل: 13.00 جم و100.00 ريال عليه", kp.includes("13.00 جم عيار 18 عليه") && kp.includes("100.00 ريال عليه"), kp);
   // 1.11: «عليه · له · الرصيد» وصفّ الإجمالي آخر الجدول
   check("الأعمدة: التاريخ · العملية · عليه · له · الرصيد", (await page.locator(".st-table th").allInnerTexts()).join("،") === "التاريخ،العملية،عليه،له،الرصيد",
     (await page.locator(".st-table th").allInnerTexts()).join("،"));
@@ -431,7 +431,7 @@ function check(name, cond, detail) {
   check("فرز التحصيل: سند RV-00001 وحده، وإجماليه في «له» 7.00 و300.00", (await page.locator(".st-table tr.tap").count()) === 1 &&
     (await text(".st-table")).includes("RV-00001") && cot[0].includes("إجمالي التحصيل") && cot[2] === "7.00 300.00" && cot[1] === "—", cot);
   check("وأعلاه إجمالي التحصيل، ورصيد الحساب كله كما هو", (await text(".st-bal")).includes("إجمالي التحصيل") &&
-    (await text(".st-bal")).includes("13.00 جم عليه"));
+    (await text(".st-bal")).includes("13.00 جم عيار 18 عليه"));
   check("والمشاركة والطباعة تتبعان الفرز", await page.evaluate((id) => {
     const x = PrintDoc.statementHtml(App.state, id, null, null, "gold", "collect");
     return x.includes("كشف حساب — التحصيل") && x.includes("RV-00001") && !x.includes("S-00001") && x.includes("إجمالي التحصيل"); }, shopId));
@@ -667,27 +667,30 @@ function check(name, cond, detail) {
   await page.waitForTimeout(200);
   const kh = await page.evaluate(() => App.state.shops.find((x) => x.name === "عميل الخليج"));
   check("حُفظ بعيار 21 ورصيدٍ 7 مكافئ 18", kh.karat === 21 && kh.openGold18 === 7, JSON.stringify(kh));
-  // 1.13: العرض كله بعيار العرض المختار أعلى الرئيسية (18 هنا) — وعيار الحساب للإدخال
-  check("وصفحته بعيار العرض: 7.00 جم عيار 18", (await text(".kpis")).includes("عيار 18") &&
-    (await text(".kpis")).includes("7.00"), await text(".kpis"));
+  check("وصفحته بعياره: «عيار 21» و6.00 جم عيار 21 عليه", (await text("#bar")).includes("عيار 21") &&
+    (await text(".kpis")).includes("عيار 21") && (await text(".kpis")).includes("6.00"), await text(".kpis"));
+  // 1.13.1: لا زرّ عيار في الرئيسية — زرّ عيار العرض أعلى «الممتلكات» وحدها
   await page.goto(url + "#/home");
   await page.waitForTimeout(200);
-  check("زرّ العيار أعلى الرئيسية بجانب التحديث", (await text("#bar .k-chip")).includes("عيار 18"));
-  await tap("#bar .k-chip");
-  await page.waitForSelector(".sheet .k-grid");
-  await page.locator(".sheet .k-grid .chip", { hasText: "عيار 21" }).click();
+  check("لا زرّ عيار أعلى الرئيسية", (await page.locator("#bar .k-chip").count()) === 0);
+  await page.goto(url + "#/holdings");
   await page.waitForTimeout(250);
-  check("اختيار عيار 21 يُحفظ ويظهر في الزر", (await text("#bar .k-chip")).includes("عيار 21") &&
-    (await page.evaluate(() => App.state.settings.viewKarat)) === 21);
-  await page.goto(url + `#/shop/${kh.id}`);
-  await page.waitForTimeout(200);
-  check("وصفحة العميل الآن بعيار 21: 6.00", (await text(".kpis")).includes("عيار 21") && (await text(".kpis")).includes("6.00"), await text(".kpis"));
-  await page.goto(url + "#/home");
-  await page.waitForTimeout(200);
-  await tap("#bar .k-chip");
+  check("زرّ عيار العرض أعلى الممتلكات", (await text("#bar .k-chip")).includes("عيار 18"));
+  // كشف الحساب: عيار الحساب أعلى الكشف بجانب الاسم، ويُعرض بعيارٍ آخر للعرض فقط
+  await page.goto(url + `#/statement/${kh.id}`);
+  await page.waitForTimeout(250);
+  check("الكشف بعيار الحساب: زرّ «عيار 21» بجانب الاسم", (await text("#bar .chip-btn.kar")).includes("عيار 21") &&
+    (await text(".st-bal")).includes("6.00 جم عيار 21"), await text(".st-bal"));
+  await tap("#bar .chip-btn.kar");
   await page.waitForSelector(".sheet .k-grid");
   await page.locator(".sheet .k-grid .chip", { hasText: "عيار 18" }).click();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(300);
+  check("عرضه بعيار 18 للعرض فقط: 7.00 جم عيار 18 وتنبيهٌ بعيار الحساب", (await text(".st-bal")).includes("7.00 جم عيار 18") &&
+    (await text(".st-kview")).includes("عيار الحساب 21") &&
+    (await page.evaluate((id) => App.state.shops.find((x) => x.id === id).karat, kh.id)) === 21, await text(".st-bal"));
+  await tap(".st-kview");
+  await page.waitForTimeout(300);
+  check("والرجوع لعيار الحساب بلمسة", (await text("#bar .chip-btn.kar")).includes("عيار 21") && (await page.locator(".st-kview").count()) === 0);
   // فاتورة بيعٍ له: السطر يبدأ بعياره، وOP1 يُعبّأ من الرصيد الافتتاحي باسمه
   await page.goto(url + `#/invoice/new?kind=sale&shop=${kh.id}`);
   await page.waitForTimeout(250);
@@ -698,7 +701,7 @@ function check(name, cond, detail) {
   check("OP1 يُعبّأ من الرصيد الافتتاحي: 7.00 عيار 21", (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "7.00" &&
     (await page.content()).includes("من الرصيد الافتتاحي"));
   await fill("الأجور (ريال)", "70");
-  check("إجمالي الوزن بعيار العرض", (await text(".totals")).includes("إجمالي الوزن (عيار 18)"));
+  check("إجمالي الوزن بعيار العميل", (await text(".totals")).includes("إجمالي الوزن (عيار 21)"));
   await tap(".footer-bar .btn:has-text('حفظ الفاتورة')");
   await confirm("حفظ الفاتورة");
   await page.waitForURL(/#\/doc\/inv\//);

@@ -390,6 +390,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_close.setVisible(False)
         subbar = QtWidgets.QFrame()
         subbar.setObjectName("subbar")
+        self._subbar = subbar
         # الشريط الفرعي لا يفرض عرضاً على النافذة أبداً: ما زاد عن
         # عرضها يُضغط داخله بدل أن تتّسع النافذة خارج الشاشة
         subbar.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
@@ -427,6 +428,11 @@ class MainWindow(QtWidgets.QMainWindow):
         sb.addWidget(self.btn_nav)
         sb.addWidget(self.page_icon)
         sb.addLayout(title_box)
+        # 5.2.2: شارة العملية بجانب العنوان — «فاتورة بيع» خضراء، «مرتجع بيع» حمراء
+        self.tone_badge = QtWidgets.QLabel("")
+        self.tone_badge.setObjectName("toneBadge")
+        self.tone_badge.setVisible(False)
+        sb.addWidget(self.tone_badge)
         # «ⓘ» — شرح الشاشة المطويّ، يظهر عند الطلب لا فوق الجدول
         self.btn_notes = QtWidgets.QToolButton()
         self.btn_notes.setObjectName("notesBtn")
@@ -1221,6 +1227,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.setCurrentIndex(row)
         # قبل هدم أي شاشةٍ قديمة: شريط أقسام المغادَرة يعود إليها
         self._mount_page_tabs(target)
+        # لون العملية (5.2.2): لكل شاشةٍ لونها، ولا يبقى لونُ شاشةٍ غادرناها
+        self._apply_page_tone(target)
         # ══ سلسلة الرجوع ══
         # الانتقال من شاشةٍ إلى أخرى يُبقي الأولى حيّةً خلفها (فيعود
         # إليها «رجوع» كما تُركت). والرجوع يُغلق الشاشة المغادَرة،
@@ -2207,11 +2215,73 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             err(self, e)
 
+    # ══════════ لون العملية في شريط الشاشة (5.2.2) ══════════
+    def set_page_tone(self, tone=None, label=""):
+        """شريط عنوان الشاشة بلون العملية: أخضر للبيع والقبض، أحمر للمرتجع
+        والصرف — وشارةٌ بجانب العنوان باسمها. وبلا عملية: كما كان."""
+        from ui.widgets import op_tone
+        sb = getattr(self, "_subbar", None)
+        badge = getattr(self, "tone_badge", None)
+        if sb is None or badge is None:
+            return
+        c = op_tone.colors(tone) if tone else None
+        try:
+            if c is None:
+                sb.setStyleSheet("")
+                self.crumb.setStyleSheet("")
+                badge.setVisible(False)
+                return
+            fg, bg, edge = c
+            sb.setStyleSheet(f"QFrame#subbar {{ background: {bg};"
+                             f" border-bottom: 3px solid {edge}; }}")
+            self.crumb.setStyleSheet(f"color: {fg};")
+            badge.setText(("⬇  " if tone == op_tone.IN else "⬆  ") + label)
+            badge.setStyleSheet(
+                f"QLabel#toneBadge {{ background: {edge}; color: #FFFFFF;"
+                " font-weight: bold; font-size: 14px; border-radius: 12px;"
+                " padding: 3px 14px; }")
+            badge.setVisible(bool(label))
+        except RuntimeError:
+            pass
+
+    def _apply_page_tone(self, screen):
+        """لون الشاشة الظاهرة — من `page_tone()` إن كانت لها عملية."""
+        real = None
+        if screen is not None and not (isinstance(screen, Lazy)
+                                       and not screen.built):
+            real = getattr(screen, "real", screen)
+        tone, label = None, ""
+        try:
+            fn = getattr(real, "_apply_tone", None)
+            if callable(fn):
+                fn(notify=False)          # خانة العملية بلون المظهر الحالي
+            fn = getattr(real, "page_tone", None)
+            if callable(fn):
+                tone, label = fn()
+        except Exception:
+            tone, label = None, ""
+        self.set_page_tone(tone, label)
+
+    def refresh_page_tone(self, widget):
+        """تُناديها الشاشة حين تتغيّر عمليتها — وتُطبَّق إن كانت هي الظاهرة."""
+        try:
+            cur = self.screens[getattr(self, "_current_row", 0)]
+            real = getattr(cur, "real", cur) if not (
+                isinstance(cur, Lazy) and not cur.built) else None
+        except Exception:
+            return
+        if real is widget:
+            self._apply_page_tone(cur)
+
     def _set_theme(self, name):
         try:
             theme.set_theme(name, self.user.get("username"))
             theme.apply(QtWidgets.QApplication.instance(), theme=name)
             self._apply_nav_icons()
+            try:
+                self._apply_page_tone(self.screens[self._current_row])
+            except Exception:
+                pass
             self._set_page_head(self._items.get(
                 self.screens[getattr(self, "_current_row", 0)]))
             # ألوانٌ تُرسم بالشيفرة (صفّ الإجمالي، الدرجات) تُقرأ من

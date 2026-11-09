@@ -107,9 +107,8 @@ function check(name, cond, detail) {
   await tap(".footer-bar .btn:has-text('Save')");
   await page.waitForURL(/#\/shop\//);
   await page.waitForTimeout(250);
-  // 1.13: everything shows in the display karat chosen at the top of Home (18K here): 6 g 21K = 7.00 g 18K
-  check("Customer saved (21K entry): 7.00 g owes you in the 18K display", (await page.locator(".kpis").innerText()).includes("7.00") &&
-    (await page.locator(".kpis").innerText()).includes("18K"), await page.locator(".kpis").innerText());
+  check("Customer saved in 21K: 6.00 g owes you", (await page.locator(".kpis").innerText()).includes("6.00") &&
+    (await page.locator(".kpis").innerText()).includes("21K"), await page.locator(".kpis").innerText());
   await screen("customer_page", null);
   await page.goto(url + "#/shop-form?type=factory");
   await page.waitForTimeout(250);

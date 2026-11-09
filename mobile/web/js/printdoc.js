@@ -19,8 +19,8 @@
     '<rect x="2" y="6.5" width="20" height="11" rx="2" fill="#2F9E5B" stroke="#1C6B3C" stroke-width="1.3"/>' +
     '<circle cx="12" cy="12" r="2.8" fill="none" stroke="#E6F7EC" stroke-width="1.5"/></svg>';
   const gI = (v) => ICO_GOLD + v, cI = (v) => ICO_CASH + v;
-  // 1.13: عيار العرض والمكافئ الواحد (يُختار أعلى الرئيسية) — للمستندات كلها
-  const vK = (st) => parseInt(st.settings.viewKarat || 18, 10);
+  // عيار الحساب (العميل/المصنع) ومكافئه — لكل مستندٍ عيار حسابه
+  const pK = (st, shopId) => D.partyKarat(D.shopById(st, shopId), st.settings.viewKarat || 18);
 
   function base() {
     try { return location.href.replace(/[^/]*([?#].*)?$/, ""); } catch (e) { return ""; }
@@ -155,7 +155,7 @@
     };
     const shop = D.shopById(st, inv.shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
-    const k = vK(st);
+    const k = pK(st, inv.shopId);
     const title = (INV_TITLE[inv.kind] || T("فاتورة")) + (inv.vat ? T(" ضريبية") : "");
     const anyDia = inv.lines.some((l) => l.diamond > 0);
     let rows = "", n = 0;
@@ -192,7 +192,7 @@
   function voucherHtml(st, v) {
     const shop = D.shopById(st, v.shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
-    const k = vK(st);
+    const k = pK(st, v.shopId);
     const title = v.kind === "receipt" ? T("سند تحصيل") : D.isFactory(shop) ? T("سند سداد للمصنع") : T("سند صرف");
     let rows = "", n = 0;
     for (const r of v.rows) {
@@ -212,10 +212,11 @@
   }
 
   // كشف الحساب بعرض الجوال: «gold» الذهب والنقد، أو «diamond» الماس
-  function statementHtml(st, shopId, from, to, mode, filter) {
+  // `kView`: عيارٌ آخر للعرض فقط (يُختار أعلى الكشف) — وإلا عيار الحساب
+  function statementHtml(st, shopId, from, to, mode, filter, kView) {
     const shop = D.shopById(st, shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
-    const k = vK(st);
+    const k = kView || pK(st, shopId);
     const fac = D.isFactory(shop);
     const period = from || to ? T("من {0} إلى {1}", from ? dmy(from) : T("البداية"), to ? dmy(to) : T("اليوم")) : T("كل الفترات");
     const sgn = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + f2(Math.abs(v));
@@ -288,7 +289,7 @@
   function invoiceText(st, inv) {
     const shop = D.shopById(st, inv.shopId) || { name: "" };
     // عيار حساب العميل/المصنع
-    const k = vK(st);
+    const k = pK(st, inv.shopId);
     const { after } = D.balanceAround(st, inv);
     return [`${INV_TITLE[inv.kind] || T("فاتورة")} ${inv.no} — ${dmy(inv.date)}`,
       `${shop.name}`,
