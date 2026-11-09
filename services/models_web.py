@@ -1334,7 +1334,7 @@ _JS = """
    if(!whole){tn+=cn;tw+=cw;}});
   // 4.59: الطلبات — بالعميل أو رقم الطلب أو رقم موديلٍ فيه
   // 4.73: والعملاء — باسم العميل أو رقم حسابه
-  document.querySelectorAll('.order,tr.crow').forEach(function(o){
+  document.querySelectorAll('.order,tr.crow,.dayd').forEach(function(o){
    var hit=!v||(o.getAttribute('data-s')||'').indexOf(v)>=0;
    o.style.display=hit?'':'none'; if(hit)n++;});
   var e=document.getElementById('none'); if(e)e.style.display=n?'none':'';
@@ -1493,7 +1493,8 @@ def page_html(conn, query, base):
     if tab == "income":
         # روابط قائمة الدخل المحفوظة (قبل 4.89) تفتح اللوحة التي حلّت محلها
         tab = "pnl"
-    if tab not in ("guide", "received", "orders", "customers", "pnl"):
+    if tab not in ("guide", "day", "received", "orders", "customers",
+                   "pnl"):
         tab = "guide"
     view = query.get("view") if query.get("view") in (
         "all", "in_stock", "sold") else "all"
@@ -1513,6 +1514,7 @@ def page_html(conn, query, base):
         f'<a class="{"on" if tab == k else ""}"'
         f' href="{_e(_link(base, tab=k, view=view, sort=sort))}">{t}</a>'
         for k, t in (("guide", "الدليل"),
+                     ("day", "حركة اليوم"),
                      ("received", "البضاعة الواردة بتاريخ"),
                      ("orders", "طلبات العملاء"
                       + (f" ({n_orders})" if n_orders else "")),
@@ -1537,7 +1539,9 @@ def page_html(conn, query, base):
         for k, t in (("az", "أ ← ي"), ("za", "ي ← أ"),
                      ("most", "الأكثر عدداً"), ("least", "الأقل عدداً")))
 
-    if tab == "customers":
+    if tab == "day":
+        body, summary, tools, seg = _day(conn, query, base, imgs)
+    elif tab == "customers":
         body, summary, tools, seg = _board(conn, query, base)
     elif tab == "pnl":
         body, summary, tools, seg = _pnl(conn, query, base)
@@ -1553,22 +1557,27 @@ def page_html(conn, query, base):
     co = _company().strip()
     board = tab in ("customers", "pnl")
     title = ((pnl_title if tab == "pnl" else
+              "حركة اليوم" if tab == "day" else
               "العملاء — المبيعات والسداد" if board else "دليل الموديلات")
              + (f" — {_e(co)}" if co else ""))
     cols = "".join(f'<button type="button" data-c="{c}">{c}</button>'
                    for c in COLS)
-    cols_bar = ("" if board else
+    cols_bar = ("" if board or tab == "day" else
                 f'<div class="cols">الصور في الصف: {cols}</div>')
     hint = ("ابحث في حسابات اللوحة…" if tab == "pnl" else
+            "ابحث برقم المستند أو اسم الجهة أو رقم التشغيل أو الموديل…"
+            if tab == "day" else
             "ابحث باسم العميل أو رقم حسابه…" if board else
             "ابحث برقم الموديل أو رقم التشغيل أو اسم الجهة…")
     sect = ("board" if board else
+            "dayw" if tab == "day" else
             "orders" if tab == "orders" else "grid")
     # اللوحة تتجدّد وحدها كل ربع ساعة: فترتها باسمها («هذا الشهر»)
     # تنتقل مع الأيام بلا لمس، وأرقام اليوم تتبع ما يُرحَّل
     refresh = ('<meta http-equiv="refresh" content="900">'
                if tab == "pnl" else "")
-    again = (_link(base, tab=tab, side=query.get("side"),
+    again = (_link(base, tab="day", d=query.get("d")) if tab == "day" else
+             _link(base, tab=tab, side=query.get("side"),
                    **{k: query.get(k)
                       for k in ("from", "to", "all", "f", "dim", "per",
                                 "m")})
@@ -1581,7 +1590,7 @@ def page_html(conn, query, base):
 <meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">{_install_head(base)}{refresh}
 <title>{title}</title>
-<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_PNL_CSS}</style></head><body>
+<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_PNL_CSS}{_DAY_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
 <div class="bar"><button type="button" id="inst" class="inst"
@@ -1601,7 +1610,336 @@ def page_html(conn, query, base):
 <footer><a href="{_e(again)}">↻ تحديث</a>
  · إصدار {_e(_version())}
  · <a href="{_e(base)}/logout">خروج</a></footer>
-<script>{_JS}{_IMG_JS}{_INSTALL_JS}</script></body></html>"""
+<script>{_JS}{_IMG_JS}{_INSTALL_JS}{_DAY_JS}</script></body></html>"""
+
+
+# ══════════════════════════════════════════════════════════════════
+#  حركة اليوم (5.2.6): كل مستندات يومٍ واحد — للمدير
+# ------------------------------------------------------------------
+#  اليوم أو أمس أو أي تاريخ: المستندات مصنّفةً بنوعها (مبيعات · مرتجع ·
+#  قبض · صرف · توريد · مشتريات · أخرى) كشاشة «الإغلاق اليومي»، ولكل
+#  مستندٍ «عرض» يفتح تفصيله: الفاتورة بموديلاتها وصورها وأرقام تشغيلها،
+#  والسند بأعيرته، والتوريد بأطقمه، وغيرها بأسطر قيدها.
+#  المصدر `models.day_feed` — قراءةٌ محضة.
+# ══════════════════════════════════════════════════════════════════
+
+_DAY_CSS = """
+.dayw{display:flex;flex-direction:column;gap:18px}
+.dg{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+margin:4px 2px 8px;font-size:18px;color:var(--brown)}
+.dg small{font-size:13px;color:var(--muted);font-weight:500}
+.dgrp{background:#fff;border:1px solid var(--line);border-radius:14px;
+padding:10px 12px}
+.dgrp.sale{border-top:4px solid #1E7B45}
+.dgrp.sale_return{border-top:4px solid #B4232A}
+.dgrp.receipt{border-top:4px solid #1E6B8F}
+.dgrp.payment{border-top:4px solid #8B5E1E}
+.dgrp.supply{border-top:4px solid #A8822E}
+details.dayd{border:1px solid #efe7d8;border-radius:10px;margin:8px 0 0;
+padding:0;background:#fffdf9;overflow:visible}
+details.dayd[open]{background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+details.dayd>summary{list-style:none;display:grid;align-items:center;
+grid-template-columns:120px minmax(160px,1.4fr) minmax(220px,2fr) 120px 90px;
+gap:10px;padding:10px 12px;color:var(--ink);font-weight:500;font-size:14px}
+details.dayd>summary::-webkit-details-marker{display:none}
+.dayd .no{font-weight:700;color:var(--brown);direction:ltr;text-align:right}
+.dayd .pt{font-weight:700}
+.dayd .mt{color:#4a4037}
+.dayd .tm{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.dayd .go{justify-self:end;background:var(--gold);color:#fff;
+border-radius:16px;padding:4px 14px;font-size:13px;font-weight:600}
+.dayd[open] .go{background:var(--brown)}
+.dayd .tag{font-size:11.5px;padding:1px 8px;border-radius:10px;
+background:#f7e2e0;color:#B4232A;margin-inline-start:6px}
+.dv{padding:4px 14px 14px;border-top:1px dashed var(--line)}
+.mgrid{display:grid;gap:12px;margin-top:10px;
+grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+.mc{border:1px solid var(--line);border-radius:12px;overflow:hidden;
+background:#fff;display:flex;flex-direction:column}
+.mc .ph,.mc .noimg{aspect-ratio:4/3}
+.mh{padding:6px 10px 2px;font-weight:700;color:var(--brown);font-size:14px}
+.mh small{display:block;color:var(--muted);font-weight:500;font-size:12.5px}
+.mc table{font-size:12.5px;margin:2px 0 6px}
+.mc td{padding:3px 10px}
+.mc td.w{direction:ltr;text-align:left;font-variant-numeric:tabular-nums}
+.dl{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:10px;font-size:14px}
+.dl span b{color:var(--brown)}
+.dv table.vt{font-size:13.5px;margin-top:10px}
+.dv table.vt th{background:#f4efe5;color:var(--ink);padding:7px 8px}
+.dv table.vt td{padding:7px 8px;text-align:center;
+font-variant-numeric:tabular-nums}
+.dv .note{margin-top:8px;color:var(--muted);font-size:13px}
+.kchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.kchips span{background:#f3efe6;border-radius:12px;padding:3px 10px;
+font-size:13px}
+.daynav{display:flex;gap:6px;align-items:center}
+.allbtn{border:1px solid var(--line);background:#fff;border-radius:16px;
+padding:6px 14px;font-size:13px;cursor:pointer}
+.sum small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.sum span{color:var(--muted);font-size:13px}
+"""
+
+_DAY_JS = """
+(function(){
+ var b=document.getElementById('dayall'); if(!b)return;
+ b.addEventListener('click',function(){
+  var ds=document.querySelectorAll('details.dayd'),open=false;
+  ds.forEach(function(d){if(!d.open)open=true;});
+  ds.forEach(function(d){d.open=open;});
+  b.textContent=open?'طيّ الكل':'عرض الكل';});
+ // البحث برقم تشغيلٍ أو موديل يفتح المستند الذي فيه
+ var q=document.getElementById('q');
+ if(q)q.addEventListener('input',function(){var v=q.value.trim();
+  document.querySelectorAll('details.dayd').forEach(function(d){
+   if(v.length>=2&&d.style.display!=='none')d.open=true;});});
+})();
+"""
+
+_DAY_GROUP_WORD = {"sale": "فاتورة", "sale_return": "فاتورة",
+                   "receipt": "سند", "payment": "سند", "supply": "توريد",
+                   "purchase": "مستند", "other": "مستند"}
+
+
+def _day_date(query, today=None):
+    import datetime as _dt
+    t = today or _dt.date.today()
+    d = str(query.get("d") or "")
+    if _DATE.match(d):
+        try:
+            return _dt.date.fromisoformat(d), t
+        except ValueError:
+            pass
+    return t, t
+
+
+def _day_models(base, imgs, models):
+    """شبكة موديلات المستند: صورة كل موديل، وعدد قطعه ووزنها، وتحتها
+    أرقام التشغيل بأوزانها."""
+    from services import karat_view as kv
+    cards = ""
+    for m in models:
+        ver = imgs.get(_vkey(m["model"])) if m["model"][:1] != "—" else ""
+        rows = "".join(
+            f'<tr><td>{_e(i["wo"])}</td><td class="w">{_w(i["weight"])}'
+            '</td></tr>' for i in m["items"])
+        cards += (f'<div class="mc">{_photo(base, m["model"], ver)}'
+                  f'<div class="mh">الموديل {_e(m["model"])}<small>'
+                  f'{m["count"]} قطعة · {_w(m["weight"])} {_e(kv.unit())}'
+                  f'</small></div><table>{rows}</table></div>')
+    return f'<div class="mgrid">{cards}</div>' if cards else ""
+
+
+def _day_doc(base, imgs, g, d):
+    """مستندٌ واحد: سطرٌ مختصر، و«عرض» يفتح تفصيله."""
+    from services import karat_view as kv
+    u = _e(kv.unit())
+    det = d.get("detail") or {}
+    keys = [d["no"], d.get("party"), d.get("op"), d.get("desc"),
+            d.get("accounts")]
+    meta, view = "", ""
+    if g in ("sale", "sale_return") and det:
+        for m in det["models"]:
+            keys.append(m["model"])
+            keys += [i["wo"] for i in m["items"]]
+        keys += [i["wo"] for i in det["italian"]]
+        parts = []
+        if det["n_sets"]:
+            parts.append(f'{det["n_sets"]} قطعة · {_w(det["set_weight"])}')
+        if det["italian"]:
+            parts.append(f'ايطالي {_w(det["italian_weight"])}')
+        meta = " · ".join(parts) + f' {u} · أجور {_nf.f2(det["wages"])}'
+        ital = ""
+        if det["italian"]:
+            ital = ('<div class="dl"><span><b>الايطالي (الرقم التجميعي):'
+                    '</b> ' + " · ".join(
+                        f'{_e(i["wo"])}: {_w(i["weight"])} {u}'
+                        for i in det["italian"]) + '</span></div>')
+        wo = ""
+        if det["wages_only"]:
+            wo = ('<div class="dl"><span><b>أجر فقط:</b> ' + " · ".join(
+                f'{_nf.f2(x["amount"])}' + (f' ({_e(x["note"])})'
+                                            if x["note"] else "")
+                for x in det["wages_only"]) + '</span></div>')
+        vat = (f'<span>الضريبة: <b>{_nf.f2(det["vat"])}</b></span>'
+               f'<span>الإجمالي: <b>{_nf.f2(det["grand"])}</b></span>'
+               if det["vat"] else "")
+        view = (_day_models(base, imgs, det["models"]) + ital + wo
+                + '<div class="dl">'
+                + (f'<span>عدد الأطقم: <b>{det["n_sets"]}</b></span>'
+                   if det["n_sets"] else "")
+                + f'<span>الوزن: <b>{_w(det["weight"])}</b> {u}'
+                  f'</span><span>الأجور: <b>{_nf.f2(det["wages"])}</b>'
+                  f'</span>{vat}</div>'
+                + (f'<div class="note">{_e(det["note"])}</div>'
+                   if det.get("note") else ""))
+    elif g in ("receipt", "payment") and det:
+        ks = " · ".join(f'عيار {k["karat"]}: {_nf.f2(k["weight"])}'
+                        for k in det["karats"])
+        meta = " · ".join(x for x in (
+            ks, (f'نقد {_nf.f2(det["cash"])}' if det["cash"] else "")) if x)
+        rows = ""
+        for ln in det["lines"]:
+            gold = ln["kind"] == "gold"
+            rows += ("<tr>" + f'<td>{_e(ln["label"])}</td>'
+                     + f'<td>{ln["karat"] if gold else "—"}</td>'
+                     + f'<td>{_nf.f2(ln["weight"]) if gold else "—"}</td>'
+                     + f'<td>{_w(ln["equiv"]) if gold else "—"}</td>'
+                     + f'<td>{_nf.f2(ln["amount"]) if ln["amount"] else "—"}'
+                       '</td>'
+                     + f'<td>{_e(ln["note"]) or ""}</td></tr>')
+        chips = "".join(
+            f'<span>عيار {k["karat"]}: <b>{_nf.f2(k["weight"])}</b> جم'
+            f' (مكافئ {_w(k["equiv"])} {u})</span>' for k in det["karats"])
+        view = (f'<div class="kchips">{chips}'
+                + (f'<span>النقد: <b>{_nf.f2(det["cash"])}</b> ريال</span>'
+                   if det["cash"] else "") + '</div>'
+                + '<table class="vt"><tr><th>النوع</th><th>العيار</th>'
+                  '<th>الوزن الفعلي (جم)</th>'
+                  f'<th>المكافئ ({u})</th><th>المبلغ (ريال)</th>'
+                  f'<th>ملاحظة</th></tr>{rows}</table>'
+                + (f'<div class="note">{_e(det["note"])}</div>'
+                   if det.get("note") else ""))
+    elif g == "supply" and det:
+        for m in det["models"]:
+            keys.append(m["model"])
+            keys += [i["wo"] for i in m["items"]]
+        meta = f'{det["n_sets"]} قطعة · {_w(det["weight"])} {u}'
+        ital = ("" if not det["italian"] else
+                '<div class="dl"><span><b>الايطالي:</b> ' + " · ".join(
+                    f'{_e(i["wo"])}: {_w(i["weight"])} {u}'
+                    for i in det["italian"]) + '</span></div>')
+        view = _day_models(base, imgs, det["models"]) + ital
+    else:
+        parts = []
+        if d["gold"]:
+            parts.append(f'ذهب {_w(d["gold"])} {u}')
+        if d["cash"]:
+            parts.append(f'نقد {_nf.f2(d["cash"])}')
+        meta = " · ".join(parts) or _e(d.get("desc") or "")
+        rows = "".join(
+            "<tr>" + f'<td style="text-align:right">{_e(ln["account"])}</td>'
+            + "".join(f"<td>{v}</td>" for v in (
+                _w(ln["gd"]) if ln["gd"] else "—",
+                _w(ln["gc"]) if ln["gc"] else "—",
+                _nf.f2(ln["cd"]) if ln["cd"] else "—",
+                _nf.f2(ln["cc"]) if ln["cc"] else "—")) + "</tr>"
+            for ln in d.get("lines") or [])
+        view = ((f'<div class="note">{_e(d["desc"])}</div>'
+                 if d.get("desc") else "")
+                + '<table class="vt"><tr><th>الحساب</th>'
+                  f'<th>مدين ذهب ({u})</th><th>دائن ذهب</th>'
+                  f'<th>مدين نقد</th><th>دائن نقد</th></tr>{rows}</table>')
+    tag = ""
+    if d.get("reversed_by"):
+        tag = f'<span class="tag">عُكس بـ {_e(d["reversed_by"])}</span>'
+    elif d.get("reverses"):
+        tag = f'<span class="tag">عكسٌ لـ {_e(d["reverses"])}</span>'
+    party = d.get("party") or d.get("op") or ""
+    s = " ".join(str(k) for k in keys if k).lower()
+    return (f'<details class="dayd" data-s="{_e(s)}"><summary>'
+            f'<span class="no">{_e(d["no"])}</span>'
+            f'<span class="pt">{_e(party)}{tag}</span>'
+            f'<span class="mt">{meta}</span>'
+            f'<span class="tm">{_e(d.get("time") or "")}'
+            f'{" · " + _e(d["who"]) if d.get("who") else ""}</span>'
+            f'<span class="go">عرض ▾</span></summary>'
+            f'<div class="dv">{view}</div></details>')
+
+
+def _day(conn, query, base, imgs, today=None):
+    import datetime as _dt
+    from models import day_feed
+    from services import karat_view as kv
+    day, t = _day_date(query, today)
+    one = _dt.timedelta(days=1)
+    data = day_feed.day(conn, day.isoformat())
+    u = _e(kv.unit())
+
+    def go(d):
+        return _e(_link(base, tab="day", d=d.isoformat()))
+    seg = (f'<a class="{"on" if day == t else ""}" href="{go(t)}">اليوم</a>'
+           f'<a class="{"on" if day == t - one else ""}"'
+           f' href="{go(t - one)}">أمس</a>'
+           f'<a href="{go(day - one)}">◀ اليوم السابق</a>'
+           + (f'<a href="{go(day + one)}">اليوم التالي ▶</a>'
+              if day < t else
+              '<span class="off">اليوم التالي ▶</span>'))
+    tools = (f'<form class="tools" method="get" action="{_e(base)}">'
+             '<input type="hidden" name="tab" value="day">'
+             f'<input type="date" name="d" value="{day.isoformat()}"'
+             f' max="{t.isoformat()}"><button type="submit">عرض اليوم'
+             '</button></form>'
+             '<button type="button" id="dayall" class="allbtn">عرض الكل'
+             '</button>')
+    sm = data["summary"]
+    by = {g["key"]: g for g in data["groups"]}
+
+    def card(key, cls=""):
+        g = by.get(key)
+        title = day_feed.GROUP_LABEL[key]
+        if not g:
+            return f'<div><span>{title}</span><b>—</b></div>'
+        tt = g["totals"]
+        if key in ("sale", "sale_return", "supply"):
+            val = (f'{tt.get("sets", 0)} قطعة · {_w(tt.get("weight", 0))}'
+                   f' <small style="display:inline">{u}</small>')
+            sub = (f'{tt["count"]} مستند'
+                   + (f' · أجور {_nf.f2(tt["wages"])}'
+                      if tt.get("wages") else ""))
+        else:
+            val = (f'{_w(tt.get("gold_equiv", 0))} {u}'
+                   if tt.get("gold_equiv") else "")
+            if tt.get("cash"):
+                val += (" · " if val else "") + f'{_nf.f2(tt["cash"])} ريال'
+            sub = f'{tt["count"]} سند'
+        return (f'<div class="{cls}"><span>{title}</span><b>{val or "—"}</b>'
+                f'<small>{sub}</small></div>')
+    summary = (f'<div><span>{_e(day_names(day))}</span>'
+               f'<b>{data["count"]} مستند</b><small>{day.isoformat()}'
+               '</small></div>'
+               + card("sale", "in") + card("sale_return", "out")
+               + card("receipt", "in") + card("payment", "out")
+               + card("supply")
+               + f'<div><span>الصندوق النقدي اليوم</span>'
+                 f'<b>{_nf.f2(sm["cash_net"])}</b><small>داخل '
+                 f'{_nf.f2(sm["cash_in"])} · خارج {_nf.f2(sm["cash_out"])}'
+                 '</small></div>')
+    if not data["groups"]:
+        body = (f'<div class="empty">لا مستندات في {_e(day_names(day))}'
+                f' {day.isoformat()}</div>')
+        return body, summary, tools, seg
+    body = ""
+    for g in data["groups"]:
+        tt = g["totals"]
+        word = _DAY_GROUP_WORD.get(g["key"], "مستند")
+        extra = ""
+        if g["key"] in ("sale", "sale_return", "supply"):
+            extra = (f' · {tt.get("sets", 0)} قطعة · '
+                     f'{_w(tt.get("weight", 0))} {u}'
+                     + (f' · أجور {_nf.f2(tt["wages"])}'
+                        if tt.get("wages") else ""))
+        elif g["key"] in ("receipt", "payment"):
+            ks = " · ".join(f'عيار {k["karat"]}: {_nf.f2(k["weight"])}'
+                            for k in tt.get("karats") or [])
+            extra = ((" · " + ks) if ks else "") + (
+                f' · نقد {_nf.f2(tt["cash"])}' if tt.get("cash") else "")
+        docs = "".join(_day_doc(base, imgs, g["key"], d) for d in g["docs"])
+        body += (f'<div class="dgrp {g["key"]}"><h2 class="dg">{g["title"]}'
+                 f'<small>{tt["count"]} {word}{extra}</small></h2>'
+                 f'{docs}</div>')
+    return body, summary, tools, seg
+
+
+def day_names(d):
+    """«اليوم» · «أمس» · أو اسم اليوم بالعربية."""
+    import datetime as _dt
+    t = _dt.date.today()
+    if d == t:
+        return "اليوم"
+    if d == t - _dt.timedelta(days=1):
+        return "أمس"
+    return ("الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت",
+            "الأحد")[d.weekday()]
 
 
 # ══════════════════════════════════════════════════════════════════
