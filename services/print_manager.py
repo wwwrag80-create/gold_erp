@@ -2043,6 +2043,7 @@ DOC_TITLES = {
     "italian_statement": "كشف ايطالي / نواعم",
     "balances": "أرصدة الحسابات", "turnover": "حركة الأطقم",
     "sales_sets": "المبيعات — أين صارت الأطقم",
+    "invoices_combined": "فاتورة مجمّعة — للعرض",
     "aging": "أعمار الديون", "tax_sales_register": "سجل المبيعات الضريبية",
     "purchases_register": "سجل المشتريات", "day_close": "إقفال اليوم",
     "trial_balance": "ميزان المراجعة", "coa_list": "دليل الحسابات",
@@ -2142,7 +2143,8 @@ def build_body(doc_type, doc_id, **kw):
                 conn, doc_id, kw.get("title", ""),
                 kw.get("kind", "accounts"), kw.get("codes"),
                 kw.get("ratios"), kw.get("date_from"),
-                kw.get("date_to"), kw.get("search", "")))
+                kw.get("date_to"), kw.get("search", ""),
+                kw.get("unit")))
         if doc_type == "aging":
             return en(_tpl_aging(conn, doc_id,
                                  kw.get("entity_type", "customer"),
@@ -3673,7 +3675,7 @@ def _tpl_italian(conn, _id=0, date_from=None, date_to=None, **_kw):
 
 def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
                     ratios=None, date_from=None, date_to=None,
-                    search=""):
+                    search="", unit=None):
     """قالب لوحة التحكم — مطابق لما يظهر على الشاشة."""
     from models import dash_panels as dp
     from services import karat_view
@@ -3769,24 +3771,21 @@ def _tpl_dash_panel(conn, _id=0, title="", kind="accounts", codes=None,
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
 
     # أشرطة النسب أسفل الجدول — كما تظهر على الشاشة
-    bars = dp.ratio_bars(rows, ratios or [])
+    bars = dp.ratio_bars(rows, ratios or [], unit)
     extra = ""
     if bars:
         items = ""
         for b in bars:
             pct = "—" if b["pct"] is None else _nf.f2(b["pct"]) + "%"
             mode = ("عكسية" if b.get("mode") == "inverse" else "مباشرة")
+            _v = _gw if b.get("dim") == "gold" else (lambda v: _w(v, 2))
             detail = "{} · {} {} ÷ {} {}".format(
-                mode, b["second_name"], _w(b["second_value"]),
-                b["first_name"], _w(b["first_value"]))
+                mode, b["second_name"], _v(b["second_value"]),
+                b["first_name"], _v(b["first_value"]))
             c1 = '<td class="r"><b>' + str(b["title"]) + "</b></td>"
             c2 = "<td><b>" + pct + "</b></td>"
             c3 = '<td class="r">' + detail + "</td>"
             items += "<tr>" + cells(c1, c2, c3) + "</tr>"
-        vals = [b["pct"] for b in bars if b["pct"] is not None]
-        tot = ("{:,.1f}%".format(sum(vals)) if vals else "—")
-        items += ("<tr>" + cells(thw("إجمالي النسب"), thw(tot), thw(""))
-                  + "</tr>")
         rhead = cells(thw("النسبة", 30), thw("القيمة", 18),
                       thw("التفصيل", 52))
         extra = ('<table class="items totals" width="100%" cellspacing="0"'
@@ -4957,59 +4956,275 @@ def _tpl_doc_edits(conn, _id=0, date_from=None, date_to=None,
                     show_meta=False) + html + _footer(""))
 
 
-def _tpl_sales_sets(conn, _id=0, invoice_ids=None, title=None):
-    """«المبيعات» (5.2.4): أطقم فواتير بيعٍ مختارة — صورة موديل كل طقم،
-    ووزنه، وبيعه، وهل رجع (ومرتجعه)، وإلى من ذهب الآن."""
+def _tpl_sales_sets(conn, _id=0, invoice_ids=None, title=None, per_page=4):
+    """«المبيعات» (5.2.4 · 5.2.5): أطقم فواتير بيعٍ مختارة على شبكة صور
+    الموديلات نفسها (كـ«موديلات الجهة»): صورةٌ لكل موديل، وتحتها أطقمه —
+    رقم التشغيل والوزن والحال (مباع معه / مرتجع) ومَن هو عنده الآن
+    (المشتري، أو الخزنة، أو المندوب الذي أخذه بعد رجوعه)."""
+    from models import models_catalog as mc
     from models import sales_sets
     today = _qd(QtCore.QDate.currentDate())
     rows = sales_sets.track(conn, invoice_ids or [])
     sm = sales_sets.summary(rows)
     nos = sorted({r["invoice_no"] for r in rows})
-    body_rows = ""
-    for r in rows:
-        img = _model_thumb(r["model_no"], 40) if r["model_no"] else ""
-        pic = (f'<img src="{img}" style="height:40px;max-width:70px">'
-               if img else en(r["model_no"] or "—"))
-        st = r["status_label"]
-        if r["status"] == sales_sets.RETURNED:
-            st = f'<b style="color:#B4232A">{st}</b>'
-        elif r["status"] == sales_sets.WITH:
-            st = f'<b style="color:#1E7B45">{st}</b>'
-        ret = (f'{en(r["ret_no"])}<br/><span class="note">'
-               f'{en(r["ret_date"])}</span>' if r["ret_no"] else "—")
-        body_rows += "<tr>" + cells(
-            f"<td>{pic}</td>",
-            f'<td><b>{en(r["wo_no"])}</b></td>',
-            f'<td>{en(r["model_no"] or "—")}</td>',
-            f'<td>{_gw(r["weight"])}</td>',
-            f'<td>{en(r["invoice_no"])}<br/><span class="note">'
-            f'{en(r["date"])}</span></td>',
-            f'<td class="r">{r["party"]}</td>',
-            f"<td>{st}</td>", f"<td>{ret}</td>",
-            f'<td class="r"><b>{r["where"] or "—"}</b></td>') + "</tr>"
+    head = title or "المبيعات — أطقم الفواتير وأين صارت"
     if not rows:
-        body_rows = f'<tr><td {TD} colspan="9">لا أطقم في الفواتير المختارة</td></tr>'
-    head = cells(thw("صورة الموديل"), thw("رقم التشغيل"), thw("الموديل"),
-                 thw(f"الوزن ({_kunit()})"), thw("فاتورة البيع"),
-                 thw("بِيع إلى"), thw("الحال"), thw("المرتجع"),
-                 thw("أين هو الآن"))
-    def _nw(k):
-        return f'{en(sm[k]["n"])} طقم · {_gw(sm[k]["w"])}'
-    totals = f'''
+        return (_slim_title(head, today)
+                + '<div style="text-align:center;padding:40px">'
+                  'لا أطقم في الفواتير المختارة</div>')
+    groups = {}
+    for r in rows:
+        key = r["model_no"] or "— بلا موديل —"
+        groups.setdefault(key, []).append(r)
+    color = {sales_sets.WITH: "#1E7B45", sales_sets.RETURNED: "#B4232A"}
+    cards = []
+    # الموديل كثير القطع يُكمَل في بطاقةٍ تالية بصورته — فلا يضيع طقمٌ
+    # تحت «+ قطعٌ أخرى» وهذه الورقة لتتبّع كل طقمٍ بعينه
+    per_card = 8
+    chunks = []
+    for model in sorted(groups, key=mc.model_key):
+        its = groups[model]
+        for k in range(0, len(its), per_card):
+            chunks.append((model, its, its[k:k + per_card], k))
+    for model, items, shown, k0 in chunks:
+        uri = _img_uri(mc.image_path(model) or "") if model[:1] != "—" else ""
+        img = (f'<img src="{uri}" />' if uri
+               else '<span class="noimg">لا صورة لهذا الموديل</span>')
+        trs = ""
+        for i in shown:
+            c = color.get(i["status"], "#4A3A1E")
+            who = i["where"] or "—"
+            if i["status"] == sales_sets.RETURNED and i["ret_no"]:
+                who += (f'<br/><span style="color:#8A7A5A">رجع'
+                        f' {en(i["ret_no"])} · {en(i["ret_date"])}</span>')
+            trs += ("<tr>" + f'<td class="h"><b>{en(i["wo_no"])}</b></td>'
+                    + f'<td>{_gw(i["weight"])}</td>'
+                    + f'<td class="h" style="color:{c};font-weight:bold">'
+                      f'{i["status_label"]}</td>'
+                    + f'<td class="h">{who}</td></tr>')
+        rest = len(items) - (k0 + len(shown))
+        more = (f'<div class="more">يُكمَل في البطاقة التالية ({en(rest)})'
+                '</div>' if rest > 0 else "")
+        n_with = sum(1 for i in items if i["status"] == sales_sets.WITH)
+        n_ret = sum(1 for i in items if i["status"] == sales_sets.RETURNED)
+        w = round(sum(i["weight"] for i in items), 3)
+        if all(i["status"] == sales_sets.BULK for i in items):
+            sub = "ايطالي — رقمٌ تجميعي: رصيدٌ وزني لا قطعٌ تُتتبَّع"
+        else:
+            sub = f"مباع معه {en(n_with)}"
+            if n_ret:
+                sub += f"  ·  مرتجع {en(n_ret)}"
+        cards.append(
+            '<td class="cell"><div class="card">'
+            f'<div class="imgbox">{img}</div>'
+            f'<div class="cap">الموديل {model}  ·  {en(len(items))} قطعة'
+            f'  ·  {_gw(w)} {_kunit()}{" (تابع)" if k0 else ""}</div>'
+            f'<div class="sub">{sub}</div>'
+            '<table class="wos"><tr>'
+            '<th style="width:20%">رقم التشغيل</th>'
+            '<th style="width:16%">الوزن</th>'
+            '<th style="width:16%">الحال</th>'
+            '<th style="width:48%">عند مَن الآن</th></tr>'
+            f'{trs}</table>{more}</div></td>')
+    per_page = max(2, int(per_page or 4))
+    cols, pages = 2, ""
+    total_pages = (len(cards) + per_page - 1) // per_page
+    for pg in range(total_pages):
+        chunk = cards[pg * per_page:(pg + 1) * per_page]
+        while len(chunk) % cols:
+            chunk.append('<td class="cell"></td>')
+        trs = "".join("<tr>" + "".join(chunk[i:i + cols]) + "</tr>"
+                      for i in range(0, len(chunk), cols))
+        brk = ' style="page-break-before:always"' if pg else ""
+        pages += ('<table class="pgrid" width="100%" cellspacing="0"'
+                  ' cellpadding="0"' + brk + ">" + trs + "</table>")
+
+    def nw(k):
+        return f'<b>{en(sm[k]["n"])}</b> قطعة ({_gw(sm[k]["w"])})'
+    meta = (f'<div {WIDE}>الفواتير: <b>{en("، ".join(nos))}</b>'
+            f' &nbsp;·&nbsp; {en(len(groups))} موديل · {nw("all")}'
+            f' &nbsp;·&nbsp; مباع معه {nw("with")}'
+            f' &nbsp;·&nbsp; مرتجع {nw("returned")}: في الخزنة'
+            f' {nw("ret_treasury")} وعند غيره {nw("ret_others")}</div>')
+    return _slim_title(head, today) + RECV_PHOTO_CSS + meta + pages
+
+
+def _tpl_invoices_combined(conn, _id=0, invoice_ids=None):
+    """معاينة مجمّعة (5.2.5): فواتير مختارة من كشف الحساب في **فاتورةٍ
+    واحدة للعرض** — الأطقم (أرقام التشغيل) في فاتورة، والايطالي (الرقم
+    التجميعي) في فاتورة، ولكلٍّ من المبيعات والمرتجع قسمه. عرضٌ فقط: لا
+    تُدمج الفواتير في الدفاتر ولا يتغيّر في الكشف شيء."""
+    ids = [int(i) for i in (invoice_ids or []) if i]
+    if not ids:
+        raise ValueError("اختر فاتورتين أو أكثر للمعاينة المجمّعة")
+    q = ",".join("?" * len(ids))
+    invs = {r["id"]: r for r in conn.execute(
+        "SELECT i.*, COALESCE(e.name,'—') party FROM invoices i"
+        " LEFT JOIN entities e ON e.id=i.customer_id"
+        f" WHERE i.id IN ({q}) AND i.is_deleted=0"
+        " AND i.kind IN ('sale','sale_return')", ids)}
+    if not invs:
+        raise ValueError("الفواتير المختارة غير موجودة")
+    items = conn.execute(
+        "SELECT it.*, w.work_order_no, w.model_no, w.gold_weight,"
+        " w.small_stones, w.big_stones, w.stones_after_discount,"
+        " w.standing_gold, COALESCE(w.is_bulk,0) is_bulk,"
+        " COALESCE(w.is_service,0) is_service FROM invoice_items it"
+        " LEFT JOIN work_orders w ON w.id=it.work_order_id"
+        f" WHERE it.invoice_id IN ({q}) ORDER BY it.invoice_id, it.id",
+        ids).fetchall()
+    _u = _kunit()
+    today = _qd(QtCore.QDate.currentDate())
+    order = sorted(invs, key=lambda k: (invs[k]["invoice_date"], k))
+    rank = {k: n for n, k in enumerate(order)}
+    sections = {}
+    for it in items:
+        inv = invs.get(it["invoice_id"])
+        if inv is None:
+            continue
+        bulk = bool(it["is_bulk"]) or is_bulk_no(it["work_order_no"] or "")
+        key = (inv["kind"], "italian" if bulk else "sets")
+        sections.setdefault(key, []).append(it)
+
+    def _th(label, pct):
+        return f'<th width="{pct}%" style="width:{pct}%;">{label}</th>'
+
+    blocks = ""
+    grand_w = grand_wages = grand_vat = 0.0
+    for kind in ("sale", "sale_return"):
+        for part in ("sets", "italian"):
+            lines = sections.get((kind, part))
+            if not lines:
+                continue
+            lines = sorted(lines, key=lambda x: (rank[x["invoice_id"]],
+                                                 x["id"]))
+            k_lbl = "مبيعات" if kind == "sale" else "مرتجع"
+            p_lbl = ("الأطقم — أرقام التشغيل" if part == "sets"
+                     else "الايطالي — الرقم التجميعي")
+            rows_html = ""
+            t = {"reg": 0.0, "st": 0.0, "g": 0.0, "sm": 0.0, "bg": 0.0,
+                 "af": 0.0, "wg": 0.0}
+            by_inv_wages = {}
+            n_sets = 0
+            for it in lines:
+                inv = invs[it["invoice_id"]]
+                wages = float(it["wages"] or 0)
+                by_inv_wages[inv["id"]] = by_inv_wages.get(inv["id"], 0) \
+                    + wages
+                t["wg"] += wages
+                if it["is_service"]:
+                    nt = (it["line_note"] if "line_note" in it.keys()
+                          else "") or ""
+                    rows_html += "<tr>" + cells(
+                        tdw("—"), tdw("أجر فقط" + (f" — {nt}" if nt else "")),
+                        tdw(""), tdw(""), tdw(""), tdw(""), tdw(""),
+                        tdw(""), tdw("—"), tdw(_w(wages, 2)),
+                        f'<td style="white-space:nowrap;font-size:8pt">'
+                    f'{en(inv["invoice_no"])}</td>') + "</tr>"
+                    continue
+                n_sets += 1
+                reg = float(it["registered_weight"] or 0)
+                if part == "italian":
+                    st = g = reg
+                    sm = bg = af = 0.0
+                else:
+                    st = float(it["standing_gold"] or 0)
+                    g = float(it["gold_weight"] or 0)
+                    sm = float(it["small_stones"] or 0)
+                    bg = float(it["big_stones"] or 0)
+                    af = float(it["stones_after_discount"] or 0)
+                for k2, v in (("reg", reg), ("st", st), ("g", g),
+                              ("sm", sm), ("bg", bg), ("af", af)):
+                    t[k2] += v
+                mn = (it["model_no"] or "").strip() or "—"
+                pic = _model_thumb(mn) if mn != "—" else ""
+                rows_html += "<tr>" + cells(
+                    (f'<td align="center" style="padding:1px 2px;">{pic}'
+                     '</td>' if pic else tdw(en(mn))),
+                    tdw(en(it["work_order_no"] or "—")),
+                    tdw(_gw(reg)), tdw(_gw(st)), tdw(_gw(g)),
+                    tdw(_gw(sm)), tdw(_gw(bg)), tdw(_gw(af)),
+                    tdw(_w(_krate(it["wage_per_gram"]), 2)),
+                    tdw(_w(wages, 2)), f'<td style="white-space:nowrap;font-size:8pt">'
+                    f'{en(inv["invoice_no"])}</td>') + "</tr>"
+            # الضريبة: حصّة هذا القسم من ضريبة كل فاتورة بنسبة أجوره فيها
+            vat = 0.0
+            for iid, wsum in by_inv_wages.items():
+                inv = invs[iid]
+                tw = float(inv["total_wages"] or 0)
+                if inv["vat_applied"] and tw > 0:
+                    vat += float(inv["vat_amount"] or 0) * wsum / tw
+            vat = round(vat, 2)
+            sign = 1 if kind == "sale" else -1
+            grand_w += sign * t["reg"]
+            grand_wages += sign * t["wg"]
+            grand_vat += sign * vat
+            head = cells(
+                _th("الموديل", 9), _th("رقم<br/>التشغيل", 10),
+                _th(f"الوزن المقيد<br/>{_u}", 10),
+                _th(f"الوزن القائم<br/>{_u}", 9), _th("الذهب", 8),
+                _th("الفصوص", 7), _th("الأحجار", 7),
+                _th("الأحجار<br/>بعد الخصم", 9), _th("الأجر", 8),
+                _th("الأجور", 12), _th("من فاتورة", 11))
+            tot = cells(
+                thw(""), thw(f"الإجمالي ({en(n_sets)})"), thw(_gw(t["reg"])),
+                thw(_gw(t["st"])), thw(_gw(t["g"])), thw(_gw(t["sm"])),
+                thw(_gw(t["bg"])), thw(_gw(t["af"])), thw("—"),
+                thw(_w(t["wg"], 2)), thw(""))
+            nos = []
+            for it in lines:
+                n = invs[it["invoice_id"]]["invoice_no"]
+                if n not in nos:
+                    nos.append(n)
+            vat_rows = (f'<tr><th>ضريبة القيمة المضافة</th>'
+                        f'<td>{_w(vat, 2)}</td></tr>'
+                        f'<tr><th>الإجمالي شامل الضريبة</th>'
+                        f'<td>{_w(t["wg"] + vat, 2)}</td></tr>'
+                        if vat else "")
+            blocks += f'''
+    <table class="titlebar" width="100%" cellspacing="0" cellpadding="6">
+      <tr><td width="100%">فاتورة {k_lbl} — {p_lbl}</td></tr>
+    </table>
+    <div class="note">مجمّعة من: {en("، ".join(nos))}</div>
     {TBL}
-      <tr><th>الأطقم</th><td>{_nw("all")}</td>
-          <th>مباع معه</th><td>{_nw("with")}</td>
-          <th>مرتجع</th><td>{_nw("returned")}</td></tr>
-      <tr><th>المرتجع في الخزنة</th><td>{_nw("ret_treasury")}</td>
-          <th>المرتجع عند غيره</th><td>{_nw("ret_others")}</td>
-          <th>الفواتير</th><td>{en(sm["invoices"])}</td></tr>
+      <tr>{head}</tr>
+      {rows_html}
+      <tr>{tot}</tr>
+    </table>
+    {TBL}
+      <tr><td {TH} width="70%">إجمالي الوزن (المقيد) — {_u}</td>
+          <td>{_gw(t["reg"])}</td></tr>
+      <tr><th>إجمالي الأجور</th><td>{_w(t["wg"], 2)}</td></tr>
+      {vat_rows}
     </table><br/>'''
-    meta = (f'<div {WIDE}>الفواتير: {en("، ".join(nos)) or "—"}'
-            f' &nbsp;·&nbsp; تاريخ الطباعة {en(today)}</div>')
-    return (_header(title or "المبيعات — أطقم الفواتير وأين صارت", "—",
-                    today, show_meta=False)
-            + meta + totals + f"{TBL}<tr>{head}</tr>{body_rows}</table>"
-            + _footer(""))
+    parties = sorted({invs[k]["party"] for k in invs})
+    d1 = min(invs[k]["invoice_date"] for k in invs)
+    d2 = max(invs[k]["invoice_date"] for k in invs)
+    info = f'''
+    <table class="wide" width="100%" cellspacing="0" cellpadding="6">
+      <tr><td {TH} width="16%">اسم العميل</td>
+          <td style="text-align:right; border:1px solid #999; padding:6px;
+                     font-weight:bold; font-size:12pt;">
+            {"، ".join(parties)}</td>
+          <td {TH} width="12%">الفترة</td>
+          <td width="24%" style="text-align:center; border:1px solid #999;
+                     padding:6px;">{en(d1)} ← {en(d2)}</td></tr>
+    </table>
+    <div class="note">معاينةٌ مجمّعة للعرض فقط — {en(len(invs))} فاتورة:
+      {en("، ".join(invs[k]["invoice_no"] for k in order))}. الفواتير في
+      الكشف والدفاتر كما هي، لم يُدمج منها شيء.</div><br/>'''
+    net = ""
+    if ("sale_return" in {k[0] for k in sections}
+            and "sale" in {k[0] for k in sections}):
+        net = f'''
+    {TBL}
+      <tr><td {TH} width="70%">الصافي (المبيعات − المرتجع) — الوزن {_u}</td>
+          <td>{_gw(grand_w)}</td></tr>
+      <tr><th>الصافي — الأجور شامل الضريبة</th>
+          <td>{_w(grand_wages + grand_vat, 2)}</td></tr>
+    </table>'''
+    return (_header("فاتورة مجمّعة — للعرض", "—", today, show_meta=False)
+            + info + blocks + net + _footer(""))
 
 
 BUILDERS = {
@@ -5060,6 +5275,8 @@ BUILDERS = {
     "screen_view": _tpl_screen_view,
     # 5.2.4: «المبيعات» — أطقم فواتير مختارة وأين صارت
     "sales_sets": _tpl_sales_sets,
+    # 5.2.5: فواتير مختارة من الكشف في فاتورةٍ واحدة — عرضٌ فقط
+    "invoices_combined": _tpl_invoices_combined,
 }
 
 DOC_LABELS = {
@@ -5255,7 +5472,7 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     """معاينة Qt الاحتياطية (تُستخدم فقط إن تعذّر فتح المتصفح)."""
     html = build_html(doc_type, doc_id, **kw)
     wide = doc_type in ("statement", "journal", "manual", "balances",
-                        "turnover", "aging", "sales_sets",
+                        "turnover", "aging",
                         "day_close", "mfg_target", "mfg_salary",
                         "customer_board", "trial_balance",
                         "equity_changes", "doc_edits", "scrap_karat")

@@ -152,6 +152,13 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             " واحدة تحمل أطقمها كلها — حدّد صفوفها بـCtrl أولاً أو اخترها"
             " من النافذة")
         btn_merge.clicked.connect(self.merge_docs)
+        # 5.2.5: معاينة فواتير مختارة في فاتورةٍ واحدة — عرضٌ لا دمج
+        btn_combo = kit.PushButton("👁 معاينة مجمّعة")
+        btn_combo.setToolTip(
+            "اختر فاتورتين أو أكثر فتُعرض في فاتورةٍ واحدة: الأطقم في"
+            " فاتورة والايطالي في فاتورة — للعرض والطباعة فقط، لا يُدمج"
+            " شيءٌ في الكشف")
+        btn_combo.clicked.connect(self.combined_preview)
         # 4.96: مرتجعٌ من جهة يُباع لجهةٍ أخرى بالبنود نفسها
         btn_resell = kit.PushButton("↗ مبيعات من المرتجع")
         btn_resell.setToolTip(
@@ -171,6 +178,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         actions.addWidget(btn_edit)
         actions.addWidget(btn_move)
         actions.addWidget(btn_merge)
+        actions.addWidget(btn_combo)
         actions.addWidget(btn_resell)
         actions.addWidget(btn_del)
         actions.addStretch(1)
@@ -759,6 +767,56 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             dlg = MergeInvoicesDialog(self, self.user, rows, pre)
             if dlg.exec_() == QtWidgets.QDialog.Accepted:
                 self.load()
+        except Exception as e:
+            err(self, e)
+
+    def combined_preview(self):
+        """فواتير مختارة من الكشف في فاتورةٍ واحدة — للعرض فقط (5.2.5).
+
+        الأطقم (أرقام التشغيل) في فاتورة والايطالي في فاتورة، ولكلٍّ من
+        المبيعات والمرتجع قسمه. الصفوف المحدّدة في الكشف (Ctrl) تأتي
+        مختارةً في النافذة."""
+        try:
+            sids = [r.get("sid") for r in self.rows
+                    if r.get("src") == "invoices" and r.get("sid")]
+            if not sids:
+                raise ValueError("لا فواتير في هذا الكشف — اعرض الكشف أولاً")
+            pre = set()
+            for idx in self.table.selectionModel().selectedRows():
+                i = idx.row()
+                if 0 <= i < len(self.rows) \
+                        and self.rows[i].get("src") == "invoices":
+                    pre.add(self.rows[i]["sid"])
+            q = ",".join("?" * len(sids))
+            with db(readonly=True) as conn:
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT i.id, i.invoice_no, i.invoice_date, i.kind,"
+                    " COALESCE(e.name,'—') party, COUNT(it.id) n,"
+                    " COALESCE(SUM(it.registered_weight),0) wt"
+                    " FROM invoices i LEFT JOIN entities e"
+                    " ON e.id=i.customer_id LEFT JOIN invoice_items it"
+                    f" ON it.invoice_id=i.id WHERE i.id IN ({q})"
+                    " AND i.is_deleted=0 AND i.kind IN ('sale','sale_return')"
+                    " GROUP BY i.id ORDER BY i.invoice_date, i.id", sids)]
+            for r in rows:
+                r["note"] = "مبيعات" if r["kind"] == "sale" else "مرتجع"
+            if not rows:
+                raise ValueError("لا فواتير مبيعات أو مرتجع في هذا الكشف")
+            from ui.sales_sets_screen import InvoicePicker
+            dlg = InvoicePicker(
+                rows, pre, self, title="معاينة مجمّعة — اختر الفواتير",
+                ok_text="👁 معاينة",
+                hint="ضع علامةً على الفواتير التي تريد رؤيتها فاتورةً واحدة:"
+                     " الأطقم في فاتورة والايطالي في فاتورة. عرضٌ وطباعةٌ"
+                     " فقط — الفواتير في الكشف تبقى كما هي.")
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            ids = dlg.chosen()
+            if not ids:
+                raise ValueError("لم تُختر فواتير")
+            from services import print_manager
+            print_manager.preview_document(self, "invoices_combined", 0,
+                                           invoice_ids=ids)
         except Exception as e:
             err(self, e)
 

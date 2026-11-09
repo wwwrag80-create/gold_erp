@@ -183,7 +183,7 @@ def _page_setup(doc_type):
     """اتجاه الصفحة والهوامش بحسب نوع المستند."""
     # تقرير تحليل المبيعات عمودي (4.72): أربع لوحات بجداول ضيّقة
     wide = doc_type in ("statement", "journal", "manual", "balances",
-                        "turnover", "balance_tree", "sales_sets",
+                        "turnover", "balance_tree",
                         "dash_panel", "aging", "day_close", "customer_board",
                         "mfg_target", "mfg_salary", "tax_sales_register",
                         "purchases_register", "trial_balance",

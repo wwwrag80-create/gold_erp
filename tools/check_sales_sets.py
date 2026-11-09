@@ -1,4 +1,4 @@
-# اختبار 5.2.4: «المبيعات» (أطقم فواتير مختارة وأين صارت) · البحث بالوزن — python3 tools/check_sales_sets.py
+# اختبار 5.2.4–5.2.5: «المبيعات» (أطقم فواتير مختارة وأين صارت) · البحث بالوزن — python3 tools/check_sales_sets.py
 import sys, os, tempfile, pathlib  # noqa: E401
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 T = tempfile.mkdtemp(prefix="tss_")
@@ -68,5 +68,26 @@ with db() as conn:
 from services import print_manager  # noqa: E402
 html = print_manager.build_html("sales_sets", 0, invoice_ids=[s1["id"], s2["id"]])
 check("الطباعة: الأطقم وحالها وإلى من ذهبت", "عند مندوب سالم" in html and "مرتجع" in html and "800" in html)
+check("الطباعة على شبكة صور الموديلات (لا وسم صورةٍ داخل وسم)", 'class="card"' in html and 'src="<img' not in html)
+# 5.2.5: معاينة مجمّعة — الأطقم في فاتورة والايطالي في فاتورة، عرضٌ فقط
+with db() as conn:
+    inventory.create_work_orders_batch(conn, [{"wo_no": "0010", "gold": 50, "small_stones": 0, "big_stones": 0,
+                                               "wage_per_gram": 5}], "2026-11-01", "t")
+    w10 = conn.execute("SELECT id FROM work_orders WHERE work_order_no='0010'").fetchone()[0]
+    it = invoices.create_sale(conn, A, [{"work_order_id": w10, "weight": 7.5}], "2026-11-07", "t", apply_vat=False)
+    n_before = conn.execute("SELECT COUNT(*) FROM invoices WHERE is_deleted=0").fetchone()[0]
+combo = print_manager.build_html("invoices_combined", 0, invoice_ids=[s1["id"], s2["id"], it["id"]])
+with db() as conn:
+    n_after = conn.execute("SELECT COUNT(*) FROM invoices WHERE is_deleted=0").fetchone()[0]
+check("المعاينة المجمّعة: فاتورة أطقم وفاتورة ايطالي", "الأطقم — أرقام التشغيل" in combo and "الايطالي — الرقم التجميعي" in combo
+      and "800" in combo and "0010" in combo)
+check("والمعاينة عرضٌ فقط: لا فاتورة تُنشأ ولا تُحذف", n_before == n_after, (n_before, n_after))
+# لوحة التحكم: النسب
+from models import dash_panels as dp  # noqa: E402
+_r = [{"code": "1400", "name": "ن", "gold_balance": 2.0, "cash_balance": 1000.0},
+      {"code": "1500", "name": "ب", "gold_balance": 0.5, "cash_balance": 300.0}]
+check("نسبة لوحةٍ نقدية بالريال", dp.ratio_bars(_r, [{"first": "1400", "second": "1500"}], "cash")[0]["pct"] == 30.0)
+check("ونسبة «ايطالي / نواعم» برمزه الرسمي 1210",
+      dp.ratio_bars([dict(_r[0], code="1210")] + _r[1:], [{"first": "@italian", "second": "1500"}])[0]["first"] == "1210")
 print(f"{ok} ✔ · {bad} ✘")
 sys.exit(1 if bad else 0)

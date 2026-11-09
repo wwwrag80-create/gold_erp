@@ -459,7 +459,11 @@ class DashboardScreen(QtWidgets.QWidget):
                 code = txt.split("—")[0].strip() if "—" in txt else txt
             if not code:
                 raise ValueError("اختر حساباً من القائمة")
-            if code in p["accounts"]:
+            # «ايطالي / نواعم» حسابٌ رسمي (1210) — يُضاف برمزه كأي حساب
+            if code == dp.ITALIAN:
+                code = dp.ITALIAN_ACC
+            same = {code} | ({dp.ITALIAN} if code == dp.ITALIAN_ACC else set())
+            if same & set(p["accounts"]):
                 raise ValueError("الحساب مضاف مسبقاً في هذه اللوحة")
             p["accounts"].append(code)
             dp.save_panels(self.panels)
@@ -476,9 +480,20 @@ class DashboardScreen(QtWidgets.QWidget):
             if not (0 <= i < len(self._rows)):
                 raise ValueError("اختر حساباً من الجدول أولاً")
             code = self._rows[i].get("code")
+            # «ايطالي / نواعم»: صفّه يظهر برمز حسابه (1210) والمحفوظ في
+            # اللوحة رمزه القديم — فكان الحذف يقول «لا يُحذف» (5.2.5)
+            if code == dp.ITALIAN_ACC and code not in p["accounts"] \
+                    and dp.ITALIAN in p["accounts"]:
+                code = dp.ITALIAN
             if not code or code not in p["accounts"]:
                 raise ValueError("هذا الصف لا يُحذف")
+            if not ask(self, f"حذف «{_acc_label(self._rows[i])}» من لوحة"
+                             f" «{p['title']}»؟\n\nيُحذف من اللوحة فقط — "
+                             "الحساب وقيوده باقية، وتعيده بـ«إضافة حساب»."):
+                return
             p["accounts"].remove(code)
+            p["ratios"] = [r for r in (p.get("ratios") or [])
+                           if code not in (r.get("first"), r.get("second"))]
             dp.save_panels(self.panels)
             self.refresh()
         except Exception as e:
@@ -666,16 +681,20 @@ class DashboardScreen(QtWidgets.QWidget):
             w = it.widget()
             if w is not None:
                 w.setParent(None)
-        bars = dp.ratio_bars(rows, p.get("ratios") or [])
+        bars = dp.ratio_bars(rows, p.get("ratios") or [], p.get("unit"))
         for i, b in enumerate(bars):
             frame = QtWidgets.QFrame()
             frame.setObjectName("ratioBar")
             pct = ("—" if b["pct"] is None else f"{_nf.f2(b['pct'])}%")
+            # الذهب بعيار العرض كما في الجدول فوقه — لا بمكافئ 18
+            g = (lambda v: kv.g(v)) if b.get("dim") == "gold" else float
+            unit = (f"جم {kv.label()}" if b.get("dim") == "gold"
+                    else b.get("unit", ""))
             lbl = QtWidgets.QLabel(
                 f"{b['title']}:   {pct}      "
-                f"({b['second_name']} {_signed(b['second_value'])}  ÷  "
-                f"{b['first_name']} {_signed(b['first_value'])} "
-                f"{b.get('unit', '')})")
+                f"({b['second_name']} {_signed(g(b['second_value']))}  ÷  "
+                f"{b['first_name']} {_signed(g(b['first_value']))} "
+                f"{unit})")
             lbl.setWordWrap(True)
             x = kit.PushButton("✕")
             x.setMaximumWidth(30)
@@ -793,7 +812,7 @@ class DashboardScreen(QtWidgets.QWidget):
             return self._render_compare(conn, p, d1, d2)
         rows = dp.account_rows(conn, p["accounts"], d1, d2)
         self._rows = rows
-        bars = dp.ratio_bars(rows, p.get("ratios") or [])
+        bars = dp.ratio_bars(rows, p.get("ratios") or [], p.get("unit"))
         # 4.91: «الأرباح والخسائر» بمنظور الربح — الربح موجب والخسارة
         # سالبةٌ حمراء (`dp.profit_view`)؛ وبقية اللوحات على طبيعتها
         pnl = dp.is_pnl(p)
@@ -815,14 +834,13 @@ class DashboardScreen(QtWidgets.QWidget):
                 bl = by_code.get(r["code"]) or []
                 txt = "   ·   ".join(
                     f"{x['title']}: "
-                    + ("—" if x["pct"] is None else f"{x['pct']:,.1f}%")
+                    + ("—" if x["pct"] is None else f"{_nf.f2(x['pct'])}%")
                     for x in bl) or "—"
                 data.append((txt, _acc_label(r),
                              money(kv.g(r['gold_balance'])),
                              money(r['cash_balance'])))
-            vals = [x["pct"] for x in bars if x["pct"] is not None]
-            tot = (f"{sum(vals):,.1f}%" if vals else "—")
-            data.append((f"إجمالي النسب: {tot}", "الإجمالي",
+            # 5.2.5: لا «إجمالي نسب» — جمعُ نسبٍ مختلفة يتخطّى المئة بلا معنى
+            data.append(("", "الإجمالي",
                          money(kv.g(t['gold_balance'])),
                          money(t['cash_balance'])))
             self._fill(cols, data, bold_last=True,
@@ -1155,6 +1173,7 @@ class DashboardScreen(QtWidgets.QWidget):
                 kind=p.get("kind") or "accounts",
                 codes=list(p.get("accounts") or []),
                 ratios=list(p.get("ratios") or []),
+                unit=p.get("unit") or None,
                 date_from=p.get("date_from") or None,
                 date_to=p.get("date_to") or None,
                 search=(self.stock_search.text()

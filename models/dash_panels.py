@@ -302,31 +302,43 @@ def account_rows(conn, codes, date_from=None, date_to=None):
     return out
 
 
-def ratio_bars(rows, ratios):
+def ratio_bars(rows, ratios, unit=None):
     """يحسب أشرطة النسب أسفل الجدول.
 
     **المعنى المحاسبي**: النسبة = رصيد الحساب الثاني ÷ رصيد الأول.
     تُعرض أسفل الجدول لا فيه، لأنها **مؤشر** لا رصيد — إدراجها بين
-    الصفوف يُفسد الإجمالي.
-    """
+    الصفوف يُفسد الإجمالي. ولا «إجمالي نسب»: جمع نسبٍ لمقاماتٍ مختلفة
+    رقمٌ بلا معنى يتخطّى المئة (5.2.5).
+
+    `unit`: وحدة اللوحة ("cash"/"gold") — البعد التلقائي يتبعها أولاً
+    (لوحة الصناديق نقدية: نسبتها بالريال وإن كان للحساب رصيدٌ ذهبي)."""
     by_code = {r["code"]: r for r in rows}
     out = []
     for spec in (ratios or []):
         a = str(spec.get("first") or "")
         b = str(spec.get("second") or "")
+        # «ايطالي / نواعم» صار حساباً رسمياً (1210): صفّه برمزه
+        a = ITALIAN_ACC if a == ITALIAN else a
+        b = ITALIAN_ACC if b == ITALIAN else b
         ra, rb = by_code.get(a), by_code.get(b)
-        # البعد يُختار تلقائياً: الذهب إن كان للمقام رصيد ذهبي،
-        # وإلا النقد — فلا تظهر النسبة فارغة لحسابات نقدية بحتة.
         ga = float(ra["gold_balance"]) if ra else 0.0
         gb = float(rb["gold_balance"]) if rb else 0.0
         ca = float(ra["cash_balance"]) if ra else 0.0
         cb = float(rb["cash_balance"]) if rb else 0.0
         forced = str(spec.get("dim") or "").lower()
-        if forced == "cash" or (forced != "gold" and abs(ga) < 1e-9
-                                and abs(ca) > 1e-9):
-            va, vb, unit = ca, cb, "ريال"
+        if forced in ("cash", "gold"):
+            dim = forced
+        elif unit == "cash":
+            dim = "cash" if abs(ca) > 1e-9 or abs(ga) < 1e-9 else "gold"
+        elif unit == "gold":
+            dim = "gold" if abs(ga) > 1e-9 or abs(ca) < 1e-9 else "cash"
         else:
-            va, vb, unit = ga, gb, "جم"
+            # بلا وحدة: الذهب إن كان للمقام رصيدٌ ذهبي، وإلا النقد
+            dim = "cash" if abs(ga) < 1e-9 and abs(ca) > 1e-9 else "gold"
+        if dim == "cash":
+            va, vb, unit_lbl = ca, cb, "ريال"
+        else:
+            va, vb, unit_lbl = ga, gb, "جم"
         # نمط النسبة:
         #   مباشرة (direct): الثاني ÷ الأول    → 8÷10 = 80%
         #   عكسية  (inverse): الفرق ÷ الأول    → (10-8)÷10 = 20%
@@ -344,10 +356,11 @@ def ratio_bars(rows, ratios):
             pct = None
         out.append({
             "title": spec.get("title") or f"{b} ÷ {a}",
-            "first": a, "second": b, "unit": unit,
+            "first": a, "second": b, "unit": unit_lbl,
             "first_name": ra["name"] if ra else a,
             "second_name": rb["name"] if rb else b,
             "first_value": round(va, 3), "second_value": round(vb, 3),
+            "dim": dim,
             "mode": mode,
             "pct": (round(pct, 2) if pct is not None else None),
         })

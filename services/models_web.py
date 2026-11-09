@@ -1715,7 +1715,7 @@ def _pnl(conn, query=None, base="", today=None):
                 '>الشهر الأحدث</a>')
     rows = dp.account_rows(conn, p["accounts"], d1.isoformat(),
                            d2.isoformat())
-    bars = dp.ratio_bars(rows, p.get("ratios") or [])
+    bars = dp.ratio_bars(rows, p.get("ratios") or [], p.get("unit"))
     # بمنظور الربح (4.90): الدائن (ربح) موجب والمدين (خسارة) سالبٌ أحمر
     rows, bars = dp.profit_view(rows), dp.profit_bars(bars)
     t = dp.totals(rows)
@@ -1736,7 +1736,7 @@ def _pnl(conn, query=None, base="", today=None):
         by_code.setdefault(b["second"], []).append(b)
 
     def pct(v):
-        return "—" if v is None else f"{v:,.1f}%"
+        return "—" if v is None else f"{_nf.f2(v)}%"
     head = (["النسبة"] if bars else []) + [
         f"الحساب — {label}", f"رصيد الذهب ({kv.unit()})",
         "الرصيد النقدي (ريال)"]
@@ -1751,11 +1751,8 @@ def _pnl(conn, query=None, base="", today=None):
         trs.append(f'<tr class="crow" data-s="{s_}">{ratio}'
                    f'<td class="lbl">{_e(r["code"])} — {_e(r["name"])}</td>'
                    f"{tds(r)}</tr>")
-    tot_ratio = ""
-    if bars:
-        vals = [x["pct"] for x in bars if x["pct"] is not None]
-        tot_ratio = (f"<td>إجمالي النسب: "
-                     f"{f'{sum(vals):,.1f}%' if vals else '—'}</td>")
+    # 5.2.5: لا «إجمالي نسب» — جمعُ نسبٍ مختلفة يتخطّى المئة بلا معنى
+    tot_ratio = "<td></td>" if bars else ""
     body = ("<table><thead><tr>"
             + "".join(f"<th>{_e(h)}</th>" for h in head)
             + "</tr></thead><tbody>" + "".join(trs) + "</tbody><tfoot>"

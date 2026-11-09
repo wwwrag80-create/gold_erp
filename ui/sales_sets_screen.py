@@ -30,9 +30,11 @@ ALL = "__all__"
 class InvoicePicker(QtWidgets.QDialog):
     """نافذة اختيار فواتير المبيعات — علامةٌ لكل فاتورة."""
 
-    def __init__(self, rows, chosen=(), parent=None):
+    def __init__(self, rows, chosen=(), parent=None,
+                 title="اختر فواتير المبيعات", ok_text="عرض الأطقم",
+                 hint=None):
         super().__init__(parent)
-        self.setWindowTitle("اختر فواتير المبيعات")
+        self.setWindowTitle(title)
         self.setLayoutDirection(QtCore.Qt.RightToLeft)
         self.resize(820, 560)
         self.rows = rows
@@ -41,8 +43,9 @@ class InvoicePicker(QtWidgets.QDialog):
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
         data = [("", r["invoice_no"], r["invoice_date"], r["party"],
                  str(r["n"]), _nf.f2(kv.g(r["wt"])),
-                 (f"ملغاة بالمستند {r['reversed_by']}"
-                  if r.get("reversed_by") else "")) for r in rows]
+                 r.get("note") or (f"ملغاة بالمستند {r['reversed_by']}"
+                                   if r.get("reversed_by") else ""))
+                for r in rows]
         fill(self.table, PICK_COLS, data)
         for i, r in enumerate(rows):
             it = QtWidgets.QTableWidgetItem()
@@ -60,14 +63,14 @@ class InvoicePicker(QtWidgets.QDialog):
         b_all.clicked.connect(lambda: self._set_all(True))
         b_none = kit.PushButton("إلغاء التحديد")
         b_none.clicked.connect(lambda: self._set_all(False))
-        ok = kit.PushButton("عرض الأطقم")
+        ok = kit.PushButton(ok_text)
         ok.clicked.connect(self.accept)
         cancel = kit.PushButton("إلغاء")
         cancel.clicked.connect(self.reject)
 
-        note = QtWidgets.QLabel(
+        note = QtWidgets.QLabel(hint or (
             "ضع علامةً على الفواتير التي تريد تتبّع أطقمها — من جهةٍ واحدة "
-            "أو من عدة جهات — ثم «عرض الأطقم».")
+            "أو من عدة جهات — ثم «عرض الأطقم»."))
         note.setObjectName("cardSub")
         note.setWordWrap(True)
         bar = QtWidgets.QHBoxLayout()
