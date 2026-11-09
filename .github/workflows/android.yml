@@ -45,8 +45,30 @@ jobs:
           java-version: "17"
 
       - uses: gradle/actions/setup-gradle@v3
+        id: sg
+        continue-on-error: true
         with:
           gradle-version: "8.13"
+
+      # إن تعطّلت خدمة Gradle (رأيناها تردّ 504 ساعةً كاملة): تنزيلٌ مباشر بمحاولاتٍ متكرّرة،
+      # وإلا Gradle المثبّت على جهاز البناء — فلا يتوقّف البناء على عطلٍ خارجه
+      - name: Gradle احتياطي عند تعطّل الخدمة
+        if: steps.sg.outcome == 'failure'
+        run: |
+          for u in https://services.gradle.org/distributions/gradle-8.13-bin.zip \
+                   https://downloads.gradle.org/distributions/gradle-8.13-bin.zip; do
+            for i in 1 2 3 4 5 6; do
+              if curl -fsSL --retry 2 -o "$RUNNER_TEMP/gradle.zip" "$u"; then break 2; fi
+              echo "محاولة $i لـ $u لم تنجح"; sleep 20
+            done
+          done
+          if [ -s "$RUNNER_TEMP/gradle.zip" ]; then
+            unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP" && echo "$RUNNER_TEMP/gradle-8.13/bin" >> "$GITHUB_PATH"
+          elif command -v gradle >/dev/null; then
+            echo "Gradle المثبّت: $(gradle --version | grep '^Gradle')"
+          else
+            echo "::error::لا Gradle — خدمة التنزيل معطّلة"; exit 1
+          fi
 
       # و«play» ملف APK أيضاً: لمتاجر تطلب APK (متجر شاومي GetApps…) — بلا تحديثٍ ذاتي ولا إذن تثبيت
       - name: بناء ملف التثبيت (والنسخة التجريبية للمحاكي) وحزمة Google Play وملف المتاجر
