@@ -100,6 +100,10 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.summary = big_label()
         self.summary.setVisible(False)
         self.table = make_table()
+        # Ctrl+F في الكشف يبحث برقم التشغيل أيضاً (5.2.4)
+        self.table.setProperty(
+            "searchHint", "🔍 ابحث في الكشف: رقم سند · جهة · بيان · رقم"
+            " تشغيل…  (Esc يغلق)")
         # 5.1: الجدول الفارغ يقول ما ينتظره بدل مستطيلٍ أبيض صامت
         self.table.setProperty(
             "emptyText", "اختر الحساب والفترة ثم اضغط «عرض»")
@@ -360,6 +364,46 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             else print_manager.preview_document
         fn(self, "screen_view", 0, **kw)
 
+    @staticmethod
+    def _wo_keys(rows):
+        """{(المصدر، المعرّف): "أرقام تشغيل أطقمه"} — للبحث برقم التشغيل
+        في الكشف: الفاتورة بأطقمها، والتوريد بطقمه (5.2.4)."""
+        inv = sorted({r.get("sid") for r in rows
+                      if r.get("src") == "invoices" and r.get("sid")})
+        wos = sorted({r.get("sid") for r in rows
+                      if r.get("src") == "work_orders" and r.get("sid")})
+        out = {}
+        try:
+            with db(readonly=True) as conn:
+                for i in range(0, len(inv), 400):
+                    part = inv[i:i + 400]
+                    for r in conn.execute(
+                            "SELECT it.invoice_id, w.work_order_no FROM"
+                            " invoice_items it JOIN work_orders w ON"
+                            " w.id=it.work_order_id WHERE it.invoice_id IN"
+                            f" ({','.join('?' * len(part))})", part):
+                        k = ("invoices", r[0])
+                        out[k] = (out.get(k, "") + " " + str(r[1])).strip()
+                for i in range(0, len(wos), 400):
+                    part = wos[i:i + 400]
+                    for r in conn.execute(
+                            "SELECT id, work_order_no FROM work_orders WHERE"
+                            f" id IN ({','.join('?' * len(part))})", part):
+                        out[("work_orders", r[0])] = str(r[1])
+        except Exception:
+            return {}
+        return out
+
+    def _tag_row(self, row, r, keys):
+        """يضع أرقام تشغيل السطر في نصّه الخفيّ (يُبحث فيه بـ Ctrl+F)."""
+        from ui.widgets.table_search import SEARCH_ROLE
+        k = keys.get((r.get("src"), r.get("sid")))
+        it = self.table.item(row, 0)
+        if k and it is not None:
+            it.setData(SEARCH_ROLE, k)
+            tip = it.toolTip() or ""
+            it.setToolTip((tip + "\n" if tip else "") + f"الأطقم: {k}")
+
     def load(self):
         try:
             code = self.account.currentData()
@@ -458,6 +502,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                        if r["op"] != "رصيد سابق")
             tcc_ = sum(float(r.get("cc") or 0) for r in rows
                        if r["op"] != "رصيد سابق")
+            _keys = self._wo_keys(rows)
             self.table.setUpdatesEnabled(False)
             self.table.setSortingEnabled(False)
             try:
@@ -490,6 +535,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                                      else text_item(""))
                     for c, it in enumerate(cellv):
                         self.table.setItem(i, c, it)
+                    self._tag_row(i, r, _keys)
                 if rows:
                     last_g = rows[-1]["gbal"]
                     last_c = rows[-1]["cbal"]
@@ -856,6 +902,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         self.table.setHorizontalHeaderLabels(headers)
         fit_columns(self.table, [9, 8, 8, 26, 20, 8, 8, 8, 5])
 
+        _keys = self._wo_keys(rows)
         self.table.setUpdatesEnabled(False)
         self.table.setSortingEnabled(False)
         try:
@@ -874,6 +921,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 ]
                 for c, it in enumerate(cellv):
                     self.table.setItem(i, c, it)
+                self._tag_row(i, r, _keys)
             if rows:
                 # صفُّ الختام هنا أيضاً: اليومية تُطبع كما يُطبع الكشف
                 self._sum_row(len(rows), [

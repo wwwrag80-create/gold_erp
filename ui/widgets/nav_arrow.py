@@ -5,7 +5,9 @@
 «الإدارة والتقارير» مثلاً تفتح على شاشاتٍ تحتها. هنا يُرسم بدلاً منه
 سهمٌ داخل دائرةٍ بلون الهوية في طرف البند:
   ◂ المجموعة مطويّة (اضغط لتفتح)   ▾ مفتوحة (اضغط لتطوي)
-يُرسم لأي بندٍ له أبناء — ولو صنعه المستخدم بالسحب والإفلات — ولا
+يُرسم لأي بندٍ له أبناء — مجموعةً، أو شاشةً في داخلها شاشات (5.2.4)،
+ولو صنعه المستخدم بالسحب والإفلات — والنقر على السهم نفسه يفتح ما تحته
+أو يطويه، والنقر على اسم الشاشة يفتحها كالعادة. ولا
 يُكتب في نص البند، فلا يدخل اسمَه ولا ملفَّ ترتيب القائمة المحفوظ.
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -92,12 +94,55 @@ class NavArrowDelegate(QtWidgets.QStyledItemDelegate):
         return sz
 
 
+def arrow_rect(view, index):
+    """مكان السهم في البند (للنقر) — أوسع قليلاً من الدائرة نفسها."""
+    r = view.visualRect(index)
+    rtl = view.layoutDirection() == QtCore.Qt.RightToLeft
+    pad = 6
+    left = (r.left() + 8 + GAP - pad) if rtl \
+        else (r.right() - 8 - GAP - BADGE - pad)
+    return QtCore.QRect(int(left), r.top(), BADGE + 2 * pad, r.height())
+
+
+class _ArrowClicks(QtCore.QObject):
+    """النقر على السهم يفتح ما تحته أو يطويه — ولا يفتح الشاشة نفسها.
+    (النقر على اسم الشاشة يفتحها كالعادة، وعلى اسم المجموعة يفتحها.)"""
+
+    def __init__(self, view):
+        super().__init__(view)
+        self._view = view
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t not in (QtCore.QEvent.MouseButtonPress,
+                     QtCore.QEvent.MouseButtonRelease,
+                     QtCore.QEvent.MouseButtonDblClick):
+            return False
+        try:
+            if ev.button() != QtCore.Qt.LeftButton:
+                return False
+            v = self._view
+            idx = v.indexAt(ev.pos())
+            if not idx.isValid() or not _has_children(idx):
+                return False
+            if not arrow_rect(v, idx).contains(ev.pos()):
+                return False
+            if t == QtCore.QEvent.MouseButtonPress:
+                v.setExpanded(idx, not v.isExpanded(idx))
+            return True
+        except Exception:
+            return False
+
+
 def install(tree):
     """يركّب السهم على الشجرة ويُخفي سهمها الافتراضي الصغير، ويعيد
-    الرسم فور الفتح أو الطيّ."""
+    الرسم فور الفتح أو الطيّ، ويجعل السهم نفسه زرّاً."""
     tree.setItemDelegate(NavArrowDelegate(tree))
     tree.setRootIsDecorated(False)
     upd = lambda *_: tree.viewport().update()
     tree.itemExpanded.connect(upd)
     tree.itemCollapsed.connect(upd)
+    f = _ArrowClicks(tree)
+    tree.viewport().installEventFilter(f)
+    tree._nav_arrow_clicks = f
     return tree

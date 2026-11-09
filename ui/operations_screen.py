@@ -236,8 +236,9 @@ class OperationsScreen(QtWidgets.QWidget):
                 raise ValueError("اختر الجهة الجديدة")
             new_name = self.target.currentText()
             if not ask(self, f"تحويل {d['no']} من «{d['party']}» إلى "
-                             f"«{new_name}»؟\n\nسيُعكس القيد القديم وتُنشأ "
-                             f"عملية جديدة على الجهة الجديدة."):
+                             f"«{new_name}»؟\n\nتبقى القديمة برقمها ويُلغى أثرها بمستندٍ "
+                             f"عكسي جديد، وتُنشأ عملية جديدة على الجهة "
+                             f"الجديدة — لا شيء يُحذف."):
                 return
             with db() as conn:
                 if d["src"] == "invoices":
@@ -249,8 +250,9 @@ class OperationsScreen(QtWidgets.QWidget):
                         conn, d["id"], new_id, self.user["username"],
                         self.reason.text().strip())
             info(self, f"تم التحويل بنجاح.\n"
-                       f"القديمة: {r['old_no']} ({r['from']})\n"
-                       f"الجديدة: {r['new_no']} ({r['to']})")
+                       f"القديمة: {r['old_no']} ({r['from']}) — باقية برقمها\n"
+                       + (f"مستند العكس: {r['rev_no']}\n" if r.get('rev_no') else "")
+                       + f"الجديدة: {r['new_no']} ({r['to']})")
             self.reason.clear()
             self.load_docs()
         except Exception as e:
@@ -322,15 +324,18 @@ class OperationsScreen(QtWidgets.QWidget):
             lbl = {"sale": "مبيعات", "sale_return": "مرتجع"}
             new = "مرتجع" if d["kind"] == "sale" else "مبيعات"
             if not ask(self, f"عكس نوع {d['no']} من «{lbl[d['kind']]}» إلى "
-                             f"«{new}»؟\n\nسيُعكس القيد المالي بالكامل "
-                             f"وتُحدَّث حالة كل أرقام التشغيل."):
+                             f"«{new}»؟\n\nتبقى الفاتورة برقمها ويُلغى أثرها بمستندٍ "
+                             f"عكسي جديد، ثم تُرحَّل بالنوع الصحيح — لا شيء "
+                             f"يُحذف."):
                 return
             with db() as conn:
                 r = operations.flip_invoice_kind(
                     conn, d["id"], self.user["username"],
                     self.reason.text().strip())
             info(self, f"تم عكس النوع.\n{r['old_no']} ({r['from']}) → "
-                       f"{r['new_no']} ({r['to']})\n{r['items']} بند")
+                       f"{r['new_no']} ({r['to']})\n"
+                       + (f"مستند العكس: {r['rev_no']}\n" if r.get('rev_no') else "")
+                       + f"{r['items']} بند")
             self.reason.clear()
             self.load_docs()
         except Exception as e:
@@ -460,7 +465,9 @@ class InvoiceItemsDialog(QtWidgets.QDialog):
                      for c in self.cart],
                     self.user["username"])
             info(self, f"تم التعديل.\n{r['old_no']} → {r['new_no']}\n"
-                       f"حُذف {r['removed']} بند · أُضيف {r['added']} بند")
+                       + (f"مستند العكس: {r['rev_no']} (القديمة باقية برقمها)\n"
+                          if r.get('rev_no') else "")
+                       + f"أُزيل {r['removed']} بند · أُضيف {r['added']} بند")
             self.accept()
         except Exception as e:
             err(self, e)

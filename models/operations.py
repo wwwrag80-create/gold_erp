@@ -10,6 +10,8 @@
 (BEGIN IMMEDIATE … COMMIT/ROLLBACK) — فإن فشلت أي خطوة تراجعت العملية
 بكاملها ولم تُحفظ نصفها.
 """
+import contextlib
+
 from models import invoices, vouchers
 from services.audit import log_action
 
@@ -59,6 +61,45 @@ def _entity_name(conn, entity_id):
     return r["name"] if r else f"#{entity_id}"
 
 
+@contextlib.contextmanager
+def _one_move(conn, wo_ids, username):
+    """مستند العكس والمستند الجديد **حركةٌ واحدة** للطقم (5.2.4): يُرحَّلان
+    معاً بلا فحص سلسلةٍ بينهما، ثم تُفحص السلسلة كاملةً في آخرهما — فإن
+    صار فيها ما لم يكن (طقمٌ يخرج مرتين) رُفضت العملية كلها بأسماء
+    الأطقم ولم يُحفظ منها شيء. ثم تُضبط حالة كل طقمٍ من سلسلته."""
+    from models import wo_moves
+    ids = sorted({int(i) for i in wo_ids if i})
+    before = {w: wo_moves.bad_ids(conn, [w]) for w in ids}
+    with invoices.chain_checked_at_end(ids):
+        yield
+    broken = [w for w in ids if wo_moves.bad_ids(conn, [w]) - before[w]]
+    if broken:
+        # أسماء الأطقم للرسالة — بما فيه المحذوف من القوائم (طقمٌ حُذف من
+        # الدليل يبقى سطراً في فواتيره، 5.1.8)
+        names = [r[0] for r in conn.execute(
+            "SELECT work_order_no FROM work_orders WHERE id IN"
+            f" ({','.join('?' * len(broken))})", broken)]
+        raise ValueError(
+            "العملية تجعل حركة هذه الأطقم غير منتظمة (تخرج مرتين أو تعود"
+            " مرتين): " + "، ".join(names) + "\nلم يُحفظ شيء.")
+    wo_moves.resync(conn, ids, username)
+
+
+def _reverse_doc(conn, inv, username, note):
+    """5.2.4: لا حذف — الفاتورة تبقى برقمها ويُعكس أثرها بفاتورةٍ مقابلة
+    جديدة (بيع ⇄ مرتجع) بتاريخها نفسه، فيصفو أثرها في يومها ولا تتغيّر
+    أرصدة ما قبله ولا ما بعده. يعيد رقم مستند العكس."""
+    from models import reversal
+    if not inv["entry_id"]:
+        raise ValueError(f"الفاتورة {inv['invoice_no']} بلا قيد — لا تُعكس")
+    reversal.reverse(conn, inv["entry_id"], username,
+                     day=inv["invoice_date"])
+    r = reversal.reversal_of(conn, inv["entry_id"])
+    log_action(conn, username, "void", "journal_entries", inv["entry_id"],
+               note + (f" | العكس {r['rev_no']}" if r else ""))
+    return r["rev_no"] if r else ""
+
+
 def _void(conn, entry_id, username, note):
     """يعكس قيداً سابقاً بقيد مضاد صريح (بلا حذف مادي)."""
     from services.audit import reverse_entry
@@ -96,32 +137,29 @@ def transfer_invoice(conn, invoice_id, new_entity_id, username, notes=""):
     new_name = _entity_name(conn, new_entity_id)
     kind = inv["kind"]
 
-    # (1) عكس أثر الفاتورة القديمة على الجهة (أ)
-    _void(conn, inv["entry_id"], username,
-          f"تحويل الفاتورة {inv['invoice_no']} من {old_name} إلى {new_name}")
-    conn.execute("UPDATE invoices SET is_deleted=1 WHERE id=?", (invoice_id,))
+    # (1) الفاتورة تبقى برقمها على (أ) ويُعكس أثرها بمستندٍ مقابل بتاريخها
+    #     (5.2.4) — والأطقم تعود بحركة العكس نفسها لا بتعديل حالتها يدوياً
+    with _one_move(conn, [c.get("work_order_id") for c in cart], username):
+        rev_no = _reverse_doc(
+            conn, inv, username,
+            f"تحويل الفاتورة {inv['invoice_no']} من {old_name} إلى {new_name}")
 
-    # إعادة الأطقم لحالتها قبل الفاتورة ليقبلها الترحيل الجديد
-    back = "in_stock" if kind == "sale" else "sold"
-    for it in cart:
-        conn.execute("UPDATE work_orders SET status=? WHERE id=?",
-                     (back, it["work_order_id"]))
-
-    # (2) إنشاء العملية نفسها على الجهة (ب)
-    fn = invoices.create_sale if kind == "sale" else invoices.create_sale_return
-    res = fn(conn, new_entity_id, cart, inv["invoice_date"], username,
-             bool(inv["vat_applied"]),
-             (inv["description"] or "")
-             + f" [محوَّلة من {old_name} — {inv['invoice_no']}]",
-             **_invoice_source(conn, inv))
+        # (2) إنشاء العملية نفسها على الجهة (ب)
+        fn = (invoices.create_sale if kind == "sale"
+              else invoices.create_sale_return)
+        res = fn(conn, new_entity_id, cart, inv["invoice_date"], username,
+                 bool(inv["vat_applied"]),
+                 (inv["description"] or "")
+                 + f" [محوَّلة من {old_name} — {inv['invoice_no']}]",
+                 **_invoice_source(conn, inv))
 
     log_action(conn, username, "transfer", "invoices", invoice_id,
                f"{inv['invoice_no']} : {old_name} → {new_name}"
-               f" | الجديدة {res['invoice_no']}"
+               f" | العكس {rev_no} | الجديدة {res['invoice_no']}"
                + (f" | {notes}" if notes else ""))
     return {"old_no": inv["invoice_no"], "new_no": res["invoice_no"],
             "new_id": res["id"], "from": old_name, "to": new_name,
-            "items": len(cart)}
+            "items": len(cart), "rev_no": rev_no}
 
 
 def resale_marker(inv, party_name):
@@ -205,30 +243,28 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
     removed, added = old_ids - new_ids, new_ids - old_ids
     kind = inv["kind"]
 
-    _void(conn, inv["entry_id"], username,
-          f"تعديل بنود الفاتورة {inv['invoice_no']}")
-    conn.execute("UPDATE invoices SET is_deleted=1 WHERE id=?", (invoice_id,))
+    # 5.2.4: القديمة تبقى برقمها وتُعكس بمستندٍ مقابل بتاريخها، ثم تُرحَّل
+    # الجديدة ببنودها — فلا رقم يختفي من التسلسل
+    with _one_move(conn, old_ids | new_ids, username):
+        rev_no = _reverse_doc(conn, inv, username,
+                              f"تعديل بنود الفاتورة {inv['invoice_no']}")
 
-    # أرقام التشغيل القديمة تعود لحالتها السابقة قبل إعادة الترحيل
-    back = "in_stock" if kind == "sale" else "sold"
-    for wid in old_ids:
-        conn.execute("UPDATE work_orders SET status=? WHERE id=?", (back, wid))
-
-    fn = invoices.create_sale if kind == "sale" else invoices.create_sale_return
-    res = fn(conn, entity_id or inv["customer_id"], new_cart,
-             invoice_date or inv["invoice_date"], username,
-             bool(inv["vat_applied"] if apply_vat is None else apply_vat),
-             inv["description"] or "", **_invoice_source(conn, inv))
-
-    # الأطقم المحذوفة من الفاتورة: حالتها من سلسلة حركتها لا «قبلها» (4.75)
-    from models import wo_moves
-    wo_moves.resync(conn, old_ids, username)
+        fn = (invoices.create_sale if kind == "sale"
+              else invoices.create_sale_return)
+        res = fn(conn, entity_id or inv["customer_id"], new_cart,
+                 invoice_date or inv["invoice_date"], username,
+                 bool(inv["vat_applied"] if apply_vat is None else apply_vat),
+                 inv["description"] or "", **_invoice_source(conn, inv))
+    # الأطقم المزالة من الفاتورة: حالتها من سلسلة حركتها لا «قبلها» (4.75)
+    # — يضبطها `_one_move` في آخره
     log_action(conn, username, "edit_items", "invoices", invoice_id,
                f"{inv['invoice_no']} → {res['invoice_no']}"
+               f" | العكس {rev_no}"
                f" | حُذف {len(removed)} | أُضيف {len(added)}"
                + (f" | {notes}" if notes else ""))
     return {"old_no": inv["invoice_no"], "new_no": res["invoice_no"],
-            "new_id": res["id"], "removed": len(removed), "added": len(added)}
+            "new_id": res["id"], "removed": len(removed), "added": len(added),
+            "rev_no": rev_no}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -298,8 +334,9 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
     افتراضاً، أو `keep_id`).
 
     البنود **تنتقل** إليها كما هي (أوزانها وأجورها وعيارها وحسابها)
-    وقيدها يُعاد بناؤه منها، والمدموجة تُحذف منطقياً بقيودها. فلا يتحرّك
-    المخزون ولا رصيد الرقم التجميعي: ما خرج خرج، وإنما يتوحّد مستنده.
+    وقيدها يُعاد بناؤه منها، والمدموجة **تبقى برقمها** ويُلغى أثرها بمستندٍ
+    مقابل (5.2.4 — لا حذف). فلا يتحرّك المخزون ولا رصيد الرقم التجميعي:
+    ما خرج خرج، وإنما يتوحّد مستنده.
 
     **حركة الطقم**: البنود تنتقل إلى تاريخ الباقية — فإن جعل ذلك سلسلة
     طقمٍ غير منتظمة (بيعٌ يسبق مرتجعاً كان قبله) رُفض الدمج كله بأسماء
@@ -329,23 +366,32 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
         return out
     bad_before = _broken()
 
-    for o in others:
-        conn.execute("UPDATE invoice_items SET invoice_id=? WHERE"
-                     " invoice_id=?", (keep["id"], o["id"]))
-        conn.execute("INSERT OR IGNORE INTO invoice_assets(invoice_id, sha)"
-                     " SELECT ?, sha FROM invoice_assets WHERE invoice_id=?",
-                     (keep["id"], o["id"]))
-        conn.execute("UPDATE scrap_moves SET is_deleted=1"
-                     " WHERE ref_table='invoices' AND ref_id=?", (o["id"],))
-        if o["entry_id"]:
+    # 5.2.4: لا حذف — كل مدموجةٍ تبقى برقمها وبنودها، ويُلغى أثرها بمستندٍ
+    # مقابل بتاريخها، وتُنسخ بنودها كما هي (أوزانها وأجورها وعيارها) إلى
+    # الباقية التي يُعاد بناء قيدها منها
+    icols = [r["name"] for r in conn.execute("PRAGMA table_info(invoice_items)")
+             if r["name"] not in ("id", "invoice_id")]
+    rev_nos = []
+    _relax = invoices.chain_checked_at_end(wos)   # يُفحص كله بعد الدمج
+    _relax.__enter__()
+    try:
+        for o in others:
+            rev_nos.append(_reverse_doc(
+                conn, o, username,
+                f"دمج الفاتورة {o['invoice_no']} في {keep['invoice_no']}"))
             conn.execute(
-                "UPDATE journal_entries SET is_deleted=1, deleted_by=?,"
-                " deleted_at=datetime('now','localtime') WHERE id=?",
-                (username, o["entry_id"]))
-        conn.execute("UPDATE invoices SET is_deleted=1 WHERE id=?",
-                     (o["id"],))
-        log_action(conn, username, "merge", "invoices", o["id"],
-                   f"{o['invoice_no']} دُمجت في {keep['invoice_no']}")
+                f"INSERT INTO invoice_items(invoice_id,{','.join(icols)})"
+                f" SELECT ?,{','.join(icols)} FROM invoice_items"
+                " WHERE invoice_id=? ORDER BY id", (keep["id"], o["id"]))
+            conn.execute(
+                "INSERT OR IGNORE INTO invoice_assets(invoice_id, sha)"
+                " SELECT ?, sha FROM invoice_assets WHERE invoice_id=?",
+                (keep["id"], o["id"]))
+            log_action(conn, username, "merge", "invoices", o["id"],
+                       f"{o['invoice_no']} دُمجت في {keep['invoice_no']}"
+                       f" | العكس {rev_nos[-1]}")
+    finally:
+        _relax.__exit__(None, None, None)
 
     # إجماليات الباقية من بنودها كلها — كما يحسبها الترحيل نفسه
     from models.entities import get_entity
@@ -401,6 +447,7 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
     return {"id": keep["id"], "invoice_no": keep["invoice_no"],
             "invoice_date": keep["invoice_date"],
             "merged": [o["invoice_no"] for o in others], "items": n,
+            "reversals": rev_nos,
             "total_weight": tw, "total_wages": tg, "vat": vat,
             "grand_total": grand}
 
@@ -581,31 +628,29 @@ def flip_invoice_kind(conn, invoice_id, username, notes=""):
     new_kind = "sale_return" if old_kind == "sale" else "sale"
     lbl = {"sale": "مبيعات", "sale_return": "مرتجع"}
 
-    _void(conn, inv["entry_id"], username,
-          f"عكس نوع الفاتورة {inv['invoice_no']}:"
-          f" {lbl[old_kind]} → {lbl[new_kind]}")
-    conn.execute("UPDATE invoices SET is_deleted=1 WHERE id=?", (invoice_id,))
+    # 5.2.4: الأصل يبقى برقمه ويُلغى أثره بمستندٍ مقابل، ثم يُرحَّل النوع
+    # الصحيح — وحركة كل طقمٍ تُفحص كما في أي فاتورة (فما يُخرج طقماً
+    # مفرداً مرتين يُرفض بسببه)
+    with _one_move(conn, [c.get("work_order_id") for c in cart], username):
+        rev_no = _reverse_doc(conn, inv, username,
+                              f"عكس نوع الفاتورة {inv['invoice_no']}:"
+                              f" {lbl[old_kind]} → {lbl[new_kind]}")
 
-    # تهيئة حالة الأطقم لتقبل النوع الجديد
-    need = "in_stock" if new_kind == "sale" else "sold"
-    for it in cart:
-        conn.execute("UPDATE work_orders SET status=? WHERE id=?",
-                     (need, it["work_order_id"]))
-
-    fn = invoices.create_sale if new_kind == "sale" else invoices.create_sale_return
-    res = fn(conn, inv["customer_id"], cart, inv["invoice_date"], username,
-             bool(inv["vat_applied"]),
-             (inv["description"] or "")
-             + f" [عُكس نوعها من {lbl[old_kind]}]",
-             **_invoice_source(conn, inv))
+        fn = (invoices.create_sale if new_kind == "sale"
+              else invoices.create_sale_return)
+        res = fn(conn, inv["customer_id"], cart, inv["invoice_date"],
+                 username, bool(inv["vat_applied"]),
+                 (inv["description"] or "")
+                 + f" [عُكس نوعها من {lbl[old_kind]}]",
+                 **_invoice_source(conn, inv))
 
     log_action(conn, username, "flip_kind", "invoices", invoice_id,
                f"{inv['invoice_no']} : {lbl[old_kind]} → {lbl[new_kind]}"
-               f" | الجديدة {res['invoice_no']}"
+               f" | العكس {rev_no} | الجديدة {res['invoice_no']}"
                + (f" | {notes}" if notes else ""))
     return {"old_no": inv["invoice_no"], "new_no": res["invoice_no"],
             "new_id": res["id"], "from": lbl[old_kind], "to": lbl[new_kind],
-            "items": len(cart)}
+            "items": len(cart), "rev_no": rev_no}
 
 
 # ══════════════════════════════════════════════════════════════════

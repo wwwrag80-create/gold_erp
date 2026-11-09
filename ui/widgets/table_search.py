@@ -18,6 +18,18 @@ from PyQt5 import QtCore, QtWidgets
 from ui import kit
 
 _BAR_PROP = "_search_bar"
+# نصٌّ خفيّ يُبحث فيه مع نصّ السطر (5.2.4) — على خلية العمود الأول.
+# كشف الحساب يضع فيه أرقام تشغيل أطقم الفاتورة: فمن كتب رقم تشغيلٍ ظهرت
+# الفواتير التي هو فيها، ولو لم يُكتب الرقم في السطر نفسه.
+SEARCH_ROLE = QtCore.Qt.UserRole + 91   # (77: صفّ الإجمالي)
+
+
+def _extra(table, row):
+    try:
+        it = table.item(row, 0)
+        return str(it.data(SEARCH_ROLE) or "") if it is not None else ""
+    except Exception:
+        return ""
 
 
 def _norm(text):
@@ -87,6 +99,9 @@ class SearchBar(QtWidgets.QFrame):
         return False
 
     def open_bar(self):
+        hint = self.view.property("searchHint")
+        if hint:
+            self.edit.setPlaceholderText(str(hint))
         self.reposition()
         self.show()
         self.raise_()
@@ -116,7 +131,8 @@ class SearchBar(QtWidgets.QFrame):
                 total += 1
                 hit = not q or any(
                     q in _norm(v.item(r, c).text())
-                    for c in range(cols) if v.item(r, c) is not None)
+                    for c in range(cols) if v.item(r, c) is not None) \
+                    or q in _norm(_extra(v, r))
                 v.setRowHidden(r, not hit)
                 shown += int(hit)
         elif hasattr(v, "set_filter"):

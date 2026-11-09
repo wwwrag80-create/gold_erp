@@ -2042,6 +2042,7 @@ def as_shown(parent, doc_type, doc_id, kw):
 DOC_TITLES = {
     "italian_statement": "كشف ايطالي / نواعم",
     "balances": "أرصدة الحسابات", "turnover": "حركة الأطقم",
+    "sales_sets": "المبيعات — أين صارت الأطقم",
     "aging": "أعمار الديون", "tax_sales_register": "سجل المبيعات الضريبية",
     "purchases_register": "سجل المشتريات", "day_close": "إقفال اليوم",
     "trial_balance": "ميزان المراجعة", "coa_list": "دليل الحسابات",
@@ -4956,6 +4957,61 @@ def _tpl_doc_edits(conn, _id=0, date_from=None, date_to=None,
                     show_meta=False) + html + _footer(""))
 
 
+def _tpl_sales_sets(conn, _id=0, invoice_ids=None, title=None):
+    """«المبيعات» (5.2.4): أطقم فواتير بيعٍ مختارة — صورة موديل كل طقم،
+    ووزنه، وبيعه، وهل رجع (ومرتجعه)، وإلى من ذهب الآن."""
+    from models import sales_sets
+    today = _qd(QtCore.QDate.currentDate())
+    rows = sales_sets.track(conn, invoice_ids or [])
+    sm = sales_sets.summary(rows)
+    nos = sorted({r["invoice_no"] for r in rows})
+    body_rows = ""
+    for r in rows:
+        img = _model_thumb(r["model_no"], 40) if r["model_no"] else ""
+        pic = (f'<img src="{img}" style="height:40px;max-width:70px">'
+               if img else en(r["model_no"] or "—"))
+        st = r["status_label"]
+        if r["status"] == sales_sets.RETURNED:
+            st = f'<b style="color:#B4232A">{st}</b>'
+        elif r["status"] == sales_sets.WITH:
+            st = f'<b style="color:#1E7B45">{st}</b>'
+        ret = (f'{en(r["ret_no"])}<br/><span class="note">'
+               f'{en(r["ret_date"])}</span>' if r["ret_no"] else "—")
+        body_rows += "<tr>" + cells(
+            f"<td>{pic}</td>",
+            f'<td><b>{en(r["wo_no"])}</b></td>',
+            f'<td>{en(r["model_no"] or "—")}</td>',
+            f'<td>{_gw(r["weight"])}</td>',
+            f'<td>{en(r["invoice_no"])}<br/><span class="note">'
+            f'{en(r["date"])}</span></td>',
+            f'<td class="r">{r["party"]}</td>',
+            f"<td>{st}</td>", f"<td>{ret}</td>",
+            f'<td class="r"><b>{r["where"] or "—"}</b></td>') + "</tr>"
+    if not rows:
+        body_rows = f'<tr><td {TD} colspan="9">لا أطقم في الفواتير المختارة</td></tr>'
+    head = cells(thw("صورة الموديل"), thw("رقم التشغيل"), thw("الموديل"),
+                 thw(f"الوزن ({_kunit()})"), thw("فاتورة البيع"),
+                 thw("بِيع إلى"), thw("الحال"), thw("المرتجع"),
+                 thw("أين هو الآن"))
+    def _nw(k):
+        return f'{en(sm[k]["n"])} طقم · {_gw(sm[k]["w"])}'
+    totals = f'''
+    {TBL}
+      <tr><th>الأطقم</th><td>{_nw("all")}</td>
+          <th>مباع معه</th><td>{_nw("with")}</td>
+          <th>مرتجع</th><td>{_nw("returned")}</td></tr>
+      <tr><th>المرتجع في الخزنة</th><td>{_nw("ret_treasury")}</td>
+          <th>المرتجع عند غيره</th><td>{_nw("ret_others")}</td>
+          <th>الفواتير</th><td>{en(sm["invoices"])}</td></tr>
+    </table><br/>'''
+    meta = (f'<div {WIDE}>الفواتير: {en("، ".join(nos)) or "—"}'
+            f' &nbsp;·&nbsp; تاريخ الطباعة {en(today)}</div>')
+    return (_header(title or "المبيعات — أطقم الفواتير وأين صارت", "—",
+                    today, show_meta=False)
+            + meta + totals + f"{TBL}<tr>{head}</tr>{body_rows}</table>"
+            + _footer(""))
+
+
 BUILDERS = {
     "invoice": _tpl_invoice, "invoices": _tpl_invoice,
     "voucher": _tpl_voucher, "vouchers": _tpl_voucher,
@@ -5002,6 +5058,8 @@ BUILDERS = {
     "party_groups_all": _tpl_party_groups_all,
     # 5.0.1: صورة الشاشة — الجدول كما يُرى (بحثٌ أو ترشيحٌ لا يعرفه قالب)
     "screen_view": _tpl_screen_view,
+    # 5.2.4: «المبيعات» — أطقم فواتير مختارة وأين صارت
+    "sales_sets": _tpl_sales_sets,
 }
 
 DOC_LABELS = {
@@ -5197,7 +5255,7 @@ def qt_preview_document(parent, doc_type, doc_id, landscape=None, **kw):
     """معاينة Qt الاحتياطية (تُستخدم فقط إن تعذّر فتح المتصفح)."""
     html = build_html(doc_type, doc_id, **kw)
     wide = doc_type in ("statement", "journal", "manual", "balances",
-                        "turnover", "aging",
+                        "turnover", "aging", "sales_sets",
                         "day_close", "mfg_target", "mfg_salary",
                         "customer_board", "trial_balance",
                         "equity_changes", "doc_edits", "scrap_karat")

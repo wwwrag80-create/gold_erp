@@ -7,6 +7,7 @@
 from models import numbering as _numbering
 from datetime import datetime
 
+import contextlib
 import config
 from models import accounts as _acc
 from models.accounts import acc_id
@@ -106,6 +107,23 @@ def _where_is(conn, work_order_id):
             f"\nاحذفه من تلك الفاتورة أو ارتجعه أولاً.")
 
 
+# أطقم عمليةٍ مركّبة (مستند عكسٍ + مستندٌ جديد معاً، 5.2.4) تُفحص سلسلتها
+# مرةً في آخر العملية لا بعد كل مستند: النقل والتعديل والدمج يمرّ في
+# منتصفه بحالةٍ لا تصحّ وحدها (عكسُ مرتجعٍ بِيع طقمه لغيره قبل أن يُسجَّل
+# مرتجعه الصحيح). والفحص النهائي في `models.operations._one_move`.
+_CHAIN_RELAX = set()
+
+
+@contextlib.contextmanager
+def chain_checked_at_end(wo_ids):
+    ids = {int(i) for i in wo_ids if i} - _CHAIN_RELAX
+    _CHAIN_RELAX.update(ids)
+    try:
+        yield
+    finally:
+        _CHAIN_RELAX.difference_update(ids)
+
+
 def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
     """يحلّ كل سطر من السلة إلى (صف الطقم، الوزن المطبَّق، أجر الجرام).
     cart: [{"work_order_id", "weight": None أو رقم للتجميعي (00010 · 0010),
@@ -164,6 +182,7 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
             weight = (float(_w) if _w not in (None, "", 0)
                       else _wm.default_weight(conn, wo, kind))
             why = (None if wo["id"] in (skip_ids or ())
+                   or wo["id"] in _CHAIN_RELAX
                    else _wm.refusal(conn, wo, kind, invoice_date, weight))
             if why:
                 need = "بالمخزون" if need_status == "in_stock" else "مباعاً"
@@ -678,15 +697,21 @@ def last_wage(conn, wo_id):
     أجرٍ عُرف له، والمستخدم يعدّله. والتحويل الداخلي بلا أجر فلا يُعتدّ به.
 
     {"wage" (بمكافئ 18), "kind", "invoice_no", "invoice_date"} أو None."""
-    r = conn.execute(
-        "SELECT it.wage_per_gram wage, i.kind, i.invoice_no, i.invoice_date"
-        " FROM invoice_items it JOIN invoices i ON i.id=it.invoice_id"
-        " JOIN entities e ON e.id=i.customer_id"
-        " WHERE it.work_order_id=? AND i.is_deleted=0"
-        " AND i.kind IN ('sale','sale_return')"
-        " AND COALESCE(e.entity_type,'')<>'internal'"
-        " ORDER BY i.invoice_date DESC, i.id DESC, it.id DESC LIMIT 1",
-        (int(wo_id),)).fetchone()
+    sql = ("SELECT it.wage_per_gram wage, i.kind, i.invoice_no,"
+           " i.invoice_date"
+           " FROM invoice_items it JOIN invoices i ON i.id=it.invoice_id"
+           " JOIN entities e ON e.id=i.customer_id"
+           " WHERE it.work_order_id=? AND i.is_deleted=0"
+           " AND i.kind IN ('sale','sale_return')"
+           " AND COALESCE(e.entity_type,'')<>'internal'")
+    # فاتورةٌ عُكست، ومستند العكس نفسه: إلغاءٌ لا أجرٌ عُرف للطقم (5.2.4)
+    skip = (" AND COALESCE(i.entry_id,0) NOT IN (SELECT src_entry_id FROM"
+            " doc_reversals UNION SELECT rev_entry_id FROM doc_reversals)")
+    tail = " ORDER BY i.invoice_date DESC, i.id DESC, it.id DESC LIMIT 1"
+    try:
+        r = conn.execute(sql + skip + tail, (int(wo_id),)).fetchone()
+    except Exception:              # قاعدةٌ لم يُنشأ فيها جدول العكس بعد
+        r = conn.execute(sql + tail, (int(wo_id),)).fetchone()
     return dict(r) if r else None
 
 

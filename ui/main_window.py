@@ -44,6 +44,7 @@ from ui.reports.day_close_screen import DayCloseScreen
 from ui.reports.diagnostics_screen import DiagnosticsScreen
 from ui.reports.integrity_screen import IntegrityScreen
 from ui.item_history_screen import ItemHistoryScreen
+from ui.sales_sets_screen import SalesSetsScreen
 from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
 from ui.sales_screen import SalesScreen
@@ -64,6 +65,20 @@ from services import numfmt as _nf
 
 # دور مخصّص يحمل المفتاح الثابت لكل عنصر في القائمة
 NAV_KEY_ROLE = QtCore.Qt.UserRole + 1
+# قسمٌ داخل شاشة يظهر تحتها في القائمة (5.2.4) — (مفتاح الشاشة، اسم القسم)
+NAV_SUB_ROLE = QtCore.Qt.UserRole + 2
+# الشاشات التي في داخلها شاشات: يظهر بجانبها السهم، والنقر عليه يُظهر
+# أقسامها تحتها، والنقر على قسمٍ يفتح الشاشة عليه مباشرةً
+NAV_SUBS = {
+    "العملاء — المبيعات والسداد": ("المبيعات والسداد", "ملف الجهة",
+                                    "أعمار الديون"),
+    "التحليل والدراسات": ("حركة الرصيد", "أعمار الموديلات",
+                          "ربحية الموديل"),
+    "القوائم المالية": ("ميزان المراجعة", "قائمة المركز المالي",
+                        "قائمة الدخل", "التغيرات في حقوق الملكية",
+                        "التدفقات النقدية",
+                        "تسويات نهاية الفترة والقوائم الختامية"),
+}
 
 # ══ إصدار ترتيب القائمة ══
 # الترتيب المحفوظ على جهاز المستخدم يُطابَق بمفتاح كل شاشة (اسمها
@@ -143,6 +158,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("كشف حساب", self.gl_screen),
                     ("الوارد من التصنيع", self.production_screen),
                     ("مبيعات/مرتجعات", self.sales_screen),
+                    # 5.2.4: أطقم فواتير بيعٍ مختارة — معه أم رجعت، وإلى
+                    # أين ذهبت (الخزنة أو مندوبٌ آخر)، وطباعتها بالصور
+                    ("المبيعات", Lazy(lambda: SalesSetsScreen(user),
+                                      "المبيعات")),
                     # فواتير ضريبية بالريال — لا ذهب ولا مخزون
                     ("المبيعات الضريبية", self.tax_sales_screen),
                     ("سندات قبض/صرف", self.vouchers_screen),
@@ -543,6 +562,7 @@ class MainWindow(QtWidgets.QMainWindow):
             lambda *_: self._save_nav_layout())
         self._restore_nav_layout()
         self._apply_plan_screens()
+        self._add_nav_subs()
         self._apply_nav_icons()
         self._items[self.welcome] = None
         self.switch(0)
@@ -650,8 +670,10 @@ class MainWindow(QtWidgets.QMainWindow):
             "key": item.data(0, NAV_KEY_ROLE) or "",
             "text": item.text(0),
             "expanded": item.isExpanded(),
+            # أقسام الشاشة تُبنى من `NAV_SUBS` كل مرة — لا تُحفظ
             "children": [self._nav_node(item.child(i))
-                         for i in range(item.childCount())],
+                         for i in range(item.childCount())
+                         if not item.child(i).data(0, NAV_SUB_ROLE)],
         }
 
     def _schedule_nav_save(self):
@@ -844,7 +866,60 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             err(self, e)
 
+    def _add_nav_subs(self):
+        """أقسام الشاشات التي في داخلها شاشات — تحتها في القائمة، مطويّةً
+        افتراضاً، والسهم الذهبي بجانب الشاشة يُظهرها (5.2.4)."""
+        flags = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
+        for item, _parent in list(self._iter_nav()):
+            idx = item.data(0, QtCore.Qt.UserRole)
+            if idx is None or idx < 0 or item.data(0, NAV_SUB_ROLE):
+                continue
+            key = item.data(0, NAV_KEY_ROLE) or ""
+            subs = NAV_SUBS.get(key)
+            if not subs:
+                continue
+            open_ = item.isExpanded()
+            for label in subs:
+                ch = QtWidgets.QTreeWidgetItem([label])
+                ch.setData(0, NAV_SUB_ROLE, (key, label))
+                ch.setData(0, NAV_KEY_ROLE, f"::sub::{label}")
+                ch.setFlags(flags)
+                ch.setToolTip(0, f"{key} ← {label}")
+                f = ch.font(0)
+                f.setBold(False)
+                ch.setFont(0, f)
+                item.addChild(ch)
+            item.setExpanded(bool(open_))
+
+    def _open_inner(self, widget, label):
+        """يفتح قسماً باسمه داخل شاشة: بدالتها إن كانت لها، وإلا بالتبويب
+        الذي يحمل الاسم نفسه."""
+        w = getattr(widget, "real", widget)
+        for m in ("open_section", "open_tab"):
+            fn = getattr(w, m, None)
+            if callable(fn):
+                fn(label)
+                return
+        for tw in w.findChildren(QtWidgets.QTabWidget):
+            for i in range(tw.count()):
+                if tw.tabText(i) == label:
+                    tw.setCurrentIndex(i)
+                    return
+
     def _nav_clicked(self, item, _col=0):
+        sub = item.data(0, NAV_SUB_ROLE)
+        if sub:
+            par = item.parent()
+            idx = par.data(0, QtCore.Qt.UserRole) if par is not None else None
+            if idx is None or idx < 0:
+                return
+            self.switch(idx)
+            if self._current_row == idx:
+                try:
+                    self._open_inner(self.screens[idx], sub[1])
+                except Exception:
+                    pass
+            return
         idx = item.data(0, QtCore.Qt.UserRole)
         if idx is None or idx < 0:      # عنوان مجموعة — يفتح/يطوي فقط
             item.setExpanded(not item.isExpanded())

@@ -3,7 +3,8 @@
 
 بحث برقم التشغيل، تعرض جدولاً زمنياً لكل حركات الطقم (توريد، مبيعات،
 مرتجع، تسوية) مع نوع الحركة والتاريخ والجهة المقابلة والأوزان التفصيلية
-ونوع الطقم.
+ونوع الطقم — وبطاقة تفاصيله (المقيد والقائم والذهب والفصوص والأحجار ومكانه
+الآن). أو بحثٌ بالوزن المقيد أو القائم: الأطقم الأقرب إليه أولاً (5.2.4).
 """
 from PyQt5 import QtCore, QtWidgets
 
@@ -19,6 +20,15 @@ from services import numfmt as _nf
 
 COLS = ["نوع الحركة", "التاريخ", "الجهة المقابلة", "الذهب", "الفصوص",
         "الأحجار", "الوزن المقيد", "في الخزنة بعدها", "نوع الطقم"]
+# البحث بالوزن (5.2.4): الأطقم الأقرب إلى الوزن المكتوب
+NEAR_COLS = ["رقم التشغيل", "الموديل", "الوزن المقيد", "الوزن القائم",
+             "الذهب", "الفصوص", "الأحجار", "الفرق", "مكانه الآن"]
+MODES = [("no", "رقم التشغيل"), ("reg", "الوزن المقيد"),
+         ("standing", "الوزن القائم")]
+# بطاقة تفاصيل الطقم: (المفتاح، العنوان)
+CARD = [("reg", "الوزن المقيد"), ("standing", "الوزن القائم"),
+        ("gold", "الذهب"), ("small", "الفصوص"), ("big", "الأحجار"),
+        ("model_no", "الموديل"), ("where", "مكانه الآن")]
 
 
 class TurnoverPanel(QtWidgets.QFrame):
@@ -86,6 +96,12 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         super().__init__()
         self.user = user
 
+        # نوع البحث (5.2.4): برقم التشغيل كالعادة، أو بالوزن المقيد أو
+        # القائم — فتظهر أرقام التشغيل الأقرب إلى الوزن المكتوب
+        self.mode = kit.ComboBox()
+        for key, label in MODES:
+            self.mode.addItem(label, key)
+        self.mode.currentIndexChanged.connect(self._mode_changed)
         self.search = kit.LineEdit()
         self.search.setPlaceholderText("أدخل رقم التشغيل (مثال: 1)…")
         self.search.returnPressed.connect(self.load)
@@ -93,20 +109,43 @@ class ItemHistoryScreen(QtWidgets.QWidget):
         btn.clicked.connect(self.load)
 
         top = QtWidgets.QHBoxLayout()
-        top.addWidget(QtWidgets.QLabel("رقم التشغيل:"))
+        top.addWidget(QtWidgets.QLabel("البحث بـ:"))
+        top.addWidget(self.mode)
         top.addWidget(self.search, 1)
         top.addWidget(btn)
 
         self.info = big_label()
+        # بطاقة تفاصيل الطقم: أوزانه وذهبه وفصوصه وأحجاره ومكانه الآن
+        self.card = QtWidgets.QFrame()
+        self.card.setObjectName("card")
+        cg = QtWidgets.QGridLayout(self.card)
+        cg.setContentsMargins(10, 6, 10, 6)
+        cg.setHorizontalSpacing(18)
+        cg.setVerticalSpacing(2)
+        self.card_vals = {}
+        for c, (key, title) in enumerate(CARD):
+            t = QtWidgets.QLabel(title)
+            t.setObjectName("cardSub")
+            v = QtWidgets.QLabel("—")
+            v.setObjectName("big" if key != "where" else "")
+            v.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+            cg.addWidget(t, 0, c)
+            cg.addWidget(v, 1, c)
+            self.card_vals[key] = v
+        cg.setColumnStretch(len(CARD) - 1, 1)
+        self.card.hide()
         self.table = make_table()
         self.table.setProperty(
             "emptyText", "اكتب رقم التشغيل ثم اضغط «بحث» أو Enter — تظهر "
             "حركة الطقم كاملةً")
+        self.table.cellDoubleClicked.connect(self._open_near)
+        self._near = []
 
         hist = QtWidgets.QWidget()
         hl = QtWidgets.QVBoxLayout(hist)
         hl.addLayout(top)
         hl.addWidget(self.info)
+        hl.addWidget(self.card)
         hl.addWidget(self.table, 1)
 
         # ── تبويب تحليلات دوران المخزون ──
@@ -185,10 +224,36 @@ class ItemHistoryScreen(QtWidgets.QWidget):
 
     def open_for_wo(self, wo_no):
         """يفتح تاريخ رقم تشغيلٍ بعينه — من شريط الأوامر الموحّد."""
+        self.mode.setCurrentIndex(0)
         self.search.setText(str(wo_no or "").strip())
         self.load()
 
+    def _mode_changed(self, _i=0):
+        key = self.mode.currentData()
+        self.search.setPlaceholderText(
+            "أدخل رقم التشغيل (مثال: 1)…" if key == "no" else
+            f"أدخل {self.mode.currentText()} ({kv.unit()}) — تظهر الأطقم"
+            " الأقرب إليه…")
+        self.search.setFocus()
+
+    def _fill_card(self, d):
+        """بطاقة التفاصيل من `models.set_lookup.details`."""
+        for key, v in self.card_vals.items():
+            if key == "where":
+                w = d["where"]
+                txt = w["label"]
+                if w.get("invoice_no"):
+                    txt += f" · {w['invoice_no']}"
+                v.setText(txt)
+            elif key == "model_no":
+                v.setText(d["model_no"] or "—")
+            else:
+                v.setText(f"{_nf.f2(kv.g(d[key]))}")
+        self.card.show()
+
     def load(self):
+        if self.mode.currentData() != "no":
+            return self.load_near()
         no = self.search.text().strip()
         if not no:
             return
@@ -199,6 +264,10 @@ class ItemHistoryScreen(QtWidgets.QWidget):
                 if not wo["is_bulk"]:
                     from models import wo_moves
                     st = wo_moves.state(conn, wo)
+                from models import set_lookup
+                det = set_lookup.details(conn, wo)
+            self._near = []
+            self._fill_card(det)
             where = ""
             if st is not None:
                 # 4.82: كم منه في الخزنة وكم عند الجهات — بيعُ جزءٍ يُرى
@@ -221,8 +290,51 @@ class ItemHistoryScreen(QtWidgets.QWidget):
             fill(self.table, COLS, data)
         except Exception as e:
             self.info.setText("")
+            self.card.hide()
             self.table.setRowCount(0)
             err(self, e)
+
+    def load_near(self):
+        """الأطقم الأقرب إلى الوزن المكتوب — الأقرب أولاً. نقرةٌ مزدوجة
+        على طقمٍ تفتح حركته."""
+        txt = self.search.text().strip().replace("٫", ".").replace(",", ".")
+        if not txt:
+            return
+        try:
+            v = float(txt.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩",
+                                                  "0123456789")))
+        except ValueError:
+            err(self, ValueError("اكتب الوزن رقماً (مثال: 12.5)"))
+            return
+        try:
+            from models import set_lookup
+            with db(readonly=True) as conn:
+                rows = set_lookup.near_weight(
+                    conn, kv.store(v), self.mode.currentData(), limit=40)
+            self._near = [r["work_order_no"] for r in rows]
+            self.card.hide()
+            self.info.setText(
+                f"أقرب {len(rows)} طقماً إلى {self.mode.currentText()} "
+                f"{_nf.f2(v)} {kv.unit()} — الأقرب أولاً · نقرةٌ مزدوجة على"
+                " طقمٍ تفتح حركته وتفاصيله")
+            data = [(r["work_order_no"], r["model_no"] or "—",
+                     self._w(r["reg"]), self._w(r["standing"]),
+                     self._w(r["gold"]), self._w(r["small"]),
+                     self._w(r["big"]), self._w(r["diff"]),
+                     r["where"]["label"]) for r in rows]
+            fill(self.table, NEAR_COLS, data)
+            # «مكانه الآن» يأخذ باقي العرض فيُقرأ اسم الجهة كاملاً
+            self.table.horizontalHeader().setSectionResizeMode(
+                len(NEAR_COLS) - 1, QtWidgets.QHeaderView.Stretch)
+        except Exception as e:
+            self.info.setText("")
+            self.table.setRowCount(0)
+            err(self, e)
+
+    def _open_near(self, row, _col=0):
+        if not self._near or not (0 <= row < len(self._near)):
+            return
+        self.open_for_wo(self._near[row])
 
     def load_turnover(self):
         """يحدّث اللوحات الأربع من التتبّع الفردي لأرقام التشغيل."""
