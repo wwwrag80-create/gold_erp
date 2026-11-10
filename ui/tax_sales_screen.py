@@ -595,7 +595,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
                     f"{self.p_vat.value_lbl.text()} = "
                     f"{self.p_total.value_lbl.text()} ريال\n"
                     f"على حساب المندوب: الضريبة {self.p_vat.value_lbl.text()}"
-                    " فقط — والمخزون لا يتغيّر."):
+                    " فقط — والمخزون لا يتغيّر.", self.inv_date):
                 return
             with db() as conn:
                 res = tax_sales.create_rep_invoice(
@@ -771,7 +771,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
             if not confirm_post(
                     self, f"إشعار دائن على {self.cn_inv.currentText()}\n"
                           f"الإجمالي {self.cn_c_total.value_lbl.text()} ريال"
-                          f" — السبب: {reason}"):
+                          f" — السبب: {reason}", self.cn_date):
                 return
             with db() as conn:
                 res = tax_sales.create_credit_note(
@@ -864,7 +864,7 @@ class TaxSalesScreen(QtWidgets.QWidget):
             if not confirm_post(
                     self, f"إشعار مدين على {self.dn_inv.currentText()}\n"
                           f"الإجمالي {self.dn_c_total.value_lbl.text()} ريال"
-                          f" — السبب: {reason}"):
+                          f" — السبب: {reason}", self.dn_date):
                 return
             with db() as conn:
                 res = tax_sales.create_debit_note(

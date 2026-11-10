@@ -16,7 +16,7 @@ from ui import kit
 import config
 from database.database import db
 from models import editing, entities, purchases
-from ui.widgets.common import (Card, date_edit, dstr, enter_chain, err,
+from ui.widgets.common import (Card, confirm_doc_date, date_edit, dstr, enter_chain, err,
                                make_table, mspin, num_item, posted,
                                reload_combo, row_action_buttons, row_height,
                                search_combo, tab_widget, text_item,
@@ -514,6 +514,9 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             if tr == "standard" and vat and not self.inv_no.text().strip():
                 raise ValueError("اكتب رقم فاتورة المورد — ضريبة المدخلات "
                                  "لا تُخصم إلا بفاتورةٍ ضريبية مرقّمة")
+            # 5.2.7: تاريخ المشتريات غير تاريخ النظام ← تنبيهٌ قبل الترحيل
+            if not confirm_doc_date(self, self.p_date):
+                return
             args = (self.kind.currentData(), sid, self.desc.text(), net, vat,
                     dstr(self.p_date), self.user["username"])
             kw = {"supplier_invoice_no": self.inv_no.text(),

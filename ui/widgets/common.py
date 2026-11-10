@@ -1237,12 +1237,71 @@ def enter_chain(widget_owner, widgets, on_last=None, require=None):
     return nav
 
 
-def confirm_post(parent, summary):
+def _as_date_str(v):
+    """تاريخٌ من خانة تاريخ أو QDate أو date أو نص ← «YYYY-MM-DD» (أو "")
+    — بأرقامٍ إنجليزية دائماً (`qdstr`)."""
+    try:
+        if v is None:
+            return ""
+        if isinstance(v, QtWidgets.QDateEdit):
+            return dstr(v)
+        if isinstance(v, QtCore.QDate):
+            return qdstr(v)
+        if hasattr(v, "isoformat"):
+            return v.isoformat()[:10]
+        return str(v)[:10]
+    except Exception:
+        return ""
+
+
+def confirm_doc_date(parent, doc_date):
+    """5.2.7: تاريخ المستند غير تاريخ النظام ← تنبيهٌ صريح قبل الترحيل.
+
+    مستندٌ بتاريخ أمس أو الشهر الماضي قد يكون مقصوداً (فاتورةٌ تأخّر
+    تسجيلها) وقد يكون خطأً لم يُنتبه له (خانة التاريخ بقيت على يومٍ قديم).
+    فلا يُرحَّل بصمت: يظهر التنبيه بالتاريخين والفرق بينهما، و«موافق»
+    يرحّله كما هو. والمستندات المرحّلة بتاريخٍ مغاير تُعرض في «سلامة
+    السجل». يعيد True إن طابق التاريخُ اليوم أو وافق المستخدم."""
+    import datetime as _dt
+    d = _as_date_str(doc_date)
+    today = _dt.date.today()
+    if not d or d == today.isoformat():
+        return True
+    try:
+        n = (_dt.date.fromisoformat(d) - today).days
+    except ValueError:
+        return True
+    k = abs(n)
+    span = ("يومٌ واحد" if k == 1 else "يومان" if k == 2
+            else f"{k} أيام" if 3 <= k <= 10 else f"{k} يوماً")
+    rel = f"قبل اليوم بـ{span}" if n < 0 else f"بعد اليوم بـ{span}"
+    return kit.message(
+        parent, "تاريخ العملية يختلف عن تاريخ النظام",
+        "⚠ تنبيه التاريخ", "warning",
+        buttons=(("ok", "✔ موافق — بهذا التاريخ", "primary"),
+                 ("cancel", "إلغاء — أعدّل التاريخ", "secondary")),
+        detail=(f"تاريخ العملية: {d}\n"
+                f"تاريخ النظام اليوم: {today.isoformat()}\n"
+                f"الفرق: {rel}\n\n"
+                "إن كان مقصوداً اضغط «موافق» فتُرحَّل بتاريخها. وإن كان"
+                " خطأً فاضغط «إلغاء» وعدّل خانة التاريخ."),
+        default="cancel") == "ok"
+
+
+def confirm_post(parent, summary, doc_date=None):
     """تأكيد صريح قبل ترحيل أي عملية محاسبية.
 
     الترحيل يُحدث أثراً في الحسابات ولا يُلغى إلا بقيد عكسي، فيستحق
     تأكيداً واعياً — كما في أنظمة ERP الكبيرة.
+
+    5.2.7: وقبله تنبيه التاريخ إن خالف تاريخ النظام (`confirm_doc_date`)
+    — بالتاريخ المُمرَّر، أو بخانة «التاريخ» في الشاشة نفسها (`date`).
     """
+    if doc_date is None:
+        w = getattr(parent, "date", None)
+        doc_date = w if isinstance(w, QtWidgets.QDateEdit) else None
+    if doc_date is not None and not confirm_doc_date(parent, doc_date):
+        return False
     return kit.message(
         parent, "هل تريد ترحيل هذه العملية؟", "تأكيد الترحيل", "question",
         buttons=(("post", "✔ ترحيل", "primary"),

@@ -178,6 +178,16 @@ def full_catalog(conn):
 # والدفعات القديمة (قبل وجود ذلك الجدول) لا سطور لها، فتُقرأ من
 # بطاقاتها مباشرةً — وإلا اختفى وارد سنةٍ كاملة من التقرير.
 
+# 5.2.7: «الوارد» من شاشة الوارد من التصنيع **وحدها** — قيد توريدٍ مصدره
+# `work_orders` وليس رصيداً افتتاحياً مخزنياً (ذاك يُقيَّد دائناً 3900 من
+# شاشة الأرصدة الافتتاحية، ومنه البيع المباشر لحساب «عميل»). والطقم الذي
+# أُدخل عبر مرتجعٍ (بلا قيد توريد) ليس وارداً أبداً — كان يظهر «وارداً»
+# بتاريخ إنشائه يوم المرتجع.
+SUPPLY_ENTRY = ("e.source_table='work_orders' AND NOT EXISTS ("
+                "SELECT 1 FROM journal_lines jl JOIN accounts ja"
+                " ON ja.id=jl.account_id WHERE jl.entry_id=e.id"
+                " AND ja.code='3900')")
+
 _RECV_SQL = f"""
 SELECT e.entry_date d, w.id wid, w.work_order_no wo,
        COALESCE(NULLIF(TRIM(l.model_no),''),
@@ -187,20 +197,22 @@ SELECT e.entry_date d, w.id wid, w.work_order_no wo,
   FROM wo_batch_lines l
   JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0
   JOIN work_orders w ON w.id=l.work_order_id AND w.is_deleted=0
- WHERE e.entry_date BETWEEN ? AND ?
+ WHERE e.entry_date BETWEEN ? AND ? AND {SUPPLY_ENTRY}
 UNION ALL
-SELECT {IN_DATE} d, w.id wid, w.work_order_no wo,
+SELECT e.entry_date d, w.id wid, w.work_order_no wo,
        NULLIF(TRIM(w.model_no),'') mno,
        w.registered_weight reg, w.wage_per_gram wage,
        w.status st, w.is_bulk bulk
   FROM work_orders w
+  JOIN journal_entries e ON e.id=w.entry_id AND e.is_deleted=0
  WHERE w.is_deleted=0
    AND COALESCE(w.is_service,0)=0 AND COALESCE(w.is_bulk,0)=0
    AND NOT EXISTS (SELECT 1 FROM wo_batch_lines l2
                     WHERE l2.work_order_id=w.id)
-   AND {IN_DATE} BETWEEN ? AND ?
+   AND e.entry_date BETWEEN ? AND ? AND {SUPPLY_ENTRY}
 """
-# (4.81) الشقّ الثاني للأطقم القديمة وحدها (قبل جدول السطور): لا الطقم
+# (4.81) الشقّ الثاني للأطقم القديمة وحدها (قبل جدول السطور) بقيد توريدها
+# لا بتاريخ إنشائها (5.2.7): لا الطقم
 # الخدمي «أجر» ولا رقمٌ تجميعيّ أنشأه بيعٌ أو مرتجع — كلاهما يُنشأ بتاريخ
 # أول فاتورةٍ تمسّه فكان يظهر «وارداً من التصنيع» يومها. والتجميعي يرد
 # من التصنيع بسطور دفعاته في الشقّ الأول دائماً.
@@ -306,13 +318,17 @@ def received_days(conn, limit=400):
             FROM wo_batch_lines l
             JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0
             JOIN work_orders w ON w.id=l.work_order_id AND w.is_deleted=0
+           WHERE {SUPPLY_ENTRY}
           UNION ALL
-          SELECT {IN_DATE} d, w.registered_weight reg,
+          SELECT e.entry_date d, w.registered_weight reg,
                  NULLIF(TRIM(w.model_no),'') mno
             FROM work_orders w
+            JOIN journal_entries e ON e.id=w.entry_id AND e.is_deleted=0
            WHERE w.is_deleted=0
+             AND COALESCE(w.is_service,0)=0 AND COALESCE(w.is_bulk,0)=0
              AND NOT EXISTS (SELECT 1 FROM wo_batch_lines l2
-                              WHERE l2.work_order_id=w.id))
+                              WHERE l2.work_order_id=w.id)
+             AND {SUPPLY_ENTRY})
          WHERE d IS NOT NULL AND d<>''
          GROUP BY d ORDER BY d DESC LIMIT ?""", (int(limit),)).fetchall()
     return [{"date": r["d"], "count": r["n"], "weight": r["w"] or 0.0,

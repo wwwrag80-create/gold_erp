@@ -37,9 +37,6 @@ class EntryLinesDialog(QtWidgets.QDialog):
         self.setWindowTitle(f"أسطر القيد رقم {entry_id}")
         self.setMinimumSize(760, 340)
         table = make_table()
-        if not confirm_post(self, "قيد يومية"):
-            return
-
         with db() as conn:
             rows = [(f"{l['acode']} — {l['aname']}",
                      kv.g(l["gold_debit"]), kv.g(l["gold_credit"]),
@@ -264,6 +261,12 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
             self.verify_edit_target()
             lines = self.collect()
             validate_lines(lines)
+            # التأكيد هنا عند الترحيل (كان خطأً عند عرض أسطر قيد) — ومعه
+            # تنبيه التاريخ إن خالف تاريخ النظام (5.2.7)
+            if not confirm_post(self, f"قيد يومية\nالبيان: {self.desc.text()}"
+                                      f"\nالتاريخ: {dstr(self.date)}",
+                                self.date):
+                return
             with db() as conn:
                 if self.is_editing:
                     editing.void_for_edit(conn, self.editing_entry_id,

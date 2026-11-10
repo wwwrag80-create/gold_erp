@@ -91,9 +91,6 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
         if cid is None:
             self.balances.setText("")
             return
-        if not confirm_post(self, "عملية تسكير"):
-            return
-
         with db() as conn:
             g, c = entities.balances(conn, cid)
         self.balances.setText(
@@ -107,6 +104,12 @@ class FixingScreen(EditModeMixin, QtWidgets.QWidget):
             cid = self.customer.currentData()
             if cid is None:
                 raise ValueError("اختر الجهة")
+            # التأكيد هنا عند الترحيل (كان خطأً عند اختيار الجهة) — ومعه
+            # تنبيه التاريخ إن خالف تاريخ النظام (5.2.7)
+            if not confirm_post(
+                    self, f"عملية تسكير\nالجهة: {self.customer.currentText()}"
+                          f"\nالتاريخ: {dstr(self.date)}", self.date):
+                return
             with db() as conn:
                 if self.is_editing:
                     res = editing.repost(
