@@ -258,7 +258,7 @@
     const dia = D.diamondOf(d), dv = D.diamondValueOf(d);
     if (!(dia > 0) && !(dv > 0)) return null;
     return h("div", { class: "dia-line small" }, h("span", null, T("💎 الماس")),
-      h("span", { class: "num" }, T("{0} جم", f2(dia))),
+      h("span", { class: "num" }, T("{0} قيراط", f2(dia))),
       dv > 0 ? [h("span", { class: "muted" }, "·"), h("span", null, T("قيمته")), h("span", { class: "num" }, icoCash(), T("{0} ريال", f2(dv)))] : null);
   }
 
@@ -665,7 +665,7 @@
     const f = fac ? -1 : 1, dia = f * ((dm && dm.diamond) || 0), dv = f * ((dm && dm.value) || 0);
     const dcell = h("div", { class: "ab dia" }, h("span", { class: "lb" }, T("💎 الماس")),
       z(dia) && z(dv) ? h("b", { class: "v muted" }, "—")
-        : [h("b", { class: "v" }, T("{0} جم", f2(dia))), h("span", { class: "w val" }, icoCash(), T("{0} ريال", f2(dv)))]);
+        : [h("b", { class: "v" }, T("{0} قيراط", f2(dia))), h("span", { class: "w val" }, icoCash(), T("{0} ريال", f2(dv)))]);
     return h("div", { class: "list-item acct", onclick: () => go(`shop/${x.id}`) },
       h("div", { class: "acct-top" },
         h("span", { class: "avatar" + (fac ? " fac" : "") }, fac ? ico("package", 20) : (x.name.trim()[0] || T("؟"))),
@@ -696,7 +696,7 @@
     const dm = D.allDiamonds(s)[id], fd = fac ? -1 : 1;
     if (dm && (Math.abs(dm.diamond) >= 0.0005 || Math.abs(dm.value) >= 0.005)) {
       v.append(h("div", { class: "note-bar info tap dia-kpi", style: { marginBottom: "12px" }, onclick: () => go(`statement/${id}?view=diamond`) },
-        h("span", null, T("💎 صافي الماس")), h("b", { class: "num" }, T("{0} جم", f2(fd * dm.diamond))),
+        h("span", null, T("💎 صافي الماس")), h("b", { class: "num" }, T("{0} قيراط", f2(fd * dm.diamond))),
         h("span", { class: "muted" }, "·"), h("span", null, T("قيمته")), h("b", { class: "num" }, icoCash(), T("{0} ريال", f2(fd * dm.value)))));
     }
     if (shop.agreedWage18) {
@@ -1248,7 +1248,7 @@
       const row = (a, b, cls, ic) => h("div", { class: "spread" + (cls ? " " + cls : "") }, h("span", null, a), h("span", { class: "num" }, ic ? ic() : null, b));
       totalsBox.append(row(T("عدد الأطقم"), String(sets)),
         row(T("إجمالي الوزن (عيار {0})", k), gw(t.totalW18, k), "", icoGold),
-        dia0 > 0 ? row(T("💎 إجمالي الماس (جم)"), f2(dia0)) : null,
+        dia0 > 0 ? row(T("💎 إجمالي الماس (قيراط)"), f2(dia0)) : null,
         dv0 > 0 ? row(T("💎 قيمة الماس (ريال) — للكشف فقط"), f2(dv0)) : null,
         row(T("إجمالي الأجور"), f2(t.wages), "", icoCash));
       if (inv.vat) totalsBox.append(row(T("ضريبة 15% على الأجور"), f2(t.vatAmt), "", icoCash));
@@ -1288,7 +1288,7 @@
         const dia0 = D.diamondOf(inv), dv0 = D.diamondValueOf(inv);
         const msg = T("{0} {1} — «{2}»\n", editing ? T("حفظ تعديل") : T("حفظ"), INV_TITLE[inv.kind], shopTitle(inv.shopId)) +
           T("{0} طقم · {1} جم عيار {2}", inv.lines.filter((l) => !l.wageOnly).length, gw(t.totalW18, partyK()), partyK()) +
-          (dia0 > 0 ? T(" · 💎 {0} جم", f2(dia0)) : "") + (dv0 > 0 ? T(" · قيمته {0} ريال", f2(dv0)) : "") + "\n" +
+          (dia0 > 0 ? T(" · 💎 {0} قيراط", f2(dia0)) : "") + (dv0 > 0 ? T(" · قيمته {0} ريال", f2(dv0)) : "") + "\n" +
           T("الأجور {0}{1} = {2} ريال", f2(t.wages), inv.vat ? T(" + ضريبة {0}", f2(t.vatAmt)) : "", f2(t.grand));
         if (!(await confirmSheet(msg, editing ? T("حفظ التعديل") : T("حفظ الفاتورة")))) return;
         const rec = D.saveInvoice(s, { ...inv, heldId: inv.heldId });
@@ -1331,7 +1331,7 @@
       h("div", { style: { marginTop: "2px" } }, detailsBtn), detailsBox,
       h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("الوزن (جم)"), reg), field(T("الأجور (ريال)"), wagesIn)),
       // قيمة الماس بعد خانته مباشرة — للعرض في كشف الماس فقط
-      h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("💎 الماس (جم)"), dia),
+      h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("💎 الماس (قيراط)"), dia),
         field(T("💎 قيمة الماس (ريال)"), diaVal)),
       h("div", { class: "fld", style: { marginTop: "8px" } }, h("span", null, T("صور الطقم")), photoBox, photoIn),
       photoStrip,
@@ -1719,7 +1719,7 @@
       }
       head = [T("التاريخ"), T("العملية"), T("الحركة"), T("الصافي")];
       bal = h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("صافي الماس")),
-        h("b", { class: "num" }, T("{0} جم", f2(f * res.diamond))), h("span", { class: "muted" }, "·"),
+        h("b", { class: "num" }, T("{0} قيراط", f2(f * res.diamond))), h("span", { class: "muted" }, "·"),
         h("span", { class: "muted" }, T("قيمته")), h("b", { class: "num" }, icoCash(), T("{0} ريال", f2(f * res.value))));
     } else {
       // «عليه · له · الرصيد» (1.11): في كل خانةٍ الذهب فوق والنقد تحته — ثم صفّ
@@ -1766,7 +1766,7 @@
       return;
     }
     if (mode === "gold") v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: {0} الذهب (جم عيار {1}) فوق، و{2} النقد والأجور (ريال) تحته.", P.ICO_GOLD, k, P.ICO_CASH) }));
-    else v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: 💎 الماس (جم) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.", P.ICO_CASH) }));
+    else v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: 💎 الماس (قيراط) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.", P.ICO_CASH) }));
     v.append(h("table", { class: "st-table" + (mode === "diamond" ? " dia" : " gold") },
       h("thead", null, h("tr", null, ...head.map((x) => h("th", null, x)))), tbody));
     if (n) v.append(h("div", { class: "muted small st-hint" }, T("اضغط على أي عملية لمعاينتها وصورها، ومنها تعديلها")));

@@ -61,5 +61,14 @@ with db(readonly=True) as conn:
     check("واختيار يومٍ آخر (أمس)", "الوارد من التصنيع" in html_y and "أمس" in html_y)
     html_bad = models_web.page_html(conn, {"tab": "day", "d": "x';--"}, "/m/x")
     check("تاريخٌ غير صالح في الرابط يُعرض اليوم بأمان", "حركة اليوم" in html_bad and "x';--" not in html_bad)
+# 5.2.8: كل مصدرٍ باسم شاشته بالعربية — لا اسم الجدول (كان «workshop_losses» يظهر في رابط المدير)
+import re  # noqa: E402
+from models.journal import OP_LABELS, _doc_info  # noqa: E402
+from services.accounting_engine import _DOC_PREFIX  # noqa: E402
+miss = [k for k in _DOC_PREFIX if not re.search(r"[؀-ۿ]", OP_LABELS.get(k, ""))]
+check("كل مصادر القيود لها اسمٌ عربي", not miss, miss)
+with db(readonly=True) as conn:
+    check("فواقد الورشة باسم شاشتها", _doc_info(conn, "workshop_losses", 1, {})[1] == "تسوية فواقد الورشة",
+          _doc_info(conn, "workshop_losses", 1, {}))
 print(f"{ok} ✔ · {bad} ✘")
 sys.exit(1 if bad else 0)

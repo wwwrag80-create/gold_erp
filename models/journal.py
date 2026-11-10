@@ -55,6 +55,12 @@ OP_LABELS = {
     "purchases": "مشتريات", "entities": "رصيد افتتاحي",
     "payroll_ledger": "راتب", "tax_debit_notes": "إشعار ضريبي",
     "tax_sales": "مبيعات ضريبية",
+    # 5.2.8: كل مصدرٍ باسم شاشته — لا اسم الجدول بالإنجليزية (رابط المدير وغيره)
+    "workshop_losses": "تسوية فواقد الورشة", "mfg_salaries": "رواتب العمال والإدارة",
+    "manual": "قيد يومي", "opening_entry": "رصيد افتتاحي",
+    "year_close": "إقفال السنة", "year_open": "افتتاح السنة",
+    "depreciation": "إهلاك", "prepaid": "مصروف مقدّم", "prepaid_amort": "إطفاء مصروف مقدّم",
+    "accrual": "استحقاق", "accrual_rev": "عكس استحقاق",
     None: "قيد يومي",
 }
 

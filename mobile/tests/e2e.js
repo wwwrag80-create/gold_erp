@@ -113,10 +113,10 @@ function check(name, cond, detail) {
   const html0 = await page.content();
   check("لا خانة موديل ولا فصوص ولا «الأحجار بعد الخصم»", !html0.includes("رقم الموديل") && !html0.includes("الفصوص") && !html0.includes("بعد الخصم"));
   check("وخانة «الطقم (اختياري)»", html0.includes("الطقم (اختياري)") && !html0.includes("رقم التشغيل"));
-  check("خانة «أحجار/فصوص» وخانة الماس وخانة الصورة", html0.includes("أحجار/فصوص") && html0.includes("💎 الماس (جم)") && html0.includes("صور الطقم"));
+  check("خانة «أحجار/فصوص» وخانة الماس وخانة الصورة", html0.includes("أحجار/فصوص") && html0.includes("💎 الماس (قيراط)") && html0.includes("صور الطقم"));
   check("وبعد خانة الماس مباشرةً «قيمة الماس»", await page.evaluate(() => {
     const ls = [...document.querySelectorAll("label.f")].map((x) => x.textContent.trim());
-    const i = ls.findIndex((x) => x.startsWith("💎 الماس (جم)"));
+    const i = ls.findIndex((x) => x.startsWith("💎 الماس (قيراط)"));
     return i >= 0 && (ls[i + 1] || "").startsWith("💎 قيمة الماس (ريال)"); }));
   await fill("الطقم", "T1");
   await page.locator("label.f", { hasText: "الطقم" }).locator("input").press("Enter");
@@ -339,7 +339,7 @@ function check(name, cond, detail) {
   check("اختياره يعبّئ اسمه ووزنه",
     (await page.locator("label.f", { hasText: "الطقم" }).locator("input").inputValue()) === "T1" &&
     (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "12.00");
-  check("ويحمل ماسه 0.50 وصورتيه", (await page.locator("label.f", { hasText: "💎 الماس (جم)" }).locator("input").inputValue()) === "0.50" &&
+  check("ويحمل ماسه 0.50 وصورتيه", (await page.locator("label.f", { hasText: "💎 الماس (قيراط)" }).locator("input").inputValue()) === "0.50" &&
     (await page.locator(".photo-pick img.thumb").count()) === 2);
   check("وقيمة ماس المصنع لا تُنقل للبيع (كالأجور)", (await page.locator("label.f", { hasText: "💎 قيمة الماس" }).locator("input").inputValue()) === "");
   await fill("الأجور", "180");
@@ -350,7 +350,7 @@ function check(name, cond, detail) {
   await page.waitForURL(/#\/doc\/inv\//);
   await page.waitForFunction(() => (document.querySelector(".preview iframe") || {}).srcdoc && document.querySelector(".preview iframe").srcdoc.includes("data:image/jpeg"));
   check("الفاتورة المطبوعة فيها صورتا الطقم وعمود الماس", await page.evaluate(() => {
-    const x = document.querySelector(".preview iframe").srcdoc; return x.includes("<th>الصورة</th>") && x.includes('class="phs"') && x.includes("💎 الماس (جم)"); }));
+    const x = document.querySelector(".preview iframe").srcdoc; return x.includes("<th>الصورة</th>") && x.includes('class="phs"') && x.includes("💎 الماس (قيراط)"); }));
   check("وتحتها كل صورةٍ وحدها كاملة", (await page.locator("#view .photo-fig").count()) === 2);
   await shot("sale_doc_photo");
   check("رُحّلت S-00002، ولا طقم معي (المرتجع بالوزن بلا اسمٍ ليس طقماً)", (await text("#bar h1")).includes("S-00002") &&
@@ -481,15 +481,15 @@ function check(name, cond, detail) {
   await page.waitForURL(/view=diamond/);
   await page.waitForTimeout(400);
   const dk = (await text(".st-bal")).replace(/\s+/g, " ");
-  check("كشف الألماس للنخبة: صافي 0.50 جم وقيمته 900.00 ريال، والطقم T1 (0.50 · 900.00) في الجدول",
-    dk.includes("0.50") && dk.includes("900.00") && (await text(".st-table")).includes("T1 (0.50 · 900.00)"), dk);
+  check("كشف الألماس للنخبة: صافي 0.50 قيراط وقيمته 900.00 ريال، والطقم T1 (0.50 · 900.00) في الجدول",
+    dk.includes("0.50 قيراط") && dk.includes("900.00") && (await text(".st-table")).includes("T1 (0.50 · 900.00)"), dk);
   check("وفي كل خانة: الماس فوق وقيمته تحته", (await page.locator(".st-table.dia tr.tap").first().locator("td.m").count()) === 2 &&
     (await page.locator(".st-table.dia tr.tap").first().locator("td.m.b .gl").innerText()).includes("0.50") &&
     (await page.locator(".st-table.dia tr.tap").first().locator("td.m.b .cl").innerText()).includes("900.00"));
   check("وصورته المُرسَلة: «كشف حساب الماس» بالقيمة تحت الماس", await page.evaluate(() => {
     const id = App.state.shops.find((x) => x.name === "محل النخبة").id;
     const x = PrintDoc.statementHtml(App.state, id, null, null, "diamond");
-    return x.includes("كشف حساب الماس") && x.includes("T1 (0.50 · 900.00)") && x.includes("0.50 جم · 900.00 ريال"); }));
+    return x.includes("كشف حساب الماس") && x.includes("T1 (0.50 · 900.00)") && x.includes("0.50 قيراط · 900.00 ريال"); }));
   check("والقيمة لا تدخل رصيد النخبة", await page.evaluate(() => {
     const sh = App.state.shops.find((x) => x.name === "محل النخبة");
     const inv = App.state.invoices.find((d) => d.shopId === sh.id && Domain.diamondValueOf(d) === 900);
@@ -509,10 +509,10 @@ function check(name, cond, detail) {
   check("الحسابات ← العملاء: عميلان", (await page.locator(".list-item .avatar").count()) === 2);
   // 1.13.4: بطاقة الحساب — الاسم وعياره، ثم الذهب · الأجور · الماس (وقيمته تحته)
   const nk = page.locator(".list-item.acct", { hasText: "محل النخبة" });
-  check("بطاقة الحساب: عياره، ثم الذهب · الأجور · الماس 0.50 جم وقيمته 900.00 ريال",
+  check("بطاقة الحساب: عياره، ثم الذهب · الأجور · الماس 0.50 قيراط وقيمته 900.00 ريال",
     (await nk.locator(".acct-bals .ab").count()) === 3 && (await nk.locator(".badge.kar").innerText()).includes("عيار 18") &&
     (await nk.locator(".ab").nth(0).innerText()).includes("الذهب") && (await nk.locator(".ab").nth(1).innerText()).includes("الأجور") &&
-    (await nk.locator(".ab.dia").innerText()).includes("0.50 جم") && (await nk.locator(".ab.dia").innerText()).includes("900.00 ريال"),
+    (await nk.locator(".ab.dia").innerText()).includes("0.50 قيراط") && (await nk.locator(".ab.dia").innerText()).includes("900.00 ريال"),
     (await nk.innerText()).replace(/\s+/g, " "));
   check("وحسابٌ بلا ماس: «—» في خانة الماس", (await page.locator(".list-item.acct", { hasText: "محل الأمانة" }).locator(".ab.dia").innerText()).includes("—"));
   await shot("accounts_cards");
@@ -776,7 +776,7 @@ function check(name, cond, detail) {
   await page.waitForURL(/#\/shop\//);
   await page.waitForTimeout(250);
   const dOnly = page.locator(".list-item", { hasText: "ماس فقط" }).first();
-  check("بيع الماس وحده في عمليات الحساب: «ماس فقط» وتحته 0.20 جم · قيمته 300.00 ريال",
+  check("بيع الماس وحده في عمليات الحساب: «ماس فقط» وتحته 0.20 قيراط · قيمته 300.00 ريال",
     (await dOnly.count()) === 1 && (await dOnly.locator(".dia-line").innerText()).includes("0.20") &&
     (await dOnly.locator(".dia-line").innerText()).includes("300.00"), (await page.locator("#view").innerText()).slice(0, 400));
   await shot("account_diamond_only");
