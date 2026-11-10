@@ -138,5 +138,12 @@
   "file": "jadeite-mobile-1.13.2.apk",
   "sha256": "75b20c9eaf30db0bf94311924a0a91f1f5d2c04582d1941a3f4c48a0c511c334",
   "notes": "تحديث"
+ },
+ {
+  "version": "1.13.5",
+  "code": 26,
+  "file": "jadeite-mobile-1.13.5.apk",
+  "sha256": "39b3e905fce0f1af718b0633cdd2edfb50acfe5a9b998a9eaa93646d9471d146",
+  "notes": "تحديث"
  }
 ]
