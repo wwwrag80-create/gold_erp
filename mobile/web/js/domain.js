@@ -865,6 +865,22 @@
     for (const li of doc.lines || []) if (!li.wageOnly) s += Number(li.diamondValue || 0);
     return R(s, 2);
   }
+  // صافي الماس وقيمته لكل حساب (كصافي كشف الماس، بلا فترة): {id: {diamond, value}}
+  // البيع والإرجاع للمصنع «+» والمرتجع والبضاعة «−» — وللعرض يُقلب للمصنع كالكشف
+  function allDiamonds(st) {
+    const out = {};
+    for (const s of st.shops) out[s.id] = { diamond: 0, value: 0 };
+    for (const d of st.invoices) {
+      const o = out[d.shopId];
+      if (!o) continue;
+      const dia = diamondOf(d), val = diamondValueOf(d);
+      if (!(dia > 0) && !(val > 0)) continue;
+      const sg = d.kind === "sale" || d.kind === "purchase_return" ? 1 : -1;
+      o.diamond = R(o.diamond + sg * dia, 3);
+      o.value = R(o.value + sg * val, 2);
+    }
+    return out;
+  }
   // الماس فوق وقيمته تحته (كالذهب والأجور): لكل صفٍّ حركة الماس `dd/dc`
   // ورصيده `bal`، وحركة القيمة `vd/vc` ورصيدها `vbal`
   function diamondStatement(st, partyId, from, to) {
@@ -940,7 +956,7 @@
     woHistory, woLast, setTracks, searchSets, searchKey, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, debtSummary, pieceById, docOrder,
     partyKarat, openHold, saveOpenHold,
-    diamondOf, diamondValueOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
+    diamondOf, diamondValueOf, diamondStatement, allDiamonds, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

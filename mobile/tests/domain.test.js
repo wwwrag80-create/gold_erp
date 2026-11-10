@@ -331,6 +331,9 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   D.saveInvoice(t, { kind: "purchase", shopId: fa.id, date: "2026-04-01", lines: [D.buildLine({ wo: "V9", reg: 3, wages: 5, diamond: 0.1, diamondValue: 250 })] });
   const df = D.diamondStatement(t, fa.id);
   check("وللمصنع: البضاعة سالبة كالماس (−250)", df.value === -250 && df.vminus === 250 && df.diamond === -0.1);
+  const ad = D.allDiamonds(t);
+  check("صافي الماس وقيمته لكل حساب = صافي كشفه", ad[sh.id].diamond === ds.diamond && ad[sh.id].value === ds.value &&
+    ad[fa.id].diamond === df.diamond && ad[fa.id].value === df.value, ad);
 }
 
 // ══ الممتلكات: ذهب المصانع عندي، وذهبي عند العملاء ══

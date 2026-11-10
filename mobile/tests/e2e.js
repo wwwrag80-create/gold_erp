@@ -507,6 +507,24 @@ function check(name, cond, detail) {
   await page.waitForURL(/#\/customers/);
   await page.waitForTimeout(200);
   check("الحسابات ← العملاء: عميلان", (await page.locator(".list-item .avatar").count()) === 2);
+  // 1.13.4: بطاقة الحساب — الاسم وعياره، ثم الذهب · الأجور · الماس (وقيمته تحته)
+  const nk = page.locator(".list-item.acct", { hasText: "محل النخبة" });
+  check("بطاقة الحساب: عياره، ثم الذهب · الأجور · الماس 0.50 جم وقيمته 900.00 ريال",
+    (await nk.locator(".acct-bals .ab").count()) === 3 && (await nk.locator(".badge.kar").innerText()).includes("عيار 18") &&
+    (await nk.locator(".ab").nth(0).innerText()).includes("الذهب") && (await nk.locator(".ab").nth(1).innerText()).includes("الأجور") &&
+    (await nk.locator(".ab.dia").innerText()).includes("0.50 جم") && (await nk.locator(".ab.dia").innerText()).includes("900.00 ريال"),
+    (await nk.innerText()).replace(/\s+/g, " "));
+  check("وحسابٌ بلا ماس: «—» في خانة الماس", (await page.locator(".list-item.acct", { hasText: "محل الأمانة" }).locator(".ab.dia").innerText()).includes("—"));
+  await shot("accounts_cards");
+  await nk.click();
+  await page.waitForURL(/#\/shop\//);
+  await page.waitForTimeout(200);
+  check("صفحة الحساب: صافي الماس 0.50 وقيمته 900.00 — وتحت فاتورة البيع ماسها وقيمتها",
+    (await text(".dia-kpi")).includes("0.50") && (await text(".dia-kpi")).includes("900.00") &&
+    (await page.locator(".list-item .dia-line", { hasText: "900.00" }).count()) === 1, await text(".dia-kpi"));
+  await tap("#tabs button[data-tab=customers]");
+  await page.waitForURL(/#\/customers$/);
+  await page.waitForTimeout(200);
   await tap(".seg button:has-text('المصانع')");
   await page.waitForURL(/view=factories/);
   await page.waitForTimeout(200);
@@ -741,6 +759,27 @@ function check(name, cond, detail) {
   await page.goto(url + "#/customers?view=factories");
   await page.waitForTimeout(200);
   await shot("factories_dark");
+
+  // 1.13.4: بيعٌ بالماس وقيمته فقط — ملخّصه «ماس فقط» وتحته ماسه وقيمته
+  await page.goto(url + "#/invoice/new?kind=sale");
+  await page.waitForSelector(".sheet");
+  await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
+  await page.waitForTimeout(200);
+  await fill("💎 الماس", "0.2");
+  await fill("💎 قيمة الماس", "300");
+  await tap(".footer-bar .btn:has-text('حفظ الفاتورة')");
+  await confirm("حفظ الفاتورة");
+  await page.waitForURL(/#\/doc\/inv\//);
+  await page.goto(url + "#/customers");
+  await page.waitForTimeout(250);
+  await page.locator(".list-item.acct", { hasText: "محل الأمانة" }).click();
+  await page.waitForURL(/#\/shop\//);
+  await page.waitForTimeout(250);
+  const dOnly = page.locator(".list-item", { hasText: "ماس فقط" }).first();
+  check("بيع الماس وحده في عمليات الحساب: «ماس فقط» وتحته 0.20 جم · قيمته 300.00 ريال",
+    (await dOnly.count()) === 1 && (await dOnly.locator(".dia-line").innerText()).includes("0.20") &&
+    (await dOnly.locator(".dia-line").innerText()).includes("300.00"), (await page.locator("#view").innerText()).slice(0, 400));
+  await shot("account_diamond_only");
 
   check("بلا أي خطأ في الصفحة", !errors.length, errors.slice(0, 3).join(" | "));
   await browser.close();

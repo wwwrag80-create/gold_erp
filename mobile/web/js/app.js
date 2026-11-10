@@ -230,7 +230,11 @@
   const unitK = (k) => T("جم عيار {0}", k);
   function docSummary(d) {
     const k = pk(D.shopById(st(), d.shopId));
-    if (isInvKind(d.kind)) return T("{0} {1} · أجور {2}", gw(d.totalW18, k), unitK(k), f2(d.grand));
+    if (isInvKind(d.kind)) {
+      // فاتورةٌ بالماس وحده (بلا وزنٍ ولا أجور): «ماس فقط» — وتفصيله في سطره تحتها
+      if (!(d.totalW18 > 0) && !(d.grand > 0) && (D.diamondOf(d) > 0 || D.diamondValueOf(d) > 0)) return T("ماس فقط");
+      return T("{0} {1} · أجور {2}", gw(d.totalW18, k), unitK(k), f2(d.grand));
+    }
     const parts = [];
     if (d.gold18) parts.push(`${gw(d.gold18, k)} ${unitK(k)}`);
     if (d.cash) parts.push(T("{0} ريال", f2(d.cash)));
@@ -245,7 +249,17 @@
         h("div", { class: "spread" }, h("span", { class: "t", text: shopTitle(d.shopId) }), kindBadge(d.kind)),
         h("div", { class: "spread muted small" },
           h("span", null, h("span", { dir: "ltr", text: d.no }), " · ", h("span", { dir: "ltr", text: dmy(d.date) })),
-          h("span", { class: "num", text: docSummary(d) }))));
+          h("span", { class: "num", text: docSummary(d) })),
+        diaLine(d)));
+  }
+  // ماس الفاتورة وقيمته — سطرٌ تحت ملخّصها في قوائم العمليات
+  function diaLine(d) {
+    if (!isInvKind(d.kind)) return null;
+    const dia = D.diamondOf(d), dv = D.diamondValueOf(d);
+    if (!(dia > 0) && !(dv > 0)) return null;
+    return h("div", { class: "dia-line small" }, h("span", null, T("💎 الماس")),
+      h("span", { class: "num" }, T("{0} جم", f2(dia))),
+      dv > 0 ? [h("span", { class: "muted" }, "·"), h("span", null, T("قيمته")), h("span", { class: "num" }, icoCash(), T("{0} ريال", f2(dv)))] : null);
   }
 
   // ══ صور الأطقم: مخزنٌ وحده، ومصغّرةٌ تُحمَّل عند الحاجة ══
@@ -620,14 +634,8 @@
           ? T("لا مصانع بعد — اضغط «+ مصنع» لإضافة المصنع الذي تأخذ منه البضاعة وتدفع له.")
           : T("لا عملاء بعد — اضغط «+ عميل» لإضافة أول عميل.")));
       }
-      for (const x of arr) {
-        list.append(h("div", { class: "list-item", onclick: () => go(`shop/${x.id}`) },
-          h("span", { class: "avatar" + (fac ? " fac" : "") }, fac ? ico("package", 20) : (x.name.trim()[0] || T("؟"))),
-          h("div", { class: "grow" }, h("div", { class: "t", text: x.name }),
-            x.phone ? h("div", { class: "muted small", dir: "ltr", style: { textAlign: root.I18N.start }, text: x.phone }) : null),
-          h("div", { style: { textAlign: root.I18N.end }, class: "small num" },
-            h("div", null, goldBal(bals[x.id].gold18, fac, pk(x))), h("div", null, cashBal(bals[x.id].cash, fac)))));
-      }
+      const dias = D.allDiamonds(s);
+      for (const x of arr) list.append(acctCard(x, fac, bals[x.id], dias[x.id]));
     };
     const chips = fac ? [["name", T("بالاسم")], ["gold", T("الأكثر ذهباً عليّ")], ["cash", T("الأكثر نقداً عليّ")]]
       : [["name", T("بالاسم")], ["gold", T("الأكثر ذهباً عليه")], ["cash", T("الأكثر نقداً عليه")]];
@@ -644,6 +652,32 @@
     render();
   }
 
+  // بطاقة الحساب (1.13.4): الاسم وعياره فوق، ثم ثلاث خانات متساوية —
+  // الذهب · الأجور · الماس (وقيمته تحته) — كلٌّ برقمه وكلمته (عليه/له)
+  function acctCard(x, fac, b, dm) {
+    const k = pk(x);
+    const z = (v) => Math.abs(v) < 0.005;
+    const bcell = (label, ic, v, unit) => h("div", { class: "ab" }, h("span", { class: "lb" }, ic, label),
+      z(v) ? h("b", { class: "v muted" }, "0.00")
+        : h("b", { class: "v " + ((fac ? v < 0 : v > 0) ? "bal-on" : "bal-for") }, `${f2(Math.abs(v))} ${unit}`),
+      z(v) ? null : h("span", { class: "w " + ((fac ? v < 0 : v > 0) ? "bal-on" : "bal-for") }, balWord(v, fac)));
+    // الماس كالكشف: للمصنع البضاعة «+» من جهته
+    const f = fac ? -1 : 1, dia = f * ((dm && dm.diamond) || 0), dv = f * ((dm && dm.value) || 0);
+    const dcell = h("div", { class: "ab dia" }, h("span", { class: "lb" }, T("💎 الماس")),
+      z(dia) && z(dv) ? h("b", { class: "v muted" }, "—")
+        : [h("b", { class: "v" }, T("{0} جم", f2(dia))), h("span", { class: "w val" }, icoCash(), T("{0} ريال", f2(dv)))]);
+    return h("div", { class: "list-item acct", onclick: () => go(`shop/${x.id}`) },
+      h("div", { class: "acct-top" },
+        h("span", { class: "avatar" + (fac ? " fac" : "") }, fac ? ico("package", 20) : (x.name.trim()[0] || T("؟"))),
+        h("div", { class: "grow" }, h("div", { class: "t", text: x.name }),
+          x.phone ? h("div", { class: "muted small", dir: "ltr", style: { textAlign: root.I18N.start }, text: x.phone }) : null),
+        h("span", { class: "badge kar" }, T("عيار {0}", k))),
+      h("div", { class: "acct-bals" },
+        bcell(T("الذهب"), icoGold(), G.g(b.gold18, k), T("جم")),
+        bcell(fac ? T("النقد") : T("الأجور"), icoCash(), b.cash, T("ريال")),
+        dcell));
+  }
+
   function shopPage(id) {
     const s = st();
     const shop = D.shopById(s, id);
@@ -658,6 +692,13 @@
     v.append(h("div", { class: "kpis" },
       h("div", { class: "kpi" }, h("b", null, T("رصيد الذهب (عيار {0})", k)), h("div", { class: "v num" }, goldBal(b.gold18, fac, k))),
       h("div", { class: "kpi" }, h("b", null, fac ? T("رصيد النقد والأجور") : T("رصيد الأجور والنقد")), h("div", { class: "v num" }, cashBal(b.cash, fac)))));
+    // وصافي الماس وقيمته — إن كان للحساب ماس (يفتح كشف الماس)
+    const dm = D.allDiamonds(s)[id], fd = fac ? -1 : 1;
+    if (dm && (Math.abs(dm.diamond) >= 0.0005 || Math.abs(dm.value) >= 0.005)) {
+      v.append(h("div", { class: "note-bar info tap dia-kpi", style: { marginBottom: "12px" }, onclick: () => go(`statement/${id}?view=diamond`) },
+        h("span", null, T("💎 صافي الماس")), h("b", { class: "num" }, T("{0} جم", f2(fd * dm.diamond))),
+        h("span", { class: "muted" }, "·"), h("span", null, T("قيمته")), h("b", { class: "num" }, icoCash(), T("{0} ريال", f2(fd * dm.value)))));
+    }
     if (shop.agreedWage18) {
       v.append(h("div", { class: "note-bar info", style: { marginBottom: "12px" } },
         T("{0}: {1} ريال لكل جرام عيار {2}", fac ? T("أجرة المصنع المتفق عليها") : T("الأجرة المتفق عليها"), f2(G.rate(shop.agreedWage18, k)), k)));

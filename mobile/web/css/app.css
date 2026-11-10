@@ -618,3 +618,21 @@ body.no-tabs .web-bk { bottom: calc(16px + env(safe-area-inset-bottom)); }
 .chip-btn.kar { flex: 0 0 auto; color: var(--goldDim); }
 .chip-btn.kar.alt { border-color: var(--gold); background: var(--goldSoft); }
 .st-kview { margin-bottom: 10px; }
+
+/* 1.13.4: بطاقة الحساب — الاسم وعياره فوق، ثم الذهب · الأجور · الماس (وقيمته تحته) */
+.list-item.acct { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 12px 10px; }
+.acct-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.acct-top .grow { min-width: 0; }
+.acct-top .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-top .badge.kar { flex: 0 0 auto; font-size: 12px; }
+.acct-bals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); padding-top: 9px; }
+.acct-bals .ab { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 0 4px; text-align: center; }
+.acct-bals .ab + .ab { border-inline-start: 1px solid var(--line); }
+.acct-bals .lb { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.acct-bals .v { font-size: 14.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.acct-bals .w { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.acct-bals .w.val { color: var(--muted); font-weight: 600; font-size: 12px; }
+.acct-bals .v.muted { font-weight: 600; }
+/* ماس الفاتورة وقيمته تحت ملخّصها في قوائم العمليات */
+.dia-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin-top: 3px; color: var(--ink); }
+.dia-kpi { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; cursor: pointer; }
