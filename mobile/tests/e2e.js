@@ -114,10 +114,15 @@ function check(name, cond, detail) {
   check("لا خانة موديل ولا فصوص ولا «الأحجار بعد الخصم»", !html0.includes("رقم الموديل") && !html0.includes("الفصوص") && !html0.includes("بعد الخصم"));
   check("وخانة «الطقم (اختياري)»", html0.includes("الطقم (اختياري)") && !html0.includes("رقم التشغيل"));
   check("خانة «أحجار/فصوص» وخانة الماس وخانة الصورة", html0.includes("أحجار/فصوص") && html0.includes("💎 الماس (جم)") && html0.includes("صور الطقم"));
+  check("وبعد خانة الماس مباشرةً «قيمة الماس»", await page.evaluate(() => {
+    const ls = [...document.querySelectorAll("label.f")].map((x) => x.textContent.trim());
+    const i = ls.findIndex((x) => x.startsWith("💎 الماس (جم)"));
+    return i >= 0 && (ls[i + 1] || "").startsWith("💎 قيمة الماس (ريال)"); }));
   await fill("الطقم", "T1");
   await page.locator("label.f", { hasText: "الطقم" }).locator("input").press("Enter");
   await fill("الوزن (جم)", "12");
   await fill("💎 الماس", "0.5");
+  await fill("💎 قيمة الماس", "750");
   check("خانة الصور تقبل أكثر من صورة", await page.evaluate(() => document.querySelector('input[type=file][accept="image/*"]').multiple));
   await page.locator('input[type=file][accept="image/*"]').setInputFiles([{ name: "t1.png", mimeType: "image/png", buffer: PHOTO },
     { name: "t1b.png", mimeType: "image/png", buffer: PHOTO }]);
@@ -131,6 +136,8 @@ function check(name, cond, detail) {
   check("أجر المصنع المتفق عليه: 12 × 8 = 96", (await l1.innerText()).includes("96.00"));
   check("والسطر بصورته (وعليها +1) وماسه", (await l1.locator("img.thumb").count()) === 1 && (await l1.locator(".thumb-n").innerText()) === "+1" &&
     (await l1.innerText()).includes("0.50"));
+  check("وقيمة ماسه 750.00 — ولا تدخل الأجور (96.00)", (await l1.innerText()).includes("750.00") &&
+    (await text(".totals")).includes("750.00") && (await page.locator(".totals .spread", { hasText: "إجمالي الأجور" }).innerText()).includes("96.00"));
   check("وخانة الصورة تفرغ للسطر التالي", (await page.locator(".photo-pick img.thumb").count()) === 0);
   await fill("الوزن (جم)", "20");
   await shot("purchase_editor");
@@ -332,9 +339,11 @@ function check(name, cond, detail) {
   check("اختياره يعبّئ اسمه ووزنه",
     (await page.locator("label.f", { hasText: "الطقم" }).locator("input").inputValue()) === "T1" &&
     (await page.locator("label.f", { hasText: "الوزن (جم)" }).locator("input").inputValue()) === "12.00");
-  check("ويحمل ماسه 0.50 وصورتيه", (await page.locator("label.f", { hasText: "الماس" }).locator("input").inputValue()) === "0.50" &&
+  check("ويحمل ماسه 0.50 وصورتيه", (await page.locator("label.f", { hasText: "💎 الماس (جم)" }).locator("input").inputValue()) === "0.50" &&
     (await page.locator(".photo-pick img.thumb").count()) === 2);
+  check("وقيمة ماس المصنع لا تُنقل للبيع (كالأجور)", (await page.locator("label.f", { hasText: "💎 قيمة الماس" }).locator("input").inputValue()) === "");
   await fill("الأجور", "180");
+  await fill("💎 قيمة الماس", "900");
   await tap("button:has-text('+ إضافة')");
   await tap(".footer-bar .btn:has-text('حفظ الفاتورة')");
   await confirm("حفظ الفاتورة");
@@ -472,10 +481,19 @@ function check(name, cond, detail) {
   await page.waitForURL(/view=diamond/);
   await page.waitForTimeout(400);
   const dk = (await text(".st-bal")).replace(/\s+/g, " ");
-  check("كشف الألماس للنخبة: صافي 0.50 جم، والطقم T1 (0.50) في الجدول", dk.includes("0.50") && (await text(".st-table")).includes("T1 (0.50)"), dk);
-  check("وصورته المُرسَلة: «كشف حساب الماس»", await page.evaluate(() => {
+  check("كشف الألماس للنخبة: صافي 0.50 جم وقيمته 900.00 ريال، والطقم T1 (0.50 · 900.00) في الجدول",
+    dk.includes("0.50") && dk.includes("900.00") && (await text(".st-table")).includes("T1 (0.50 · 900.00)"), dk);
+  check("وفي كل خانة: الماس فوق وقيمته تحته", (await page.locator(".st-table.dia tr.tap").first().locator("td.m").count()) === 2 &&
+    (await page.locator(".st-table.dia tr.tap").first().locator("td.m.b .gl").innerText()).includes("0.50") &&
+    (await page.locator(".st-table.dia tr.tap").first().locator("td.m.b .cl").innerText()).includes("900.00"));
+  check("وصورته المُرسَلة: «كشف حساب الماس» بالقيمة تحت الماس", await page.evaluate(() => {
     const id = App.state.shops.find((x) => x.name === "محل النخبة").id;
-    const x = PrintDoc.statementHtml(App.state, id, null, null, "diamond"); return x.includes("كشف حساب الماس") && x.includes("T1 (0.50)"); }));
+    const x = PrintDoc.statementHtml(App.state, id, null, null, "diamond");
+    return x.includes("كشف حساب الماس") && x.includes("T1 (0.50 · 900.00)") && x.includes("0.50 جم · 900.00 ريال"); }));
+  check("والقيمة لا تدخل رصيد النخبة", await page.evaluate(() => {
+    const sh = App.state.shops.find((x) => x.name === "محل النخبة");
+    const inv = App.state.invoices.find((d) => d.shopId === sh.id && Domain.diamondValueOf(d) === 900);
+    return inv && inv.wages === 180 && inv.grand === 180; }));
   await tap(".st-period");
   await page.waitForSelector(".sheet .chip");
   await page.locator(".sheet .chip", { hasText: "هذا الشهر" }).click();

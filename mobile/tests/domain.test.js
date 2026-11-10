@@ -304,6 +304,35 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("والحساب: 3 جم و75 ريال عليه", D.balance(t, sh.id).gold18 === 3 && D.balance(t, sh.id).cash === 75);
 }
 
+// ══ قيمة الماس (1.13.3): للعرض في كشف الماس فقط — لا تدخل الأجور ولا الإجمالي ولا الرصيد ══
+{
+  const t = D.newState();
+  const sh = D.saveShop(t, { name: "محل القيمة" });
+  const fa = D.saveShop(t, { name: "مصنع القيمة", type: "factory" });
+  const l1 = D.buildLine({ wo: "V1", reg: 10, wages: 90, diamond: 0.5, diamondValue: 1500.555 });
+  check("السطر يحمل قيمة ماسه (1500.56)", l1.diamondValue === 1500.56 && l1.wages === 90, l1.diamondValue);
+  check("والتعبئة منه تنقلها", D.lineToEntry(l1, 18).diamondValue === 1500.56);
+  check("وسطرٌ بلا قيمة: صفر", D.buildLine({ reg: 1 }).diamondValue === 0 && D.buildLine({ wages: 5 }).diamondValue === 0);
+  check("قيمة الماس وحدها تكفي سطراً (لا «أجور فقط»)", !D.buildLine({ diamondValue: 200 }).wageOnly);
+  const s1 = D.saveInvoice(t, { kind: "sale", shopId: sh.id, date: "2026-04-01",
+    lines: [l1, D.buildLine({ wo: "V2", reg: 5, wages: 40, diamond: 0.25, diamondValue: 500 })] });
+  check("لا تدخل الأجور ولا الإجمالي: 130 ريال", s1.wages === 130 && s1.grand === 130 && D.diamondValueOf(s1) === 2000.56, [s1.wages, s1.grand]);
+  check("ولا رصيد الحساب: 15 جم و130 ريال", D.balance(t, sh.id).gold18 === 15 && D.balance(t, sh.id).cash === 130);
+  D.saveInvoice(t, { kind: "sale_return", shopId: sh.id, date: "2026-04-03",
+    lines: [D.buildLine({ wo: "V2", reg: 5, wages: 40, diamond: 0.25, diamondValue: 500 })] });
+  D.saveInvoice(t, { kind: "sale", shopId: sh.id, date: "2026-04-04", lines: [D.buildLine({ wo: "V3", reg: 2, wages: 10, diamondValue: 300 })] });
+  const ds = D.diamondStatement(t, sh.id);
+  check("كشف الماس: القيمة تحت الماس — بيع 2000.56 · مرتجع 500 · بيع 300 = 1800.56",
+    ds.rows.length === 3 && ds.value === 1800.56 && ds.vplus === 2300.56 && ds.vminus === 500 && ds.diamond === 0.5, ds);
+  check("ولكل صفٍّ حركة القيمة ورصيدها", ds.rows[1].vc === 500 && ds.rows[1].vbal === 1500.56 && ds.rows[2].vd === 300 && ds.rows[2].dd === 0);
+  check("وأطقم كل فاتورة بماسها وقيمته", ds.rows[0].sets.map((x) => `${x.name}:${x.diamond}:${x.value}`).join() === "V1:0.5:1500.56,V2:0.25:500");
+  const dp = D.diamondStatement(t, sh.id, "2026-04-02", null);
+  check("من تاريخ: رصيد القيمة السابق 2000.56", dp.rows[0].kind === "prev" && dp.rows[0].vbal === 2000.56 && dp.value === 1800.56, dp.rows[0]);
+  D.saveInvoice(t, { kind: "purchase", shopId: fa.id, date: "2026-04-01", lines: [D.buildLine({ wo: "V9", reg: 3, wages: 5, diamond: 0.1, diamondValue: 250 })] });
+  const df = D.diamondStatement(t, fa.id);
+  check("وللمصنع: البضاعة سالبة كالماس (−250)", df.value === -250 && df.vminus === 250 && df.diamond === -0.1);
+}
+
 // ══ الممتلكات: ذهب المصانع عندي، وذهبي عند العملاء ══
 {
   const t = D.newState();

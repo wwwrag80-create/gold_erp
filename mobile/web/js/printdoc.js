@@ -157,22 +157,24 @@
     // عيار حساب العميل/المصنع
     const k = pK(st, inv.shopId);
     const title = (INV_TITLE[inv.kind] || T("فاتورة")) + (inv.vat ? T(" ضريبية") : "");
-    const anyDia = inv.lines.some((l) => l.diamond > 0);
+    // عمود الماس، وبعده قيمة الماس (ريال) — للعرض: لا تدخل الأجور ولا الإجمالي
+    const anyDv = inv.lines.some((l) => !l.wageOnly && l.diamondValue > 0);
+    const anyDia = anyDv || inv.lines.some((l) => l.diamond > 0);
     let rows = "", n = 0;
     for (const li of inv.lines) {
       n++;
       if (li.wageOnly) {
-        rows += T("<tr><td>{0}</td><td class=\"t\" colspan=\"{1}\">أجور فقط{2}</td>\n          <td>{3}</td></tr>", n, (anyDia ? 5 : 4) + (anyPh ? 1 : 0), li.note ? " — " + esc(li.note) : "", cI(f2(li.amount)));
+        rows += T("<tr><td>{0}</td><td class=\"t\" colspan=\"{1}\">أجور فقط{2}</td>\n          <td>{3}</td></tr>", n, 4 + (anyDia ? 1 : 0) + (anyDv ? 1 : 0) + (anyPh ? 1 : 0), li.note ? " — " + esc(li.note) : "", cI(f2(li.amount)));
         continue;
       }
       const lk = li.karat || 18;
       rows += `<tr><td>${n}</td>${anyPh ? phCell(li) : ""}<td>${li.wo ? `<span dir="auto">${esc(li.wo)}</span>` : "—"}</td>
         <td>${li.reg18 > 0 ? lk : "—"}</td><td>${li.reg18 > 0 ? f2(G.g(li.standing18, lk)) : "—"}</td><td><b>${li.reg18 > 0 ? gI(f2(G.g(li.reg18, lk))) : "—"}</b></td>
-        ${anyDia ? `<td>${li.diamond ? f2(li.diamond) : "—"}</td>` : ""}
+        ${anyDia ? `<td>${li.diamond ? f2(li.diamond) : "—"}</td>` : ""}${anyDv ? `<td>${li.diamondValue ? f2(li.diamondValue) : "—"}</td>` : ""}
         <td>${cI(f2(li.wages))}</td></tr>`;
     }
     const sets = inv.lines.filter((l) => !l.wageOnly).length;
-    rows += T("<tr class=\"tot\"><td colspan=\"{0}\">الإجمالي — {1} طقم · عيار {2}</td>\n      <td>{3}</td>{4}<td>{5}</td></tr>", anyPh ? 5 : 4, sets, k, gI(f2(G.g(inv.totalW18, k))), anyDia ? `<td>${f2(D.diamondOf(inv))}</td>` : "", cI(f2(inv.wages)));
+    rows += T("<tr class=\"tot\"><td colspan=\"{0}\">الإجمالي — {1} طقم · عيار {2}</td>\n      <td>{3}</td>{4}<td>{5}</td></tr>", anyPh ? 5 : 4, sets, k, gI(f2(G.g(inv.totalW18, k))), (anyDia ? `<td>${f2(D.diamondOf(inv))}</td>` : "") + (anyDv ? `<td>${f2(D.diamondValueOf(inv))}</td>` : ""), cI(f2(inv.wages)));
 
     let qr = "";
     if (inv.vat && st.settings.vatNo) {
@@ -185,7 +187,7 @@
       bal = T("<div class=\"sum\">\n        <div class=\"box\"><b>رصيد الذهب قبل الفاتورة (عيار {0})</b><span>{1}</span></div>\n        <div class=\"box\"><b>رصيد الذهب بعد الفاتورة (عيار {2})</b><span>{3}</span></div>\n        <div class=\"box\"><b>رصيد الأجور قبل الفاتورة</b><span>{4}</span></div>\n        <div class=\"box\"><b>رصيد الأجور بعد الفاتورة</b><span>{5}</span></div></div>", k, gI(balTxt(G.g(before.gold18, k), T("جم"))), k, gI(balTxt(G.g(after.gold18, k), T("جم"))), cI(balTxt(before.cash, T("ريال"))), cI(balTxt(after.cash, T("ريال"))));
     }
     const body = header(st, title, inv.no, inv.date) +
-      T("<div class=\"party\"><div><b>{0}:</b> {1}</div>\n       {2}\n       {3}</div>\n      <table><thead><tr><th>#</th>{4}<th>الطقم</th><th>العيار</th>\n      <th>الوزن القائم</th><th>الوزن</th>{5}<th>الأجور (ريال)</th></tr></thead>\n      <tbody>{6}</tbody></table>\n      {7}<div class=\"sum\">\n        <div class=\"box\"><b>إجمالي الوزن</b><span>{8} جم {9}</span></div>\n        <div class=\"box\"><b>إجمالي الأجور</b><span>{10} ريال</span></div>\n        {11}\n      </div>{12}\n      {13}\n      <div class=\"foot\">{14} · {15}</div>", PARTY_WORD[inv.kind] || T("الحساب"), esc(shop.name), shop.phone ? `<div>${ltr(shop.phone)}</div>` : "", inv.vat && st.settings.vatNo ? T("<div class=\"muted\">الرقم الضريبي: {0}</div>", ltr(st.settings.vatNo)) : "", anyPh ? T("<th>الصورة</th>") : "", anyDia ? T("<th>💎 الماس (جم)</th>") : "", rows, qr, gI(f2(G.g(inv.totalW18, k))), k, cI(f2(inv.wages)), inv.vat ? T("<div class=\"box\"><b>ضريبة القيمة المضافة 15%</b><span>{0} ريال</span></div>\n        <div class=\"box\"><b>الإجمالي شامل الضريبة</b><span>{1} ريال</span></div>", cI(f2(inv.vatAmt)), cI(f2(inv.grand))) : "", bal, inv.desc ? T("<div class=\"note\">البيان: {0}</div>", esc(inv.desc)) : "", esc(st.settings.name || APP), ltr(inv.no));
+      T("<div class=\"party\"><div><b>{0}:</b> {1}</div>\n       {2}\n       {3}</div>\n      <table><thead><tr><th>#</th>{4}<th>الطقم</th><th>العيار</th>\n      <th>الوزن القائم</th><th>الوزن</th>{5}<th>الأجور (ريال)</th></tr></thead>\n      <tbody>{6}</tbody></table>\n      {7}<div class=\"sum\">\n        <div class=\"box\"><b>إجمالي الوزن</b><span>{8} جم {9}</span></div>\n        <div class=\"box\"><b>إجمالي الأجور</b><span>{10} ريال</span></div>\n        {11}\n      </div>{12}\n      {13}\n      <div class=\"foot\">{14} · {15}</div>", PARTY_WORD[inv.kind] || T("الحساب"), esc(shop.name), shop.phone ? `<div>${ltr(shop.phone)}</div>` : "", inv.vat && st.settings.vatNo ? T("<div class=\"muted\">الرقم الضريبي: {0}</div>", ltr(st.settings.vatNo)) : "", anyPh ? T("<th>الصورة</th>") : "", (anyDia ? T("<th>💎 الماس (جم)</th>") : "") + (anyDv ? T("<th>💎 قيمة الماس (ريال)</th>") : ""), rows, qr, gI(f2(G.g(inv.totalW18, k))), k, cI(f2(inv.wages)), inv.vat ? T("<div class=\"box\"><b>ضريبة القيمة المضافة 15%</b><span>{0} ريال</span></div>\n        <div class=\"box\"><b>الإجمالي شامل الضريبة</b><span>{1} ريال</span></div>", cI(f2(inv.vatAmt)), cI(f2(inv.grand))) : "", bal, inv.desc ? T("<div class=\"note\">البيان: {0}</div>", esc(inv.desc)) : "", esc(st.settings.name || APP), ltr(inv.no));
     return page(`${title} ${inv.no}`, body);
   }
 
@@ -223,24 +225,31 @@
     const op = (r) => `${esc(T(r.label))}${r.no ? `<small>${ltr(r.no)}</small>` : ""}${r.desc ? `<small>${esc(r.desc)}</small>` : ""}`;
     // التاريخ يوماً وشهراً، والسنة تحته — فيتّسع الجدول لعرض الجوال
     const dt = (iso) => iso ? `${ltr(iso.slice(8, 10) + "-" + iso.slice(5, 7))}<small>${iso.slice(0, 4)}</small>` : "";
-    // الحركة فوق، والرصيد بعدها في الخانة نفسها
-    const cell = (mv, bal, word) => `<td class="m">${mv ? `<span class="mv" dir="ltr">${mv}</span>` : ""}<b>${bal}</b>${word ? `<span class="w">${word}</span>` : ""}</td>`;
     const partyRow = `<div class="party"><div><b>${fac ? T("المصنع") : T("العميل")}:</b> ${esc(shop.name)}</div>
       <div class="muted">${period}${mode === "diamond" ? T(" · الماس بالجرام") : T(" · الذهب بعيار {0}", k)}</div></div>`;
     let body;
     if (mode === "diamond") {
+      // الماس فوق وقيمته (ريال) تحته في كل خانة — كالذهب والأجور في كشف الذهب
       const s = D.diamondStatement(st, shopId, from, to);
       // للمصنع: البضاعة «+» والإرجاع «−» — من جهته
       const f = fac ? -1 : 1;
+      const z = (x) => Math.abs(x) < 0.005;
+      const dc = (dv, vv, isBal) => {
+        if (!isBal && z(dv) && z(vv)) return `<td class="z">—</td>`;
+        const t = (x) => (isBal ? f2(x) : z(x) ? "—" : sgn(x));
+        return `<td class="m"><span class="gl"><b>💎 <span dir="ltr">${t(dv)}</span></b></span>` +
+          `<span class="cl">${cI(`<span dir="ltr">${t(vv)}</span>`)}</span></td>`;
+      };
       let rows = "";
       for (const r of s.rows) {
-        const v = f * (r.dd - r.dc);
-        const sets = r.sets.map((x) => `${x.name ? esc(x.name) : T("طقم")} (${f2(x.diamond)})`).join(T("، "));
-        rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td><td class="t">${sets || "—"}</td>
-          ${cell(r.kind === "prev" ? "" : sgn(v), f2(f * r.bal), "")}</tr>`;
+        // كل طقمٍ في سطره: الاسم (الماس · القيمة)
+        const sets = r.sets.map((x) => `<span dir="auto" style="display:block">${x.name ? esc(x.name) : T("طقم")} (${f2(x.diamond)}${x.value > 0 ? " · " + f2(x.value) : ""})</span>`).join("");
+        rows += `<tr><td class="d">${dt(r.date)}</td><td class="t">${op(r)}</td><td class="t">${sets || "—"}</td>` +
+          `${r.kind === "prev" ? `<td class="z"></td>` : dc(f * (r.dd - r.dc), f * (r.vd - r.vc), false)}${dc(f * r.bal, f * r.vbal, true)}</tr>`;
       }
       body = header(st, T("كشف حساب الماس"), "", to || D.today()) + partyRow +
-        T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس)</th><th>الماس (جم)<small>الحركة · الصافي</small></th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} جم</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} جم</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>صافي الماس</b><span>{5} جم</span></div></div>\n        <div class=\"note\">الماس للعرض والمعرفة: لا يدخل الوزن ولا رصيد الذهب.</div>", rows || T("<tr><td colspan=\"4\">لا ماس في الفترة</td></tr>"), fac ? T("البضاعة") : T("المبيعات"), f2(fac ? s.minus : s.plus), fac ? T("الإرجاع") : T("المرتجع"), f2(fac ? s.plus : s.minus), f2(f * s.diamond));
+        `<div class="legend">${T("في كل خانة: 💎 الماس (جم) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.", ICO_CASH)}</div>` +
+        T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس · القيمة)</th><th>الحركة</th><th>الصافي</th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} جم · {6} ريال</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} جم · {7} ريال</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>صافي الماس · قيمته</b><span>{5} جم · {8} ريال</span></div></div>\n        <div class=\"note\">الماس وقيمته للعرض والمعرفة: لا يدخلان الوزن ولا رصيد الذهب ولا الأجور.</div>", rows || T("<tr><td colspan=\"5\">لا ماس في الفترة</td></tr>"), fac ? T("البضاعة") : T("المبيعات"), f2(fac ? s.minus : s.plus), fac ? T("الإرجاع") : T("المرتجع"), f2(fac ? s.plus : s.minus), f2(f * s.diamond), f2(fac ? s.vminus : s.vplus), f2(fac ? s.vplus : s.vminus), f2(f * s.value));
     } else {
       // «عليه · له · الرصيد» (1.11): الذهب فوق والنقد تحته في كل خانة، ثم صفّ
       // الإجمالي: مجموع ما عليه، ومجموع ما له، والباقي — والفرز نوعٌ واحدٌ ومجموعه

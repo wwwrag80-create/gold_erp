@@ -129,20 +129,22 @@
       if (amount <= 0) throw new Error(T("أدخل مبلغ الأجر لسطر «أجر فقط»"));
       return { wageOnly: true, amount, wages: amount, note: String(e.note || "").trim(),
         wo: "", model: "", karat: 0, reg18: 0, gold18: 0, small18: 0, big18: 0,
-        after18: 0, standing18: 0, diamond: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
+        after18: 0, standing18: 0, diamond: 0, diamondValue: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
     }
     // اسم الطقم اختياري. والسطر: ذهبٌ (وزن)، أو ماسٌ وحده، أو أجورٌ وحدها —
     // والأجور مبلغٌ مباشر (`wages`) أو بالجرام (`wage`/`rate18`) من حركةٍ قديمة
     const wo = String(e.wo || "").trim();
     const reg = Number(e.reg || 0);
     const dia0 = Math.max(0, Number(e.diamond || 0));
+    // قيمة الماس (ريال): للعرض في كشف الماس فقط — لا تدخل الأجور ولا الرصيد
+    const diaVal = R(Math.max(0, Number(e.diamondValue || 0)), 2);
     const direct = e.wages !== undefined && e.wages !== null && e.wages !== "";
     const wagesAmt = direct ? R(Math.max(0, Number(e.wages)), 2) : null;
-    if (!(reg > 0) && !(dia0 > 0)) {
+    if (!(reg > 0) && !(dia0 > 0) && !(diaVal > 0)) {
       if (wagesAmt > 0) {
         return { wageOnly: true, amount: wagesAmt, wages: wagesAmt, note: String(e.note || wo).trim(),
           wo: "", model: "", karat: 0, reg18: 0, gold18: 0, small18: 0, big18: 0,
-          after18: 0, standing18: 0, diamond: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
+          after18: 0, standing18: 0, diamond: 0, diamondValue: 0, rate18: 0, lid: e.lid || uid("l"), src: "" };
       }
       throw new Error(wo ? T("أدخل وزن الطقم {0} أو أجوره أو ماسه", wo) : T("أدخل الوزن أو الأجور أو الماس"));
     }
@@ -171,7 +173,7 @@
       gold18: st18("gold18", e.gold), small18: st18("small18", e.small),
       big18: st18("big18", e.big), after18: st18("after18", e.after),
       standing18: st18("standing18", e.standing),
-      reg18, diamond: R(Math.max(0, Number(e.diamond || 0)), 3),
+      reg18, diamond: R(Math.max(0, Number(e.diamond || 0)), 3), diamondValue: diaVal,
       stoneRate: e.stoneRate === undefined ? Gold.STONE_DISCOUNT_RATE : Number(e.stoneRate),
       rate18, wages,
       note: String(e.note || "").trim(),
@@ -214,7 +216,7 @@
       gold: Gold.g(li.gold18, k), small: Gold.g(li.small18, k),
       big: Gold.g(li.big18, k), after: Gold.g(li.after18, k),
       standing: Gold.g(li.standing18, k), reg: Gold.g(li.reg18, k),
-      diamond: li.diamond, stoneRate: li.stoneRate,
+      diamond: li.diamond, diamondValue: li.diamondValue || 0, stoneRate: li.stoneRate,
       wage: Gold.wageView(li.rate18, k), note: li.note, photos: linePhotos(li),
       exact18: { gold18: li.gold18, small18: li.small18, big18: li.big18,
         after18: li.after18, standing18: li.standing18, reg18: li.reg18 },
@@ -857,27 +859,44 @@
     for (const li of doc.lines || []) if (!li.wageOnly) s += Number(li.diamond || 0);
     return R(s, 3);
   }
+  // وقيمة ماسها (ريال) — للعرض في كشف الماس فقط: لا تدخل الأجور ولا الإجمالي ولا الرصيد
+  function diamondValueOf(doc) {
+    let s = 0;
+    for (const li of doc.lines || []) if (!li.wageOnly) s += Number(li.diamondValue || 0);
+    return R(s, 2);
+  }
+  // الماس فوق وقيمته تحته (كالذهب والأجور): لكل صفٍّ حركة الماس `dd/dc`
+  // ورصيده `bal`، وحركة القيمة `vd/vc` ورصيدها `vbal`
   function diamondStatement(st, partyId, from, to) {
     const docs = st.invoices.filter((d) => d.shopId === partyId).sort(docOrder);
     const rows = [];
     let bal = 0, prev = 0, hasPrev = false, plusSum = 0, minusSum = 0;
-    const prevRow = () => ({ kind: "prev", label: "رصيد سابق", date: from, no: "", dd: 0, dc: 0, bal: prev, doc: null, sets: [] });
+    let vbal = 0, vprev = 0, vplus = 0, vminus = 0;
+    const prevRow = () => ({ kind: "prev", label: "رصيد سابق", date: from, no: "", dd: 0, dc: 0, bal: prev,
+      vd: 0, vc: 0, vbal: vprev, doc: null, sets: [] });
     for (const d of docs) {
-      const dia = diamondOf(d);
-      if (!(dia > 0)) continue;
+      const dia = diamondOf(d), val = diamondValueOf(d);
+      if (!(dia > 0) && !(val > 0)) continue;
       const plus = d.kind === "sale" || d.kind === "purchase_return";
-      if (from && d.date < from) { prev = R(prev + (plus ? dia : -dia), 3); hasPrev = true; continue; }
+      if (from && d.date < from) {
+        prev = R(prev + (plus ? dia : -dia), 3); vprev = R(vprev + (plus ? val : -val), 2);
+        hasPrev = true; continue;
+      }
       if (to && d.date > to) continue;
-      if (!rows.length && hasPrev) { bal = prev; rows.push(prevRow()); }
+      if (!rows.length && hasPrev) { bal = prev; vbal = vprev; rows.push(prevRow()); }
       bal = R(bal + (plus ? dia : -dia), 3);
-      if (plus) plusSum = R(plusSum + dia, 3); else minusSum = R(minusSum + dia, 3);
+      vbal = R(vbal + (plus ? val : -val), 2);
+      if (plus) { plusSum = R(plusSum + dia, 3); vplus = R(vplus + val, 2); }
+      else { minusSum = R(minusSum + dia, 3); vminus = R(vminus + val, 2); }
       rows.push({ kind: d.kind, label: KIND_LABEL[d.kind], date: d.date, no: d.no, doc: d,
-        dd: plus ? dia : 0, dc: plus ? 0 : dia, bal,
-        sets: d.lines.filter((l) => !l.wageOnly && Number(l.diamond || 0) > 0)
-          .map((l) => ({ name: (l.wo || "").trim(), diamond: l.diamond })) });
+        dd: plus ? dia : 0, dc: plus ? 0 : dia, bal, vd: plus ? val : 0, vc: plus ? 0 : val, vbal,
+        sets: d.lines.filter((l) => !l.wageOnly && (Number(l.diamond || 0) > 0 || Number(l.diamondValue || 0) > 0))
+          .map((l) => ({ name: (l.wo || "").trim(), diamond: Number(l.diamond || 0), value: Number(l.diamondValue || 0) })) });
     }
     if (!rows.length && hasPrev) rows.push(prevRow());
-    return { rows, diamond: rows.length ? rows[rows.length - 1].bal : 0, plus: plusSum, minus: minusSum };
+    const last = rows.length ? rows[rows.length - 1] : null;
+    return { rows, diamond: last ? last.bal : 0, plus: plusSum, minus: minusSum,
+      value: last ? last.vbal : 0, vplus, vminus };
   }
 
   // ══ نسخة احتياطية ══
@@ -921,7 +940,7 @@
     woHistory, woLast, setTracks, searchSets, searchKey, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
     GRADES, grade, boardSide, board, hasMovement, holdings, debtSummary, pieceById, docOrder,
     partyKarat, openHold, saveOpenHold,
-    diamondOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
+    diamondOf, diamondValueOf, diamondStatement, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

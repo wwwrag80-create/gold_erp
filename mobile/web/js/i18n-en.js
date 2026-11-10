@@ -554,10 +554,8 @@ window.I18N_EN = {
 " · الماس بالجرام": " · diamonds in grams",
 " · الذهب بعيار {0}": " · gold in {0}K",
 "كشف حساب الماس": "Diamond statement",
-"<tr><td colspan=\"4\">لا ماس في الفترة</td></tr>": "<tr><td colspan=\"4\">No diamonds in this period</td></tr>",
 "البضاعة": "Goods",
 "الإرجاع": "Returns",
-"<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس)</th><th>الماس (جم)<small>الحركة · الصافي</small></th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} جم</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} جم</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>صافي الماس</b><span>{5} جم</span></div></div>\n        <div class=\"note\">الماس للعرض والمعرفة: لا يدخل الوزن ولا رصيد الذهب.</div>": "<table><thead><tr><th>Date</th><th>Operation</th><th>Sets (diamond)</th><th>Diamond (g)<small>movement · net</small></th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} g</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} g</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>Net diamond</b><span>{5} g</span></div></div>\n        <div class=\"note\">Diamonds are for information: they don't count in the weight or the gold balance.</div>",
 "<tr><td colspan=\"4\">لا حركة في الفترة</td></tr>": "<tr><td colspan=\"4\">No movement in this period</td></tr>",
 "<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الذهب (جم {0})<small>الحركة · الرصيد</small></th><th>النقد (ريال)<small>الحركة · الرصيد</small></th></tr></thead>\n        <tbody>{1}</tbody></table>\n        <div class=\"sum\"><div class=\"box\"><b>رصيد الذهب (عيار {2})</b><span>{3}</span></div>\n        <div class=\"box\"><b>رصيد النقد</b><span>{4}</span></div></div>": "<table><thead><tr><th>Date</th><th>Operation</th><th>Gold (g {0})<small>movement · balance</small></th><th>Cash (SAR)<small>movement · balance</small></th></tr></thead>\n        <tbody>{1}</tbody></table>\n        <div class=\"sum\"><div class=\"box\"><b>Gold balance ({2}K)</b><span>{3}</span></div>\n        <div class=\"box\"><b>Cash balance</b><span>{4}</span></div></div>",
 "<div class=\"foot\">{0} · كشف حساب {1}</div>": "<div class=\"foot\">{0} · account statement {1}</div>",
@@ -666,5 +664,16 @@ window.I18N_EN = {
 "<div class=\"sum\"><div class=\"box\"><b>رصيد الذهب (عيار {0})</b><span>{1}</span></div>\n        <div class=\"box\"><b>رصيد النقد</b><span>{2}</span></div></div>": "<div class=\"sum\"><div class=\"box\"><b>Gold balance ({0}K)</b><span>{1}</span></div>\n        <div class=\"box\"><b>Cash balance</b><span>{2}</span></div></div>",
 "<div class=\"legend\">في كل خانة: الذهب (جم عيار {0}) فوق، والنقد (ريال) تحته.</div>": "<div class=\"legend\">In each cell: gold (g, {0}K) on top, cash (SAR) below.</div>",
 "<table><thead><tr><th>التاريخ</th><th>العملية</th><th>عليه</th><th>له</th><th>{0}</th></tr></thead>\n        <tbody>{1}</tbody></table>": "<table><thead><tr><th>Date</th><th>Operation</th><th>Owes</th><th>Credit</th><th>{0}</th></tr></thead>\n        <tbody>{1}</tbody></table>",
-"<tr><td colspan=\"5\">لا حركة في الفترة</td></tr>": "<tr><td colspan=\"5\">No movement in this period</td></tr>"
+"<tr><td colspan=\"5\">لا حركة في الفترة</td></tr>": "<tr><td colspan=\"5\">No movement in this period</td></tr>",
+// 1.13.3: قيمة الماس
+"قيمة الماس": "Diamond value",
+"💎 قيمة الماس (ريال) — للكشف فقط": "💎 Diamond value (SAR) — statement only",
+" · قيمته {0} ريال": " · value {0} SAR",
+"💎 قيمة الماس (ريال)": "💎 Diamond value (SAR)",
+"الحركة": "Movement",
+"قيمته": "Value",
+"في كل خانة: 💎 الماس (جم) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.": "In each cell: 💎 diamond (g) on top, {0} diamond value (SAR) below — for information only, not in the balance.",
+"<th>💎 قيمة الماس (ريال)</th>": "<th>💎 Diamond value (SAR)</th>",
+"<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس · القيمة)</th><th>الحركة</th><th>الصافي</th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} جم · {6} ريال</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} جم · {7} ريال</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>صافي الماس · قيمته</b><span>{5} جم · {8} ريال</span></div></div>\n        <div class=\"note\">الماس وقيمته للعرض والمعرفة: لا يدخلان الوزن ولا رصيد الذهب ولا الأجور.</div>": "<table><thead><tr><th>Date</th><th>Operation</th><th>Sets (diamond · value)</th><th>Movement</th><th>Net</th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} g · {6} SAR</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} g · {7} SAR</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>Net diamond · value</b><span>{5} g · {8} SAR</span></div></div>\n        <div class=\"note\">Diamonds and their value are for information: they don't count in the weight, the gold balance or the charges.</div>",
+"<tr><td colspan=\"5\">لا ماس في الفترة</td></tr>": "<tr><td colspan=\"5\">No diamonds in this period</td></tr>",
 };

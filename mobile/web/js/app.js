@@ -863,7 +863,7 @@
     // ── الطقم: الاسم اختياري؛ ويُحفظ ذهبٌ أو ماسٌ أو أجورٌ وحدها ──
     const woIn = h("input", { class: "in", placeholder: T("اختياري"), autocomplete: "off", dir: "auto",
       enterkeyhint: "next", inputmode: "text" });
-    const gold = numInput(), big = numInput(), dia = numInput(), stand = numInput();
+    const gold = numInput(), big = numInput(), dia = numInput(), diaVal = numInput(), stand = numInput();
     const reg = numInput({ hl: true });
     const wagesIn = numInput({ enter: "done" });
     const karatSel = h("select", { class: "in" }, G.KARATS.map((x) => h("option", { value: x, text: T("عيار {0}", x) })));
@@ -981,8 +981,11 @@
       snap();
       hintWages();
     }
-    // أجور حركةٍ سابقة (من الجهة نفسها) تُقترح كما هي
-    const offerWages = (li) => { if (wagesIn.isBlank() && li && li.wages > 0) wagesIn.setVal(li.wages); };
+    // أجور حركةٍ سابقة (من الجهة نفسها) تُقترح كما هي — وقيمة ماسها معها، فهي كالأجور
+    const offerWages = (li) => {
+      if (wagesIn.isBlank() && li && li.wages > 0) wagesIn.setVal(li.wages);
+      if (diaVal.isBlank() && li && li.diamondValue > 0) diaVal.setVal(li.diamondValue);
+    };
 
     // الطقوم التي في يدي — للبيع، وما جاء من مصنعٍ للإرجاع إليه
     function availablePieces() {
@@ -1063,7 +1066,7 @@
 
     function clearEntry() {
       woIn.value = "";
-      for (const el of [gold, big, dia, reg, stand, wagesIn]) el.setVal(0);
+      for (const el of [gold, big, dia, diaVal, reg, stand, wagesIn]) el.setVal(0);
       ent.regManual = false; ent.fromCard = false; ent.shadow = null;
       ent.stoneRate = s.settings.stoneRate; ent.editIdx = null; ent.lastWo = "";
       ent.exact18 = null; ent.src = ""; ent.lid = null; ent.smallV = 0; ent.afterV = 0;
@@ -1078,16 +1081,17 @@
       const quiet = !!(opt && opt.quiet);
       try {
         const no = woIn.value.trim();
-        const vals = { gold: gold.getVal(), big: big.getVal(), diamond: dia.getVal(), reg: reg.getVal(),
-          standing: stand.getVal(), wages: wagesIn.getVal() };
+        const vals = { gold: gold.getVal(), big: big.getVal(), diamond: dia.getVal(), diamondValue: diaVal.getVal(),
+          reg: reg.getVal(), standing: stand.getVal(), wages: wagesIn.getVal() };
         for (const [key, x] of Object.entries(vals)) {
           if (!isFinite(x)) throw new Error(T("رقمٌ غير صحيح في خانة ") + ({ gold: T("الذهب"), big: T("أحجار/فصوص"),
-            diamond: T("الماس"), reg: T("الوزن"), standing: T("الوزن القائم"), wages: T("الأجور") })[key]);
+            diamond: T("الماس"), diamondValue: T("قيمة الماس"), reg: T("الوزن"), standing: T("الوزن القائم"), wages: T("الأجور") })[key]);
         }
         const regV = vals.reg > 0 ? vals.reg : 0, diaV = vals.diamond > 0 ? vals.diamond : 0;
+        const dvV = vals.diamondValue > 0 ? vals.diamondValue : 0;
         let wagesV = wagesIn.isBlank() ? agreedWages() : Math.max(0, vals.wages);
         if (wagesV === null) wagesV = 0;
-        if (!(regV > 0) && !(diaV > 0) && !(wagesV > 0)) {
+        if (!(regV > 0) && !(diaV > 0) && !(dvV > 0) && !(wagesV > 0)) {
           reg.focus();
           throw new Error(T("اكتب الوزن، أو الأجور، أو الماس — ويكفي واحدٌ منها"));
         }
@@ -1110,7 +1114,7 @@
         }
         const li = D.buildLine({ wo: no, karat: ent.karat,
           gold: vals.gold, small: ent.smallV, big: vals.big, after: ent.afterV,
-          standing: vals.standing || regV, reg: regV, diamond: diaV,
+          standing: vals.standing || regV, reg: regV, diamond: diaV, diamondValue: dvV,
           stoneRate: ent.stoneRate, wages: wagesV, exact18: ent.fromCard ? ent.exact18 : null,
           src: ent.src, lid: ent.lid, photos: ent.photos });
         pushLine(li);
@@ -1121,7 +1125,7 @@
     }
     // في خانات الطقم ما لم يُضَف بعد (أو سطرٌ قيد التعديل)
     const pendingEntry = () => ent.editIdx !== null || !!woIn.value.trim() || (reg.getVal() || 0) > 0 ||
-      (dia.getVal() || 0) > 0 || !wagesIn.isBlank() || ent.photos.length > 0;
+      (dia.getVal() || 0) > 0 || (diaVal.getVal() || 0) > 0 || !wagesIn.isBlank() || ent.photos.length > 0;
     function pushLine(li) {
       if (ent.editIdx !== null) inv.lines[ent.editIdx] = li; else inv.lines.push(li);
       refresh();
@@ -1129,7 +1133,7 @@
     addBtn.addEventListener("click", () => addLine());
     cancelEdit.addEventListener("click", clearEntry);
     enterChain([woIn, gold, big, stand, reg, wagesIn], () => addLine());
-    enterChain([dia], () => addLine());
+    enterChain([dia, diaVal], () => addLine());
 
     function editLine(i) {
       const li = inv.lines[i];
@@ -1146,6 +1150,7 @@
         woIn.value = li.wo || ""; ent.lastWo = li.wo || "";
         fillFrom(li);
         wagesIn.setVal(li.wages);
+        diaVal.setVal(li.diamondValue || 0);
         if (Math.abs(G.g(li.reg18, ent.karat) - G.registered(G.g(li.gold18, ent.karat), G.g(li.small18, ent.karat),
           G.g(li.big18, ent.karat), ent.stoneRate)) > 0.0051) ent.regManual = true;
       }
@@ -1191,17 +1196,19 @@
             : h("div", { class: "vals" },
               cell(T("الوزن"), li.reg18 > 0 ? gw(li.reg18, lk) : "—", icoGold),
               cell(T("💎 الماس"), li.diamond > 0 ? f2(li.diamond) : "—"),
+              li.diamondValue > 0 ? cell(T("قيمة الماس"), f2(li.diamondValue)) : null,
               cell(T("الأجور"), f2(li.wages), icoCash))));
       });
       const t = D.totals(inv.lines, inv.vat);
       const sets = inv.lines.filter((l) => !l.wageOnly).length;
-      const dia0 = D.diamondOf(inv);
+      const dia0 = D.diamondOf(inv), dv0 = D.diamondValueOf(inv);
       const k = partyK();
       totalsBox.innerHTML = "";
       const row = (a, b, cls, ic) => h("div", { class: "spread" + (cls ? " " + cls : "") }, h("span", null, a), h("span", { class: "num" }, ic ? ic() : null, b));
       totalsBox.append(row(T("عدد الأطقم"), String(sets)),
         row(T("إجمالي الوزن (عيار {0})", k), gw(t.totalW18, k), "", icoGold),
         dia0 > 0 ? row(T("💎 إجمالي الماس (جم)"), f2(dia0)) : null,
+        dv0 > 0 ? row(T("💎 قيمة الماس (ريال) — للكشف فقط"), f2(dv0)) : null,
         row(T("إجمالي الأجور"), f2(t.wages), "", icoCash));
       if (inv.vat) totalsBox.append(row(T("ضريبة 15% على الأجور"), f2(t.vatAmt), "", icoCash));
       totalsBox.append(row(T("الإجمالي"), f2(t.grand) + T(" ريال"), "grand", icoCash));
@@ -1237,10 +1244,10 @@
         if (!inv.shopId) { pickParty(); throw new Error(T("اختر {0}", partyWord())); }
         D.checkLines(inv.lines);
         const t = D.totals(inv.lines, inv.vat);
-        const dia0 = D.diamondOf(inv);
+        const dia0 = D.diamondOf(inv), dv0 = D.diamondValueOf(inv);
         const msg = T("{0} {1} — «{2}»\n", editing ? T("حفظ تعديل") : T("حفظ"), INV_TITLE[inv.kind], shopTitle(inv.shopId)) +
           T("{0} طقم · {1} جم عيار {2}", inv.lines.filter((l) => !l.wageOnly).length, gw(t.totalW18, partyK()), partyK()) +
-          (dia0 > 0 ? T(" · 💎 {0} جم", f2(dia0)) : "") + "\n" +
+          (dia0 > 0 ? T(" · 💎 {0} جم", f2(dia0)) : "") + (dv0 > 0 ? T(" · قيمته {0} ريال", f2(dv0)) : "") + "\n" +
           T("الأجور {0}{1} = {2} ريال", f2(t.wages), inv.vat ? T(" + ضريبة {0}", f2(t.vatAmt)) : "", f2(t.grand));
         if (!(await confirmSheet(msg, editing ? T("حفظ التعديل") : T("حفظ الفاتورة")))) return;
         const rec = D.saveInvoice(s, { ...inv, heldId: inv.heldId });
@@ -1282,8 +1289,10 @@
       h("div", { class: "grid2" }, field(T("الطقم (اختياري)"), woIn), field(T("العيار"), karatSel)),
       h("div", { style: { marginTop: "2px" } }, detailsBtn), detailsBox,
       h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("الوزن (جم)"), reg), field(T("الأجور (ريال)"), wagesIn)),
+      // قيمة الماس بعد خانته مباشرة — للعرض في كشف الماس فقط
       h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("💎 الماس (جم)"), dia),
-        h("div", { class: "fld" }, h("span", null, T("صور الطقم")), photoBox, photoIn)),
+        field(T("💎 قيمة الماس (ريال)"), diaVal)),
+      h("div", { class: "fld", style: { marginTop: "8px" } }, h("span", null, T("صور الطقم")), photoBox, photoIn),
       photoStrip,
       // الأزرار قبل الإشعار: الإشعار يظهر عند مغادرة خانة الطقم —
       // ولو كان فوقها لانزاح الزرّ تحت الإصبع فتقع اللمسة على غيره
@@ -1648,17 +1657,29 @@
     };
     let head, bal, n = 0;
     if (mode === "diamond") {
+      // الماس فوق وقيمته تحته — كالذهب والأجور في كشف الذهب
       const res = D.diamondStatement(s, id, from || null, to || null);
       const f = fac ? -1 : 1;     // للمصنع: البضاعة «+» والإرجاع «−» من جهته
+      const ln = (cls, ic, txt) => h("span", { class: cls }, ic, h("span", { class: "num", dir: "ltr" }, txt));
+      const dcell = (dv, vv, isBal) => {
+        const z = (x) => Math.abs(x) < 0.005;
+        if (!isBal && z(dv) && z(vv)) return h("td", { class: "m z" }, "—");
+        const t = (x) => (isBal ? f2(x) : z(x) ? "—" : sgn(x));
+        return h("td", { class: "m" + (isBal ? " b" : "") }, ln("gl", h("span", { class: "u" }, "💎"), t(dv)),
+          ln("cl", icoCash(), t(vv)));
+      };
       for (const r of res.rows) {
-        const sets = (r.sets || []).map((x) => `${x.name || T("طقم")} (${f2(x.diamond)})`).join(T("، "));
-        row(r, [dt(r.date), opCell(r, sets ? h("small", null, sets) : null),
-          mcell(r.kind === "prev" ? "" : sgn(f * (r.dd - r.dc)), f2(f * r.bal), "")]);
+        // كل طقمٍ في سطره: الاسم (الماس · القيمة)
+        const sets = (r.sets || []).map((x) => h("small", { dir: "auto" }, `${x.name || T("طقم")} (${f2(x.diamond)}${x.value > 0 ? " · " + f2(x.value) : ""})`));
+        row(r, [dt(r.date), opCell(r, sets.length ? sets : null),
+          r.kind === "prev" ? h("td", { class: "m z" }, "") : dcell(f * (r.dd - r.dc), f * (r.vd - r.vc), false),
+          dcell(f * r.bal, f * r.vbal, true)]);
         if (r.doc) n++;
       }
-      head = [T("التاريخ"), T("العملية"), T("💎 الماس (جم)")];
+      head = [T("التاريخ"), T("العملية"), T("الحركة"), T("الصافي")];
       bal = h("div", { class: "st-bal" }, h("span", { class: "muted" }, T("صافي الماس")),
-        h("b", { class: "num" }, T("{0} جم", f2(f * res.diamond))));
+        h("b", { class: "num" }, T("{0} جم", f2(f * res.diamond))), h("span", { class: "muted" }, "·"),
+        h("span", { class: "muted" }, T("قيمته")), h("b", { class: "num" }, icoCash(), T("{0} ريال", f2(f * res.value))));
     } else {
       // «عليه · له · الرصيد» (1.11): في كل خانةٍ الذهب فوق والنقد تحته — ثم صفّ
       // الإجمالي: كم عليه، وكم له، وكم الباقي (عليه − له). وبالفرز: النوع وحده ومجموعه
@@ -1704,6 +1725,7 @@
       return;
     }
     if (mode === "gold") v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: {0} الذهب (جم عيار {1}) فوق، و{2} النقد والأجور (ريال) تحته.", P.ICO_GOLD, k, P.ICO_CASH) }));
+    else v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: 💎 الماس (جم) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.", P.ICO_CASH) }));
     v.append(h("table", { class: "st-table" + (mode === "diamond" ? " dia" : " gold") },
       h("thead", null, h("tr", null, ...head.map((x) => h("th", null, x)))), tbody));
     if (n) v.append(h("div", { class: "muted small st-hint" }, T("اضغط على أي عملية لمعاينتها وصورها، ومنها تعديلها")));

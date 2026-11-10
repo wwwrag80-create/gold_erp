@@ -523,7 +523,17 @@ details.opts .in { margin-top: 6px; }
 .st-table td.m .mv { display: block; font-size: 12px; color: var(--muted); }
 .st-table td.m b { font-size: 14px; }
 .st-table td.m .w { font-size: 11px; color: var(--muted); margin-inline-start: 3px; }
-.st-table.dia th:last-child { width: 34%; }
+/* كشف الماس: الماس فوق وقيمته تحته في كل خانة — كالذهب والأجور */
+.st-table.dia th:nth-child(3), .st-table.dia th:nth-child(4) { width: 27%; }
+.st-table.dia td { padding: 8px 3px; }
+.st-table.dia td.m .gl, .st-table.dia td.m .cl { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-table.dia td.m .gl { font-size: 13px; font-weight: 600; }
+.st-table.dia td.m.b .gl { font-weight: 700; }
+.st-table.dia td.m .cl { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.st-table.dia td.m.z { color: var(--muted); }
+.st-table.dia th:nth-child(n+3), .st-table.dia td.m, .st-table.dia td.m .gl, .st-table.dia td.m .cl { text-align: center; }
+.st-table.dia .u { margin-inline-end: 2px; font-size: 11px; }
+.st-table.dia .u svg { width: 12px; height: 12px; }
 .st-table tr.tap { cursor: pointer; }
 .st-table tr.tap:active td { background: var(--hover); }
 .st-hint { text-align: center; margin: 8px 0 4px; }
