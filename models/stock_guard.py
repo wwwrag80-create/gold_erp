@@ -388,7 +388,8 @@ def _problems(conn, rows):
         # قيد توريدٍ تغيّر تاريخه أو حُذف: أطقمه
         q = ",".join("?" * len(jes))
         wos |= {r[0] for r in conn.execute(
-            f"SELECT id FROM work_orders WHERE entry_id IN ({q})", list(jes))}
+            f"SELECT id FROM work_orders WHERE is_deleted=0 AND entry_id IN ({q})",
+            list(jes))}
     wos.discard(None)
     problems = []
 
@@ -454,7 +455,7 @@ def _chain_msg(conn, new):
     q = ",".join("?" * len(new))
     rows = conn.execute(
         "SELECT id, invoice_no, invoice_date, kind FROM invoices"
-        f" WHERE id IN ({q})", list(new)).fetchall()
+        f" WHERE is_deleted=0 AND id IN ({q})", list(new)).fetchall()
     lines = []
     for r in rows[:12]:
         kind = "بيع" if r["kind"] == "sale" else "مرتجع"

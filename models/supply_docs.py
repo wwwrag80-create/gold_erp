@@ -71,7 +71,8 @@ def batch_info(conn, entry_id):
     except Exception:
         n = 0
     if not n:
-        n = conn.execute("SELECT COUNT(*) FROM work_orders WHERE entry_id=?",
+        n = conn.execute("SELECT COUNT(*) FROM work_orders WHERE is_deleted=0"
+                         " AND entry_id=?",
                          (int(entry_id),)).fetchone()[0]
     no = number_of(conn, entry_id)
     ref = (e["doc_no"] or "").strip()
