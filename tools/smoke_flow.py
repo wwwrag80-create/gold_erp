@@ -71,6 +71,9 @@ def step(title):
     print(f"\n═══ {title} ═══")
 
 
+from models import stock_guard as _SG                     # noqa: E402
+
+
 def main():
     step("0) تهيئة قاعدة مؤقتة")
     create_tables()
@@ -1850,7 +1853,7 @@ def main():
             "SELECT account_id FROM entities WHERE id=?",
             (cl_cust,)).fetchone()["account_id"]
         post_entry(conn, "2026-07-04", "سداد جزئي", [
-            {"account_id": acc_id(conn, "1200"), "gold_debit": 5.0},
+            {"account_id": acc_id(conn, "1100"), "gold_debit": 5.0},
             {"account_id": _acc_cust, "gold_credit": 5.0}],
             username="admin")
     check("السداد لا يُنبَّه عليه ولو بقي فوق السقف",
@@ -2139,8 +2142,10 @@ def main():
           and abs(_res2b["delta"] - 4.0) < 0.001
           and _res2b["sold_edited"] == ["RW-B"],
           f"{_deb[0]} · {_deb[1]} · فرق {_res2b['delta']}")
-    check("والذهب المشغول يتغيّر بالفرق نفسه، والدفتر متوازن",
-          abs((_w1 - _w0) - 4.0) < 0.001 and _g and _c,
+    # 5.3.2: فرق ما في الخزنة (+2) وحده على الذهب المشغول — وفرق المباع
+    # كله (RW-B +2) إلى «تسويات الأوزان» ظاهراً، فيبقى الحساب = الخزنة
+    check("والذهب المشغول يتغيّر بفرق ما في الخزنة وحده، والدفتر متوازن",
+          abs((_w1 - _w0) - 2.0) < 0.001 and _g and _c,
           f"{_w0} ← {_w1}")
     check("وفواتير البيع والمرتجع لا تُمسّ", tuple(_inv0) == tuple(_inv1),
           f"{tuple(_inv0)} ← {tuple(_inv1)}")
@@ -2240,7 +2245,7 @@ def main():
           not _inf["blocked"] and _inf["sold"]
           and _inf["invoices"] == [_s2c["invoice_no"]]
           and _inf["model"] == "DELM", str(_inf))
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _dwo2c(conn, _i2c["DEL-1"], "admin")
         _dwo2c(conn, _i2c["DEL-2"], "admin")
         _dwo2c(conn, _i2c["DEL-3"], "admin")
@@ -2313,10 +2318,10 @@ def main():
         with db() as conn:
             _mc2b.rename_model(conn, _IT2c, "X", "admin")
     expect_error("ولا يُعاد تسمية «ايطاليات»", _rename_it, "ثابتٌ")
-    with db(readonly=True) as conn:
+    with db(readonly=True) as conn, _SG.allow("اختبار: بياناتٌ قديمة"):
         _bi = _dwi2c(conn, _bw["id"])
     _before_b = (_snap2c()[0], _snap2c()[1])
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _dwo2c(conn, _bw["id"], "admin")
     with db(readonly=True) as conn:
         _stk_b = [r["wo"] for r in _dp2c.stock_rows(conn)]
@@ -2414,7 +2419,7 @@ def main():
           and abs(_per4["closing"] - (_per4["opening"] - 7.0 + 2.0)) < 0.001,
           f"أول {_per4['opening']} · آخر {_per4['closing']}")
     # فرقٌ قديم بلا مستند (رصيدٌ قبل تفصيل الدفعات): سطرٌ أول باسمه
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         conn.execute("UPDATE work_orders SET registered_weight="
                      "registered_weight+3 WHERE id=?", (_w10,))
     with db(readonly=True) as conn:
@@ -2424,7 +2429,7 @@ def main():
           _s3["rows"][0]["label"] == "رصيد سابق غير مفصّل"
           and abs(_s3["gap"] - 3.0) < 0.001
           and abs(_s3["closing"] - _s3["card_total"]) < 0.001)
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         conn.execute("UPDATE work_orders SET registered_weight="
                      "registered_weight-3 WHERE id=?", (_w10,))
     _html4 = _pm.build_body("italian_statement", 0)
@@ -2539,7 +2544,7 @@ def main():
     from models.inventory import get_or_create_bulk_wo as _bulk
     from models import invoices as invoices
 
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _bw = _bulk(conn, "admin")["id"]
         _adj(conn, 1000.0, "admin")
         _bi = create_sale(conn, cust, [{"work_order_id": _bw,
@@ -2862,7 +2867,7 @@ def main():
         _macc = get_entity(conn, _mc)["account_id"]
         _b3 = _batch(conn, [{"wo_no": f"MV{i}", "gold": 100.0,
                              "wage_per_gram": 20.0} for i in range(1, 6)],
-                     "2026-02-01", "admin")
+                     "2026-01-01", "admin")
         _mw = [r["id"] for r in conn.execute(
             "SELECT id FROM work_orders WHERE work_order_no LIKE 'MV%'"
             " ORDER BY id")]
@@ -4039,7 +4044,7 @@ def main():
 
     _b_scrap = _bal44("1310")
     _b_worked = _bal44("1200")
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _w44 = conn.execute(
             "SELECT id FROM work_orders WHERE work_order_no='SRC-1'"
         ).fetchone()["id"]
@@ -4082,7 +4087,7 @@ def main():
             "SELECT COUNT(*) c FROM journal_entries"
             " WHERE source_table='invoices' AND source_id=?",
             (_inv44["id"],)).fetchone()["c"]
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _up44 = _iv44.update_invoice(
             conn, _inv44["id"],
             [{"work_order_id": _w44, "item_id": _it44, "karat": 21,
@@ -4797,7 +4802,7 @@ def main():
     _b49 = _w49("00010")
     check("قاعدة الاختبار فيها رقمٌ تجميعي بحركة", bool(_b49)
           and _b49["is_bulk"] == 1, str(_b49))
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _n_items49 = conn.execute(
             "SELECT COUNT(*) FROM invoice_items WHERE work_order_id=?",
             (_b49["id"],)).fetchone()[0]
@@ -5034,7 +5039,7 @@ def main():
     from models import customer_board as _cb51, movement as _mv51
     from models import journal as _j51, entry_kind as _ek51
     from services.accounting_engine import post_entry as _pe51
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _m51 = add_entity(conn, "محمد القيد اليومي", "customer",
                           username="admin")
         _x51 = add_entity(conn, "جهة مُسلِّمة", "customer",
@@ -8789,7 +8794,7 @@ def main():
     from models import operations as _op105, wo_moves as _wm105
     from models import inventory as _in105
     from services.audit import reverse_entry as _rev105
-    with db() as conn:
+    with db() as conn, _SG.allow("اختبار: بياناتٌ قديمة", conn):
         _a105 = _en103.add_entity(conn, "مندوب ١٠٥ أ", "customer",
                                   username="admin")
         _b105 = _en103.add_entity(conn, "مندوب ١٠٥ ب", "customer",
@@ -9780,7 +9785,7 @@ def main():
     step("121) 5.0.2: «00010/0010» في المباع الفعلي — الرقمان معاً")
     from models import sales_analytics as _sa121, inventory as _iv121
     from models import invoices as _inv121
-    with db() as _c121:
+    with db() as _c121, _SG.allow("اختبار: بياناتٌ قديمة", _c121):
         _bulk121 = {r["work_order_no"]: r["id"] for r in _c121.execute(
             "SELECT id, work_order_no FROM work_orders WHERE is_deleted=0"
             " AND work_order_no IN ('00010','0010') AND is_bulk=1")}
@@ -10496,6 +10501,116 @@ def main():
             _w128.close()
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
+    step("129) 5.3.2: حارس المخزون — الذهب المشغول · ايطالي · حركة الأطقم")
+    from models import invoices as _iv129, inventory as _in129
+    from models import entities as _en129
+    from services.accounting_engine import post_entry as _pe129
+    with db() as conn:
+        _c129 = _en129.add_entity(conn, "عميل الحارس", "customer",
+                                  username="admin")
+        _ca129 = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                              (_c129,)).fetchone()[0]
+        _b129 = _in129.create_work_orders_batch(conn, [
+            {"wo_no": f"G129-{i}", "gold": 10.0, "wage_per_gram": 5.0}
+            for i in (1, 2, 3)], "2026-09-10", "admin")
+        _w129 = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders"
+            " WHERE work_order_no LIKE 'G129-%'")}
+    with db(readonly=True) as conn:
+        _r0 = _SG.report(conn)
+    # فرقٌ قائم من خطوات «بياناتٍ قديمة» السابقة = خطّ الأساس — لا يتغيّر
+    _d0 = _r0["worked"]["diff"]
+    check("الحارس جاهز، وخطّ أساسه = فرق الدفتر عن الخزنة الآن",
+          _r0["ready"], str(_r0["worked"]))
+
+    def _manual_1200():
+        with db() as conn:
+            _pe129(conn, "2026-09-11", "قيد يومي", [
+                {"account_id": acc_id(conn, "1200"), "gold_credit": 4.0},
+                {"account_id": _ca129, "gold_debit": 4.0}],
+                source_table="manual", username="admin")
+    expect_error("قيدٌ يدوي على الذهب المشغول يُرفض", _manual_1200,
+                 "الذهب المشغول (1200)")
+
+    def _voucher_1210():
+        with db() as conn:
+            _pe129(conn, "2026-09-11", "سند", [
+                {"account_id": acc_id(conn, "1210"), "gold_debit": 3.0},
+                {"account_id": _ca129, "gold_credit": 3.0}],
+                username="admin")
+    expect_error("وسندٌ على ايطالي/نواعم يُرفض", _voucher_1210,
+                 "ايطالي / نواعم (1210)")
+
+    def _sale_before_supply():
+        with db() as conn:
+            _iv129.create_sale(conn, _c129,
+                               [{"work_order_id": _w129["G129-1"]}],
+                               "2026-09-01", "admin", apply_vat=False)
+    expect_error("وبيعُ طقمٍ بتاريخٍ يسبق توريده يُرفض", _sale_before_supply,
+                 "حركة الأطقم")
+
+    with db(readonly=True) as conn:
+        _di129 = _in129.work_order_delete_info(conn, _w129["G129-2"])
+    check("وحذفُ طقمٍ في الخزنة «بلا أثر» ممنوعٌ قبل المحاولة، مع الطريق "
+          "الصحيح", bool(_di129["blocked"])
+          and "شاشة الوارد" in _di129["blocked"], str(_di129["blocked"]))
+
+    def _del_in_stock():
+        with db() as conn:
+            _in129.delete_work_order(conn, _w129["G129-2"], "admin")
+    expect_error("ويُرفض إن حووِل", _del_in_stock, "عجز")
+
+    # الصحيح يمرّ: بيعٌ ثم مرتجعٌ ثم بيعٌ لغيره — والدفتر = الخزنة بعد كلٍّ
+    _ok129 = True
+    try:
+        with db() as conn:
+            _iv129.create_sale(conn, _c129,
+                               [{"work_order_id": _w129["G129-1"]}],
+                               "2026-09-12", "admin", apply_vat=False)
+        with db() as conn:
+            _iv129.create_sale_return(conn, _c129,
+                                      [{"work_order_id": _w129["G129-1"]}],
+                                      "2026-09-13", "admin", apply_vat=False)
+        with db() as conn:
+            _iv129.create_sale(conn, _c129,
+                               [{"work_order_id": _w129["G129-1"]}],
+                               "2026-09-14", "admin", apply_vat=False)
+    except Exception as _e129:
+        _ok129 = False
+        print("   ", _e129)
+    with db(readonly=True) as conn:
+        _r1 = _SG.report(conn)
+    check("والصحيح يمرّ (بيع ← مرتجع ← بيع) والفرق لا يتغيّر",
+          _ok129 and abs(_r1["worked"]["diff"] - _d0) < 0.011,
+          str(_r1["worked"]))
+
+    def _return_twice():
+        with db() as conn:
+            _iv129.create_sale_return(conn, _c129,
+                                      [{"work_order_id": _w129["G129-3"]}],
+                                      "2026-09-15", "admin", apply_vat=False)
+    expect_error("ومرتجعُ طقمٍ لم يخرج يُرفض", _return_twice)
+
+    # تعديل وزن طقمٍ مباعٍ كله في توريده: الفرق إلى «تسويات الأوزان» ظاهراً
+    with db(readonly=True) as conn:
+        _rows129 = [dict(r) for r in conn.execute(
+            "SELECT wo_no, gold, wage_per_gram, model_no FROM wo_batch_lines"
+            " WHERE entry_id=? ORDER BY seq, id", (_b129["entry_id"],))]
+        _adj0 = account_balance(conn, acc_id(conn, "1250"))[0]
+    for _r in _rows129:
+        if _r["wo_no"] == "G129-1":
+            _r["gold"] = 12.0
+    with db() as conn:
+        _in129.update_supply_batch(conn, _b129["entry_id"], _rows129,
+                                   "2026-09-10", "admin")
+    with db(readonly=True) as conn:
+        _r2 = _SG.report(conn)
+        _adj1 = account_balance(conn, acc_id(conn, "1250"))[0]
+    check("وزيادة وزن طقمٍ مباعٍ في توريده تذهب لتسويات الأوزان — والدفتر "
+          "= الخزنة", abs(_r2["worked"]["diff"] - _d0) < 0.011
+          and abs((_adj1 - _adj0) - 2.0) < 0.011,
+          f"{_r2['worked']} · 1250 {_adj0} ← {_adj1}")
 
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")

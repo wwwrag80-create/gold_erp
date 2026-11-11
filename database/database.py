@@ -622,8 +622,16 @@ def db(readonly: bool = False):
         conn.execute(begin)
     st["depth"], st["readonly"] = 1, readonly
     _changes0 = conn.total_changes
+    if not readonly:
+        _guard_begin(st, conn)
     try:
         yield conn
+        # ══ حارس المخزون (5.3.2) ══
+        # الذهب المشغول وايطالي/نواعم وحركة الأطقم: عمليةٌ تجعل الدفتر
+        # يختلف عن الواقع تُرفض هنا — فيُلغى كل ما كُتب فيها
+        if not readonly and st.get("sg") is conn:
+            from models import stock_guard
+            stock_guard.check(conn)
         # ══ ختم القيود قبل الإغلاق ══
         # آخر لحظةٍ يكون فيها القيد قد بلغ صورته النهائية: ما وُسم في
         # هذه المعاملة يُختم الآن في سلسلة البصمات (models/integrity).
@@ -650,11 +658,49 @@ def db(readonly: bool = False):
         st["depth"], st["readonly"] = 0, False
 
 
+def _guard_begin(st, conn):
+    """يجهّز حارس المخزون على اتصال هذا الخيط (مرةً) ويمحو أثر ما كُتب
+    خارج المعاملات — فلا يُنسب إلى العملية الجديدة."""
+    try:
+        from models import stock_guard
+        if st.get("sg") is not conn and stock_guard.install(conn):
+            st["sg"] = conn
+            stock_guard.ensure_ready(conn)
+        if st.get("sg") is conn:
+            conn.execute("DELETE FROM sg_touch")
+    except Exception:
+        pass
+
+
 def db_read():
     """معاملة قراءة فقط — لا تحجز قفل الكتابة."""
     return db(readonly=True)
 
 
+def _system_op(fn):
+    """ترقيةٌ أو تجهيزٌ نظامي (5.3.2): لا يفحصه حارس المخزون — فهو يُصلح
+    البيانات لا يغيّرها عمداً — ثم يُعتمد ما انتهى إليه خطَّ أساس، فلا
+    يُرفض بسببه أول عملٍ للمستخدم بعده (والتغيّر يُسجَّل في السجل)."""
+    import functools
+
+    @functools.wraps(fn)
+    def run(*a, **k):
+        try:
+            from models import stock_guard
+        except Exception:
+            return fn(*a, **k)
+        with stock_guard.allow(fn.__name__):
+            out = fn(*a, **k)
+        try:
+            with db() as conn:
+                stock_guard.rebase(conn, why=fn.__name__)
+        except Exception:
+            pass
+        return out
+    return run
+
+
+@_system_op
 def create_tables() -> None:
     conn = get_connection()
     try:
@@ -663,6 +709,7 @@ def create_tables() -> None:
         conn.close()
 
 
+@_system_op
 def migrate_schema() -> None:
     """ترقية قواعد البيانات القائمة دون فقد بيانات (إضافة أعمدة/جداول جديدة)."""
     with db() as conn:
@@ -1533,6 +1580,7 @@ def migrate_schema() -> None:
             "  AND work_order_no IN ('00010','0010'))")
 
 
+@_system_op
 def run_migrations_files():
     """ينفّذ ملفات الهجرة المرقّمة مرة واحدة لكل إصدار.
 

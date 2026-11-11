@@ -87,8 +87,11 @@ class IntegrityScreen(QtWidgets.QWidget):
         self.tabs = tab_widget()
         self.tabs.addTab(page, "بصمة القيود")
         self.tabs.addTab(self._drift_page(), "بتاريخٍ مغاير لتاريخ النظام")
+        # ══ 5.3.2: سلامة المخزون — الحسابان مقابل الواقع ══
+        self.tabs.addTab(self._stock_page(), "سلامة المخزون")
         self.tabs.currentChanged.connect(
-            lambda i: self.load_drift() if i == 1 else None)
+            lambda i: self.load_drift() if i == 1 else (
+                self.load_stock() if i == 2 else None))
         outer = QtWidgets.QVBoxLayout(self)
         outer.addWidget(title_label("سلامة السجل — بصمة كل قيد وسلسلتها،"
                                     " وما رُحّل بتاريخٍ مغاير"))
@@ -133,6 +136,99 @@ class IntegrityScreen(QtWidgets.QWidget):
         lay.addWidget(self.drift_state)
         lay.addWidget(self.drift_table, 1)
         return page
+
+    # ══════════ سلامة المخزون (5.3.2) ══════════
+    def _stock_page(self):
+        page = QtWidgets.QWidget()
+        lay = QtWidgets.QVBoxLayout(page)
+        lay.setContentsMargins(0, 4, 0, 0)
+        intro = QtWidgets.QLabel(
+            "حارس المخزون يفحص كل عمليةٍ قبل حفظها: إن جعلت رصيد «الذهب"
+            " المشغول» يختلف عن أوزان الأطقم الموجودة فعلاً في الخزنة، أو"
+            " رصيد «ايطالي / نواعم» يختلف عن بطاقتي 0010 و00010، أو جعلت"
+            " حركة طقمٍ غير منتظمة (بيعٌ وهو ليس في الخزنة، مرتجعٌ وهو فيها،"
+            " حركةٌ بتاريخٍ يسبق توريده) — رُفضت كلها ولم يُحفظ منها شيء."
+            "\nالفرق القائم من بياناتٍ قديمة يظهر هنا ليُصلَح بمستندٍ صحيح، ولا"
+            " يُعطّل العمل.")
+        intro.setObjectName("cardSub")
+        intro.setWordWrap(True)
+        btn = kit.PushButton("🔍 افحص الآن")
+        btn.clicked.connect(self.load_stock)
+        self.stock_state = big_label("")
+        bar = QtWidgets.QHBoxLayout()
+        bar.addWidget(btn)
+        bar.addStretch(1)
+        bar.addWidget(self.stock_state)
+        self.stock_table = make_table()
+        enhance(self.stock_table, key="integrity_stock")
+        self.stock_broken = make_table()
+        enhance(self.stock_broken, key="integrity_stock_broken")
+        self.stock_broken.setProperty(
+            "emptyText", "لا طقم حركته غير منتظمة ✔")
+        self.stock_broken.doubleClicked.connect(self._preview_broken)
+        self._broken = []
+        lay.addWidget(intro)
+        lay.addLayout(bar)
+        lay.addWidget(self.stock_table)
+        cap = QtWidgets.QLabel("فواتير قديمة كسرت حركة طقمها (قبل الحارس) —"
+                               " نقرةٌ مزدوجة تعاين الفاتورة:")
+        cap.setObjectName("cardSub")
+        lay.addWidget(cap)
+        lay.addWidget(self.stock_broken, 1)
+        return page
+
+    def load_stock(self):
+        try:
+            from models import stock_guard
+            with db(readonly=True) as conn:
+                rep = stock_guard.report(conn)
+            rows, bad = [], 0
+            for label, r, what in (
+                    ("الذهب المشغول (1200)", rep["worked"],
+                     "أوزان الأطقم في الخزنة"),
+                    ("ايطالي / نواعم (1210)", rep["italian"],
+                     "رصيد بطاقتي 0010 و00010")):
+                if r is None:
+                    continue
+                ok = abs(r["diff"]) < 0.011
+                bad += 0 if ok else 1
+                rows.append((label, _nf.f2(kv.g(r["gl"])), what,
+                             _nf.f2(kv.g(r["stock"])),
+                             _nf.f2(kv.g(r["diff"])),
+                             "✔ مطابق" if ok else "⚠ فرقٌ قديم"))
+            fill(self.stock_table, ["الحساب", "رصيد الدفتر", "يقابله",
+                                    "الواقع", "الفرق", "الحالة"], rows)
+            from ui.widgets.table_fit import fit_columns
+            fit_columns(self.stock_table, [22, 14, 22, 14, 12, 16])
+            self.stock_table.setMaximumHeight(
+                self.stock_table.verticalHeader().defaultSectionSize() * 3
+                + self.stock_table.horizontalHeader().height() + 6)
+            self._broken = rep["broken"]
+            fill(self.stock_broken, ["التاريخ", "الفاتورة", "النوع", "الجهة"],
+                 [(b["invoice_date"], b["invoice_no"] or "—",
+                   "بيع" if b["kind"] == "sale" else "مرتجع", b["party"])
+                  for b in self._broken])
+            fit_columns(self.stock_broken, [18, 22, 14, 46])
+            on = stock_guard.mode() == "on"
+            if not bad and not self._broken:
+                txt = "✔ الدفاتر = الواقع"
+            else:
+                txt = (f"⚠ {bad} حساب بفرقٍ قديم · "
+                       f"{len(self._broken)} فاتورة قديمة غير منتظمة")
+            self.stock_state.setText(txt + ("" if on else
+                                            " — الحارس معطّل على هذا الجهاز"))
+        except Exception as e:
+            err(self, e)
+
+    def _preview_broken(self, index):
+        try:
+            i = index.row()
+            if 0 <= i < len(self._broken):
+                from services import print_manager
+                print_manager.preview_document(self, "invoices",
+                                               self._broken[i]["id"])
+        except Exception as e:
+            err(self, e)
 
     def load_drift(self):
         try:
@@ -255,6 +351,9 @@ class IntegrityScreen(QtWidgets.QWidget):
         if getattr(self, "tabs", None) is not None \
                 and self.tabs.currentIndex() == 1:
             self.load_drift()
+        elif getattr(self, "tabs", None) is not None \
+                and self.tabs.currentIndex() == 2:
+            self.load_stock()
         else:
             self.run_check()
 

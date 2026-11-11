@@ -1676,6 +1676,20 @@ def work_order_delete_info(conn, wo_id):
         weight = wo_moves.state(conn, wo)["rem"] \
             if wo["status"] == "in_stock" else float(
                 wo["registered_weight"] or 0)
+    # حارس المخزون (5.3.2): حذفٌ «بلا أثر على الأرصدة» لطقمٍ في الخزنة
+    # (أو رقمٍ تجميعي له رصيد) يترك وزنه في الحساب بلا شيءٍ يقابله —
+    # عجزٌ مصنوع. يُرفض، ويُدلّ على الطريق الصحيح
+    if not blocked and abs(weight) > 0.001 and (bulk or wo["status"] == "in_stock"):
+        from models import stock_guard
+        if not stock_guard._bypassed() and stock_guard.mode() == "on":
+            blocked = (
+                f"{no} رصيده {_nf.f2(weight)} جم — حذفه من القوائم يترك وزنه"
+                " في حساب " + ("ايطالي / نواعم" if bulk else "الذهب المشغول")
+                + " بلا شيءٍ يقابله فيظهر عجز.\n"
+                + ("صفّر رصيده بمستندٍ صحيح (بيع أو تعديل توريده) ثم احذفه."
+                   if bulk else
+                   "لإخراجه من الحساب: احذف سطره من دفعة توريده في شاشة"
+                   " الوارد (يُخرج وزنه)، أو بِعه بفاتورة."))
     return {"id": wo_id, "wo_no": no, "model": model, "bulk": bulk,
             "weight": round(weight, 3),
             "sold": wo["status"] != "in_stock" and not bulk,
@@ -1737,6 +1751,27 @@ def _reweigh(conn, wo, d, entry_id, username):
         (wo["id"], entry_id, day, d,
          float(wo["registered_weight"] or 0),
          round(float(wo["registered_weight"] or 0) + d, 3), username))
+    if st["rem"] <= _wm.EPS:
+        # خرج كله (5.3.2): الفرق ليس في الخزنة — قيد الدفعة زاد الذهب
+        # المشغول (أو أنقصه) بوزنٍ لا طقم له فيها. يُنقل إلى «تسويات
+        # الأوزان» (1250) ظاهراً باسم الطقم، فيبقى الحساب = ما في الخزنة
+        # ويُرى الفرق ويُعالَج (يُحمَّل على الجهة أو يُسوّى)
+        from models import stock_home
+        home = stock_home.home_account(conn, wo)
+        adj = acc_id(conn, ADJUST_ACCOUNT)
+        amt = round(abs(d), 3)
+        label = (f"فرق وزن توريد الطقم {wo['work_order_no']} وهو خارج"
+                 " الخزنة")
+        if d > 0:
+            lines = [{"account_id": adj, "gold_debit": amt, "line_desc": label},
+                     {"account_id": home, "gold_credit": amt,
+                      "line_desc": label}]
+        else:
+            lines = [{"account_id": home, "gold_debit": amt, "line_desc": label},
+                     {"account_id": adj, "gold_credit": amt,
+                      "line_desc": label}]
+        post_entry(conn, day, label, lines, source_table="work_orders",
+                   source_id=wo["id"], username=username, note=label)
 
 
 def _follow_models(conn, renamed):

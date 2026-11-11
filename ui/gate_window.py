@@ -71,9 +71,6 @@ CARD_DELAY = 140            # الحقول تلحق الترحيب بلحظة
 # 5.3 — مع المشهد ثلاثي الأبعاد: المشهد يخرج من العتمة، فالشعار المجسّم
 # يستدير إليك، فالترحيب، فالحقول والزر — كلٌّ بعد سابقه بلحظة
 LOGO_W_3D = 236             # الشعار المجسّم أكبر قليلاً من الصورة
-HERO_3D_DELAY = 650         # الترحيب بعد بدء المشهد (الشعار يستدير أولاً)
-CARD_3D_DELAY = 1050        # ثم الحقول والزر
-WAIT_3D_MS = 4500           # أقصى انتظارٍ لأول إطار — ثم الترحيب على أي حال
 FADE_IN = 450               # ظهور البوابة نفسها من الشفافية
 SLIDE = 26                  # مسافة الانزلاق بالبكسل
 
@@ -409,7 +406,6 @@ class GateWindow(QtWidgets.QDialog):
         self._3d = hasattr(self.stage, "set_logo_rect")
         self._logo3d = False        # الشعار المجسّم مكان صورة الشعار
         self._logo_pix2d = None
-        self._await3d = False       # الترحيب ينتظر أول إطارٍ من المشهد
         if self._3d:
             self.stage.ready.connect(self._go3d)
             self.stage.failed.connect(self._stage_failed)
@@ -524,9 +520,18 @@ class GateWindow(QtWidgets.QDialog):
         # 5.3: شعار JADEITE الأصلي يُرسم مجسّماً في المشهد — والصورة تُترك
         # مكانها فارغةً بمقاسه (فلا يتغيّر ترتيب ما حوله). شعار مصنعٍ خاص
         # يبقى صورته هو كما هي.
+        # 5.3.2: الصورة تبقى ظاهرةً (بمقاس المجسّم) حتى يُرسم المشهد، ثم
+        # تذوب والمجسّم يستدير مكانها — فلا انتظار ولا فراغ عند الفتح
         if self._3d and self._is_jadeite_logo():
             self._logo3d = True
-            self.logo.setPixmap(self._blank_like(pix, LOGO_W_3D))
+            if pix is not None:
+                dpr = _screen_dpr()
+                big = QtGui.QPixmap(str(config.LOGO_GOLD_PATH)).scaledToWidth(
+                    int(LOGO_W_3D * dpr), QtCore.Qt.SmoothTransformation)
+                if not big.isNull():
+                    big.setDevicePixelRatio(dpr)
+                    self._logo_pix2d = big
+            self.logo.setPixmap(self._logo_pix2d)
         lay.addWidget(self.logo)
 
         self.hello = QtWidgets.QLabel(_greeting())
@@ -637,6 +642,13 @@ class GateWindow(QtWidgets.QDialog):
         quit_ = QtWidgets.QPushButton("إغلاق البرنامج")
         quit_.setObjectName("gateQuit")
         quit_.setCursor(QtCore.Qt.PointingHandCursor)
+        # 5.3.2: **لا يُضغط إلا بالفأرة** — كان التركيز ينتقل إليه حين
+        # تُقفل الخانات أثناء «جارٍ التحقق…»، فيضغطه Enter الثاني ويُغلق
+        # البرنامج كله
+        quit_.setAutoDefault(False)
+        quit_.setDefault(False)
+        quit_.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.quit_btn = quit_
         quit_.clicked.connect(self.reject)
         lay.addWidget(quit_, alignment=QtCore.Qt.AlignCenter)
 
@@ -682,9 +694,6 @@ class GateWindow(QtWidgets.QDialog):
         super().showEvent(e)
         self.stage.setGeometry(self.rect())
         self._build_overlay()
-        if self._3d and animations_on() and not getattr(self, "_shown3d", False):
-            self._show_3d()
-            return
         # المشهد كاملاً قبل أول إطار (فلا يومض شيء) — ثم الحركة: النافذة
         # تظهر من الشفافية، والمقطع يخرج من العتمة، والترحيب ثم الحقول
         # ينزلقان إلى مكانهما
@@ -736,59 +745,30 @@ class GateWindow(QtWidgets.QDialog):
         out.fill(QtCore.Qt.transparent)
         return out
 
-    def _show_3d(self):
-        """البداية مع المشهد الحيّ: ليلٌ أسود، والمشهد يُبنى في عمليته.
-
-        لا يظهر شيءٌ فوقه حتى يُرسم أول إطار (`ready`): فلا ترحيبَ فوق
-        سواد ثم مشهدٌ يقفز تحته. وإن تأخّر (جهازٌ بطيء) فبعد `WAIT_3D_MS`
-        يظهر الترحيب على أي حال — والدخولُ لا ينتظر زينة. وتجهيز القاعدة
-        يبدأ الآن تحته كما كان.
-        """
-        self._shown3d = True
-        self._ensure_card()
-        self._hero_k = 0.0
-        self._card_k = 0.0
-        self.hero.hide()
-        self.card.hide()
-        self._card_shown = False
-        self._layout_scene()
-        self._await3d = True
-        self.stage.start()
-        QtCore.QTimer.singleShot(WAIT_3D_MS, self._go3d)
-        self._start_prepare()
-
     def _go3d(self):
-        """أول إطار رُسم: تُغلق شاشة البدء، والترحيب ثم الحقول بعده."""
-        if not self._await3d:
+        """أول إطارٍ من المشهد الحيّ: صورة الشعار تذوب والمجسّم مكانها.
+
+        البوابة ظاهرةٌ كاملةً من أول لحظة (5.3.2) — لا تنتظر المشهد.
+        """
+        if not self._logo3d or getattr(self, "_logo_swapped", False):
             return
-        self._await3d = False
-        self._revealed()
-        self._apply_hero(0.0)
-        self.hero.show()
-        self._layout_scene()
+        self._logo_swapped = True
+        self.logo._src_pix = QtGui.QPixmap(self._logo_pix2d)
+        blank = self._blank_like(self._logo_pix2d, LOGO_W_3D)
         fade = QtCore.QVariantAnimation(self)
-        fade.setStartValue(0.0)
-        fade.setEndValue(1.0)
-        fade.setDuration(1100)
-        fade.setEasingCurve(QtCore.QEasingCurve.OutCubic)
-        fade.valueChanged.connect(self._apply_hero)
-        fade.finished.connect(self._clear_effects)
+        fade.setStartValue(1.0)
+        fade.setEndValue(0.0)
+        fade.setDuration(900)
+        fade.setEasingCurve(QtCore.QEasingCurve.InOutSine)
+        fade.valueChanged.connect(
+            lambda v: self._fade_pixmap(self.logo, float(v)))
+
+        def _done():
+            self.logo._src_pix = None
+            self.logo.setPixmap(blank)
+        fade.finished.connect(_done)
         self._anims.append(fade)
-
-        def _hero():
-            fade.start()
-            self._intro.start()
-
-        QtCore.QTimer.singleShot(HERO_3D_DELAY, _hero)
-        QtCore.QTimer.singleShot(CARD_3D_DELAY, self._card_3d)
-
-    def _card_3d(self):
-        if self.card is None or not self.isVisible():
-            return
-        self._card_shown = True
-        self._apply_card(0.0)
-        self.card.show()
-        self._card_in.start()
+        QtCore.QTimer.singleShot(350, fade.start)
 
     def _stage_failed(self, why):
         """تعذّر المشهد الحيّ: المقطع المصوَّر مكانه — والدخول كما هو."""
@@ -819,8 +799,6 @@ class GateWindow(QtWidgets.QDialog):
         if self.isVisible():
             st.intro = 0.0
             st.start()
-        if self._await3d:
-            self._go3d()
 
     def _fade_in(self):
         """البوابة تظهر من الشفافية مرةً واحدة — لا تنبثق دفعةً.
@@ -832,6 +810,11 @@ class GateWindow(QtWidgets.QDialog):
         if getattr(self, "_faded", False):
             return
         self._faded = True
+        if self._3d:
+            # المشهد الحيّ يخرج من العتمة بنفسه، والنوافذ الشفّافة لا
+            # تأتمن عرض كرت الشاشة — فتظهر البوابة كاملةً في لحظتها
+            QtCore.QTimer.singleShot(0, self._revealed)
+            return
         try:
             anim = QtCore.QPropertyAnimation(self, b"windowOpacity", self)
             anim.setStartValue(0.0)
@@ -1439,10 +1422,26 @@ class GateWindow(QtWidgets.QDialog):
 
     # ─────────────────────────────── إغلاقٌ آمن
     def keyPressEvent(self, e):
+        if self._busy or self.user:
+            # الدخول جارٍ أو النظام يُفتح: لا مفتاحَ يُغلق أو يعيد شيئاً
+            e.accept()
+            return
+        if e.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+            # Enter على البوابة لا يصل إلى زرٍّ غير «دخول» أبداً
+            if self.card is not None and self.btn.isEnabled():
+                self.try_login()
+            e.accept()
+            return
         if e.key() == QtCore.Qt.Key_Escape:
             self.reject()
             return
         super().keyPressEvent(e)
+
+    def reject(self):
+        """الإغلاق لا يقع أثناء الدخول أو فتح النظام — مهما ضُغط."""
+        if self._busy or self.user:
+            return
+        super().reject()
 
     def closeEvent(self, e):
         self.stage.stop()

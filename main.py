@@ -271,8 +271,9 @@ def prepare_steps():
             # حالة كل طقم من سلسلة حركته المنظّمة (4.75): ما أفسدته عملياتٌ
             # سابقة (نقل فاتورة · حذف بيعٍ قديم) يُصحَّح ويُسجَّل في السجل
             try:
-                from models import wo_moves
-                wo_moves.resync(conn, None, "system")
+                from models import stock_guard, wo_moves
+                with stock_guard.allow("resync", conn):
+                    wo_moves.resync(conn, None, "system")
             except Exception:
                 pass
             # قيود الرواتب الجامعة (قبل 4.78) تُقسم قيداً لكل عامل، فيصحّ
@@ -280,6 +281,14 @@ def prepare_steps():
             try:
                 from models import mfg_costs
                 mfg_costs.split_combined(conn, "system")
+            except Exception:
+                pass
+            # حارس المخزون (5.3.2): خطّ الأساس — الفرق القائم بين الدفتر
+            # والخزنة (إن وُجد من بياناتٍ قديمة) يُحفظ كما هو، فلا يُرفض
+            # العمل بسببه، ويُرفض كل ما يزيده أو يغيّره
+            try:
+                from models import stock_guard
+                stock_guard.init(conn)
             except Exception:
                 pass
             # بقايا طابور المزامنة من الإصدارات السابقة — لا شيء يُرفع
@@ -297,6 +306,22 @@ def prepare_steps():
         except Exception as ex:
             print(f"[branding] {ex}")
 
+    def _sys(fn):
+        # تجهيز الإقلاع عملٌ نظامي: لا يفحصه حارس المخزون (5.3.2) — وخطّ
+        # الأساس يُعتمد بعده في «تجهيز الجهات»
+        def run():
+            from models import stock_guard
+            with stock_guard.allow("startup"):
+                return fn()
+        return run
+
+    return [(label, _sys(fn)) for label, fn in _steps(
+        create_tables, _recover, migrate_schema, run_migrations_files,
+        seed_initial_data, ensure_new_accounts, _identities, _branding)]
+
+
+def _steps(create_tables, _recover, migrate_schema, run_migrations_files,
+           seed_initial_data, ensure_new_accounts, _identities, _branding):
     return [
         ("جارٍ تجهيز قاعدة البيانات…", create_tables),
         ("جارٍ التحقّق من سلامة البيانات…", _recover),
