@@ -40,10 +40,19 @@ jobs:
         # libQt5Gui يرتبط بـ libGL حتى في وضع offscreen، وبقيتها
         # يحتاجها محرك الخطوط وحافلة الرسائل.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            libgl1 libegl1 libglib2.0-0 libdbus-1-3 \
-            libxkbcommon0 libfontconfig1 libfreetype6
+          # مرآة الحزم تتعثّر أحياناً («Temporary failure resolving») — تُعاد
+          # المحاولة بدل أن يسقط الفحص كله قبل أن يبدأ
+          for i in 1 2 3 4; do
+            sudo apt-get update -qq || true
+            if sudo apt-get install -y --no-install-recommends --fix-missing \
+                libgl1 libegl1 libglib2.0-0 libdbus-1-3 \
+                libxkbcommon0 libfontconfig1 libfreetype6; then
+              exit 0
+            fi
+            echo "apt: محاولة $i تعثّرت — إعادة بعد $((i * 15)) ث"
+            sleep $((i * 15))
+          done
+          exit 1
 
       - name: تثبيت المتطلبات
         run: |
