@@ -17,4 +17,14 @@ sys.path.insert(0, str(ROOT))
 import core.build as b  # noqa: E402
 
 b._bundled_env = lambda: None
+if "--no-webengine" in sys.argv:
+    # نسخة مقارنة بلا محرّك الويب: لقياس ما يضيفه المشهد للحجم والإقلاع
+    ex = []
+    for m in ("PyQt5.QtWebEngineWidgets", "PyQt5.QtWebEngineCore",
+              "PyQt5.QtWebEngine", "PyQt5.QtWebChannel", "PyQt5.QtQuick",
+              "PyQt5.QtQml", "PyQt5.QtQuickWidgets",
+              "qframelesswindow.webengine"):
+        ex += ["--exclude-module", m]
+    b._webengine_args = lambda: ex
+    b.APP_NAME = "gold_erp_noweb"
 b.build_app(onefile=True)
