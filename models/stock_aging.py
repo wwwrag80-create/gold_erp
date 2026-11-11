@@ -89,33 +89,88 @@ def items(conn, as_of=None, model=None):
         extra = (f" AND COALESCE(NULLIF(TRIM(w.model_no),''),?)"
                  f" IN ({ph})")
         p += [NO_MODEL] + chosen
+    # 5.3.1: **العمر من آخر دخولٍ للخزنة** — التوريد، أو آخر مرتجعٍ
+    # رجعت به. طقمٌ خرج ثم رجع يبدأ عمره من يوم رجوعه، لا من توريده.
     rows = conn.execute(
         "SELECT w.id, w.work_order_no wo, w.model_no,"
         "  COALESCE(w.remaining_weight, w.registered_weight) wt, w.wage_per_gram wpg, w.is_bulk,"
         "  w.item_type, w.small_stones, w.big_stones,"
-        "  COALESCE(e.entry_date, substr(w.created_at,1,10)) in_date"
+        "  COALESCE(e.entry_date, substr(w.created_at,1,10)) sup_date,"
+        "  (SELECT MAX(i.invoice_date) FROM invoice_items it"
+        "    JOIN invoices i ON i.id=it.invoice_id"
+        "   WHERE it.work_order_id=w.id AND i.is_deleted=0"
+        "     AND i.kind='sale_return' AND i.invoice_date <= ?) ret_date"
         " FROM work_orders w"
         " LEFT JOIN journal_entries e ON e.id=w.entry_id"
         " WHERE w.is_deleted=0 AND w.status='in_stock'"
         "   AND COALESCE(e.entry_date, substr(w.created_at,1,10)) <= ?"
-        + extra, p).fetchall()
+        + extra, [as_of] + p).fetchall()
 
     out = []
     for r in rows:
         wt = float(r["wt"] or 0.0)
         wpg = float(r["wpg"] or 0.0)
-        n = _days(r["in_date"], as_of)
+        sup = str(r["sup_date"] or "")[:10]
+        ret = str(r["ret_date"] or "")[:10]
+        in_date = max(sup, ret) if ret else sup
+        n = _days(in_date, as_of)
         out.append({
             "id": r["id"], "wo_no": r["wo"],
             "model": (r["model_no"] or "").strip() or NO_MODEL,
             "weight": round(wt, 3), "wage_per_gram": round(wpg, 2),
             "idle_wage": round(wt * wpg, 2),
-            "in_date": str(r["in_date"] or "")[:10],
+            "in_date": in_date,
+            "how": "مرتجع" if ret and ret >= sup else "توريد",
             "days": n, "bucket": _bucket(n),
             "is_bulk": bool(r["is_bulk"]),
             "item_type": (r["item_type"] or "").strip(),
             "small_stones": round(float(r["small_stones"] or 0.0), 2),
             "big_stones": round(float(r["big_stones"] or 0.0), 2),
+        })
+    out.sort(key=lambda x: (-x["days"], -x["weight"]))
+    return out
+
+
+def outside(conn, as_of=None, model=None):
+    """أرقام التشغيل في الخارج (عند العملاء) — كم لها خارج الخزنة.
+
+    العمر من **آخر خروج** (آخر فاتورة مبيعات): طقمٌ خرج ثم رجع ثم خرج
+    يُحسب من خروجه الأخير — ورجوعه يُخرجه من هذا القسم إلى الخزنة.
+    """
+    as_of = as_of or _today()
+    p = [as_of]
+    extra = ""
+    chosen = as_list(model)
+    if chosen:
+        ph = ",".join("?" * len(chosen))
+        extra = (f" AND COALESCE(NULLIF(TRIM(w.model_no),''),?)"
+                 f" IN ({ph})")
+        p += [NO_MODEL] + chosen
+    rows = conn.execute(
+        "SELECT w.id, w.work_order_no wo, w.model_no, w.registered_weight wt,"
+        "  i.invoice_date out_date, COALESCE(e.name,'—') holder"
+        " FROM work_orders w"
+        " JOIN invoice_items it ON it.work_order_id=w.id"
+        " JOIN invoices i ON i.id=it.invoice_id"
+        " LEFT JOIN entities e ON e.id=i.customer_id"
+        " WHERE w.is_deleted=0 AND w.status='sold' AND w.is_bulk=0"
+        "   AND i.is_deleted=0 AND i.kind='sale'"
+        "   AND i.id=(SELECT i2.id FROM invoice_items it2"
+        "     JOIN invoices i2 ON i2.id=it2.invoice_id"
+        "    WHERE it2.work_order_id=w.id AND i2.is_deleted=0"
+        "      AND i2.kind='sale'"
+        "    ORDER BY i2.invoice_date DESC, i2.id DESC LIMIT 1)"
+        "   AND i.invoice_date <= ?" + extra, p).fetchall()
+    out = []
+    for r in rows:
+        d = str(r["out_date"] or "")[:10]
+        n = _days(d, as_of)
+        out.append({
+            "id": r["id"], "wo_no": r["wo"],
+            "model": (r["model_no"] or "").strip() or NO_MODEL,
+            "weight": round(float(r["wt"] or 0.0), 3),
+            "out_date": d, "holder": r["holder"],
+            "days": n, "bucket": _bucket(n),
         })
     out.sort(key=lambda x: (-x["days"], -x["weight"]))
     return out
@@ -181,7 +236,12 @@ def report(conn, as_of=None, model=None):
         "idle_wage": round(total["idle_wage"] + bulk_sum["idle_wage"], 2),
     }
 
+    out_rows = outside(conn, as_of, model)
     return {
+        "outside": out_rows,
+        "outside_total": {
+            "count": len(out_rows),
+            "weight": round(sum(x["weight"] for x in out_rows), 3)},
         "as_of": as_of, "model": model, "filter_models": as_list(model),
         "items": aged, "buckets": buckets, "models": models,
         "total": total, "bulk": bulk_sum, "bulk_rows": bulk,

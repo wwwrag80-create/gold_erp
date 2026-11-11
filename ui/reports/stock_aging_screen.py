@@ -87,8 +87,13 @@ class StockAgingScreen(QtWidgets.QWidget):
         self.t_items = make_table()
         _enhance(self.t_items, key="stock_aging_items")
 
+        self.t_out = make_table()
+        _enhance(self.t_out, key="stock_aging_outside")
+
         self.tabs = tab_widget()
-        self.tabs.addTab(self.t_items, "برقم التشغيل")
+        self.tabs.addTab(self.t_items, "في الخزنة")
+        # 5.3.1: قسمٌ ثانٍ — ما في الخارج عند العملاء، وكم له خارج الخزنة
+        self.tabs.addTab(self.t_out, "في الخارج")
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(6, 4, 6, 4)
@@ -272,7 +277,9 @@ class StockAgingScreen(QtWidgets.QWidget):
         # (ألماس/زركون/أحجار) وصفٌ مشتقٌّ من المكوّنات لا يضيف شيئاً
         # إلى سؤال «ما الذي رقد ومنذ متى» — وإزاحته تُوسّع الموديل
         # والفئة، وهما ما يُقرأ فعلاً.
-        rows = [(x["wo_no"], x["model"], x["in_date"], f"{x['days']:,}",
+        rows = [(x["wo_no"], x["model"],
+                 f"{x['in_date']}  ({x.get('how', 'توريد')})",
+                 f"{x['days']:,}",
                  BUCKET_LABELS[x["bucket"]], w(x["weight"]))
                 for x in r["items"]]
         marks = []
@@ -285,12 +292,26 @@ class StockAgingScreen(QtWidgets.QWidget):
                 rows.append((b["wo_no"], "رصيد تجميعي", "—", "—",
                              "بلا عمر — خارج الفئات", w(b["weight"])))
         fill(self.t_items,
-             ["رقم التشغيل", "الموديل", "تاريخ الدخول",
+             ["رقم التشغيل", "الموديل", "آخر دخول للخزنة",
               "العمر (يوم)", "الفئة", f"الوزن ({u})"], rows)
-        fit_columns(self.t_items, [17, 25, 16, 12, 16, 14])
+        fit_columns(self.t_items, [15, 22, 22, 11, 16, 14])
         ledger_rows(self.t_items, wrap_cols=(1, 4))
         self._mark(self.t_items, marks)
-        self.tabs.setTabText(0, f"برقم التشغيل ({len(r['items']):,})")
+        self.tabs.setTabText(0, f"في الخزنة ({len(r['items']):,})")
+
+        # ── في الخارج: من آخر خروج (آخر فاتورة مبيعات) ──
+        outs = r.get("outside") or []
+        orows = [(x["wo_no"], x["model"], x["holder"], x["out_date"],
+                  f"{x['days']:,}", BUCKET_LABELS[x["bucket"]],
+                  w(x["weight"])) for x in outs]
+        fill(self.t_out,
+             ["رقم التشغيل", "الموديل", "عند", "آخر خروج",
+              "في الخارج (يوم)", "الفئة", f"الوزن ({u})"], orows)
+        fit_columns(self.t_out, [13, 18, 20, 13, 11, 13, 12])
+        ledger_rows(self.t_out, wrap_cols=(1, 2, 5))
+        ot = r.get("outside_total") or {"count": 0, "weight": 0}
+        self.tabs.setTabText(
+            1, f"في الخارج ({ot['count']:,} · {w(ot['weight'])} {u})")
 
     def _mark(self, table, rows):
         from ui import theme

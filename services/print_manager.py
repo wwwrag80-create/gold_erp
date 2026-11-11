@@ -2044,6 +2044,7 @@ DOC_TITLES = {
     "balances": "أرصدة الحسابات", "turnover": "حركة الأطقم",
     "sales_sets": "المبيعات — أين صارت الأطقم",
     "invoices_combined": "فاتورة مجمّعة — للعرض",
+    "invoices_models_combined": "معاينة مجمّعة — صور الموديلات",
     "aging": "أعمار الديون", "tax_sales_register": "سجل المبيعات الضريبية",
     "purchases_register": "سجل المشتريات", "day_close": "إقفال اليوم",
     "trial_balance": "ميزان المراجعة", "coa_list": "دليل الحسابات",
@@ -3594,41 +3595,159 @@ def _tpl_dossier_models(conn, entity_id=0, date_from=None, date_to=None,
     return _slim_title(title, today) + RECV_PHOTO_CSS + meta + pages
 
 
-def _tpl_invoice_models(conn, invoice_id=0, per_page=4):
-    """صور موديلات فاتورةٍ واحدة — صورةٌ لكل رقم موديل وتحتها أرقام
-    تشغيله في الفاتورة بوزنها. تُفتح من معاينة كشف الحساب."""
+GALLERY_CSS = """
+<style>
+  .ghead { text-align: center; margin: 1mm 0 3mm; }
+  .gtitle { font-size: 21pt; font-weight: bold; color: #2E2410;
+            display: inline-block; padding: 0 4mm 1.2mm;
+            border-bottom: 2.4px solid #C9A227; }
+  .gsub { font-size: 9pt; color: #7A6A48; margin-top: 1.2mm; }
+  table.ginfo { width: 100%; border-collapse: separate;
+                border-spacing: 2.5mm 0; margin: 0 0 3mm; }
+  table.ginfo td { background: #F7F2E6; border: 1px solid #E4D9BF;
+                   border-radius: 4px; text-align: center;
+                   padding: 1.6mm 1mm; }
+  .gk { font-size: 8pt; color: #7A6A48; }
+  .gv { font-size: 12.5pt; font-weight: bold; color: #2E2410; }
+  .gsec { font-size: 12pt; font-weight: bold; color: #4A3A1E;
+          margin: 3mm 0 1.5mm; padding-bottom: 0.8mm;
+          border-bottom: 1px solid #E4D9BF; }
+  table.gal { table-layout: fixed; width: 100%;
+              border-collapse: separate; border-spacing: 2.5mm; }
+  table.gal td.g { width: 33.3%; vertical-align: top;
+                   border: 1px solid #E4D9BF; border-radius: 5px;
+                   padding: 2mm; text-align: center; background: #FFFFFF; }
+  .gimg { height: 52mm; display: flex; align-items: center;
+          justify-content: center; overflow: hidden; }
+  .gimg img { max-width: 96%; max-height: 52mm; object-fit: contain; }
+  .gnone { color: #9A8C6E; font-size: 9pt; }
+  .gcount { font-size: 13pt; font-weight: bold; color: #2E2410;
+            margin-top: 1.5mm; }
+  .gname { font-size: 10pt; color: #6B5B3A; margin-top: 0.6mm; }
+</style>
+"""
+
+
+def _invoice_model_groups(conn, ids):
+    """موديلات فواتير ← [(الموديل، عدد الأطقم)] مرتّبةً بالاسم."""
     from models import models_catalog as mc
+    if not ids:
+        return []
+    q = ",".join("?" * len(ids))
+    rows = conn.execute(
+        "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') m,"
+        " COUNT(*) n FROM invoice_items it"
+        " LEFT JOIN work_orders w ON w.id=it.work_order_id"
+        f" WHERE it.invoice_id IN ({q}) AND COALESCE(w.is_service,0)=0"
+        " GROUP BY m", list(ids)).fetchall()
+    out = [(r["m"], int(r["n"] or 0)) for r in rows]
+    out.sort(key=lambda x: mc.model_key(x[0]))
+    return out
+
+
+def _gallery(models, per_row=3):
+    """شبكة صور: تحت كل صورة عدد الأطقم ثم اسم الموديل."""
+    from models import models_catalog as mc
+    cells_ = []
+    for name, n in models:
+        uri = _img_uri(mc.image_path(name) or "")
+        img = (f'<img src="{uri}" />' if uri
+               else '<span class="gnone">لا صورة</span>')
+        cells_.append(
+            f'<td class="g"><div class="gimg">{img}</div>'
+            f'<div class="gcount">{en(n)} {"طقم" if n == 1 else "أطقم"}</div>'
+            f'<div class="gname">{name}</div></td>')
+    while len(cells_) % per_row:
+        cells_.append('<td style="border:none"></td>')
+    rows = "".join("<tr>" + "".join(cells_[i:i + per_row]) + "</tr>"
+                   for i in range(0, len(cells_), per_row))
+    return f'<table class="gal" cellspacing="0" cellpadding="0">{rows}</table>'
+
+
+def _gallery_head(title, sub, info):
+    """رأس الصفحة: اسم العملية بخطٍّ بارز وتحته خطٌّ قصير، ثم شريطٌ
+    بالعميل والوزن والأجور."""
+    tds = "".join(f'<td><div class="gk">{k}</div><div class="gv">{v}</div></td>'
+                  for k, v in info)
+    return (GALLERY_CSS + f'<div class="ghead"><div class="gtitle">{title}'
+            f'</div><div class="gsub">{sub}</div></div>'
+            f'<table class="ginfo"><tr>{tds}</tr></table>')
+
+
+def _invoice_totals(conn, ids):
+    q = ",".join("?" * len(ids))
+    r = conn.execute(
+        "SELECT COUNT(it.id) n, COALESCE(SUM(it.registered_weight),0) wt,"
+        " COALESCE(SUM(it.wages),0) wg FROM invoice_items it"
+        f" WHERE it.invoice_id IN ({q})", list(ids)).fetchone()
+    return int(r["n"] or 0), float(r["wt"] or 0.0), float(r["wg"] or 0.0)
+
+
+def _tpl_invoice_models(conn, invoice_id=0, per_page=4):
+    """صور موديلات فاتورةٍ واحدة (5.3.1) — قالبٌ مريح: اسم العملية بارزاً
+    وتحته خطٌّ قصير، ثم العميل والوزن والأجور، ثم صورة كل موديل وتحتها
+    عدد أطقمه واسمه. تُفتح من معاينة كشف الحساب."""
     inv = conn.execute(
         "SELECT i.invoice_no, i.invoice_date, i.kind, e.name"
         " FROM invoices i LEFT JOIN entities e ON e.id=i.customer_id"
         " WHERE i.id=?", (invoice_id,)).fetchone()
     if not inv:
         raise ValueError("الفاتورة غير موجودة")
-    rows = conn.execute(
-        "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') m,"
-        " w.work_order_no wo, it.registered_weight wt, i.kind k,"
-        " i.invoice_date d FROM invoice_items it"
-        " JOIN invoices i ON i.id=it.invoice_id"
-        " LEFT JOIN work_orders w ON w.id=it.work_order_id"
-        " WHERE it.invoice_id=? AND COALESCE(w.is_service,0)=0"
-        " ORDER BY m, w.work_order_no",
-        (invoice_id,)).fetchall()
-    models = _group_models(rows)
-    models.sort(key=lambda m: mc.model_key(m["model"]))
     kind = "فاتورة مبيعات" if inv["kind"] == "sale" else "فاتورة مرتجع"
-    title = f"موديلات {kind} {inv['invoice_no'] or ''}"
+    n, wt, wg = _invoice_totals(conn, [invoice_id])
+    models = _invoice_model_groups(conn, [invoice_id])
+    head = _gallery_head(
+        kind, f'رقم {en(inv["invoice_no"] or "—")} · {en(inv["invoice_date"])}',
+        [("العميل", inv["name"] or "—"),
+         ("الوزن", f'{_gw(wt)} {_kunit()}'),
+         ("الأجور", _w(wg, 2)),
+         ("الأطقم", f'{en(n)} طقم · {en(len(models))} موديل')])
     if not models:
-        return (_slim_title(title, inv["invoice_date"])
-                + '<div style="text-align:center;padding:40px">'
-                  'لا أصناف في هذه الفاتورة</div>')
-    pages, _n = _model_photo_pages(models, per_page)
-    n = sum(len(m["items"]) for m in models)
-    w = round(sum(abs(m["weight"]) for m in models), 3)
-    meta = (f'<div {WIDE}>الجهة: <b>{inv["name"] or "—"}</b> &nbsp;·&nbsp; '
-            f'<b>{en(len(models))}</b> موديل · <b>{en(n)}</b> قطعة · '
-            f'<b>{_gw(w)}</b> {_kunit()}</div>')
-    return (_slim_title(title, inv["invoice_date"]) + RECV_PHOTO_CSS
-            + meta + pages)
+        return head + ('<div style="text-align:center;padding:40px">'
+                       'لا أصناف في هذه الفاتورة</div>')
+    return head + _gallery(models)
+
+
+def _tpl_invoices_models_combined(conn, _id=0, invoice_ids=None):
+    """معاينة مجمّعة بصور الموديلات (5.3.1): الفواتير المختارة من الكشف —
+    المبيعات قسمٌ والمرتجع قسم، وكلٌّ بصوره وعدد أطقمه."""
+    ids = [int(x) for x in (invoice_ids or []) if x]
+    if not ids:
+        raise ValueError("لم تُختر فواتير")
+    q = ",".join("?" * len(ids))
+    invs = [dict(r) for r in conn.execute(
+        "SELECT i.id, i.kind, i.invoice_no, i.invoice_date,"
+        " COALESCE(e.name,'—') name FROM invoices i"
+        " LEFT JOIN entities e ON e.id=i.customer_id"
+        f" WHERE i.id IN ({q}) AND i.is_deleted=0"
+        " ORDER BY i.invoice_date, i.id", ids)]
+    if not invs:
+        raise ValueError("الفواتير غير موجودة")
+    parties = sorted({r["name"] for r in invs})
+    n, wt, wg = _invoice_totals(conn, [r["id"] for r in invs])
+    dates = sorted(r["invoice_date"] for r in invs)
+    span = (en(dates[0]) if dates[0] == dates[-1]
+            else f"{en(dates[0])} ← {en(dates[-1])}")
+    nums = "، ".join(en(r["invoice_no"] or "—") for r in invs)
+    head = _gallery_head(
+        "معاينة مجمّعة", f"{len(invs)} فاتورة ({nums}) · {span}",
+        [("العميل", "، ".join(parties)),
+         ("الوزن", f'{_gw(wt)} {_kunit()}'),
+         ("الأجور", _w(wg, 2)),
+         ("الأطقم", en(n))])
+    body = ""
+    for kind, label in (("sale", "فاتورة مبيعات"),
+                        ("sale_return", "فاتورة مرتجع")):
+        part = [r["id"] for r in invs if r["kind"] == kind]
+        if not part:
+            continue
+        pn, pw, pg = _invoice_totals(conn, part)
+        models = _invoice_model_groups(conn, part)
+        body += (f'<div class="gsec">{label} — {en(pn)} طقم · '
+                 f'{_gw(pw)} {_kunit()} · أجور {_w(pg, 2)}</div>'
+                 + (_gallery(models) if models else
+                    '<div style="text-align:center;padding:12px">—</div>'))
+    return head + body
 
 
 def _tpl_italian(conn, _id=0, date_from=None, date_to=None, **_kw):
@@ -4362,10 +4481,22 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
     for x in r["items"]:
         body += "<tr>" + cells(
             tdw(en(x["wo_no"])), tdw(x["model"], align="right"),
-            tdw(en(x["in_date"])),
+            tdw(en(x["in_date"]) + f' ({x.get("how", "توريد")})'),
             tdw(en(f"{x['days']:,}")),
             tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
             tdw(_g(x["weight"]))) + "</tr>"
+    # 5.3.1: ما في الخارج — من آخر خروج (آخر فاتورة مبيعات)
+    obody = "".join(
+        "<tr>" + cells(
+            tdw(en(x["wo_no"])), tdw(x["model"], align="right"),
+            tdw(x["holder"], align="right"), tdw(en(x["out_date"])),
+            tdw(en(f"{x['days']:,}")),
+            tdw(stock_aging.BUCKET_LABELS[x["bucket"]]),
+            tdw(_g(x["weight"]))) + "</tr>"
+        for x in r.get("outside") or [])
+    if not obody:
+        obody = f'<tr><td {TD} colspan="7">لا أطقم في الخارج</td></tr>'
+    ot = r.get("outside_total") or {"count": 0, "weight": 0}
     # سطرٌ لكل رقمٍ تجميعي (00010 · 0010): رصيدان مستقلّان
     for b in r.get("bulk_rows") or []:
         body += "<tr>" + cells(
@@ -4393,11 +4524,22 @@ def _tpl_stock_aging(conn, _id=0, as_of=None, model=None, detail=False):
       <tr><th>تاريخ الطباعة</th><td {TD} colspan="3">{en(today)}</td></tr>
     </table>
 
+    <div class="note"><b>في الخزنة</b> — العمر من آخر دخول (التوريد أو
+      آخر مرتجع)</div>
     {TBL}
       <tr>{cells(thw("رقم التشغيل"), thw("الموديل"),
-                 thw("تاريخ الدخول"), thw("العمر (يوم)"), thw("الفئة"),
+                 thw("آخر دخول للخزنة"), thw("العمر (يوم)"), thw("الفئة"),
                  thw(f"الوزن ({u})"))}</tr>
       {body}
+    </table>
+
+    <div class="note"><b>في الخارج</b> — {en(f"{ot['count']:,}")} طقم ·
+      {en(_g(ot["weight"]))} {u} — المدّة من آخر خروج</div>
+    {TBL}
+      <tr>{cells(thw("رقم التشغيل"), thw("الموديل"), thw("عند"),
+                 thw("آخر خروج"), thw("في الخارج (يوم)"), thw("الفئة"),
+                 thw(f"الوزن ({u})"))}</tr>
+      {obody}
     </table>
 
     <div class="note">تاريخ الدخول من قيد التوريد لا من وقت كتابة
@@ -5277,6 +5419,7 @@ BUILDERS = {
     "sales_sets": _tpl_sales_sets,
     # 5.2.5: فواتير مختارة من الكشف في فاتورةٍ واحدة — عرضٌ فقط
     "invoices_combined": _tpl_invoices_combined,
+    "invoices_models_combined": _tpl_invoices_models_combined,
 }
 
 DOC_LABELS = {

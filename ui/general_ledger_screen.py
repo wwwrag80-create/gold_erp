@@ -815,8 +815,17 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
             if not ids:
                 raise ValueError("لم تُختر فواتير")
             from services import print_manager
-            print_manager.preview_document(self, "invoices_combined", 0,
-                                           invoice_ids=ids)
+            # 5.3.1: الفاتورة المجمّعة أو صور موديلاتها مجمّعة
+            menu = QtWidgets.QMenu(self)
+            a_inv = menu.addAction("📄 الفاتورة المجمّعة")
+            a_mdl = menu.addAction("🖼 صور الموديلات مجمّعة")
+            picked = menu.exec_(QtGui.QCursor.pos())
+            if picked is a_mdl:
+                print_manager.preview_document(
+                    self, "invoices_models_combined", 0, invoice_ids=ids)
+            elif picked is a_inv:
+                print_manager.preview_document(self, "invoices_combined", 0,
+                                               invoice_ids=ids)
         except Exception as e:
             err(self, e)
 

@@ -6115,8 +6115,11 @@ def main():
     _hd66 = _pm65.build_html("dossier_models", _cust66[0],
                              date_from="2000-01-01", date_to="2100-01-01")
     _hi66 = _pm65.build_html("invoice_models", _cust66[1])
+    # 5.3.1: ورقة صور الفاتورة باسم العملية بارزاً، وتحت كل صورة عدد
+    # الأطقم واسم الموديل (لا جدول أرقام تشغيل)
     check("ورقتا الصور: موديلات الجهة وموديلات الفاتورة",
-          "رقم التشغيل" in _hd66 and "رقم التشغيل" in _hi66
+          "رقم التشغيل" in _hd66 and 'class="gtitle"' in _hi66
+          and "طقم" in _hi66 and "الأجور" in _hi66
           and _mi66[0]["items"][0]["wo"] in _hd66)
     try:
         from PyQt5 import QtWidgets as _QW66
