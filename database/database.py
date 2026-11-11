@@ -1538,6 +1538,14 @@ def migrate_schema() -> None:
             if pcols and col not in pcols:
                 conn.execute(f"ALTER TABLE purchases ADD COLUMN {col} {ddl}")
 
+        # 5.3.2: رقمٌ خاص لكل فاتورة وارد (IN-…) — والدفعات القائمة تأخذ
+        # أرقامها بترتيب تواريخها مرةً واحدة
+        try:
+            from models import supply_docs as _sdocs
+            _sdocs.backfill(conn)
+        except Exception as _e:
+            print(f"[supply_docs] {_e}")
+
         # 4.36: تسويات نهاية الفترة — تاريخ التعيين وأجر نهاية الخدمة
         # للموظفين، وجدول المصروفات المدفوعة مقدماً
         from models.period_end import ensure_schema as _pe_schema

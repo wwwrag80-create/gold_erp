@@ -1925,6 +1925,30 @@ class MainWindow(QtWidgets.QMainWindow):
             self.sidebar.setCurrentItem(node)
         self.switch(self.screens.index(screen))
 
+    def open_by_title(self, title, after=None):
+        """اختصارٌ من شاشةٍ إلى أخرى (5.3.2): يفتح الشاشة بعنوانها في
+        القائمة، ثم يُجري `after(screen)` عليها بعد بنائها (فتح سند قبض،
+        أو لوحة صناديق الكسر)."""
+        target = None
+        for scr, node in self._items.items():
+            if node is not None and node.text(0).strip() == title:
+                target = scr
+                break
+        if target is None:
+            try:
+                self.toast(f"«{title}» غير متاحة لهذا المستخدم")
+            except Exception:
+                pass
+            return
+        self._goto(target)
+        if after is not None:
+            def _run():
+                try:
+                    after(getattr(target, "real", target))
+                except Exception:
+                    pass
+            QtCore.QTimer.singleShot(0, _run)
+
     def open_subledger(self, entity_type):
         """من لوحة التحكم: يفتح كشف أرصدة الأستاذ المساعد على الفئة."""
         scr = getattr(self, "subledger_screen", None)

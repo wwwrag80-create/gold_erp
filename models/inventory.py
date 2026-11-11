@@ -457,9 +457,14 @@ def create_work_orders_batch(conn, rows, entry_date, username,
     lines.append({"account_id": acc_id(conn, "1100"), "gold_credit": total_reg,
                   "line_desc": f"صرف لدفعة إنتاج ({n} طقم)"})
     _note = batch_note(reference, rows)
+    # 5.3.2: اسمٌ ورقمٌ خاص لفاتورة الوارد — كفواتير البيع
+    from models import supply_docs as _sd
+    supply_no = _sd.new_no(conn)
     entry_id = post_entry(
-        conn, entry_date, f"توريد دفعة أطقم مجمّعة ({n} طقم)", lines,
+        conn, entry_date,
+        f"{_sd.NAME} {supply_no} — توريد دفعة أطقم مجمّعة ({n} طقم)", lines,
         source_table="work_orders", username=username, note=_note)
+    _sd.bind(conn, entry_id, supply_no)
     # المرجع يُحفظ في عمود المستند كذلك: نصُّ البيان قد يُعاد بناؤه،
     # أما هذا فمخزنٌ ثابت يعود منه المرجع عند فتح الدفعة للتعديل.
     _ref = str(reference or "").strip()
@@ -535,7 +540,7 @@ def create_work_orders_batch(conn, rows, entry_date, username,
     return {"entry_id": entry_id, "total_registered": total_reg,
             "items": created, "dest_account_id": dest_id,
             "dest_name": f"{dest['code']} — {dest['name']}",
-            "scrap_karat": _k}
+            "scrap_karat": _k, "supply_no": supply_no}
 
 
 def list_in_stock(conn):
@@ -1040,12 +1045,21 @@ def item_history(conn, wo_no):
     src_entry = conn.execute(
         "SELECT entry_date FROM journal_entries WHERE id=?",
         (wo["entry_id"],)).fetchone() if wo["entry_id"] else None
+    # 5.3.2: في أي فاتورة وارد ودفعة ومرجع سُجّل الطقم
+    _bi = None
+    if wo["entry_id"]:
+        try:
+            from models import supply_docs as _sd
+            _bi = _sd.batch_info(conn, wo["entry_id"])
+        except Exception:
+            _bi = None
     rows.append({
         "kind": "توريد", "date": (src_entry["entry_date"] if src_entry
                                   else (wo["created_at"] or "")[:10]),
         "party": ("أُدخل عبر مرتجع — بلا توريد"
                   if wo_moves.birth(wo) == wo_moves.SOLD
-                  else "المصنع (خزينة التصنيع)"),
+                  else (_bi["label"] if _bi else "المصنع (خزينة التصنيع)")),
+        "batch": _bi,
         "gold": wo["gold_weight"], "small": wo["small_stones"],
         "big": wo["big_stones"], "reg": wo["registered_weight"],
         "left": (wo["registered_weight"] if not wo["is_bulk"]

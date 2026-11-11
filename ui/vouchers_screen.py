@@ -737,3 +737,14 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self.kind_changed()
         self.recalc_equiv()
         self._restore_draft()
+
+
+# ══ 5.3.2: اختصاراتٌ في الشريط العلوي — بجوار «إغلاق الشاشة» ══
+def _shortcut_tools(self):
+    if getattr(self, "_sc_btns", None) is None:
+        from ui.widgets import shortcuts as _sc
+        self._sc_btns = _sc.buttons(self, _sc.RECEIPT)
+    return list(self._sc_btns)
+
+
+VouchersScreen.toolbar_widgets = _shortcut_tools

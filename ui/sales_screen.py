@@ -3370,3 +3370,14 @@ class SalesScreen(QtWidgets.QWidget):
         # منه، فيضيع العميل المحفوظ في المسوّدة.
         self._restore_draft()
         self.load_held()             # عدّاد «المعلّقات» على عنوانه
+
+
+# ══ 5.3.2: اختصاراتٌ في الشريط العلوي — بجوار «إغلاق الشاشة» ══
+def _shortcut_tools(self):
+    if getattr(self, "_sc_btns", None) is None:
+        from ui.widgets import shortcuts as _sc
+        self._sc_btns = _sc.buttons(self, _sc.SALES)
+    return list(self._sc_btns)
+
+
+SalesScreen.toolbar_widgets = _shortcut_tools

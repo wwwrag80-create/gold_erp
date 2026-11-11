@@ -2299,7 +2299,20 @@ def _tpl_work_order(conn, wo_id):
                  thw("عدد الأطقم"), f'<td>{en(str(len(rows)))}</td>')}</tr>
     </table><br/>'''
     table = f"{TBL}<tr>{head}</tr>{body}<tr>{foot}</tr></table>"
-    return (_header("سند توريد أطقم", "—", date, show_meta=False)
+    try:
+        from models import supply_docs as _sd
+        _bi = _sd.batch_info(conn, wo["entry_id"])
+    except Exception:
+        _bi = None
+    if _bi and _bi["no"]:
+        _row = cells(thw("فاتورة الوارد"), f'<td>{en(_bi["no"])}</td>',
+                     thw("المرجع"), f'<td>{_bi["ref"] or "—"}</td>',
+                     thw("الدفعة"), f'<td>{en(_bi["date"])}</td>')
+        meta = meta.replace("</table><br/>",
+                            f"<tr>{_row}</tr></table><br/>", 1)
+    return (_header("فاتورة وارد" if _bi and _bi["no"] else "سند توريد أطقم",
+                    (_bi or {}).get("no") or "—", date,
+                    show_meta=bool(_bi and _bi["no"]))
             + meta + table + _footer(desc))
 
 
@@ -5433,7 +5446,7 @@ DOC_LABELS = {
     "purchases": "فاتورة مشتريات", "tax_sales": "فاتورة ضريبية/إشعار دائن",
     "melting_ops": "صب وتصفية",
     "fixing_ops": "تسكير", "manual": "قيد يومية",
-    "work_orders": "سند توريد",
+    "work_orders": "فاتورة وارد",
     "workshop_losses": "سند خزينة التصنيع (صرف/قبض)",
 }
 

@@ -29,7 +29,8 @@ _SOURCES = (("invoices", "invoice_no"), ("vouchers", "voucher_no"),
             ("melting_ops", "op_no"), ("tax_sales", "doc_no"),
             ("stocktakes", "stocktake_no"), ("shrinkage_ops", "op_no"),
             ("tax_debit_notes", "note_no"), ("direct_adjustments", "adj_no"),
-            ("model_orders", "order_no"), ("journal_entries", "doc_no"))
+            ("model_orders", "order_no"), ("journal_entries", "doc_no"),
+            ("supply_docs", "supply_no"))
 
 
 def ensure_schema(conn):

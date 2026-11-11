@@ -1161,8 +1161,18 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
                           " تُستكمل أطقمها الباقية.")
             elif res.get("urgent_done"):
                 lines += "\n\n✔ اكتملت الدفعة المستعجلة وخرجت من «المستعجل»."
-            posted(self, f"تم ترحيل الدفعة بقيد رقم {res.get('entry_id')}\n"
-                       f"إجمالي الوزن المقيد: "
+            _sno = res.get("supply_no")
+            if not _sno and res.get("entry_id"):
+                try:
+                    from models import supply_docs as _sd
+                    with db(readonly=True) as _c:
+                        _sno = _sd.number_of(_c, res["entry_id"])
+                except Exception:
+                    _sno = None
+            posted(self, (f"تم ترحيل فاتورة الوارد {_sno} (قيد رقم "
+                          f"{res.get('entry_id')})\n" if _sno else
+                          f"تم ترحيل الدفعة بقيد رقم {res.get('entry_id')}\n")
+                   + "إجمالي الوزن المقيد: "
                        f"{_nf.f2(kv.g(res.get('total_registered') or 0), sep=False)} "
                        f"{kv.unit()}\n{lines}", "work_orders",
                    (res.get("items") or [{}])[0].get("id"),
@@ -1315,3 +1325,14 @@ class ProductionScreen(EditModeMixin, QtWidgets.QWidget):
         self.render_batch()
         self._restore_draft()
         self.load_urgent()           # عدّاد «المستعجل» على عنوانه
+
+
+# ══ 5.3.2: اختصاراتٌ في الشريط العلوي — بجوار «إغلاق الشاشة» ══
+def _shortcut_tools(self):
+    if getattr(self, "_sc_btns", None) is None:
+        from ui.widgets import shortcuts as _sc
+        self._sc_btns = _sc.buttons(self, _sc.SUPPLY)
+    return list(self._sc_btns)
+
+
+ProductionScreen.toolbar_widgets = _shortcut_tools
