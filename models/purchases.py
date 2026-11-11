@@ -157,7 +157,8 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
                     purchase_date, username, supplier_invoice_no="",
                     tax_treatment="standard", account_code=None,
                     price_mode="net", life_months=0, discount=0.0,
-                    pay_mode="credit", invoice_type="standard", lines=None):
+                    pay_mode="credit", invoice_type="standard", lines=None,
+                    is_return=False):
     """فاتورة مورد آجلة — `amount` الصافي الخاضع (بعد الخصم وقبل الضريبة)
     و`vat_amount` ضريبته، و`discount` خصم المورد قبل الضريبة (للبيان).
 
@@ -173,10 +174,20 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
         من حـ/ المصروف أو الأصل       الصافي (+ الضريبة إن لم تُسترد)
         من حـ/ ضريبة المدخلات 1900     الضريبة (الخاضعة القابلة للخصم)
             إلى حـ/ المورد             الإجمالي
+
+    `is_return` (5.3.2): **مرتجع مشتريات** بالتفاصيل نفسها (المورد والحساب
+    والسعر والضريبة وطريقة الدفع) — قيده عكس الشراء: من حـ/ المورد (أو
+    الصندوق/البنك إن استُرد المبلغ) إلى حـ/ المصروف وضريبة المدخلات.
+    ورقمه من سلسلةٍ خاصة «PR». والأصل الثابت لا يُرتجع من هنا (يُستبعد من
+    سجل الأصول).
     """
     from services.fatoora import profile as pf
     if kind not in ("expense", "asset"):
         raise ValueError("نوع الفاتورة غير صحيح")
+    is_return = bool(is_return)
+    if is_return and kind == "asset":
+        raise ValueError("مرتجع الأصل الثابت لا يُسجَّل هنا — يُستبعد الأصل"
+                         " من سجل «الأصول الثابتة والإهلاك»")
     if tax_treatment not in dict(TAX_TREATMENTS):
         raise ValueError("المعالجة الضريبية غير معروفة")
     if price_mode not in dict(PRICE_MODES):
@@ -244,10 +255,12 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
     if supplier_invoice_no:
         dup = conn.execute(
             "SELECT purchase_no FROM purchases WHERE is_deleted=0 AND"
-            " supplier_id=? AND supplier_invoice_no=?",
-            (supplier_id, supplier_invoice_no)).fetchone()
+            " supplier_id=? AND supplier_invoice_no=?"
+            " AND COALESCE(is_return,0)=?",
+            (supplier_id, supplier_invoice_no, int(is_return))).fetchone()
         if dup:
-            raise ValueError(f"فاتورة المورد رقم {supplier_invoice_no} "
+            raise ValueError(("إشعار المورد" if is_return else "فاتورة المورد")
+                             + f" رقم {supplier_invoice_no} "
                              f"مسجّلة من قبل ({dup['purchase_no']}) — لا "
                              "تُقيَّد مرتين")
     claim = tax_treatment == "standard" and vat_amount > 0
@@ -271,8 +284,8 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
             r["asset_id"] = cur.lastrowid
         asset_id = rows[0]["asset_id"]
 
-    ref = f" — فاتورة المورد {supplier_invoice_no}" if supplier_invoice_no \
-        else ""
+    ref = (f" — {'إشعار' if is_return else 'فاتورة'} المورد"
+           f" {supplier_invoice_no}") if supplier_invoice_no else ""
     # سطرٌ مدين لكل حساب (أسطر الحساب الواحد تُجمع)
     by_acc = {}
     for r in rows:
@@ -302,17 +315,34 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
                       "cash_credit": total,
                       "line_desc": f"مشتريات {'نقداً' if pay_mode == 'cash' else 'بتحويل بنكي'}"
                                    f" — {sup['name']}" + ref})
+    if is_return:
+        # المرتجع عكس الشراء سطراً بسطر: المدين دائن والدائن مدين
+        flipped = []
+        for ln in lines:
+            ln = dict(ln)
+            d, c = ln.pop("cash_debit", 0) or 0, ln.pop("cash_credit", 0) or 0
+            if d:
+                ln["cash_credit"] = d
+            if c:
+                ln["cash_debit"] = c
+            ln["line_desc"] = (ln.get("line_desc") or "").replace(
+                "مشتريات آجلة", "مرتجع مشتريات — يُنقص رصيد المورد").replace(
+                "مشتريات نقداً", "مرتجع مشتريات — استُرد نقداً").replace(
+                "مشتريات بتحويل بنكي", "مرتجع مشتريات — استُرد بتحويل بنكي"
+            ).replace("ضريبة مدخلات", "عكس ضريبة مدخلات")
+            flipped.append(ln)
+        lines = flipped
 
     cur = conn.execute(
         "INSERT INTO purchases(purchase_date,supplier,supplier_id,kind,"
         "description,amount,vat_amount,total,asset_id,created_by,"
         "supplier_invoice_no,tax_treatment,account_id,price_mode,discount,"
-        "pay_mode,invoice_type)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "pay_mode,invoice_type,is_return)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (purchase_date, sup["name"], supplier_id, kind, description,
          amount, vat_amount, total, asset_id, username, supplier_invoice_no,
          tax_treatment, acc["id"], price_mode, discount, pay_mode,
-         invoice_type))
+         invoice_type, int(is_return)))
     p_id = cur.lastrowid
     for r in rows:
         conn.execute(
@@ -322,9 +352,13 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
             (p_id, r["line_no"], r["acc"]["id"], r["description"], r["qty"],
              r["unit_price"], r["gross"], r["discount"], r["net"], r["vat"],
              r["total"], r.get("asset_id")))
-    p_no = _numbering.next_no(conn, "P")
-    label = "شراء أصل ثابت" if kind == "asset" else "مشتريات تشغيلية"
-    how = {"credit": "آجلة", "cash": "نقداً", "bank": "بتحويل بنكي"}[pay_mode]
+    p_no = _numbering.next_no(conn, "PR" if is_return else "P")
+    label = ("مرتجع مشتريات" if is_return else
+             "شراء أصل ثابت" if kind == "asset" else "مشتريات تشغيلية")
+    how = ({"credit": "على حساب المورد", "cash": "مستردّ نقداً",
+            "bank": "مستردّ بتحويل بنكي"} if is_return else
+           {"credit": "آجلة", "cash": "نقداً", "bank": "بتحويل بنكي"}
+           )[pay_mode]
     entry_id = post_entry(
         conn, purchase_date,
         f"{label} {how} {p_no} — المورد {sup['name']}{ref} — {description}",
@@ -334,10 +368,17 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
                  (p_no, entry_id, p_id))
     log_action(conn, username, "create", "purchases", p_id, p_no)
     return {"id": p_id, "purchase_no": p_no, "total": total,
-            "pay_mode": pay_mode,
+            "pay_mode": pay_mode, "is_return": is_return,
             "asset_id": asset_id, "entry_id": entry_id,
             "supplier_name": sup["name"], "claimed_vat": vat_amount
             if claim else 0.0, "cost": cost, "lines": len(rows)}
+
+
+def _is_ret(r):
+    try:
+        return bool(r["is_return"])
+    except (IndexError, KeyError):
+        return False
 
 
 def vat_register(conn, date_from, date_to):
@@ -355,16 +396,17 @@ def vat_register(conn, date_from, date_to):
     by = {}
     for r in rows:
         tr = r["tax_treatment"] or "standard"
-        tot["net"] += r["amount"] or 0
-        tot["vat"] += r["vat_amount"] or 0
-        tot["total"] += r["total"] or 0
-        tot["discount"] += r["discount"] or 0
+        sg = -1 if _is_ret(r) else 1       # المرتجع يُنقص (5.3.2)
+        tot["net"] += sg * (r["amount"] or 0)
+        tot["vat"] += sg * (r["vat_amount"] or 0)
+        tot["total"] += sg * (r["total"] or 0)
+        tot["discount"] += sg * (r["discount"] or 0)
         if tr == "standard":
-            tot["claimed"] += r["vat_amount"] or 0
+            tot["claimed"] += sg * (r["vat_amount"] or 0)
         b = by.setdefault(tr, {"n": 0, "net": 0.0, "vat": 0.0})
         b["n"] += 1
-        b["net"] += r["amount"] or 0
-        b["vat"] += r["vat_amount"] or 0
+        b["net"] += sg * (r["amount"] or 0)
+        b["vat"] += sg * (r["vat_amount"] or 0)
     tot = {k: round(v, 2) if isinstance(v, float) else v
            for k, v in tot.items()}
     return rows, tot, by

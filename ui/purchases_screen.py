@@ -169,13 +169,33 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         sup_row = QtWidgets.QHBoxLayout()
         sup_row.addWidget(self.supplier, 1)
         sup_row.addWidget(btn_new_sup)
+        # ══ 5.3.2: شراء أو مرتجع — الشاشة نفسها بتفاصيلها ══
+        self.doc_buy = kit.PushButton("🧾 فاتورة مشتريات")
+        self.doc_ret = kit.PushButton("↩ مرتجع مشتريات")
+        self.doc_group = QtWidgets.QButtonGroup(self)
+        self.doc_group.setExclusive(True)
+        for b in (self.doc_buy, self.doc_ret):
+            b.setCheckable(True)
+            b.setMinimumWidth(150)
+            self.doc_group.addButton(b)
+        self.doc_buy.setChecked(True)
+        self.doc_group.buttonToggled.connect(self._on_doc_kind)
+        self.doc_hint = QtWidgets.QLabel("")
+        self.doc_hint.setObjectName("cardSub")
+        doc_row = QtWidgets.QHBoxLayout()
+        doc_row.addWidget(self.doc_buy)
+        doc_row.addWidget(self.doc_ret)
+        doc_row.addSpacing(10)
+        doc_row.addWidget(self.doc_hint, 1)
+        self.lbl_inv = QtWidgets.QLabel("رقم فاتورة المورد:")
         box_head = QtWidgets.QGroupBox("① فاتورة المورد")
+        self.box_head = box_head
         g = QtWidgets.QGridLayout(box_head)
         cells = (
             (0, 0, "المورد:", sup_row), (0, 2, "الرقم الضريبي:",
                                          self.sup_vat),
             (0, 4, "التاريخ:", self.p_date),
-            (1, 0, "رقم فاتورة المورد:", self.inv_no),
+            (1, 0, self.lbl_inv, self.inv_no),
             (1, 2, "نوع الفاتورة:", self.inv_type),
             (1, 4, "طريقة الدفع:", self.pay),
             (2, 0, "نوع الشراء:", self.kind),
@@ -254,9 +274,11 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
 
         btn_save = kit.PushButton("✔ ترحيل فاتورة المورد")
         btn_save.clicked.connect(self.save_purchase)
+        self.btn_save = btn_save
         self.init_edit_mode(btn_save, "فاتورة المشتريات")
 
         lay = QtWidgets.QVBoxLayout(w)
+        lay.addLayout(doc_row)
         lay.addWidget(box_head)
         lay.addWidget(box_amt, 1)
         lay.addLayout(cards)
@@ -270,6 +292,11 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                     on_last=lambda: self.account if self.add_line()
                     else False)
         self._on_kind()
+        self._restore_options()
+        for cb in (self.kind, self.treat, self.pay, self.inv_type,
+                   self.account):
+            cb.currentIndexChanged.connect(self._save_options)
+        self._on_doc_kind()
         self._line_auto_vat()
         self._render_lines()
         sa = QtWidgets.QScrollArea()
@@ -281,6 +308,76 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
 
     def _pmode(self):
         return "net"
+
+    # ══ 5.3.2: الخيارات تبقى كما تركتها — حتى بعد الخروج ══
+    _OPT_KEYS = ("kind", "treat", "pay", "inv_type", "account")
+
+    def _settings(self):
+        return QtCore.QSettings("Jadeite", "Purchases")
+
+    def _restore_options(self):
+        self._opt_loading = True
+        try:
+            st = self._settings()
+            for key in self._OPT_KEYS:
+                v = st.value(key, None)
+                cb = getattr(self, key)
+                if v is None:
+                    continue
+                i = cb.findData(v)
+                if i >= 0:
+                    cb.setCurrentIndex(i)
+                if key == "kind":
+                    self._on_kind()
+        except Exception:
+            pass
+        finally:
+            self._opt_loading = False
+
+    def _save_options(self, *_):
+        # تحميل فاتورةٍ قديمة للتعديل لا يغيّر ما اخترته أنت
+        if getattr(self, "_opt_loading", False) or \
+                getattr(self, "is_editing", False):
+            return
+        try:
+            st = self._settings()
+            for key in self._OPT_KEYS:
+                v = getattr(self, key).currentData()
+                if v is not None:
+                    st.setValue(key, v)
+        except Exception:
+            pass
+
+    def _is_ret(self):
+        return self.doc_ret.isChecked()
+
+    def _on_doc_kind(self, *_):
+        ret = self._is_ret()
+        self.box_head.setTitle("① مرتجع للمورد" if ret else "① فاتورة المورد")
+        self.lbl_inv.setText("رقم إشعار المورد:" if ret
+                             else "رقم فاتورة المورد:")
+        self.inv_no.setPlaceholderText("إشعار المورد الدائن (إن وُجد)" if ret
+                                       else "كما في ورقة المورد")
+        self.btn_save.setText("✔ ترحيل مرتجع المشتريات" if ret
+                              else "✔ ترحيل فاتورة المورد")
+        self.doc_hint.setText(
+            "المرتجع عكس الشراء: يُنقص رصيد المورد (أو يُستردّ نقداً/بنكاً)"
+            " ويُخرج المبلغ من حساب المصروف ويعكس ضريبة المدخلات"
+            if ret else "")
+        self.doc_ret.setObjectName("" if ret else "ghost")
+        self.doc_buy.setObjectName("ghost" if ret else "")
+        for b in (self.doc_buy, self.doc_ret):
+            b.style().unpolish(b)
+            b.style().polish(b)
+        if ret and self.kind.currentData() == "asset":
+            self.kind.setCurrentIndex(max(self.kind.findData("expense"), 0))
+        # الأصل الثابت لا يُرتجع من هنا (يُستبعد من سجل الأصول)
+        model = self.kind.model()
+        it = model.item(self.kind.findData("asset")) \
+            if hasattr(model, "item") else None
+        if it is not None:
+            it.setEnabled(not ret)
+        self._recalc()
 
     def _on_kind(self, *_):
         kind = self.kind.currentData()
@@ -479,14 +576,19 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self.c_disc.set_value(_m(disc), "قبل الضريبة" if disc else "لا خصم")
         self.c_net.set_value(_m(net), "يُحمَّل على الحساب" if claim or not vat
                              else f"+ ضريبة لا تُسترد = {_m(net + vat)}")
+        ret = self._is_ret() if hasattr(self, "doc_ret") else False
         self.c_vat.set_value(_m(vat if claim else 0),
-                             "تُخصم في الإقرار" if claim else
+                             ("تُعكس في الإقرار" if ret else
+                              "تُخصم في الإقرار") if claim else
                              ("لا ضريبة" if not vat else "تُضاف للتكلفة"))
-        self.c_total.set_value(_m(net + vat), {
+        self.c_total.set_value(_m(net + vat), ({
+            "credit": "مرتجع — يُنقص رصيد المورد",
+            "cash": "مرتجع — يُعاد إلى الصندوق",
+            "bank": "مرتجع — يُعاد إلى البنك"} if ret else {
             "credit": "آجل — على حساب المورد، يُسدَّد بسند صرف",
             "cash": "نقداً — يُخصم من الصندوق",
-            "bank": "بنكي — يُخصم من البنك"}.get(self.pay.currentData(),
-                                                 ""))
+            "bank": "بنكي — يُخصم من البنك"}).get(self.pay.currentData(),
+                                                  ""))
 
     def new_supplier(self):
         dlg = NewSupplierDialog(self, self.user["username"])
@@ -511,7 +613,9 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             if net <= 0:
                 raise ValueError("المبلغ بعد الخصم يجب أن يكون أكبر من صفر")
             tr = self.treat.currentData()
-            if tr == "standard" and vat and not self.inv_no.text().strip():
+            ret = self._is_ret()
+            if tr == "standard" and vat and not ret \
+                    and not self.inv_no.text().strip():
                 raise ValueError("اكتب رقم فاتورة المورد — ضريبة المدخلات "
                                  "لا تُخصم إلا بفاتورةٍ ضريبية مرقّمة")
             # 5.2.7: تاريخ المشتريات غير تاريخ النظام ← تنبيهٌ قبل الترحيل
@@ -527,6 +631,7 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
                   "discount": disc,
                   "pay_mode": self.pay.currentData(),
                   "invoice_type": self.inv_type.currentData(),
+                  "is_return": ret,
                   "lines": [{"account_code": li["account_code"],
                              "qty": li["qty"],
                              "unit_price": li["unit_price"],
@@ -543,12 +648,17 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             self.end_edit()
             self._clear()
             self.refresh()
-            how = {"credit": "آجلة على", "cash": "نقداً من الصندوق —",
-                   "bank": "بتحويل بنكي —"}[res["pay_mode"]]
-            posted(self, f"تم ترحيل الفاتورة {res['purchase_no']} {how} "
+            how = ({"credit": "— يُنقص رصيد", "cash": "مستردّاً نقداً —",
+                    "bank": "مستردّاً بتحويل بنكي —"} if ret else
+                   {"credit": "آجلة على", "cash": "نقداً من الصندوق —",
+                    "bank": "بتحويل بنكي —"})[res["pay_mode"]]
+            posted(self, ("تم ترحيل مرتجع المشتريات" if ret else
+                          "تم ترحيل الفاتورة")
+                   + f" {res['purchase_no']} {how} "
                        f"المورد {res['supplier_name']} — الإجمالي "
                        f"{_nf.f2(res['total'])} ريال"
-                       + (f" (ضريبة مدخلات {_nf.f2(res['claimed_vat'])})"
+                       + (f" ({'عكس ' if ret else ''}ضريبة مدخلات"
+                          f" {_nf.f2(res['claimed_vat'])})"
                           if res["claimed_vat"] else ""),
                    "purchases", res["id"], editing=was_edit)
         except Exception as e:
@@ -609,13 +719,16 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         t.setRowCount(len(rows))
         for r, p in enumerate(rows):
             tr = p["tax_treatment"] or "standard"
-            vals = [p["purchase_no"], p["purchase_date"], p["supplier_name"],
+            _sg = -1 if purchases._is_ret(p) else 1
+            vals = [("↩ " if _sg < 0 else "") + (p["purchase_no"] or ""),
+                    p["purchase_date"], p["supplier_name"],
                     p["supplier_vat"] or "—", p["supplier_invoice_no"] or "—",
                     TYPE_SHORT.get(p["invoice_type"] or "standard", "—"),
                     PAY_SHORT.get(p["pay_mode"] or "credit", "—"),
                     TREAT_SHORT.get(tr, tr),
-                    _m(p["discount"]), _m(p["amount"]), _m(p["vat_amount"]),
-                    _m(p["total"])]
+                    _m(_sg * (p["discount"] or 0)), _m(_sg * (p["amount"] or 0)),
+                    _m(_sg * (p["vat_amount"] or 0)),
+                    _m(_sg * (p["total"] or 0))]
             for c, v in enumerate(vals, 1):
                 t.setItem(r, c, num_item(v) if c >= 9 else text_item(v))
         for r in range(len(rows)):
@@ -698,6 +811,13 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
         self._assets_holder.layout().addWidget(self._assets_screen)
 
     def load_document(self, source_id):
+        self._opt_loading = True
+        try:
+            self._load_document(source_id)
+        finally:
+            self._opt_loading = False
+
+    def _load_document(self, source_id):
         try:
             with db() as conn:
                 p = editing.load_document(conn, "purchases", source_id)
@@ -714,6 +834,8 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
             self.refresh()
             self.tabs.setCurrentIndex(0)
             keys = p.keys()
+            _r = bool(p["is_return"]) if "is_return" in keys else False
+            (self.doc_ret if _r else self.doc_buy).setChecked(True)
             for combo, col, dflt in ((self.pay, "pay_mode", "credit"),
                                      (self.inv_type, "invoice_type",
                                       "standard")):

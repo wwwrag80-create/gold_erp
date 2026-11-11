@@ -10612,6 +10612,35 @@ def main():
           and abs((_adj1 - _adj0) - 2.0) < 0.011,
           f"{_r2['worked']} · 1250 {_adj0} ← {_adj1}")
 
+    step("130) 5.3.2: مرتجع المشتريات — بتفاصيل الشراء نفسها")
+    from models import purchases as _pu130
+    with db() as conn:
+        _s130 = _en129.add_entity(conn, "مورد المرتجع", "supplier",
+                                  vat_number="300000000000003",
+                                  username="admin")
+        _sa130 = conn.execute("SELECT account_id FROM entities WHERE id=?",
+                              (_s130,)).fetchone()[0]
+        _p130 = _pu130.create_purchase(
+            conn, "expense", _s130, "قرطاسية", 100, 15, "2026-11-01", "admin",
+            supplier_invoice_no="S-1", lines=[{
+                "account_code": "5500", "qty": 1, "unit_price": 100,
+                "discount": 0, "vat": 15}])
+        _r130 = _pu130.create_purchase(
+            conn, "expense", _s130, "مرتجع قرطاسية", 40, 6, "2026-11-02",
+            "admin", supplier_invoice_no="CN-1", is_return=True, lines=[{
+                "account_code": "5500", "qty": 1, "unit_price": 40,
+                "discount": 0, "vat": 6}])
+        _bal130 = account_balance(conn, _sa130)[1]
+        _reg130 = sum((-1 if _pu130._is_ret(r) else 1) * r["vat_amount"]
+                      for r in _pu130.vat_register(
+                          conn, "2026-11-01", "2026-11-30")[0]
+                      if r["supplier_id"] == _s130)
+    check("المرتجع برقمٍ خاص ويُنقص رصيد المورد وضريبة المدخلات",
+          _r130["purchase_no"].startswith("PR-")
+          and abs(_bal130 + 69.0) < 0.01
+          and abs(_reg130 - (15 - 6)) < 0.01,
+          f"{_r130['purchase_no']} · {_bal130} · {_reg130}")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

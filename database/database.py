@@ -1532,7 +1532,9 @@ def migrate_schema() -> None:
                          # 4.24: طريقة الدفع ونوع فاتورة المورد
                          ("pay_mode", "TEXT NOT NULL DEFAULT 'credit'"),
                          ("invoice_type", "TEXT NOT NULL DEFAULT"
-                                          " 'standard'")):
+                                          " 'standard'"),
+                         # 5.3.2: مرتجع المشتريات
+                         ("is_return", "INTEGER NOT NULL DEFAULT 0")):
             if pcols and col not in pcols:
                 conn.execute(f"ALTER TABLE purchases ADD COLUMN {col} {ddl}")
 

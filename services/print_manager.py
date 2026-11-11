@@ -1121,13 +1121,15 @@ def _tpl_purchase(conn, pid):
     amount = float(p["amount"] or 0)
     vat = float(p["vat_amount"] or 0)
     claim = tr == "standard" and vat > 0
+    _ret = bool(p["is_return"]) if "is_return" in keys else False
     acc = (f"{p['acc_code']} — {p['acc_name']}" if p["acc_code"] else
            ("1700 — الأصول الثابتة" if p["asset_id"]
             else "5500 — مصروفات تشغيلية"))
     info = [("المورد", sup["name"] if sup else "—"),
             ("الرقم الضريبي للمورد", en((sup["vat_number"] if sup else "")
                                         or "—")),
-            ("رقم فاتورة المورد", en(inv_no)),
+            ("رقم إشعار المورد" if _ret else "رقم فاتورة المورد",
+             en(inv_no)),
             ("نوع فاتورة المورد", dict(_pu.INVOICE_TYPES).get(
                 (p["invoice_type"] if "invoice_type" in keys else "")
                 or "standard")),
@@ -1158,17 +1160,21 @@ def _tpl_purchase(conn, pid):
     {TBL}{trs}</table><br/>
     {TBL}<tr>{head}</tr>{rows}</table>
     {TBL}
-      <tr><th width="70%">ضريبة المدخلات القابلة للخصم (حساب 1900)</th>
+      <tr><th width="70%">{"ضريبة مدخلات تُعكس (حساب 1900)" if _ret
+                 else "ضريبة المدخلات القابلة للخصم (حساب 1900)"}</th>
           <td>{_w(vat if claim else 0, 2)}</td></tr>
-      <tr><th>{"المستحق للمورد (آجل)" if ((p["pay_mode"] if "pay_mode"
-                 in keys else "") or "credit") == "credit"
-                 else "المدفوع للمورد"}</th>
+      <tr><th>{("يُنقص من رصيد المورد" if _ret else "المستحق للمورد (آجل)")
+                 if ((p["pay_mode"] if "pay_mode" in keys else "")
+                     or "credit") == "credit"
+                 else ("المستردّ من المورد" if _ret
+                       else "المدفوع للمورد")}</th>
           <td><b>{_w(amount + vat, 2)}</b></td></tr>
     </table>
     <div class="tafqeet">فقط: {tafqeet(amount + vat)}</div>
     {_balances_after(conn, p["entry_id"], _purchase_party(conn, p))}
     """
-    kind = "فاتورة مشتريات (أصل ثابت)" if p["asset_id"] else "فاتورة مشتريات"
+    kind = ("مرتجع مشتريات" if _ret else
+            "فاتورة مشتريات (أصل ثابت)" if p["asset_id"] else "فاتورة مشتريات")
     return (_header(kind, p["purchase_no"] or f"#{pid}", p["purchase_date"])
             + body + _footer(""))
 

@@ -185,7 +185,9 @@ def vat_return(conn, date_from, date_to):
         " FROM invoices WHERE is_deleted=0 AND vat_applied=1"
         " AND invoice_date BETWEEN ? AND ?", (date_from, date_to)).fetchone()
     p = conn.execute(
-        "SELECT COALESCE(SUM(amount),0) base, COALESCE(SUM(vat_amount),0) vat,"
+        "SELECT COALESCE(SUM(CASE WHEN COALESCE(is_return,0)=1 THEN -amount"
+        " ELSE amount END),0) base, COALESCE(SUM(CASE WHEN"
+        " COALESCE(is_return,0)=1 THEN -vat_amount ELSE vat_amount END),0) vat,"
         " COUNT(*) n FROM purchases WHERE is_deleted=0 AND vat_amount>0"
         " AND COALESCE(tax_treatment,'standard')='standard'"
         " AND purchase_date BETWEEN ? AND ?", (date_from, date_to)).fetchone()
