@@ -97,7 +97,6 @@ jobs:
           Get-Item dist\gold_erp.exe, dist\gold_erp_noweb.exe | ForEach-Object { "{0}: {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
           $runs = @(
             @{ tag = "forced";   exe = "dist\gold_erp.exe";       mode = "force" },
-            @{ tag = "forced-nosandbox"; exe = "dist\gold_erp.exe"; mode = "force"; sb = "1" },
             @{ tag = "default";  exe = "dist\gold_erp.exe";       mode = "" },
             @{ tag = "baseline"; exe = "dist\gold_erp_noweb.exe"; mode = "" }
           )
@@ -137,6 +136,8 @@ jobs:
           if ($f -notmatch "مشهد 3D: تحميل الصفحة") { Write-Host "✘ forced: web engine not used"; $ok = $false }
           if ($f -notmatch "مشهد 3D: (جاهز|تعذّر)") { Write-Host "✘ forced: page never answered"; $ok = $false }
           if ($d -notmatch "عُرضت البوابة") { Write-Host "✘ default: gate not shown"; $ok = $false }
+          if ($f -match "توقّفت عملية العرض") { Write-Host "✘ forced: render process crashed"; $ok = $false }
+          if ($d -match "توقّفت عملية العرض") { Write-Host "✘ default: render process crashed"; $ok = $false }
           Write-Host ("forced : " + (($f -split "`n") -match "مشهد 3D" -join " | "))
           Write-Host ("default: " + (($d -split "`n") -match "مشهد 3D|المقطع" -join " | "))
           if (-not $ok) { exit 1 }

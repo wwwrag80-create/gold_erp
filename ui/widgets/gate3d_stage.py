@@ -32,6 +32,12 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 # من البوابة قبله. وبعده (اختبارٌ أنشأ التطبيق أولاً) يتعذّر: فلا 3D.
 _web = None
 _WEB_ERR = ""
+# «صندوق العزل» في Chromium يُسقط عملية العرض فوراً (0xC0000005) حين يعمل من
+# ملف ويندوز التنفيذي الواحد — ثبت ذلك بفحص ويندوز في GitHub (ومن بايثون
+# مباشرةً يعمل). الصفحة هنا ملفٌّ محلّيٌّ واحد من البرنامج نفسه، ممنوعٌ من
+# الشبكة ومن الانتقال إلى أي عنوان (انظر `_Page`) — فلا محتوى غريبَ يُعزل
+# عنه. يُضبط قبل أن يبدأ المحرّك، ولا يغلب ضبطاً صريحاً من البيئة.
+os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 try:
     if QtCore.QCoreApplication.instance() is None:
         QtCore.QCoreApplication.setAttribute(

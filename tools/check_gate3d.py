@@ -77,6 +77,8 @@ def main():
           not re.search(r"""(fetch|open)\(\s*["'`]https?:""", js))
     stage_src = (ROOT / "ui" / "widgets" / "gate3d_stage.py").read_text(
         encoding="utf-8")
+    check("عزل Chromium مطفأٌ للصفحة المحلّية (يُسقط العرض في الـexe الواحد)",
+          'os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")' in stage_src)
     check("الصفحة ممنوعةٌ من الشبكة في المتصفّح المدمج",
           '("LocalContentCanAccessRemoteUrls", False)' in stage_src
           and "def acceptNavigationRequest" in stage_src)
