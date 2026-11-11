@@ -26,6 +26,10 @@ jobs:
   exe:
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      # طرفية المشغّل بترميز cp1252 لا يكتب العربية (أجهزة العملاء بـcp1256)
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 

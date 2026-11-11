@@ -575,6 +575,9 @@ function idle() {
   // ٣) دورانٌ بطيءٌ حول السبائك ذهاباً وإياباً، وتنفّسٌ في البعد والارتفاع
   gsap.to(rig, { az: 0.16, duration: 24, ease: 'sine.inOut', yoyo: true, repeat: -1 });
   gsap.to(rig, { dist: 12.9, el: 0.245, duration: 15, ease: 'sine.inOut', yoyo: true, repeat: -1 });
+  // الكشّاف الرئيسي يتمايل ببطء: لمعته تنزلق على الحوافّ المشطوفة والظلال
+  // تتحرّك قليلاً — كضوء استوديو يُحرَّك أثناء التصوير
+  gsap.to(key.position, { x: -2.2, z: 5.6, duration: 11, ease: 'sine.inOut', yoyo: true, repeat: -1 });
   // لمعةٌ تعبر الشعار كل بضع ثوانٍ
   const sweep = () => {
     gsap.fromTo(LOGO_SWEEP, { value: -3.2 }, { value: 3.2, duration: 1.8, ease: 'power1.inOut' });
