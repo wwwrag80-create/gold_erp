@@ -15,6 +15,7 @@ from ui.widgets.common import (TitledSections, ask, big_label, date_edit,
 from ui.widgets.table_tools import enhance
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from ui.widgets.common import live_search
 
 TYPE_ITEMS = [("عميل", "customer"), ("مورد", "supplier"),
               ("شريك", "partner"), ("موظف", "employee"),
@@ -154,7 +155,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.f_search = kit.LineEdit()
         self.f_search.setPlaceholderText("بحث بالاسم أو الهاتف أو الرقم"
                                          " الضريبي…")
-        self.f_search.textChanged.connect(self.refresh)
+        live_search(self.f_search, self.refresh)
         btn_edit = kit.PushButton("✎ تعديل الجهة / نقل نوعها")
         btn_edit.setObjectName("homeBtn")
         btn_edit.clicked.connect(self.edit_selected)

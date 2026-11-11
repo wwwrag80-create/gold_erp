@@ -40,8 +40,8 @@ class ColumnFitter(QtCore.QObject):
             hh.setStretchLastSection(False)
             hh.setMinimumSectionSize(min_px)
             table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            table.setWordWrap(True)
-            table.setTextElideMode(QtCore.Qt.ElideNone)
+            # (5.2.9) لا يُفرض لفّ النص هنا: اللفّ يقيس كل خلية عند كل
+            # تغيّر — من يريده لجدوله الصغير يضبطه صراحةً بعد التركيب
             table.viewport().installEventFilter(self)
         except Exception:
             pass

@@ -23,6 +23,7 @@ from models import models_catalog as mc
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, info,
                                title_label)
 from services import numfmt as _nf
+from ui.widgets.common import live_search
 
 HEADERS = ["الموديل / رقم التشغيل", "العدد", "الوزن المقيد",
            "الجهة / التاريخ"]
@@ -48,7 +49,7 @@ class ModelsScreen(QtWidgets.QWidget):
         self.search.setMaximumWidth(340)
         self.search.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                   QtWidgets.QSizePolicy.Fixed)
-        self.search.textChanged.connect(self.apply_filter)
+        live_search(self.search, self.apply_filter)
 
         # مرشّح العرض: يحدّد أي الفروع تُعرض
         self.view_mode = kit.ComboBox()
@@ -184,7 +185,11 @@ class ModelsScreen(QtWidgets.QWidget):
 
         self.tree = QtWidgets.QTreeView()
         self.tree.expanded.connect(self._fold_label)
+        self.tree.expanded.connect(self._on_expanded)
         self.tree.collapsed.connect(self._fold_label)
+        # (5.2.9) ارتفاعٌ واحد لكل الصفوف: بدونه تقيس الشجرة كل صفٍّ على حدة
+        # عند كل توسيعٍ وطيّ — آلاف القياسات على دليلٍ كبير
+        self.tree.setUniformRowHeights(True)
         self.tree.setAlternatingRowColors(True)
         self.tree.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
@@ -262,11 +267,100 @@ class ModelsScreen(QtWidgets.QWidget):
 
     def _toggle_fold(self):
         """زرٌّ واحد: يطوي الكل إن كان شيءٌ مفتوحاً، وإلا يوسّع الكل."""
-        if self._any_expanded():
-            self.tree.collapseAll()
-        else:
-            self.tree.expandAll()
+        # (5.2.9) إشارات الشجرة تُحجب أثناء الطيّ والتوسيع: «طيّ الكل» كان
+        # يطلق إشارةً لكل فرعٍ مفتوح، وكلٌّ منها يعيد فحص الشجرة كلها — ثوانٍ
+        # من «لا يستجيب» على دليلٍ كبير. تسميةُ الزرّ تُحدَّث مرةً في الآخر.
+        self.tree.blockSignals(True)
+        try:
+            if self._any_expanded():
+                self.tree.collapseAll()
+            else:
+                # «توسيع الكل» يحتاج كل أرقام التشغيل: تُبنى الآن (مرةً واحدة)
+                QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+                self.tree.setUpdatesEnabled(False)
+                try:
+                    for r in range(self.model.rowCount()):
+                        self._build_model(self.model.item(r))
+                    self.tree.expandAll()
+                finally:
+                    self.tree.setUpdatesEnabled(True)
+                    QtWidgets.QApplication.restoreOverrideCursor()
+        finally:
+            self.tree.blockSignals(False)
         self._fold_label()
+
+    # ══ أرقام التشغيل تُبنى عند فتح موديلها (5.2.9) ══
+    # كانت الشجرة تبني صفاً لكل رقم تشغيل في المصنع عند كل فتحٍ للشاشة —
+    # عشرون ألف طقم = مئة ألف خلية قبل أن يظهر شيء، والموديلات مطويّةٌ أصلاً.
+    # الآن يُبنى الموديل وفرعاه (طرف المناديب · الموجود) بأعدادهما وأوزانهما،
+    # وأرقام التشغيل تحت الفرع تُبنى حين يُفتح أو حين يطابقها البحث.
+    _LAZY = QtCore.Qt.UserRole + 8
+
+    @staticmethod
+    def _leaf_vals(kind, i):
+        tail = (f"{i['holder']}  ·  {i['date']}" if kind == "sold"
+                else f"أُدخل: {i['date']}")
+        return [i["wo"], "", f"{_nf.f2(kv.g(i['reg']))}", tail]
+
+    def _lazy_branch(self, item, kind, rows):
+        if not rows:
+            return
+        pend = self.__dict__.setdefault("_pending", {})
+        key = self.__dict__.get("_pend_seq", 0) + 1
+        self._pend_seq = key
+        pend[key] = (kind, rows)
+        item.setData(key, self._LAZY)
+        # صفٌّ نائب: به يظهر سهم الفتح قبل أن تُبنى الأرقام
+        item.appendRow(self._cells(["…", "", "", ""]))
+
+    def _build_branch(self, item):
+        """يبني أرقام التشغيل تحت فرعٍ لم يُفتح بعد — مرةً واحدة."""
+        key = item.data(self._LAZY) if item is not None else None
+        if key is None:
+            return False
+        item.setData(None, self._LAZY)
+        pend = self.__dict__.get("_pending", {}).pop(key, None)
+        if pend is None:
+            return False
+        kind, rows = pend
+        item.removeRows(0, item.rowCount())
+        for i in rows:
+            item.appendRow(self._cells(self._leaf_vals(kind, i),
+                                       data=("wo", i["id"])))
+        return True
+
+    def _build_model(self, node):
+        if node is None:
+            return
+        for r in range(node.rowCount()):
+            self._build_branch(node.child(r, 0))
+
+    def _on_expanded(self, index):
+        try:
+            it = self.model.itemFromIndex(index)
+            d = it.data(QtCore.Qt.UserRole) if it is not None else None
+            if not d:
+                return
+            if d[0] == "model":
+                self._build_model(it)
+            elif d[0] == "branch":
+                self._build_branch(it)
+        except Exception:
+            pass
+
+    def _build_hits(self, node, text):
+        """يبني من فروع الموديل غير المبنيّة ما فيه مطابقٌ للبحث — وحده."""
+        pend = self.__dict__.get("_pending", {})
+        for r in range(node.rowCount()):
+            b = node.child(r, 0)
+            key = b.data(self._LAZY) if b is not None else None
+            if key is None or key not in pend:
+                continue
+            kind, rows = pend[key]
+            for i in rows:
+                if text in str(i["wo"]) or text in self._leaf_vals(kind, i)[3]:
+                    self._build_branch(b)
+                    break
 
     def _fold_label(self, *_):
         self.btn_fold.setText("⊟ طيّ الكل" if self._any_expanded()
@@ -396,6 +490,7 @@ class ModelsScreen(QtWidgets.QWidget):
         self.tree.setUpdatesEnabled(False)
         try:
             self.model.removeRows(0, self.model.rowCount())
+            self._pending = {}
             self.model.setHorizontalHeaderLabels(HEADERS_IN)
             root = self.model.invisibleRootItem()
             for m in models:
@@ -541,6 +636,7 @@ class ModelsScreen(QtWidgets.QWidget):
         self.tree.setUpdatesEnabled(False)
         try:
             self.model.removeRows(0, self.model.rowCount())
+            self._pending = {}
             self.model.setHorizontalHeaderLabels(HEADERS)
             root = self.model.invisibleRootItem()
             mode = self.view_mode.currentData() or "all"
@@ -578,11 +674,8 @@ class ModelsScreen(QtWidgets.QWidget):
                         bold=True, brush=st["sold"],
                         data=("branch", m["model"]))
                     node[0].appendRow(sold)
-                    for i in data[m["model"]]["sold"]:
-                        sold[0].appendRow(self._cells(
-                            [i["wo"], "", f"{_nf.f2(kv.g(i['reg']))}",
-                             f"{i['holder']}  ·  {i['date']}"],
-                            data=("wo", i["id"])))
+                    self._lazy_branch(sold[0], "sold",
+                                      data[m["model"]]["sold"])
 
                 if mode in ("all", "in_stock"):
                     stock = self._cells(
@@ -592,11 +685,8 @@ class ModelsScreen(QtWidgets.QWidget):
                         bold=True, brush=st["stock"],
                         data=("branch", m["model"]))
                     node[0].appendRow(stock)
-                    for i in data[m["model"]]["in_stock"]:
-                        stock[0].appendRow(self._cells(
-                            [i["wo"], "", f"{_nf.f2(kv.g(i['reg']))}",
-                             f"أُدخل: {i['date']}"],
-                            data=("wo", i["id"])))
+                    self._lazy_branch(stock[0], "in_stock",
+                                      data[m["model"]]["in_stock"])
             # مطوية عند الفتح: القائمة قد تطول، والمستخدم يفتح ما
             # يعنيه فقط — أسرع وأوضح.
             self.tree.collapseAll()
@@ -644,9 +734,12 @@ class ModelsScreen(QtWidgets.QWidget):
         for i in range(self.model.rowCount()):
             node = self.model.item(i)
             if not text or text in node.text():
+                if text:
+                    self._build_model(node)    # يُعرض كاملاً: يُبنى ليُرى ويُطبع
                 self._unfilter(root, i)
                 show = True
             else:
+                self._build_hits(node, text)
                 n, w = self._filter_rows(node, text)
                 show = n > 0
                 if show:

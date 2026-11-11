@@ -22,6 +22,7 @@ from ui.widgets.common import (ask, date_edit, dstr, err, info, make_table,
                                title_label)
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from ui.widgets.common import live_search
 
 NO_GROUP = -1      # صفّ «بلا مجموعة» — من حساباتهم تحت الأصل مباشرة
 
@@ -58,7 +59,7 @@ class AddMembersDialog(QtWidgets.QDialog):
         hint.setObjectName("cardSub")
         self.find = kit.LineEdit()
         self.find.setPlaceholderText("🔍 ابحث بالاسم أو الكود…")
-        self.find.textChanged.connect(self._filter)
+        live_search(self.find, self._filter)
         self.lst = QtWidgets.QListWidget()
         for r in rows:
             where = (f"   ← في «{r['group']}»" if r.get("group")
@@ -117,7 +118,7 @@ class PartyGroupsScreen(QtWidgets.QWidget):
         self.search.setPlaceholderText(
             "🔍 ابحث عن مجموعة (مثل الرميزان) أو عميل…")
         self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._apply_search)
+        live_search(self.search, self._apply_search)
 
         top = QtWidgets.QHBoxLayout()
         top.addWidget(self.kind)

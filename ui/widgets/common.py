@@ -294,10 +294,15 @@ def make_table(stretch_last=True):
     t.setShowGrid(True)
     vh = t.verticalHeader()
     vh.setVisible(False)                     # إخفاء أرقام الصفوف الجانبية
-    # الخط يبقى بحجمه الطبيعي؛ الاتساع يُعالَج بلفّ النص داخل الخانة
-    # (كلمة تحت كلمة) بدل تصغير الخط أو تمديد الجدول أفقياً.
-    vh.setDefaultSectionSize(38)
-    vh.setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
+    # ══ ارتفاع الصف ثابتٌ من البداية (5.2.9) ══
+    # كان «بقدر المحتوى» مع لفّ النص: فكل `setItem` على جدولٍ ظاهر يعيد
+    # قياس **كل** صفوفه — كلفةٌ تربيعية. قيس: 300 صفاً تُعاد تعبئتها يدوياً
+    # في 75 ثانية، ولوحة أرقام التشغيل (آلاف الصفوف) تجمّد الواجهة حتى
+    # يعلن ويندوز «لا يستجيب». `fill` و`bulk_rows` كانا يثبّتانه لمن
+    # يستعملهما، ومن يملأ جدوله بيده كان يدفع الثمن كاملاً. الآن الثابت هو
+    # الأصل لكل جدول، وما طال من النص يُقصّ ويظهر كاملاً في التلميح.
+    vh.setDefaultSectionSize(max(34, row_height(t)))
+    vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
     hh = t.horizontalHeader()
     hh.setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     hh.setHighlightSections(False)
@@ -310,8 +315,6 @@ def make_table(stretch_last=True):
         hh.setTextElideMode(QtCore.Qt.ElideNone)
     except Exception:
         pass
-    t.setWordWrap(True)                      # لفّ النص داخل الخانة
-    t.setTextElideMode(QtCore.Qt.ElideNone)
     # لا تمرير أفقي: الأعمدة تتوزّع على العرض المتاح دائماً
     t.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
     t.setHorizontalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
@@ -321,6 +324,10 @@ def make_table(stretch_last=True):
         fit_columns(t)
     except Exception:
         pass
+    # سطرٌ واحد لكل صف: بلا لفّ (اللفّ يقيس كل خلية)، والمقصوص بنقاطٍ
+    # وكاملُه في التلميح (`kit.TableWidget` يعرضه لكل خليةٍ مقصوصة)
+    t.setWordWrap(False)
+    t.setTextElideMode(QtCore.Qt.ElideRight)
     # النسخ والتصدير في كل جدول بلا استثناء (الزر الأيمن): حاجةٌ
     # يوميّة لا ميزةَ تقرير. والفرز بالنقر يُطلب صراحةً في شاشات
     # العرض وحدها — شرحه في `table_tools.attach_sorter`.
@@ -1185,6 +1192,62 @@ def view_snapshot(view, skip=()):
     return {"headers": [h for _c, h, _w in cols],
             "widths": [round(100.0 * w / total_w, 1) for _c, _h, w in cols],
             "rows": rows}
+
+
+def live_search(edit, fn, ms=240):
+    """يربط خانة بحثٍ بدالّتها — والكتابة السريعة تُدمج في نداءٍ واحد (5.2.9).
+
+    كانت خانات البحث تعيد تصفية الجدول (أو قراءة القاعدة) مع **كل حرف**:
+    من يكتب «محمد» بسرعة ينتظر أربع إعادات بناءٍ متتابعة والحروف تتأخّر
+    عن أصابعه — وعلى الجداول الكبيرة تتجمّد الواجهة. الآن يُنتظر أن تهدأ
+    الكتابة (`ms`) ثم يُنفَّذ البحث مرةً واحدة بآخر نصّ؛ و«Enter» ينفّذه
+    فوراً. والتغيير من الشيفرة (`setText` والخانة بلا تركيز) ينفَّذ في
+    حينه كما كان، فلا يتغيّر شيءٌ على من يضبط النص برمجياً.
+
+    `fn` تُنادى بالنص إن قبلت وسيطاً، وبلا وسائط إن لم تقبل."""
+    import inspect
+    try:
+        ps = [p for p in inspect.signature(fn).parameters.values()
+              if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD,
+                            p.VAR_POSITIONAL)]
+        takes_text = bool(ps)
+    except (TypeError, ValueError):
+        takes_text = True
+
+    def run():
+        try:
+            if takes_text:
+                fn(edit.text())
+            else:
+                fn()
+        except RuntimeError:
+            pass                      # الشاشة أُغلقت قبل أن يحين البحث
+
+    timer = QtCore.QTimer(edit)
+    timer.setSingleShot(True)
+    timer.setInterval(int(ms))
+    timer.timeout.connect(run)
+
+    def changed(*_):
+        if edit.hasFocus():
+            timer.start()             # يكتب: يُنتظر أن يهدأ
+        else:
+            timer.stop()
+            run()
+
+    def now():
+        if timer.isActive():
+            timer.stop()
+            run()
+
+    edit.textChanged.connect(changed)
+    try:
+        edit.returnPressed.connect(now)
+    except Exception:
+        pass
+    # مراجع تُبقي الدوالّ حيّة ما بقيت الخانة
+    edit._live_search = (timer, changed, now, run)
+    return timer
 
 
 def guard_click(fn, gap=0.7):

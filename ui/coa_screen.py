@@ -18,6 +18,7 @@ from models import coa
 from ui.widgets.common import ask, big_label, err, info, title_label
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from ui.widgets.common import live_search
 
 HEADERS = ["الحساب", "الكود", "النوع", "الطبيعة", "المستوى", "نوع القياس",
            "يقبل الحركة", "الحالة", "الوسم النظامي"]
@@ -152,7 +153,7 @@ class CoaScreen(QtWidgets.QWidget):
 
         self.search = kit.LineEdit()
         self.search.setPlaceholderText("بحث بالاسم أو الكود…")
-        self.search.textChanged.connect(self.apply_filter)
+        live_search(self.search, self.apply_filter)
         self.show_frozen = kit.CheckBox("إظهار الحسابات المجمَّدة")
         self.show_frozen.setChecked(True)
         self.show_frozen.stateChanged.connect(self.refresh)

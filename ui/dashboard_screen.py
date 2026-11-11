@@ -52,6 +52,23 @@ def _signed(v):
     return (f"\u200e-{_nf.f2(abs(v))}" if v < -0.004 else _nf.f2(abs(v)))
 
 
+class _LazyRows:
+    """صفوف جدولٍ تُصاغ نصوصها عند الطلب، وآخرها صفّ الإجمالي."""
+
+    def __init__(self, rows, fn, tail):
+        self._rows, self._fn, self._tail = rows, fn, tail
+
+    def __len__(self):
+        return len(self._rows) + 1
+
+    def __getitem__(self, i):
+        if i < 0:
+            i += len(self)
+        if i == len(self._rows):
+            return self._tail
+        return self._fn(self._rows[i])
+
+
 class PanelButton(QtWidgets.QPushButton):
     """لوحة رئيسية: عنوان وقيمة، بحجم مضغوط لا يمتد بعرض الشاشة."""
 
@@ -148,8 +165,20 @@ class DashboardScreen(QtWidgets.QWidget):
         self.stock_search = kit.LineEdit()
         self.stock_search.setPlaceholderText("ابحث برقم التشغيل أو الموديل…")
         self.stock_search.setMaximumWidth(230)
+        # (5.2.9) البحث بعد أن تهدأ الكتابة: كان كل حرفٍ يعيد قراءة آلاف
+        # الأطقم وبناء الجدول كاملاً — فتتجمّد الواجهة مع الكتابة السريعة
+        self._search_timer = QtCore.QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(260)
+        self._search_timer.timeout.connect(
+            lambda: self.refresh() if self._is_stock() else None)
         self.stock_search.textChanged.connect(
-            lambda *_: self.refresh() if self._is_stock() else None)
+            lambda *_: self._search_timer.start())
+        try:
+            self.stock_search.returnPressed.connect(
+                lambda: (self._search_timer.stop(), self.refresh()))
+        except Exception:
+            pass
         self.btn_edit_wo = kit.PushButton("✎ تعديل الطقم")
         self.btn_edit_wo.setToolTip(
             "يعدّل موديل الطقم أو رقم تشغيله (نقر مزدوج على الصف)")
@@ -302,9 +331,10 @@ class DashboardScreen(QtWidgets.QWidget):
             b.setParent(None)
             b.deleteLater()
         self.buttons = []
+        self._btn_sig = None          # أزرارٌ جديدة: أرقامها تُحسب من جديد
         for i, p in enumerate(self.panels):
             b = PanelButton(p["title"])
-            b.clicked.connect(lambda _=False, k=i: self.select(k))
+            b.clicked.connect(lambda _=False, k=i: self._select_soon(k))
             self.panel_row.addWidget(b)
             self.buttons.append(b)
         self._sync_checked()
@@ -321,6 +351,29 @@ class DashboardScreen(QtWidgets.QWidget):
             self.current = idx
             self._sync_checked()
             self.refresh()
+
+    def _select_soon(self, idx):
+        """نقرة المستخدم على لوحة (5.2.9): الزرّ يُؤشَّر فوراً، والجدول
+        يُحدَّث مرةً واحدة لآخر لوحةٍ استقرّ عليها.
+
+        كانت كل نقرةٍ تحدّث الجدول وأرقام كل اللوحات قبل أن تُعالَج النقرة
+        التالية: خمس نقراتٍ سريعة = خمس قراءاتٍ كاملة متتابعة والواجهة
+        واقفة حتى تنتهي — «لا يستجيب» وشاشة بيضاء. الآن النقرات المتتابعة
+        تُدمج، ولا يُقرأ إلا ما انتهى إليه المستخدم."""
+        if not (0 <= idx < len(self.panels)):
+            return
+        if idx != self.current:
+            self._pnl_per, self._pnl_m = "year", 0
+        self.current = idx
+        self._sync_checked()
+        t = self.__dict__.get("_sel_timer")
+        if t is None:
+            t = QtCore.QTimer(self)
+            t.setSingleShot(True)
+            t.setInterval(0)
+            t.timeout.connect(self.refresh)
+            self._sel_timer = t
+        t.start()
 
     def move_panel(self, delta):
         """يحرّك اللوحة الحالية في ترتيب الصف — ويُحفظ الترتيب."""
@@ -971,16 +1024,19 @@ class DashboardScreen(QtWidgets.QWidget):
                              if hasattr(self, "stock_search") else "")
         self._rows = rows
         t = dp.stock_totals(rows)
-        data = [(r["wo"] + ("  (مجمّع)" if r["bulk"] else ""),
-                 r["model"], f"{_nf.f2(kv.g(r['gold']))}",
-                 f"{_nf.f2(kv.g(r['small']))}", f"{_nf.f2(kv.g(r['big']))}",
-                 f"{_nf.f2(kv.g(r['after']))}", f"{_nf.f2(kv.g(r['reg']))}",
-                 f"{_nf.f2(kv.g(r['standing']))}") for r in rows]
-        data.append(("الإجمالي", f"{t['models']} موديل",
-                     f"{_nf.f2(kv.g(t['gold']))}", f"{_nf.f2(kv.g(t['small']))}",
-                     f"{_nf.f2(kv.g(t['big']))}", f"{_nf.f2(kv.g(t['after']))}",
-                     f"{_nf.f2(kv.g(t['reg']))}",
-                     f"{_nf.f2(kv.g(t['standing']))}"))
+        g, f2 = kv.g, _nf.f2
+
+        def line(r):
+            return (r["wo"] + ("  (مجمّع)" if r["bulk"] else ""),
+                    r["model"], f2(g(r["gold"])), f2(g(r["small"])),
+                    f2(g(r["big"])), f2(g(r["after"])), f2(g(r["reg"])),
+                    f2(g(r["standing"])))
+        # نصوص الصفوف تُصاغ عند ملئها (آلاف الصفوف × ثمانية أرقام) لا كلها
+        # قبل أن يظهر شيء
+        data = _LazyRows(rows, line, (
+            "الإجمالي", f"{t['models']} موديل",
+            f2(g(t["gold"])), f2(g(t["small"])), f2(g(t["big"])),
+            f2(g(t["after"])), f2(g(t["reg"])), f2(g(t["standing"]))))
         self._fill(self.STOCK_COLS(), data, bold_last=True,
                    weights=[16, 18, 11, 10, 10, 11, 12, 12])
         self.tbl_title.setText(
@@ -1090,46 +1146,127 @@ class DashboardScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    # ══ ملء الجدول (5.2.9) ══
+    # لوحة أرقام التشغيل آلاف الصفوف: بناؤها دفعةً واحدة يوقف الواجهة حتى
+    # ينتهي آخر صف. فأول الصفوف (وصفّ الإجمالي) يُبنى فوراً فتظهر اللوحة
+    # مع النقرة، والباقي على دفعاتٍ صغيرة بين أحداث الواجهة — تبقى النقرات
+    # والتمرير والكتابة تُعالَج أثناءها، وتُلغى الدفعات إن غُيّرت اللوحة.
+    FILL_FIRST = 250
+    FILL_CHUNK = 400
+
     def _fill(self, cols, data, bold_last=False, weights=None,
               red_neg=False):
-        self.table.setUpdatesEnabled(False)
+        self._fill_gen = gen = getattr(self, "_fill_gen", 0) + 1
+        t, n = self.table, len(data)
+        chunked = n > self.FILL_FIRST + self.FILL_CHUNK
+        first = self.FILL_FIRST if chunked else n
+        t.setUpdatesEnabled(False)
         try:
-            self.table.setColumnCount(len(cols))
-            self.table.setHorizontalHeaderLabels(cols)
-            self.table.setRowCount(len(data))
-            for i, row in enumerate(data):
-                for c, v in enumerate(row):
-                    it = QtWidgets.QTableWidgetItem(_nf.txt(v))
-                    it.setTextAlignment(
-                        QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
-                        if c == 0 else QtCore.Qt.AlignCenter)
-                    if bold_last and i == len(data) - 1:
-                        f = it.font()
-                        f.setBold(True)
-                        it.setFont(f)
-                        try:
-                            __import__("ui.widgets.common", fromlist=["x"]).style_total_item(it)
-                        except Exception:
-                            pass
-                    # 4.91: السالب أحمر في لوحة الأرباح والخسائر
-                    if red_neg and c and str(v).lstrip("\u200e")[:1] == "-":
-                        last = bold_last and i == len(data) - 1
-                        it.setForeground(QtGui.QColor(
-                            "#ff9a8f" if last else "#b3261e"))
-                    self.table.setItem(i, c, it)
+            from ui.widgets.common import row_height
+            vh = t.verticalHeader()
+            vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+            vh.setDefaultSectionSize(row_height(t, tight=n > 120))
+            t.setColumnCount(len(cols))
+            t.setHorizontalHeaderLabels(cols)
+            if chunked:
+                # ما لم يُملأ بعدُ فارغٌ — لا صفوف اللوحة السابقة
+                t.setRowCount(0)
+            t.setRowCount(n)
+            self._fill_rows(data, 0, first, bold_last, red_neg)
+            if chunked and bold_last:
+                self._fill_rows(data, n - 1, n, bold_last, red_neg)
         finally:
             try:
-                self.table.setUpdatesEnabled(True)
+                t.setUpdatesEnabled(True)
             except Exception:
                 pass
         try:
             from ui.widgets.table_fit import fit_columns
-            fit_columns(self.table, weights or [])
+            fit_columns(t, weights or [])
         except Exception:
             pass
+        if chunked:
+            end = n - 1 if bold_last else n
+            QtCore.QTimer.singleShot(0, lambda: self._fill_more(
+                gen, data, first, end, bold_last, red_neg))
+
+    def _fill_more(self, gen, data, start, end, bold_last, red_neg):
+        """الدفعة التالية من صفوف جدولٍ كبير — وتتوقّف إن أُعيد ملؤه."""
+        if gen != getattr(self, "_fill_gen", 0) or start >= end:
+            return
+        try:
+            t = self.table
+            stop = min(end, start + self.FILL_CHUNK)
+            t.setUpdatesEnabled(False)
+            try:
+                self._fill_rows(data, start, stop, bold_last, red_neg)
+            finally:
+                t.setUpdatesEnabled(True)
+            if stop < end:
+                QtCore.QTimer.singleShot(0, lambda: self._fill_more(
+                    gen, data, stop, end, bold_last, red_neg))
+        except RuntimeError:
+            pass                      # الشاشة أُغلقت أثناء الملء
+
+    def _fill_rows(self, data, start, stop, bold_last, red_neg):
+        t, last_i = self.table, len(data) - 1
+        right = QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
+        center = QtCore.Qt.AlignCenter
+        style_total = None
+        for i in range(start, stop):
+            row = data[i]
+            total = bold_last and i == last_i
+            if total and style_total is None:
+                from ui.widgets.common import style_total_item as style_total
+            for c, v in enumerate(row):
+                it = QtWidgets.QTableWidgetItem(_nf.txt(v))
+                it.setTextAlignment(right if c == 0 else center)
+                if total:
+                    f = it.font()
+                    f.setBold(True)
+                    it.setFont(f)
+                    try:
+                        style_total(it)
+                    except Exception:
+                        pass
+                # 4.91: السالب أحمر في لوحة الأرباح والخسائر
+                if red_neg and c and str(v).lstrip("\u200e")[:1] == "-":
+                    it.setForeground(QtGui.QColor(
+                        "#ff9a8f" if total else "#b3261e"))
+                t.setItem(i, c, it)
+
+    def _buttons_sig(self):
+        """بصمة ما تُحسب منه أرقام الأزرار: البيانات والعيار واليوم
+        وتعريف كل لوحة — لا تتغيّر بمجرد التنقّل بين اللوحات."""
+        import datetime as _dt
+        from database.database import data_token
+        return (data_token(), kv.active(), _dt.date.today().isoformat(),
+                self._pnl_per, self._pnl_m, len(self.buttons),
+                repr([(p.get("title"), p.get("kind"), p.get("unit"),
+                       tuple(p.get("accounts") or ()),
+                       p.get("date_from") or "", p.get("date_to") or "",
+                       p.get("start") or "")
+                      for p in self.panels]))
 
     def _update_buttons(self, conn):
-        """قيمة كل لوحة: رصيد حساباتها بالذهب."""
+        """قيمة كل لوحة: رصيد حساباتها بالذهب.
+
+        (5.2.9) كانت أرقام **كل** اللوحات تُعاد قراءتها من القاعدة مع كل
+        نقرةٍ على أي لوحة — ومنها جمعُ كل أرقام التشغيل المتاحة. الآن
+        تُحسب مرةً، ولا تُعاد إلا إن تغيّرت البيانات أو تعريف اللوحات."""
+        try:
+            sig = self._buttons_sig()
+        except Exception:
+            sig = None
+        if sig is not None and sig == self.__dict__.get("_btn_sig"):
+            return
+        self._compute_buttons(conn)
+        try:
+            self._btn_sig = self._buttons_sig()
+        except Exception:
+            self._btn_sig = None
+
+    def _compute_buttons(self, conn):
         for i, p in enumerate(self.panels):
             if i >= len(self.buttons):
                 break
@@ -1139,7 +1276,7 @@ class DashboardScreen(QtWidgets.QWidget):
                     self.buttons[i].set_value(f"{_nf.f2(kv.g(v))} جم")
                     continue
                 if p.get("kind") == "stock":
-                    t = dp.stock_totals(dp.stock_rows(conn))
+                    t = dp.stock_summary(conn)
                     self.buttons[i].set_value(
                         f"{t['count']} طقم · {kv.g(t['reg']):,.0f} جم")
                     continue

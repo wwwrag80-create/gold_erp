@@ -19,6 +19,7 @@ from ui.widgets.common import (Card, bulk_rows, cell, err, fill, info,
                                make_table, title_label)
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from ui.widgets.common import live_search
 
 CATEGORIES = [("إجمالي العملاء", "customer"), ("إجمالي الموردين", "supplier"),
               ("الشركاء", "partner"), ("الموظفون", "employee"),
@@ -39,7 +40,7 @@ class SubLedgerScreen(QtWidgets.QWidget):
         self.category.currentIndexChanged.connect(self.refresh)
         self.search = kit.LineEdit()
         self.search.setPlaceholderText("بحث بالاسم داخل الفئة…")
-        self.search.textChanged.connect(self.render)
+        live_search(self.search, self.render)
 
         head = QtWidgets.QHBoxLayout()
         head.addWidget(QtWidgets.QLabel("حساب المراقبة التجميعي:"))

@@ -30,6 +30,7 @@ from ui.widgets.table_tools import (TOTAL_ROLE, enhance, export_csv,
                                     total_row)
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from ui.widgets.common import live_search
 
 ACC_ROLE = QtCore.Qt.UserRole + 11          # معرّف الحساب في خلية الاسم
 
@@ -113,7 +114,7 @@ class CustomersScreen(QtWidgets.QWidget):
         self.d_from.setEnabled(not self.since_start.isChecked())
         self.since_start.toggled.connect(self._since_toggled)
         self.hide_idle.toggled.connect(self._hide_toggled)
-        self.search.textChanged.connect(self._render)
+        live_search(self.search, self._render)
         self.d_from.dateChanged.connect(self._dates_changed)
         self.d_to.dateChanged.connect(self._dates_changed)
 

@@ -18,6 +18,7 @@ from services.audit import soft_delete_entry
 from ui.widgets.common import ask, date_edit, dstr, err, info, title_label
 from ui.widgets.ledger_view import LedgerView
 from services import numfmt as _nf
+from ui.widgets.common import live_search
 
 
 def _inv_kind(r):
@@ -160,7 +161,7 @@ class TransactionLogScreen(QtWidgets.QWidget):
         self.flt.setPlaceholderText("تصفية فورية داخل النتائج…")
         self.flt.setClearButtonEnabled(True)
         self.flt.setMaximumWidth(320)
-        self.flt.textChanged.connect(self._filter)
+        live_search(self.flt, self._filter)
         self.count = QtWidgets.QLabel("")
         self.count.setObjectName("tableSearchCount")
 

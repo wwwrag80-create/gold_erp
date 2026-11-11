@@ -71,7 +71,13 @@ class SearchBar(QtWidgets.QFrame):
         lay.addWidget(self.edit, 1)
         lay.addWidget(self.count)
         lay.addWidget(close)
-        self.edit.textChanged.connect(self.apply)
+        # (5.2.9) الجدول الكبير يُصفّى بعد أن تهدأ الكتابة لا مع كل حرف
+        self._timer = QtCore.QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(220)
+        self._timer.timeout.connect(lambda: self.apply())
+        self.edit.textChanged.connect(self._typed)
+        self.edit.returnPressed.connect(self._now)
         self.edit.installEventFilter(self)
         view.installEventFilter(self)
         self.hide()
@@ -110,6 +116,7 @@ class SearchBar(QtWidgets.QFrame):
         self.apply(self.edit.text())
 
     def close_bar(self):
+        self._timer.stop()
         self.edit.blockSignals(True)
         self.edit.clear()
         self.edit.blockSignals(False)
@@ -118,7 +125,40 @@ class SearchBar(QtWidgets.QFrame):
         self.view.setFocus()
 
     # ── التصفية ──
+    BIG = 300          # فوقه تُدمج الحروف المتتابعة في تصفيةٍ واحدة
+
+    def _rows(self):
+        try:
+            m = self.view.model()
+            return m.rowCount() if m is not None else 0
+        except Exception:
+            return 0
+
+    def _typed(self, text):
+        if self._rows() > self.BIG and self.edit.hasFocus():
+            self._timer.start()
+        else:
+            self._timer.stop()
+            self.apply(text)
+
+    def _now(self):
+        if self._timer.isActive():
+            self._timer.stop()
+            self.apply()
+
     def apply(self, text=None):
+        v = self.view
+        # إخفاء الصفوف وإظهارها بلا رسمٍ بينها — رسمةٌ واحدة في الآخر
+        try:
+            v.setUpdatesEnabled(False)
+            self._apply(text)
+        finally:
+            try:
+                v.setUpdatesEnabled(True)
+            except Exception:
+                pass
+
+    def _apply(self, text=None):
         q = _norm(self.edit.text() if text is None else text).strip()
         v = self.view
         shown = total = 0

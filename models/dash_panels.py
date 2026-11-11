@@ -535,6 +535,20 @@ def stock_rows(conn, search=""):
              "bulk": bool(r["bulk"])} for r in rows]
 
 
+def stock_summary(conn):
+    """عدد المتاح للبيع ووزنه المقيد — باستعلامٍ واحد لواجهة اللوحة (5.2.9).
+
+    رقم الزرّ كان يُحسب بقراءة **كل** أرقام التشغيل المتاحة (آلاف الصفوف)
+    ثم جمعها في بايثون — مع كل نقرةٍ على أي لوحة. المجموع نفسه (كل وزنٍ
+    مقرَّب لمنزلتين كما في الجدول) من القاعدة مباشرة."""
+    r = conn.execute(
+        "SELECT COUNT(*) n, COALESCE(SUM(ROUND(COALESCE("
+        "w.remaining_weight, w.registered_weight, 0), 2)), 0) reg"
+        " FROM work_orders w WHERE w.is_deleted=0"
+        " AND w.status='in_stock'").fetchone()
+    return {"count": int(r["n"] or 0), "reg": round(float(r["reg"] or 0), 2)}
+
+
 def stock_totals(rows):
     keys = ("gold", "small", "big", "after", "reg", "standing")
     t = {k: round(sum(float(r.get(k) or 0) for r in rows), 2) for k in keys}

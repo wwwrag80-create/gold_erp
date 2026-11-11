@@ -305,6 +305,33 @@ class _ClickGuard:
 EMPTY_TEXT = "لا توجد بيانات للعرض"
 
 
+def elided_tip(view, e):
+    """تلميحٌ بالنص الكامل لخليةٍ قُصّ نصّها — لكل الجداول (5.2.9).
+
+    الصفوف بسطرٍ واحد وارتفاعٍ ثابت (لفّ النص يقيس كل خلية فيجمّد الجداول
+    الكبيرة)، فما طال من النص يُقصّ بنقاط. هنا يظهر كاملاً عند الوقوف
+    عليه، بلا أن تضبط كل شاشةٍ تلميح كل خلية. يُعيد True إن عرض شيئاً."""
+    try:
+        if e.type() != QtCore.QEvent.ToolTip:
+            return False
+        idx = view.indexAt(e.pos())
+        if not idx.isValid() or idx.data(QtCore.Qt.ToolTipRole):
+            return False
+        txt = idx.data(QtCore.Qt.DisplayRole)
+        txt = "" if txt is None else str(txt)
+        if len(txt) < 4:
+            return False
+        f = idx.data(QtCore.Qt.FontRole)
+        fm = QtGui.QFontMetrics(f if isinstance(f, QtGui.QFont)
+                                else view.font())
+        if fm.horizontalAdvance(txt) <= view.visualRect(idx).width() - 14:
+            return False
+        QtWidgets.QToolTip.showText(e.globalPos(), txt, view)
+        return True
+    except Exception:
+        return False
+
+
 def paint_empty(view):
     """يكتب رسالة «لا بيانات» في وسط جدولٍ بلا صفوف."""
     try:
@@ -1661,6 +1688,11 @@ if ACTIVE:
             super().paintEvent(e)
             paint_empty(self)
 
+        def viewportEvent(self, e):
+            if e.type() == QtCore.QEvent.ToolTip and elided_tip(self, e):
+                return True
+            return super().viewportEvent(e)
+
     class TableWidget(_TableKit, qf.TableWidget):
         """`QTableWidget` بصفوف Fluent: تمريرٌ ناعم وتظليلٌ عند المرور
         وشريط تحديد ذهبي — وكل واجهة `QTableWidget` كما هي."""
@@ -1704,10 +1736,20 @@ else:
             super().paintEvent(e)
             paint_empty(self)
 
+        def viewportEvent(self, e):
+            if e.type() == QtCore.QEvent.ToolTip and elided_tip(self, e):
+                return True
+            return super().viewportEvent(e)
+
     class TableView(QtWidgets.QTableView):
         def paintEvent(self, e):
             super().paintEvent(e)
             paint_empty(self)
+
+        def viewportEvent(self, e):
+            if e.type() == QtCore.QEvent.ToolTip and elided_tip(self, e):
+                return True
+            return super().viewportEvent(e)
 
     class PushButton(_ClickGuard, QtWidgets.QPushButton):
         pass

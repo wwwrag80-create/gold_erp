@@ -910,6 +910,40 @@ class MainWindow(QtWidgets.QMainWindow):
                     return
 
     def _nav_clicked(self, item, _col=0):
+        """نقرة على بندٍ في القائمة (5.2.9): عنوان المجموعة يُفتح/يُطوى
+        فوراً، والشاشة تُفتح بعد أن تُعالَج النقرات المتراكمة — فالنقرات
+        السريعة المتتالية تفتح **آخر** شاشةٍ نُقرت وحدها.
+
+        كانت كل نقرةٍ تبني شاشتها وتقرأ بياناتها كاملةً قبل أن تُرى النقرة
+        التالية: خمس نقراتٍ سريعة = خمس شاشاتٍ تُبنى واحدةً بعد أخرى والنافذة
+        بيضاء «لا تستجيب» حتى تنتهي، ثم تستقرّ على الأخيرة على أي حال."""
+        try:
+            idx = item.data(0, QtCore.Qt.UserRole)
+            sub = item.data(0, NAV_SUB_ROLE)
+        except RuntimeError:
+            return
+        if not sub and (idx is None or idx < 0):
+            return self._nav_now(item, _col)
+        self._nav_pending = item
+        t = self.__dict__.get("_nav_timer")
+        if t is None:
+            t = QtCore.QTimer(self)
+            t.setSingleShot(True)
+            t.setInterval(0)
+            t.timeout.connect(self._nav_go)
+            self._nav_timer = t
+        t.start()
+
+    def _nav_go(self):
+        item = self.__dict__.pop("_nav_pending", None)
+        if item is None:
+            return
+        try:
+            self._nav_now(item)
+        except RuntimeError:
+            pass                      # القائمة أُعيد بناؤها قبل التنفيذ
+
+    def _nav_now(self, item, _col=0):
         sub = item.data(0, NAV_SUB_ROLE)
         if sub:
             par = item.parent()
