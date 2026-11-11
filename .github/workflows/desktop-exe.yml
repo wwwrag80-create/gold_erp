@@ -17,6 +17,7 @@ on:
       - "core/build.py"
       - "main.py"
       - "tools/ci_build_exe.py"
+      - "tools/ci_webengine_probe.py"
       - ".github/workflows/desktop-exe.yml"
 
 concurrency:
@@ -47,6 +48,28 @@ jobs:
           python -m pip install PyQt5 PyQtWebEngine qrcode pillow python-barcode pyinstaller "PyQt-Fluent-Widgets==1.11.3"
           python -m pip list
 
+      - name: تشخيص محرّك الويب (بايثون مباشرة، بلا الملف التنفيذي)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $cases = @(
+            @{ tag = "simple";            what = "simple"; sb = "";  fl = "" },
+            @{ tag = "simple-nosandbox";  what = "simple"; sb = "1"; fl = "" },
+            @{ tag = "simple-nogpu";      what = "simple"; sb = "";  fl = "--disable-gpu" },
+            @{ tag = "gate";              what = "gate";   sb = "";  fl = "" },
+            @{ tag = "gate-nosandbox";    what = "gate";   sb = "1"; fl = "" }
+          )
+          foreach ($c in $cases) {
+            Write-Host "════ $($c.tag)"
+            $env:PROBE_TAG = $c.tag
+            $env:QTWEBENGINE_DISABLE_SANDBOX = $c.sb
+            $env:QTWEBENGINE_CHROMIUM_FLAGS = $c.fl
+            python tools/ci_webengine_probe.py $c.what 15 2>&1 | Select-Object -Last 15
+          }
+          $env:QTWEBENGINE_DISABLE_SANDBOX = ""
+          $env:QTWEBENGINE_CHROMIUM_FLAGS = ""
+
       - name: بناء الملف التنفيذي (ملفٌّ واحد، مع المشهد)
         run: python tools/ci_build_exe.py
 
@@ -74,6 +97,7 @@ jobs:
           Get-Item dist\gold_erp.exe, dist\gold_erp_noweb.exe | ForEach-Object { "{0}: {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
           $runs = @(
             @{ tag = "forced";   exe = "dist\gold_erp.exe";       mode = "force" },
+            @{ tag = "forced-nosandbox"; exe = "dist\gold_erp.exe"; mode = "force"; sb = "1" },
             @{ tag = "default";  exe = "dist\gold_erp.exe";       mode = "" },
             @{ tag = "baseline"; exe = "dist\gold_erp_noweb.exe"; mode = "" }
           )
@@ -81,6 +105,7 @@ jobs:
             $tag = $r.tag
             $env:JADEITE_DATA_DIR = "$PWD\ci-data-$tag"
             $env:JADEITE_GATE3D = $r.mode
+            $env:QTWEBENGINE_DISABLE_SANDBOX = $r.sb
             $t0 = Get-Date
             $p = Start-Process $r.exe -PassThru
             Start-Sleep -Seconds 30
