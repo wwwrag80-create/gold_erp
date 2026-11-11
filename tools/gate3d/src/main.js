@@ -670,6 +670,29 @@ window.addEventListener('error', (e) => say('error ' + (e.message || e)));
 
 build().then(() => {
   say('built');
+  if (Q.has('film')) {
+    // تصويرٌ إطاراً إطاراً بساعةٍ ثابتة (لمعاينة الحركة كما هي بلا تقطّع):
+    // GSAP يُدار يدوياً، و`__film(t)` يرسم المشهد عند الثانية t بالضبط
+    if (Q.has('logo')) {
+      const [cx, cy, w, h] = Q.get('logo').split(',').map(Number);
+      window.gate3d.setLogoRect(cx, cy, w, h);
+    }
+    gsap.ticker.remove(gsap.updateRoot);
+    gsap.updateRoot(0);
+    intro = timeline();
+    intro.eventCallback('onComplete', idle);
+    intro.play();
+    let prev = 0;
+    window.__film = (t) => {
+      gsap.updateRoot(t);
+      apply(t);
+      composer.render(Math.max(0.001, t - prev));
+      prev = t;
+      return true;
+    };
+    say('film');
+    return;
+  }
   if (STILL) {
     // لقطةٌ ثابتة عند ثانيةٍ بعينها (للاختبار والصور)
     const tl = timeline();
