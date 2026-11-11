@@ -47,3 +47,6 @@ Thumbs.db
 
 # موقع ÀUR المبني (Netlify يبنيه بنفسه)
 mobile/site-dist/
+
+# أدوات بناء المشهد ثلاثي الأبعاد (تُثبّت بـ npm ci)
+node_modules/

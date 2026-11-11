@@ -1,0 +1,14 @@
+{
+  "name": "jadeite-gate3d",
+  "private": true,
+  "description": "مشهد بوابة الدخول ثلاثي الأبعاد — يُبنى إلى assets/gate3d",
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": {
+    "@pmndrs/assets": "1.7.0",
+    "esbuild": "0.24.0",
+    "gltfpack": "0.22.0",
+    "gsap": "3.12.5",
+    "three": "0.169.0"
+  }
+}

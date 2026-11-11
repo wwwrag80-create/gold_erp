@@ -1,0 +1,100 @@
+name: ملف ويندوز التنفيذي — مشهد الدخول
+
+# يبني الملف التنفيذي على ويندوز بالطريقة نفسها التي يبنيه بها MAKE_EXE.bat
+# (ملفٌّ واحد، مع محرّك الويب)، ثم يشغّله ويقرأ سجلّ إقلاعه ويلتقط الشاشة:
+#   · مرةً والمشهد ثلاثي الأبعاد مفروضٌ ولو رُسم بالمعالج (لا كرت شاشة هنا)
+#   · ومرةً بالوضع العادي: يكتشف الرسم بالمعالج فيسلّم للمقطع المصوَّر
+# الملف المبني هنا بلا إعدادات السحابة — للفحص فقط، لا يُوزَّع.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "ui/widgets/gate3d_stage.py"
+      - "ui/gate_window.py"
+      - "assets/gate3d/**"
+      - "core/build.py"
+      - "main.py"
+      - "tools/ci_build_exe.py"
+      - ".github/workflows/desktop-exe.yml"
+
+concurrency:
+  group: desktop-exe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: المكتبات (كما في MAKE_EXE.bat)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyQt5 PyQtWebEngine qrcode pillow python-barcode pyinstaller "PyQt-Fluent-Widgets==1.11.3"
+          python -m pip list
+
+      - name: بناء الملف التنفيذي (ملفٌّ واحد)
+        run: python tools/ci_build_exe.py
+
+      - name: تشغيله والتقاط الشاشة
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          function Shot($name) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("$PWD\out\$name.png")
+            $g.Dispose(); $bmp.Dispose()
+          }
+          New-Item -ItemType Directory -Force out | Out-Null
+          Get-Item dist\gold_erp.exe | Select-Object Name, Length
+          foreach ($mode in @("force", "")) {
+            $tag = if ($mode) { "forced" } else { "default" }
+            $env:JADEITE_DATA_DIR = "$PWD\ci-data-$tag"
+            $env:JADEITE_GATE3D = $mode
+            $t0 = Get-Date
+            $p = Start-Process dist\gold_erp.exe -PassThru
+            Start-Sleep -Seconds 35
+            Shot "$tag-35s"
+            Start-Sleep -Seconds 10
+            Shot "$tag-45s"
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 3
+            Get-Process gold_erp, QtWebEngineProcess -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            $log = Get-ChildItem "$PWD\ci-data-$tag" -Recurse -Filter startup.log | Select-Object -First 1
+            if ($log) {
+              Copy-Item $log.FullName "out\startup-$tag.log"
+              Write-Host "──── $tag"
+              Get-Content $log.FullName -Encoding UTF8 | Select-Object -Last 25
+            } else { Write-Host "──── ${tag}: no startup.log" }
+          }
+
+      - name: الحكم من سجلّ الإقلاع
+        shell: pwsh
+        run: |
+          $f = Get-Content out\startup-forced.log -Encoding UTF8 -Raw
+          $d = Get-Content out\startup-default.log -Encoding UTF8 -Raw
+          $ok = $true
+          if ($f -notmatch "عُرضت البوابة") { Write-Host "✘ forced: gate not shown"; $ok = $false }
+          if ($f -notmatch "مشهد 3D: تحميل الصفحة") { Write-Host "✘ forced: web engine not used"; $ok = $false }
+          if ($f -notmatch "مشهد 3D: (جاهز|تعذّر)") { Write-Host "✘ forced: page never answered"; $ok = $false }
+          if ($d -notmatch "عُرضت البوابة") { Write-Host "✘ default: gate not shown"; $ok = $false }
+          Write-Host ("forced : " + (($f -split "`n") -match "مشهد 3D" -join " | "))
+          Write-Host ("default: " + (($d -split "`n") -match "مشهد 3D|المقطع" -join " | "))
+          if (-not $ok) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate3d-windows
+          path: out/
+          retention-days: 7

@@ -25,6 +25,8 @@ SKIP_DIRS = {
     "_update_tmp", "_update_rollback", ".idea", ".vscode",
     # تطبيق الجوال يُبنى ويُثبَّت وحده (mobile/) — لا شأن لبرنامج الكمبيوتر به
     "mobile",
+    # أدوات بناء مشهد الدخول (npm) — الحزمة تحمل ناتجها في assets/gate3d
+    "node_modules",
 }
 SKIP_SUFFIX = {".pyc", ".pyo", ".db", ".db-wal", ".db-shm", ".bak",
                ".spec", ".log", ".jup"}

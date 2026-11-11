@@ -264,6 +264,32 @@ def _fluent_args():
     return out
 
 
+# ══ مشهد الدخول ثلاثي الأبعاد (5.3) ══
+# يُرسم بمحرّك Chromium المدمج في Qt (PyQtWebEngine) من ملفّات assets/gate3d
+# المحلّية. وبلا المكتبة على جهاز البناء يُبنى الـexe بالمقطع المصوَّر القديم
+# مكانه — يعمل كاملاً، فقط بلا المشهد الحيّ.
+WEBENGINE = ("PyQt5.QtWebEngineWidgets", "PyQt5.QtWebEngineCore",
+             "PyQt5.QtWebChannel", "PyQt5.QtQuickWidgets")
+
+
+def _webengine_args():
+    import importlib.util as _iu
+    try:
+        ok = _iu.find_spec("PyQt5.QtWebEngineWidgets") is not None
+    except Exception:
+        ok = False
+    if not ok:
+        print("  [!] PyQtWebEngine غير مثبّتة — مشهد الدخول ثلاثي الأبعاد لن "
+              "يُضمّ (يظهر المقطع المصوَّر بدلاً منه).\n      لضمّه: "
+              "python -m pip install PyQtWebEngine")
+        return []
+    out = []
+    for mod in WEBENGINE:
+        out += ["--hidden-import", mod]
+    print("  ✔ مشهد الدخول ثلاثي الأبعاد (QtWebEngine) يُضمّ في الـexe")
+    return out
+
+
 def build_app(onefile=False, console=False):
     print("── بناء التطبيق الرئيسي ──")
     name = APP_NAME + ("_debug" if console else "")
@@ -291,6 +317,7 @@ def build_app(onefile=False, console=False):
     for pkg in ("barcode", "qrcode"):
         args += ["--collect-all", pkg]
     args += _fluent_args()
+    args += _webengine_args()
     args.append(str(ROOT / "main.py"))
 
     # شاشة البدء تُجرَّب، وإن رفضتها أداة البناء (بيئةٌ بلا Tk مثلاً)

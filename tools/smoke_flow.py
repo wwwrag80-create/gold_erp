@@ -8542,11 +8542,16 @@ def main():
         _src100 = _in100.getsource(_gw100.GateWindow.__init__)
         # 4.98: المقطع المتحرّك خلفيةً (يُجهَّز في خيطٍ خلفي) — والحقول بلا
         # لوحة، والحركة انزلاقٌ لا مؤثّر شفافيةٍ على الحقول
+        # 5.3: المسرح من `make_stage` — المشهد ثلاثي الأبعاد إن أمكن والمقطع
+        # بديله؛ واتّضاح الحقول بمؤثّر شفافية مع المشهد الحيّ وحده
+        _ac100 = _in100.getsource(_gw100.GateWindow._apply_card)
+        _ms100 = _in100.getsource(_gw100.make_stage)
         check("والبوابة تعرض المشهد المتحرّك خلفيةً، والحقول يمين الشاشة"
               " العريضة بلا لوحةٍ داخل إطار",
-              "CinemaStage(self)" in _src100
-              and "_set_opacity" not in _in100.getsource(
-                  _gw100.GateWindow._apply_card)
+              "make_stage(self)" in _src100
+              and "return CinemaStage(parent)" in _ms100
+              and ("_set_opacity" not in _ac100
+                   or "if self._3d" in _ac100)
               and _gw100.BLOCK_X > 0.6
               and _cs100.CinemaStage.uses_overlay is False
               and "GlassCard" not in _in100.getsource(
