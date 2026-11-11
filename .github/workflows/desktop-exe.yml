@@ -4,7 +4,8 @@ name: ملف ويندوز التنفيذي — مشهد الدخول
 # (ملفٌّ واحد، مع محرّك الويب)، ثم يشغّله ويقرأ سجلّ إقلاعه ويلتقط الشاشة:
 #   · مرةً والمشهد ثلاثي الأبعاد مفروضٌ ولو رُسم بالمعالج (لا كرت شاشة هنا)
 #   · ومرةً بالوضع العادي: يكتشف الرسم بالمعالج فيسلّم للمقطع المصوَّر
-# الملف المبني هنا بلا إعدادات السحابة — للفحص فقط، لا يُوزَّع.
+#   · ونسخة مقارنة بلا محرّك الويب: كم يضيف المشهد لحجم الملف وزمن الإقلاع
+# الملفّات المبنية هنا بلا إعدادات السحابة — للفحص فقط، لا تُوزَّع.
 on:
   workflow_dispatch:
   push:
@@ -25,11 +26,14 @@ concurrency:
 jobs:
   exe:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     env:
       # طرفية المشغّل بترميز cp1252 لا يكتب العربية (أجهزة العملاء بـcp1256)
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
+      # المشغّل يطفئ «حركات ويندوز» (جلسة خدمة) — والبوابة تحترمها فتعرض
+      # الصورة الساكنة. هنا نريد الحركة كما على جهاز المستخدم.
+      GOLD_ERP_REDUCE_MOTION: "0"
     steps:
       - uses: actions/checkout@v4
 
@@ -43,10 +47,13 @@ jobs:
           python -m pip install PyQt5 PyQtWebEngine qrcode pillow python-barcode pyinstaller "PyQt-Fluent-Widgets==1.11.3"
           python -m pip list
 
-      - name: بناء الملف التنفيذي (ملفٌّ واحد)
+      - name: بناء الملف التنفيذي (ملفٌّ واحد، مع المشهد)
         run: python tools/ci_build_exe.py
 
-      - name: تشغيله والتقاط الشاشة
+      - name: بناء نسخة المقارنة (بلا محرّك الويب)
+        run: python tools/ci_build_exe.py --no-webengine
+
+      - name: تشغيلهما والتقاط الشاشة وقياس الإقلاع
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -58,27 +65,40 @@ jobs:
             $bmp.Save("$PWD\out\$name.png")
             $g.Dispose(); $bmp.Dispose()
           }
+          function Stamp($log, $what) {
+            $l = Get-Content $log -Encoding UTF8 | Where-Object { $_ -match [regex]::Escape($what) } | Select-Object -First 1
+            if ($l -match '^\[(.+?)\]') { return [datetime]::ParseExact($Matches[1], "yyyy-MM-dd HH:mm:ss.fff", $null) }
+            return $null
+          }
           New-Item -ItemType Directory -Force out | Out-Null
-          Get-Item dist\gold_erp.exe | Select-Object Name, Length
-          foreach ($mode in @("force", "")) {
-            $tag = if ($mode) { "forced" } else { "default" }
+          Get-Item dist\gold_erp.exe, dist\gold_erp_noweb.exe | ForEach-Object { "{0}: {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+          $runs = @(
+            @{ tag = "forced";   exe = "dist\gold_erp.exe";       mode = "force" },
+            @{ tag = "default";  exe = "dist\gold_erp.exe";       mode = "" },
+            @{ tag = "baseline"; exe = "dist\gold_erp_noweb.exe"; mode = "" }
+          )
+          foreach ($r in $runs) {
+            $tag = $r.tag
             $env:JADEITE_DATA_DIR = "$PWD\ci-data-$tag"
-            $env:JADEITE_GATE3D = $mode
+            $env:JADEITE_GATE3D = $r.mode
             $t0 = Get-Date
-            $p = Start-Process dist\gold_erp.exe -PassThru
-            Start-Sleep -Seconds 35
-            Shot "$tag-35s"
-            Start-Sleep -Seconds 10
-            Shot "$tag-45s"
+            $p = Start-Process $r.exe -PassThru
+            Start-Sleep -Seconds 30
+            Shot "$tag-30s"
+            Start-Sleep -Seconds 8
+            Shot "$tag-38s"
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 3
-            Get-Process gold_erp, QtWebEngineProcess -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process gold_erp, gold_erp_noweb, QtWebEngineProcess -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 2
             $log = Get-ChildItem "$PWD\ci-data-$tag" -Recurse -Filter startup.log | Select-Object -First 1
             if ($log) {
               Copy-Item $log.FullName "out\startup-$tag.log"
-              Write-Host "──── $tag"
-              Get-Content $log.FullName -Encoding UTF8 | Select-Object -Last 25
+              $shown = Stamp $log.FullName "ظهرت البوابة"
+              $secs = if ($shown) { "{0:N1}" -f ($shown - $t0).TotalSeconds } else { "?" }
+              Write-Host "──── ${tag}: gate shown after $secs s"
+              Get-Content $log.FullName -Encoding UTF8 | Select-Object -First 12
+              Get-Content $log.FullName -Encoding UTF8 | Where-Object { $_ -match "مشهد 3D|المقطع" }
             } else { Write-Host "──── ${tag}: no startup.log" }
           }
 
