@@ -10674,6 +10674,19 @@ def main():
           and abs(_reg130 - (15 - 6)) < 0.01,
           f"{_r130['purchase_no']} · {_bal130} · {_reg130}")
 
+    step("131) 5.3.5: البحث برقمٍ بلا فواصل يجد «6,469.00»")
+    try:
+        from ui.widgets.table_search import matcher as _m131, _norm as _n131
+        _cases131 = (("6469", "6,469.00", True), ("6,469", "6,469.00", True),
+                     ("٦٤٦٩", "6,469.00", True), ("6469.5", "6,469.50", True),
+                     ("6470", "6,469.00", False), ("محمد", "عميل محمد", True))
+        _bad131 = [c for c in _cases131
+                   if _m131(_n131(c[0]).strip())(_n131(c[1])) != c[2]]
+        check("الرقم يُوجد في أعمدة الذهب والأجور بفاصلٍ أو بدونه",
+              not _bad131, str(_bad131))
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

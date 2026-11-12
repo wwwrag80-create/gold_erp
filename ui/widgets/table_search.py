@@ -38,6 +38,26 @@ def _norm(text):
     return base(normalize(text or ""))
 
 
+# 5.3.5: الأرقام تُعرض بفواصل الآلاف («6,469.00») ويكتبها المستخدم بلا
+# فاصل («6469») — فلا يطابق النصُّ النصَّ والرقمُ موجودٌ في الكشف. تُحذف
+# الفواصل من الطرفين حين يكون المكتوب رقماً، فيُوجد في عمودي الذهب
+# (مدين · دائن) وعمودي الأجور/النقد وفي كل جدول.
+_SEPS = str.maketrans("", "", ",٬ \u066c")
+_NUMQ = __import__("re").compile(r"^[-+]?[\d.,٬\s]*\d[\d.,٬\s]*$")
+
+
+def matcher(q):
+    """دالةُ مطابقة لنصّ البحث (مطبَّعاً): تطابق النصّ كما هو، والرقمَ
+    بلا فواصل آلاف إن كان المكتوب رقماً."""
+    q = (q or "").strip()
+    if not q:
+        return lambda _t: True
+    if _NUMQ.match(q):
+        qn = q.translate(_SEPS)
+        return lambda t: q in t or qn in (t or "").translate(_SEPS)
+    return lambda t: q in (t or "")
+
+
 def _is_total(table, row):
     try:
         from ui.widgets.table_tools import TOTAL_ROLE
@@ -160,6 +180,7 @@ class SearchBar(QtWidgets.QFrame):
 
     def _apply(self, text=None):
         q = _norm(self.edit.text() if text is None else text).strip()
+        has = matcher(q)
         v = self.view
         shown = total = 0
         if isinstance(v, QtWidgets.QTableWidget):
@@ -170,9 +191,9 @@ class SearchBar(QtWidgets.QFrame):
                     continue
                 total += 1
                 hit = not q or any(
-                    q in _norm(v.item(r, c).text())
+                    has(_norm(v.item(r, c).text()))
                     for c in range(cols) if v.item(r, c) is not None) \
-                    or q in _norm(_extra(v, r))
+                    or has(_norm(_extra(v, r)))
                 v.setRowHidden(r, not hit)
                 shown += int(hit)
         elif hasattr(v, "set_filter"):
@@ -190,7 +211,8 @@ class SearchBar(QtWidgets.QFrame):
         self.count.setText("" if not q else f"{shown:,} من {total:,}")
 
     def _tree_hit(self, item, q):
-        if any(q in _norm(item.text(c)) for c in range(item.columnCount())):
+        has = matcher(q)
+        if any(has(_norm(item.text(c))) for c in range(item.columnCount())):
             return True
         return any(self._tree_hit(item.child(i), q)
                    for i in range(item.childCount()))

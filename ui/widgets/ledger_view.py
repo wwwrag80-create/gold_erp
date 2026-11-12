@@ -226,6 +226,8 @@ class LedgerProxy(QtCore.QSortFilterProxyModel):
 
     def set_query(self, text):
         self._q = _norm(text).strip()
+        from ui.widgets.table_search import matcher
+        self._has = matcher(self._q)        # 5.3.5: الرقم بلا فواصل آلاف
         self.invalidateFilter()
 
     def filterAcceptsRow(self, row, parent):
@@ -234,7 +236,8 @@ class LedgerProxy(QtCore.QSortFilterProxyModel):
             return True
         cols = m.columnCount()
         values = m.rows[row]
-        return any(self._q in _norm(fmt(values[c], m.kinds[c]))
+        has = getattr(self, "_has", None) or (lambda t: self._q in t)
+        return any(has(_norm(fmt(values[c], m.kinds[c])))
                    for c in range(min(cols, len(values))))
 
     def lessThan(self, left, right):
