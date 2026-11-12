@@ -181,6 +181,13 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         if not res["running"]:
             return self._show(None, "<span style='color:#a4262c'>الخادم غير"
                                     " مشغّل — اضغط «تفعيل الرابط»</span>")
+        if res.get("ts_down"):
+            return self._show(res["url"], (
+                "<span style='color:#8B5E1E'><b>هذا رابطك الثابت نفسه — لم"
+                " يتغيّر.</b> لكن Tailscale غير متصل على هذا الجهاز الآن، فلا"
+                " يُفتح من الجوال حتى يتصل: افتح Tailscale من شريط المهام"
+                " وتأكّد أنه «Connected»، ثم اضغط «✔ تفعيل الرابط»."
+                "<br><b>لا تضغط «رابط جديد»</b> — فهو وحده يغيّر الرابط.</span>"))
         if st["mode"] != "lan" and res["url"] == res["lan"]:
             return self._show(res["lan"], "<span style='color:#8B5E1E'>"
                               "الرابط الثابت غير مفعّل بعد — هذا رابط شبكة"
@@ -205,6 +212,14 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             if res.get(key):
                 extra += (f"<br><a href='{res[key]}'>افتح {label}</a> ثم"
                           f" اضغط «تفعيل الرابط» مرةً أخرى.")
+        fx = mw.fixed_url() if res.get("mode") in ("funnel", "serve") else ""
+        if fx:
+            # رابطٌ ثابت نجح من قبل: هو نفسه يُعرض — لا رابط الشبكة المحلية
+            return self._show(fx, (
+                f"<span style='color:#a4262c'><b>{res.get('message') or 'تعذّر التفعيل'}"
+                f"</b></span>{extra}<br><span style='color:#8B5E1E'>الرابط"
+                " أدناه رابطك الثابت نفسه — لم يتغيّر، ويعود يعمل حين يتصل"
+                " Tailscale وتضغط «تفعيل الرابط». لا تضغط «رابط جديد».</span>"))
         self._show(res.get("lan") or None,
                    f"<span style='color:#a4262c'><b>{res.get('message') or 'تعذّر التفعيل'}"
                    f"</b></span>{extra}"

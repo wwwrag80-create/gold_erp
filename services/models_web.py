@@ -56,6 +56,10 @@ K_PIN = "models_web_pin"
 K_ENABLED = "models_web_enabled"
 K_MODE = "models_web_mode"
 K_TS = "models_web_ts_applied"       # ما وجّهه البرنامج في Tailscale
+# 5.3.3: آخر عنوانٍ ثابت نجح (`<الجهاز>.<شبكتك>.ts.net`) — يُعرض الرابط
+# الثابت نفسه ولو كان Tailscale غير متصل لحظةَ فتح النافذة، بدل رابط
+# الشبكة المحلية الذي يبدو «رابطاً تغيّر»
+K_TS_DNS = "models_web_ts_dns"
 
 MODES = (
     ("funnel", "ثابت عبر الإنترنت — يُفتح من أي جوال"),
@@ -333,9 +337,23 @@ def activate(username=None):
         out.update(ok=False, reason="ts_apply", message=r["message"],
                    enable_url=r["enable_url"])
         return out
-    _remember_ts(st["mode"])
+    _remember_ts(st["mode"], ts["dns"])
     out["url"] = ts_url(ts["dns"], tok)
     return out
+
+
+def fixed_url(conn=None):
+    """الرابط الثابت المعروف (آخر ما نجح) — أو "" إن لم ينجح قط."""
+    from database.database import db
+    try:
+        if conn is None:
+            with db(readonly=True) as c:
+                dns, tok = _get(c, K_TS_DNS).strip(), _get(c, K_TOKEN)
+        else:
+            dns, tok = _get(conn, K_TS_DNS).strip(), _get(conn, K_TOKEN)
+    except Exception:
+        return ""
+    return ts_url(dns, tok)
 
 
 def peek():
@@ -347,13 +365,21 @@ def peek():
     addr = photo_server.current()
     lan = (f"http://{addr[0]}:{addr[1]}/{PREFIX}/{st['token']}"
            if addr and st["token"] else "")
-    url, ts = (lan if st["enabled"] else ""), None
+    url, ts, down = (lan if st["enabled"] else ""), None, False
     if st["enabled"] and addr and st["mode"] in ("funnel", "serve"):
         ts = ts_status()
         if ts["running"] and ts["dns"] and _ts_was_applied():
             url = ts_url(ts["dns"], st["token"])
+            if not fixed_url():
+                _remember_ts(st["mode"], ts["dns"])
+        else:
+            # Tailscale غير متصل الآن: الرابط الثابت نفسه لم يتغيّر — يُعرض
+            # هو مع التنبيه، لا رابط الشبكة المحلية
+            fx = fixed_url()
+            if fx:
+                url, down = fx, True
     return {"settings": st, "lan": lan, "url": url, "ts": ts,
-            "running": bool(addr)}
+            "running": bool(addr), "ts_down": down}
 
 
 def deactivate(username=None):
@@ -376,11 +402,13 @@ def _ts_was_applied():
         return False
 
 
-def _remember_ts(mode):
+def _remember_ts(mode, dns=None):
     from database.database import db
     try:
         with db() as conn:
             _set(conn, K_TS, mode or "")
+            if dns:
+                _set(conn, K_TS_DNS, str(dns).strip())
     except Exception:
         pass
 
@@ -585,17 +613,37 @@ def diagnose():
     return out
 
 
-def autostart():
-    """عند تشغيل البرنامج: إن كان الرابط مفعّلاً يعود كما كان."""
-    try:
-        from database.database import db
-        with db(readonly=True) as conn:
-            on = _get(conn, K_ENABLED, "0") == "1"
-        if on:
-            return activate("system")
-    except Exception:
-        pass
-    return None
+AUTOSTART_TRIES = 20          # 5.3.3: إعادة المحاولة كل دقيقة حتى 20 دقيقة
+AUTOSTART_WAIT = 60.0
+
+
+def autostart(tries=None, wait=None):
+    """عند تشغيل البرنامج: إن كان الرابط مفعّلاً يعود كما كان.
+
+    5.3.3: Tailscale قد يتصل **بعد** البرنامج (إقلاع ويندوز، أو إعادة
+    التشغيل بعد تحديث). كانت المحاولة الواحدة تفشل فيبقى الرابط الثابت
+    متوقفاً حتى يُضغط «تفعيل الرابط» باليد — ويظهر للمستخدم كأن الرابط
+    تغيّر. الآن تُعاد المحاولة كل دقيقة حتى يتصل، في الخيط الخلفي نفسه."""
+    import time
+    tries = AUTOSTART_TRIES if tries is None else tries
+    wait = AUTOSTART_WAIT if wait is None else wait
+    res = None
+    for n in range(max(int(tries), 1)):
+        try:
+            from database.database import db
+            with db(readonly=True) as conn:
+                on = _get(conn, K_ENABLED, "0") == "1"
+            if not on:
+                return res
+            res = activate("system")
+        except Exception:
+            res = None
+        if res and (res.get("ok") or res.get("reason") in ("no_ts",
+                                                           "server")):
+            return res
+        if n + 1 < tries:
+            time.sleep(wait)
+    return res
 
 
 # ══════════════════════════════════════════════════════════════════

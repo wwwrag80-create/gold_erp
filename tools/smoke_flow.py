@@ -1734,6 +1734,12 @@ def main():
               str(ps2.batch))
         check("ويُنبَّه المستخدم أنها استُعيدت",
               ps2.draft_note.isVisible() or bool(ps2.draft_note.text()))
+        # الشاشتان تُغلقان قبل المحو: حفظها الدوري (`keep_draft`) كان قد
+        # يعيد كتابة المسوّدة بعده فتظهر في خطوةٍ لاحقة — بحسب التوقيت
+        for _psx in (ps, ps2):
+            _psx.batch = []
+            _psx.close()
+        _app5.processEvents()
         _dr.clear(_PK, "admin")
         ps3 = _PS(_u5)
         ps3.refresh()
@@ -4503,6 +4509,9 @@ def main():
             _app47.processEvents()
 
         from ui.production_screen import ProductionScreen as _PS47
+        from ui.production_screen import DRAFT_KEY as _PK47
+        from services import drafts as _dr47
+        _dr47.clear(_PK47, "admin")      # يبدأ فارغاً لا بمسوّدة خطوةٍ سابقة
         _p47 = _PS47(_u47)
         _p47.refresh()
         _p47.show()
@@ -7678,6 +7687,30 @@ def main():
           == f"https://factory.tail9.ts.net/m/{_tok86}"
           and ["funnel", "--bg", str(_addr86[1])] in _calls86,
           str(_a86))
+    # 5.3.3: Tailscale ينقطع (إقلاع ويندوز/بعد تحديث) — الرابط الثابت نفسه
+    # يُعرض لا رابط الشبكة المحلية، والإقلاع يعيد المحاولة حتى يتصل
+    _mw86.RUNNER = lambda a, timeout=25: (
+        (0, _js86.dumps({"BackendState": "Stopped", "Self": {}}))
+        if a[:2] == ["status", "--json"] else (1, "not running"))
+    _pk86 = _mw86.peek()
+    check("Tailscale غير متصل: النافذة تعرض الرابط الثابت نفسه مع التنبيه",
+          _pk86["ts_down"] and _pk86["url"] == _a86["url"], str(_pk86["url"]))
+    _n86 = []
+
+    def _late86(args, timeout=25):
+        if args[:2] == ["status", "--json"]:
+            _n86.append(1)
+            st = "Running" if len(_n86) >= 3 else "Stopped"
+            return 0, _js86.dumps({"BackendState": st, "Self": {
+                "DNSName": "factory.tail9.ts.net." if st == "Running"
+                else ""}})
+        return 0, ""
+    _mw86.RUNNER = _late86
+    _as86 = _mw86.autostart(tries=5, wait=0)
+    check("والإقلاع يعيد المحاولة حتى يتصل Tailscale — والرابط هو نفسه",
+          bool(_as86) and _as86["ok"] and _as86["url"] == _a86["url"]
+          and len(_n86) == 3, f"{len(_n86)} · {_as86}")
+    _mw86.RUNNER = _ts86
     with db() as conn:
         _mw86.regenerate(conn, "admin")
     _s6, _ = _get86(_u86)
