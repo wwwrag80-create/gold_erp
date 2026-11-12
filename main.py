@@ -141,12 +141,21 @@ def wire_gate(app, gate, main_window_factory=None):
     # تظهر لحظةُ فراغٍ واحدة من النقرة إلى أول جدول.
     holder = {}
 
+    def _close_gate():
+        try:
+            if gate.isVisible() or not getattr(gate, "_closed_once", False):
+                gate._closed_once = True
+                fin = getattr(gate, "finish", None)
+                (fin if callable(fin) else gate.close)()
+        except RuntimeError:
+            pass                # حُذفت النافذة — لا شيء يُغلق
+
     def _reveal(win):
         if not fade_ok():
             win.setWindowOpacity(1.0)
             win.raise_()
             win.activateWindow()
-            gate.close()
+            _close_gate()
             try:
                 win.play_entrance()        # يبدأ تجهيز الشاشات (4.97)
             except Exception:
@@ -162,7 +171,10 @@ def wire_gate(app, gate, main_window_factory=None):
         down.setEndValue(0.0)
         down.setDuration(300)
         down.setEasingCurve(QtCore.QEasingCurve.InCubic)
-        down.finished.connect(gate.close)
+        down.finished.connect(_close_gate)
+        # احتياط: إن لم تكتمل حركة الشفافية (بطاقة عرضٍ لا تدعمها) تُغلق
+        # البوابة بعد ثانيتين على أي حال — لا نافذةٌ سوداء تبقى خلف النظام
+        QtCore.QTimer.singleShot(2000, _close_gate)
         up.start()
         down.start()
         win._boot_anim = (up, down)    # مرجعٌ يمنعهما من الجمع مبكراً

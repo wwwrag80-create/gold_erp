@@ -80,6 +80,25 @@ def list_models(conn, date_from=None, date_to=None):
              "out_weight": r["out_w"] or 0.0} for r in rows]
 
 
+def weight_range(conn, mode="all"):
+    """{الموديل: (أصغر وزن، أكبر وزن)} بين أطقمه — بالوزن المقيد (5.3.3).
+
+    `mode`: "in_stock" ما بالخزنة وحده · "sold" ما عند المناديب · "all"
+    الكل — كما في ورقة الصور. الرقم التجميعي لا يدخل (رصيدٌ لا قطعة)."""
+    st = {"in_stock": " AND w.status='in_stock'",
+          "sold": " AND w.status='sold'"}.get(mode, "")
+    w_expr = ("COALESCE(w.remaining_weight, w.registered_weight)"
+              if mode == "in_stock" else "w.registered_weight")
+    rows = conn.execute(
+        "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') mno,"
+        f" MIN({w_expr}) lo, MAX({w_expr}) hi"
+        " FROM work_orders w WHERE w.is_deleted=0"
+        " AND COALESCE(w.is_service,0)=0 AND COALESCE(w.is_bulk,0)=0"
+        f" AND {w_expr} > 0" + st + " GROUP BY mno").fetchall()
+    return {r["mno"]: (float(r["lo"] or 0), float(r["hi"] or 0))
+            for r in rows}
+
+
 def model_items(conn, model_no, branch):
     """أطقم الموديل في فرع محدد.
 

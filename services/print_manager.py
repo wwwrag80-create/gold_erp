@@ -3643,8 +3643,33 @@ GALLERY_CSS = """
   .gcount { font-size: 13pt; font-weight: bold; color: #2E2410;
             margin-top: 1.5mm; }
   .gname { font-size: 10pt; color: #6B5B3A; margin-top: 0.6mm; }
+  table.gwos { width: 100%; margin-top: 1.4mm; border-collapse: collapse;
+               font-size: 8.5pt; }
+  table.gwos th { color: #7A6A48; font-weight: normal; font-size: 7.5pt;
+                  border-bottom: 1px solid #E4D9BF; padding: 0.4mm; }
+  table.gwos td { padding: 0.5mm 1mm; border-bottom: 1px dotted #EFE6D2; }
+  td.gwn { text-align: right; direction: ltr; color: #2E2410; }
+  td.gww { text-align: left; font-weight: bold; color: #2E2410; }
 </style>
 """
+
+
+def _invoice_model_sets(conn, ids):
+    """{الموديل: [(رقم التشغيل، الوزن)]} لأطقم هذه الفواتير — 5.3.3: تُكتب
+    داخل إطار صورة الموديل في المعاينة المجمّعة."""
+    if not ids:
+        return {}
+    q = ",".join("?" * len(ids))
+    out = {}
+    for r in conn.execute(
+            "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') m,"
+            " COALESCE(w.work_order_no,'—') no, it.registered_weight wt"
+            " FROM invoice_items it"
+            " LEFT JOIN work_orders w ON w.id=it.work_order_id"
+            f" WHERE it.invoice_id IN ({q}) AND COALESCE(w.is_service,0)=0"
+            " ORDER BY w.work_order_no, it.id", list(ids)):
+        out.setdefault(r["m"], []).append((r["no"], float(r["wt"] or 0)))
+    return out
 
 
 def _invoice_model_groups(conn, ids):
@@ -3664,18 +3689,28 @@ def _invoice_model_groups(conn, ids):
     return out
 
 
-def _gallery(models, per_row=3):
-    """شبكة صور: تحت كل صورة عدد الأطقم ثم اسم الموديل."""
+def _gallery(models, per_row=3, sets=None):
+    """شبكة صور: تحت كل صورة عدد الأطقم ثم اسم الموديل — ومع `sets`
+    (5.3.3) أرقام تشغيل أطقمه بوزن كلٍّ منها داخل إطاره."""
     from models import models_catalog as mc
     cells_ = []
     for name, n in models:
         uri = _img_uri(mc.image_path(name) or "")
         img = (f'<img src="{uri}" />' if uri
                else '<span class="gnone">لا صورة</span>')
+        wos = ""
+        its = (sets or {}).get(name) or []
+        if its:
+            trs = "".join(
+                f'<tr><td class="gwn">{en(no)}</td>'
+                f'<td class="gww">{_gw(wt)}</td></tr>' for no, wt in its)
+            wos = (f'<table class="gwos" cellspacing="0" cellpadding="0">'
+                   f'<tr><th>رقم التشغيل</th><th>الوزن</th></tr>{trs}'
+                   f'</table>')
         cells_.append(
             f'<td class="g"><div class="gimg">{img}</div>'
             f'<div class="gcount">{en(n)} {"طقم" if n == 1 else "أطقم"}</div>'
-            f'<div class="gname">{name}</div></td>')
+            f'<div class="gname">{name}</div>{wos}</td>')
     while len(cells_) % per_row:
         cells_.append('<td style="border:none"></td>')
     rows = "".join("<tr>" + "".join(cells_[i:i + per_row]) + "</tr>"
@@ -3764,7 +3799,8 @@ def _tpl_invoices_models_combined(conn, _id=0, invoice_ids=None):
         models = _invoice_model_groups(conn, part)
         body += (f'<div class="gsec">{label} — {en(pn)} طقم · '
                  f'{_gw(pw)} {_kunit()} · أجور {_w(pg, 2)}</div>'
-                 + (_gallery(models) if models else
+                 + (_gallery(models, sets=_invoice_model_sets(conn, part))
+                    if models else
                     '<div style="text-align:center;padding:12px">—</div>'))
     return head + body
 
@@ -4046,6 +4082,22 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
     cap_mm = max(10.0, fs * 1.1)
     img_h = max(15.0, ch - cap_mm - 4)
 
+    # 5.3.3: بجانب اسم الموديل أصغر وزنٍ وأكبر وزنٍ بين أطقمه
+    try:
+        _rng = mc.weight_range(conn, mode)
+    except Exception:
+        _rng = {}
+
+    def _range(model):
+        lo_hi = _rng.get(str(model))
+        if not lo_hi:
+            return ""
+        lo, hi = lo_hi
+        if abs(hi - lo) < 0.005:
+            return (' <span class="wr">(' + _gw(lo) + ')</span>')
+        return (' <span class="wr">(' + _gw(lo) + ' — ' + _gw(hi)
+                + ')</span>')
+
     cells_html = []
     for m, p_img, n in picked:
         uri = _data_uri(p_img)
@@ -4055,7 +4107,7 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
             '<td class="ph">'
             '<div class="phbox"><img src="' + uri + '" /></div>'
             '<div class="phcap"><b class="mn">' + str(m["model"])
-            + '</b><br/>'
+            + '</b>' + _range(m["model"]) + '<br/>'
             'بالخزنة: <b>' + en(m["in_count"]) + '</b>'
             ' &nbsp;·&nbsp; عند المناديب: <b>' + en(m["out_count"])
             + '</b></div></td>')
@@ -4095,6 +4147,9 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
         color: #4A3A1E;
       }}
       .phcap b.mn {{ font-size: {fs * 1.12:.1f}pt; }}
+      .phcap .wr {{ font-size: {fs * 0.95:.1f}pt; color: #7A5C1E;
+                   white-space: nowrap; direction: ltr;
+                   unicode-bidi: embed; }}
     </style>
     """
     meta = ('<div ' + WIDE + '>الحدّ الأدنى للعدد: <b>'
@@ -4102,7 +4157,8 @@ def _tpl_model_photos(conn, _id=0, min_count=3, mode="all", sort="az",
             + en(per_page) + '</b> (' + en(cols) + '×' + en(rows)
             + ') &nbsp;·&nbsp; موديلات مطبوعة: <b>'
             + en(len(cells_html)) + '</b> &nbsp;·&nbsp; الصفحات: <b>'
-            + en(total_pages) + "</b></div>")
+            + en(total_pages) + "</b> &nbsp;·&nbsp; بجانب اسم الموديل:"
+            " (أصغر وزن — أكبر وزن) بين أطقمه</div>")
     return (_slim_title("صور الموديلات", today)
             + css + meta + pages)
 

@@ -1312,6 +1312,7 @@ class GateWindow(QtWidgets.QDialog):
 
     def _restore_scene(self):
         """بعد موجةٍ لم يُفتح بعدها النظام: يعود المشهد كما كان."""
+        self._handed_off = False
         try:
             self._exit.stop()
         except Exception:
@@ -1412,6 +1413,10 @@ class GateWindow(QtWidgets.QDialog):
     def _exit_done(self):
         fn = getattr(self, "_after_exit", None)
         self._after_exit = None
+        # التسليم اكتمل: الإغلاق صار مسموحاً (5.3.3). منعُ `reject` أثناء
+        # الدخول كان يمنع `close()` أيضاً — فـQDialog يُغلق عبر `reject`
+        # — فتبقى البوابة سوداء بتحيّتها خلف النظام ولا تختفي
+        self._handed_off = True
         self.stage.stop()
         # المشهد الحيّ عتم تماماً: يُطلق كرتُ الشاشة قبل بناء النظام، ويبقى
         # الليلُ والتحيّة — والتمازج الأخير بين نافذتين بلا عرضٍ حيّ
@@ -1438,10 +1443,19 @@ class GateWindow(QtWidgets.QDialog):
         super().keyPressEvent(e)
 
     def reject(self):
-        """الإغلاق لا يقع أثناء الدخول أو فتح النظام — مهما ضُغط."""
-        if self._busy or self.user:
+        """الإغلاق لا يقع أثناء الدخول أو فتح النظام — مهما ضُغط.
+
+        إلا بعد التسليم (`_handed_off`): حينها يُغلقها من فتح النظام
+        (`gate.close()` يمرّ بـ`reject` في QDialog)."""
+        if (self._busy or self.user) and not getattr(self, "_handed_off",
+                                                     False):
             return
         super().reject()
+
+    def finish(self):
+        """إغلاقٌ نهائي بعد ظهور النظام — لا يمنعه شيء."""
+        self._handed_off = True
+        self.close()
 
     def closeEvent(self, e):
         self.stage.stop()

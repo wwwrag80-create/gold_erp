@@ -136,6 +136,23 @@ def main():
           not gate._3d and isinstance(gate.stage, CinemaStage))
     gate.close()
 
+    # 5.3.3: دخولٌ حقيقي — البوابة تُغلق بعد ظهور النظام (كانت تبقى
+    # سوداء بتحيّتها خلفه حين مُنع `reject` أثناء الدخول)
+    for motion in ("0", "1"):
+        try:
+            r = subprocess.run(
+                [sys.executable, str(ROOT / "tools" / "gate_checks"
+                                     / "close_after_login.py"), motion],
+                capture_output=True, text=True, timeout=90,
+                env=dict(os.environ, QT_QPA_PLATFORM="offscreen",
+                         JADEITE_GATE3D="0", PYTHONIOENCODING="utf-8"))
+            out = r.stdout
+        except Exception as ex:                  # noqa: BLE001
+            out = str(ex)
+        check(f"بعد الدخول تُغلق البوابة ويبقى النظام وحده (حركة={motion})",
+              "system shown: True" in out and "gate visible: False" in out,
+              out.strip()[-160:])
+
     print("── الحزم")
     sys.path.insert(0, str(ROOT / "tools"))
     import make_update
