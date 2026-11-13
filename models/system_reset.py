@@ -143,6 +143,21 @@ def wipe_backups():
     return removed
 
 
+def _forget_made_dirs():
+    """المجلدات حُذفت: ذاكرة «أُنشئ من قبل» تُمحى فتُنشأ من جديد (5.3.6)."""
+    try:
+        from models import models_catalog
+        models_catalog._MADE_DIRS.clear()
+        models_catalog._IDX["key"] = None
+    except Exception:
+        pass
+    try:
+        from services import tenant_db
+        tenant_db._MADE.clear()
+    except Exception:
+        pass
+
+
 def wipe_all_tenants(keep_tenant=None):
     """يحذف قواعد بيانات **كل** المصانع على هذا الجهاز.
 
@@ -175,6 +190,7 @@ def wipe_all_tenants(keep_tenant=None):
             Path(str(legacy) + ext).unlink(missing_ok=True)
     except Exception:
         pass
+    _forget_made_dirs()
     return removed
 
 

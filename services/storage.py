@@ -52,8 +52,26 @@ DB_NAME = "gold_erp.db"
 # 1) فصل التطبيق عن البيانات
 # ══════════════════════════════════════════════════════════════════
 
+_DRIVE_CACHE = {}
+_DRIVE_TTL = 600.0
+
+
 def _drive_exists(letter):
-    """هل القرص موجود وقابل للكتابة؟"""
+    """هل القرص موجود وقابل للكتابة؟ — يُفحص مرةً كل عشر دقائق (5.3.6).
+
+    الفحص يكتب ملفاً ويحذفه في جذر القرص، و«D» على أجهزةٍ كثيرة قارئُ
+    أقراصٍ أو بطاقات: سؤال ويندوز عن قرصٍ فارغ قد يستغرق ثوانيَ. كان
+    يُفحص مع كل طلبٍ لمجلد البيانات أو النسخ."""
+    import time as _t
+    hit = _DRIVE_CACHE.get(letter)
+    if hit is not None and _t.monotonic() - hit[1] < _DRIVE_TTL:
+        return hit[0]
+    ok = _probe_drive(letter)
+    _DRIVE_CACHE[letter] = (ok, _t.monotonic())
+    return ok
+
+
+def _probe_drive(letter):
     if os.name != "nt":
         return False
     root = Path(f"{letter}:/")

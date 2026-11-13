@@ -52,8 +52,19 @@ def checkpoint(truncate=True):
     """
     c = get_connection()
     try:
-        mode = "TRUNCATE" if truncate else "PASSIVE"
-        r = c.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+        # 5.3.6: PASSIVE أولاً — لا ينتظر أحداً ولا يمنع أحداً. ثم TRUNCATE
+        # **بلا انتظار**: TRUNCATE ينتظر القرّاء و«يمنع كل حفظٍ جديد ما دام
+        # ينتظر» (توثيق SQLite) — ومع انتظار 30 ثانية كان حفظُ فاتورةٍ على
+        # الشاشة يقف معه فيظهر «لا يستجيب». إن لم يتسنَّ الآن تُرك لمرةٍ قادمة
+        r = c.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        if truncate:
+            c.execute("PRAGMA busy_timeout = 0")
+            try:
+                r2 = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                if r2 and not r2[0]:
+                    r = r2
+            except Exception:
+                pass
         return tuple(r) if r else None
     except Exception:
         return None

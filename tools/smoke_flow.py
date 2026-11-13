@@ -10687,6 +10687,34 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    step("132) 5.3.6: التنقّل لا يُعيد قراءة الشاشات بلا تغيّرٍ حقيقي")
+    try:
+        from database.database import data_token as _dt132
+        from ui.widgets.common import load_pref as _lp132, save_pref as _sp132
+        _t0 = _dt132()
+        _sp132("ui.test132", "1")
+        _sp132("ui.test132", "1")          # القيمة نفسها: بلا كتابة
+        _t1 = _dt132()
+        check("حفظ تفضيل عرضٍ لا يُعدّ تغيّراً في البيانات",
+              _t0[0] == _t1[0], f"{_t0} → {_t1}")
+        check("والتفضيل يُقرأ كما حُفظ", _lp132("ui.test132") == "1")
+        with db() as conn:                 # كتابةٌ حقيقية تُعدّ
+            conn.execute("UPDATE accounts SET name=name WHERE id="
+                         "(SELECT MIN(id) FROM accounts)")
+        check("وكتابةٌ حقيقية تُعدّ تغيّراً", _dt132()[0] > _t1[0])
+        with db() as conn:                 # معاملة كتابةٍ بلا تغيير
+            conn.execute("SELECT 1").fetchone()
+        _t2 = _dt132()
+        with db() as conn:
+            conn.execute("SELECT COUNT(*) FROM accounts").fetchone()
+        check("ومعاملةٌ لم تغيّر شيئاً لا تُعدّ (ولو بعد حارس المخزون)",
+              _dt132()[0] == _t2[0])
+        from services import maintenance as _mt132
+        check("ودمج WAL لا يمنع الحفظ (بلا انتظار)",
+              _mt132.checkpoint(truncate=True) is not None)
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:

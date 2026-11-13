@@ -70,6 +70,9 @@ def _safe_id(tid):
     return "".join(c for c in str(tid) if c.isalnum() or c in keep)[:64]
 
 
+_MADE = set()
+
+
 def tenant_db_path(base_dir, tenant_id=None):
     """مسار قاعدة بيانات المصنع.
 
@@ -81,10 +84,15 @@ def tenant_db_path(base_dir, tenant_id=None):
     if not tid:
         return base / "data" / LEGACY_NAME
     d = base / "data" / "tenants" / _safe_id(tid)
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    # 5.3.6: يُنشأ المجلد مرةً واحدة — كان يُطلب إنشاؤه مع كل قراءةٍ
+    # للمسار (أكثر من ألف مرة في جولةٍ على الشاشات) وكلٌّ عمليةٌ على القرص
+    key = str(d)
+    if key not in _MADE:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            _MADE.add(key)
+        except Exception:
+            pass
     return d / LEGACY_NAME
 
 

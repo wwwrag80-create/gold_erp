@@ -1332,6 +1332,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     sb.repaint()
             except Exception:
                 pass
+            import time as _tm
+            _t0 = _tm.perf_counter()
             try:
                 target.ensure()
                 fn = getattr(target.real, "refresh", None)
@@ -1339,6 +1341,16 @@ class MainWindow(QtWidgets.QMainWindow):
                     fn()
             except Exception:
                 pass
+            # 5.3.6: فتحٌ بطيء يُسجَّل باسم الشاشة — دليلٌ لا تخمين
+            _dt = _tm.perf_counter() - _t0
+            if _dt > 1.5:
+                try:
+                    from services import health
+                    node = self._items.get(target)
+                    health.log_slow(
+                        f"فتح شاشة «{node.text(0) if node else row}»", _dt)
+                except Exception:
+                    pass
         # نتتبّع الشاشة الحالية بأنفسنا: `stack.currentIndex()` قد
         # لا يعكس الحالة فوراً في كل الأحوال.
         prev = getattr(self, "_current_row", 0)

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """طبقة قاعدة البيانات: الاتصال، المخطط الكامل، ومساعد المعاملات."""
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -524,6 +525,22 @@ def _state():
 _WRITES = [0]
 
 
+_quiet = threading.local()
+
+
+@contextmanager
+def quiet_writes():
+    """كتابةٌ لا تُعدّ «تغيّراً في البيانات» (5.3.6): تفضيلات العرض (عرض
+    الأعمدة، عدد مرات فتح الشاشة…). كانت كل واحدةٍ منها تجعل كل شاشةٍ
+    مفتوحة «قديمة» فتُعاد قراءتها كاملةً عند الرجوع إليها."""
+    prev = getattr(_quiet, "on", False)
+    _quiet.on = True
+    try:
+        yield
+    finally:
+        _quiet.on = prev
+
+
 def data_token():
     """بصمة حالة البيانات: (تغييرات هذا البرنامج، `data_version`).
 
@@ -613,6 +630,8 @@ def db(readonly: bool = False):
 
     begin = "BEGIN DEFERRED" if readonly else "BEGIN IMMEDIATE"
     conn = _thread_conn()
+    import time as _tm
+    _tb = _tm.perf_counter()
     try:
         conn.execute(begin)
     except sqlite3.Error:
@@ -620,10 +639,26 @@ def db(readonly: bool = False):
         _drop_thread_conn()
         conn = _thread_conn()
         conn.execute(begin)
+    # 5.3.6: انتظارٌ طويل لقفل الحفظ (اتصالٌ آخر يكتب) يُسجَّل بموضعه —
+    # فإن ظهر «لا يستجيب» عُرف أهو انتظار القاعدة أم شيءٌ غيره
+    _wait = _tm.perf_counter() - _tb
+    if _wait > 1.0 and threading.current_thread() is threading.main_thread():
+        try:
+            import traceback
+            from services import health
+            fr = [f for f in traceback.extract_stack()[:-1]
+                  if "contextlib" not in f.filename][-3:]
+            health.log_slow("انتظار قفل القاعدة على شاشة النظام", _wait,
+                            " ← ".join(f"{os.path.basename(f.filename)}:"
+                                       f"{f.lineno} {f.name}" for f in fr))
+        except Exception:
+            pass
     st["depth"], st["readonly"] = 1, readonly
-    _changes0 = conn.total_changes
     if not readonly:
         _guard_begin(st, conn)
+    # بعد تهيئة الحارس (5.3.6): محوُ جدوله المؤقت ليس تغييراً في البيانات —
+    # وكان يُعدّ كتابةً فتُعاد قراءة كل شاشةٍ يُرجع إليها بلا داعٍ
+    _changes0 = conn.total_changes
     try:
         yield conn
         # ══ حارس المخزون (5.3.2) ══
@@ -646,7 +681,8 @@ def db(readonly: bool = False):
             except Exception:
                 pass
         conn.execute("COMMIT")
-        if not readonly and conn.total_changes != _changes0:
+        if not readonly and conn.total_changes != _changes0 \
+                and not getattr(_quiet, "on", False):
             _WRITES[0] += 1
     except BaseException:
         try:

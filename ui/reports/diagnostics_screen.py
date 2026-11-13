@@ -16,7 +16,7 @@
 **قراءة محضة**: لا تُصلح ولا تكتب شيئاً. تكشف فتُعالَج الأسباب في
 مواضعها.
 """
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 from ui import kit
 
@@ -41,6 +41,11 @@ class DiagnosticsScreen(QtWidgets.QWidget):
         btn_log = kit.PushButton("📄 آخر الأخطاء والبطء")
         btn_log.setObjectName("ghost")
         btn_log.clicked.connect(self.show_log)
+        btn_perf = kit.PushButton("📋 تقرير الأداء للدعم")
+        btn_perf.setToolTip("الأرقام التي يحتاجها من يشخّص البطء: حجم البيانات"
+                            " والقرص والذاكرة والصور والنسخ، وآخر مواضع"
+                            " التجمّد — نصّاً يُنسخ ويُرسل")
+        btn_perf.clicked.connect(self.show_perf)
         btn_clear = kit.PushButton("🧹 مسح السجل")
         btn_clear.setObjectName("ghost")
         btn_clear.setToolTip("يمسح ملف الأخطاء والبطء — لا يمسّ أي بيانات")
@@ -54,6 +59,7 @@ class DiagnosticsScreen(QtWidgets.QWidget):
         top = QtWidgets.QHBoxLayout()
         top.addWidget(btn)
         top.addWidget(btn_log)
+        top.addWidget(btn_perf)
         top.addWidget(btn_clear)
         top.addStretch(1)
         top.addWidget(self.state)
@@ -193,6 +199,42 @@ class DiagnosticsScreen(QtWidgets.QWidget):
         box.setDetailedText("\n".join(str(x) for x in lines)
                             or "السجل فارغ — لم يُسجَّل خطأ ولا بطء.")
         box.exec_()
+
+    def show_perf(self):
+        """تقرير الأداء نصّاً — وزرّ نسخٍ يضعه في الحافظة ليُرسل كما هو."""
+        try:
+            from services import perf_report
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            try:
+                txt = perf_report.build()
+            finally:
+                QtWidgets.QApplication.restoreOverrideCursor()
+        except Exception as e:
+            err(self, e)
+            return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("تقرير الأداء للدعم")
+        dlg.resize(820, 560)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        view = QtWidgets.QPlainTextEdit(txt)
+        view.setReadOnly(True)
+        lay.addWidget(view, 1)
+        row = QtWidgets.QHBoxLayout()
+        b_copy = kit.PushButton("📋 نسخ التقرير")
+        done = QtWidgets.QLabel("")
+
+        def _copy():
+            QtWidgets.QApplication.clipboard().setText(txt)
+            done.setText("✔ نُسخ — الصقه في واتساب وأرسله للدعم")
+        b_copy.clicked.connect(_copy)
+        b_close = kit.PushButton("إغلاق")
+        b_close.setObjectName("ghost")
+        b_close.clicked.connect(dlg.accept)
+        row.addWidget(b_copy)
+        row.addWidget(done, 1)
+        row.addWidget(b_close)
+        lay.addLayout(row)
+        dlg.exec_()
 
     def clear_log(self):
         try:

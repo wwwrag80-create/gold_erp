@@ -1544,26 +1544,58 @@ def has_model_image(model_no):
 #  كل تحديث). وهي تفضيلات **عرض** محضة لا تمسّ قيداً.
 # ══════════════════════════════════════════════════════════════════
 
+# 5.3.6: ذاكرةٌ للتفضيلات — كان التنقّل بين الشاشات يقرأ القاعدة مئات
+# المرات (589 قراءة في جولةٍ واحدة) لتفضيلاتٍ لا تتغيّر إلا بيد المستخدم
+_PREFS = {"db": None, "vals": {}}
+_MISSING = object()
+
+
+def _prefs():
+    import config
+    try:
+        from database.database import _WRITES
+        w = _WRITES[0]
+    except Exception:
+        w = None
+    key = (str(getattr(config, "DB_PATH", "")), w)
+    # مصنعٌ آخر، أو كتابةٌ حقيقية (قد تمسّ تفضيلاً من غير هذا الباب): من جديد
+    if _PREFS["db"] != key:
+        _PREFS["db"], _PREFS["vals"] = key, {}
+    return _PREFS["vals"]
+
+
 def load_pref(key, default=""):
     """يقرأ تفضيل عرض. لا يُفشل الشاشة أبداً — يعود بالافتراضي."""
-    try:
-        from database.database import db
-        from models import fiscal
-        with db(readonly=True) as conn:
-            return fiscal.get_setting(conn, key, default) or default
-    except Exception:
-        return default
+    vals = _prefs()
+    v = vals.get(key, _MISSING)
+    if v is _MISSING:
+        try:
+            from database.database import db
+            from models import fiscal
+            with db(readonly=True) as conn:
+                v = fiscal.get_setting(conn, key, None)
+        except Exception:
+            return default
+        vals[key] = v
+    return v or default
 
 
 def save_pref(key, value, username=None):
-    """يحفظ تفضيل عرض. الفشل لا يمنع المستخدم من متابعة عمله."""
+    """يحفظ تفضيل عرض. الفشل لا يمنع المستخدم من متابعة عمله.
+
+    لا كتابة إن لم يتغيّر — ولا تُعدّ تغيّراً في البيانات (5.3.6)."""
+    vals = _prefs()
+    if vals.get(key, _MISSING) == value:
+        return True
     try:
-        from database.database import db
+        from database.database import db, quiet_writes
         from models import fiscal
-        with db() as conn:
+        with quiet_writes(), db() as conn:
             fiscal.set_setting(conn, key, value, username)
+        vals[key] = value
         return True
     except Exception:
+        vals.pop(key, None)
         return False
 
 

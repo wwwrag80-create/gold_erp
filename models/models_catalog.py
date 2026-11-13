@@ -448,13 +448,19 @@ def assign_model(conn, wo_id, model_no, username):
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 
 
+_MADE_DIRS = set()
+
+
 def images_dir():
     """مجلد صور الموديلات — داخل مساحة المصنع فلا تختلط بين المصانع."""
     from pathlib import Path
 
     import config
     d = Path(str(config.DB_PATH)).parent / "model_images"
-    d.mkdir(parents=True, exist_ok=True)
+    key = str(d)
+    if key not in _MADE_DIRS:          # 5.3.6: مرةً لا مع كل صورة
+        d.mkdir(parents=True, exist_ok=True)
+        _MADE_DIRS.add(key)
     return d
 
 
@@ -522,9 +528,44 @@ def _newest(base):
     return best
 
 
+_IDX = {"key": None, "map": {}}
+
+
+def _image_index(d):
+    """{اسم الملف بلا امتداد: [أسماء ملفاته]} لمجلد الصور — قراءةٌ واحدة
+    للمجلد تُعاد ما لم يتغيّر (5.3.6). كان كل موديلٍ يُفحص بخمس عمليات
+    على القرص (امتدادٌ امتداد): دليلٌ من 400 موديل = 2000 عملية عند كل
+    فتح — وعلى ويندوز مع مضاد الفيروسات يصير ذلك ثوانيَ."""
+    import os
+    try:
+        mt = os.stat(d).st_mtime_ns
+    except OSError:
+        return {}
+    key = (str(d), mt)
+    if _IDX["key"] != key:
+        m = {}
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    stem, ext = os.path.splitext(e.name)
+                    if ext.lower() in IMAGE_EXTS:
+                        m.setdefault(stem, []).append(e.name)
+        except OSError:
+            m = {}
+        _IDX["key"], _IDX["map"] = key, m
+    return _IDX["map"]
+
+
 def image_path(model_no):
     """مسار صورة الموديل إن وُجدت (الأحدث إن تعدّدت امتداداتها)."""
-    return _newest(images_dir() / _safe_name(model_no))
+    d = images_dir()
+    safe = _safe_name(model_no)
+    names = _image_index(d).get(safe)
+    if not names:
+        return None
+    if len(names) == 1:
+        return d / names[0]
+    return _newest(d / safe)
 
 
 # ══ الصورة الأصلية بخلفيتها (4.61) ══
