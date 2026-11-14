@@ -3649,26 +3649,32 @@ GALLERY_CSS = """
                   border-bottom: 1px solid #E4D9BF; padding: 0.4mm; }
   table.gwos td { padding: 0.5mm 1mm; border-bottom: 1px dotted #EFE6D2; }
   td.gwn { text-align: right; direction: ltr; color: #2E2410; }
-  td.gww { text-align: left; font-weight: bold; color: #2E2410; }
+  td.gww { text-align: center; font-weight: bold; color: #2E2410; }
 </style>
 """
 
 
 def _invoice_model_sets(conn, ids):
-    """{الموديل: [(رقم التشغيل، الوزن)]} لأطقم هذه الفواتير — 5.3.3: تُكتب
-    داخل إطار صورة الموديل في المعاينة المجمّعة."""
+    """{الموديل: [(رقم التشغيل، الوزن المقيد، الوزن القائم)]} لأطقم هذه
+    الفواتير — تُكتب داخل إطار صورة الموديل في المعاينة المجمّعة (5.3.3)،
+    والقائم معها (5.3.9). المقيد وزن السطر في الفاتورة، والقائم من بطاقة
+    الطقم (والرقم التجميعي قائمه مقيده) — كما في الفاتورة المجمّعة."""
     if not ids:
         return {}
     q = ",".join("?" * len(ids))
     out = {}
     for r in conn.execute(
             "SELECT COALESCE(NULLIF(TRIM(w.model_no),''),'— بلا موديل —') m,"
-            " COALESCE(w.work_order_no,'—') no, it.registered_weight wt"
+            " COALESCE(w.work_order_no,'—') no, it.registered_weight wt,"
+            " w.standing_gold st, COALESCE(w.is_bulk,0) bulk"
             " FROM invoice_items it"
             " LEFT JOIN work_orders w ON w.id=it.work_order_id"
             f" WHERE it.invoice_id IN ({q}) AND COALESCE(w.is_service,0)=0"
             " ORDER BY w.work_order_no, it.id", list(ids)):
-        out.setdefault(r["m"], []).append((r["no"], float(r["wt"] or 0)))
+        reg = float(r["wt"] or 0)
+        bulk = bool(r["bulk"]) or is_bulk_no(r["no"] or "")
+        st = reg if bulk or r["st"] is None else float(r["st"] or 0)
+        out.setdefault(r["m"], []).append((r["no"], reg, st))
     return out
 
 
@@ -3702,11 +3708,13 @@ def _gallery(models, per_row=3, sets=None):
         its = (sets or {}).get(name) or []
         if its:
             trs = "".join(
-                f'<tr><td class="gwn">{en(no)}</td>'
-                f'<td class="gww">{_gw(wt)}</td></tr>' for no, wt in its)
+                f'<tr><td class="gwn">{en(it[0])}</td>'
+                f'<td class="gww">{_gw(it[1])}</td>'
+                f'<td class="gww">{_gw(it[2] if len(it) > 2 else it[1])}'
+                f'</td></tr>' for it in its)
             wos = (f'<table class="gwos" cellspacing="0" cellpadding="0">'
-                   f'<tr><th>رقم التشغيل</th><th>الوزن</th></tr>{trs}'
-                   f'</table>')
+                   f'<tr><th>رقم التشغيل</th><th>الوزن المقيد</th>'
+                   f'<th>الوزن القائم</th></tr>{trs}</table>')
         cells_.append(
             f'<td class="g"><div class="gimg">{img}</div>'
             f'<div class="gcount">{en(n)} {"طقم" if n == 1 else "أطقم"}</div>'
