@@ -2049,8 +2049,8 @@ DOC_TITLES = {
     "italian_statement": "كشف ايطالي / نواعم",
     "balances": "أرصدة الحسابات", "turnover": "حركة الأطقم",
     "sales_sets": "المبيعات — أين صارت الأطقم",
-    "invoices_combined": "فاتورة مجمّعة — للعرض",
-    "invoices_models_combined": "معاينة مجمّعة — صور الموديلات",
+    "invoices_combined": "مبيعات / مرتجعات — للعرض",
+    "invoices_models_combined": "مبيعات / مرتجعات — صور الموديلات",
     "aging": "أعمار الديون", "tax_sales_register": "سجل المبيعات الضريبية",
     "purchases_register": "سجل المشتريات", "day_close": "إقفال اليوم",
     "trial_balance": "ميزان المراجعة", "coa_list": "دليل الحسابات",
@@ -3784,7 +3784,8 @@ def _tpl_invoices_models_combined(conn, _id=0, invoice_ids=None):
             else f"{en(dates[0])} ← {en(dates[-1])}")
     nums = "، ".join(en(r["invoice_no"] or "—") for r in invs)
     head = _gallery_head(
-        "معاينة مجمّعة", f"{len(invs)} فاتورة ({nums}) · {span}",
+        _kinds_title(r["kind"] for r in invs),
+        f"{len(invs)} فاتورة ({nums}) · {span}",
         [("العميل", "، ".join(parties)),
          ("الوزن", f'{_gw(wt)} {_kunit()}'),
          ("الأجور", _w(wg, 2)),
@@ -5266,6 +5267,17 @@ def _tpl_sales_sets(conn, _id=0, invoice_ids=None, title=None, per_page=4):
     return _slim_title(head, today) + RECV_PHOTO_CSS + meta + pages
 
 
+def _kinds_title(kinds):
+    """اسم العملية في رأس المعاينة المجمّعة (5.3.7): «مبيعات» أو
+    «مرتجعات» — أو كلاهما إن اختيرا معاً."""
+    ks = set(kinds)
+    if ks == {"sale"}:
+        return "مبيعات"
+    if ks == {"sale_return"}:
+        return "مرتجعات"
+    return "مبيعات ومرتجعات"
+
+
 def _tpl_invoices_combined(conn, _id=0, invoice_ids=None):
     """معاينة مجمّعة (5.2.5): فواتير مختارة من كشف الحساب في **فاتورةٍ
     واحدة للعرض** — الأطقم (أرقام التشغيل) في فاتورة، والايطالي (الرقم
@@ -5402,7 +5414,7 @@ def _tpl_invoices_combined(conn, _id=0, invoice_ids=None):
     <table class="titlebar" width="100%" cellspacing="0" cellpadding="6">
       <tr><td width="100%">فاتورة {k_lbl} — {p_lbl}</td></tr>
     </table>
-    <div class="note">مجمّعة من: {en("، ".join(nos))}</div>
+    <div class="note">من الفواتير: {en("، ".join(nos))}</div>
     {TBL}
       <tr>{head}</tr>
       {rows_html}
@@ -5427,7 +5439,7 @@ def _tpl_invoices_combined(conn, _id=0, invoice_ids=None):
           <td width="24%" style="text-align:center; border:1px solid #999;
                      padding:6px;">{en(d1)} ← {en(d2)}</td></tr>
     </table>
-    <div class="note">معاينةٌ مجمّعة للعرض فقط — {en(len(invs))} فاتورة:
+    <div class="note">للعرض فقط — {en(len(invs))} فاتورة:
       {en("، ".join(invs[k]["invoice_no"] for k in order))}. الفواتير في
       الكشف والدفاتر كما هي، لم يُدمج منها شيء.</div><br/>'''
     net = ""
@@ -5440,7 +5452,8 @@ def _tpl_invoices_combined(conn, _id=0, invoice_ids=None):
       <tr><th>الصافي — الأجور شامل الضريبة</th>
           <td>{_w(grand_wages + grand_vat, 2)}</td></tr>
     </table>'''
-    return (_header("فاتورة مجمّعة — للعرض", "—", today, show_meta=False)
+    title = _kinds_title(invs[k]["kind"] for k in invs)
+    return (_header(title, "—", today, show_meta=False)
             + info + blocks + net + _footer(""))
 
 
