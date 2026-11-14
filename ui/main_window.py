@@ -1941,11 +1941,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """اختصارٌ من شاشةٍ إلى أخرى (5.3.2): يفتح الشاشة بعنوانها في
         القائمة، ثم يُجري `after(screen)` عليها بعد بنائها (فتح سند قبض،
         أو لوحة صناديق الكسر)."""
-        target = None
-        for scr, node in self._items.items():
-            if node is not None and node.text(0).strip() == title:
-                target = scr
-                break
+        target = self._find_screen(title)
         if target is None:
             try:
                 self.toast(f"«{title}» غير متاحة لهذا المستخدم")
@@ -1960,6 +1956,34 @@ class MainWindow(QtWidgets.QMainWindow):
                 except Exception:
                     pass
             QtCore.QTimer.singleShot(0, _run)
+
+    # الشاشة بهويّتها الثابتة لا باسمها في القائمة (5.3.8): القائمة تُخصَّص
+    # (إعادة تسمية · ترتيبٌ محفوظ من إصدارٍ أقدم) فيختلف الاسم الظاهر
+    _SHORTCUT_ATTR = {
+        "لوحة التحكم": "dashboard_screen",
+        "سندات قبض/صرف": "vouchers_screen",
+        "مبيعات/مرتجعات": "sales_screen",
+        "القيود اليومية": "journal_screen",
+        "كشف حساب": "gl_screen",
+        "الوارد من التصنيع": "production_screen",
+    }
+
+    def _find_screen(self, title):
+        attr = self._SHORTCUT_ATTR.get(title)
+        scr = getattr(self, attr, None) if attr else None
+        if scr is not None and scr in self.screens:
+            return scr
+        for scr, node in self._items.items():
+            if node is None:
+                continue
+            if (str(node.data(0, NAV_KEY_ROLE) or "").strip() == title
+                    or node.text(0).strip() == title):
+                return scr
+        for scr in self.screens:              # بعنوانه الأصلي في الغلاف
+            if isinstance(scr, Lazy) and \
+                    (scr.__dict__.get("_title") or "") == title:
+                return scr
+        return None
 
     def open_subledger(self, entity_type):
         """من لوحة التحكم: يفتح كشف أرصدة الأستاذ المساعد على الفئة."""

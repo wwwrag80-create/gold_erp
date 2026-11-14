@@ -51,12 +51,14 @@ def receipt_mode(screen):
 def scrap_panel(screen):
     """بعد فتح لوحة التحكم: على لوحة «صندوق الكسر» (18 · 21 · 22 · 24)."""
     panels = getattr(screen, "panels", None) or []
-    for i, p in enumerate(panels):
-        if p.get("key") == "scrap":
-            fn = getattr(screen, "_select_soon", None)
-            if callable(fn):
-                fn(i)
-            return
+    idx = next((i for i, p in enumerate(panels) if p.get("key") == "scrap"),
+               None)
+    if idx is None:                   # لوحةٌ أُعيدت تسميتها: بعنوانها
+        idx = next((i for i, p in enumerate(panels)
+                    if "كسر" in str(p.get("title") or "")), None)
+    fn = getattr(screen, "_select_soon", None)
+    if idx is not None and callable(fn):
+        fn(idx)
 
 
 SUPPLY = (("📒 القيود اليومية", "القيود اليومية", None, None),
