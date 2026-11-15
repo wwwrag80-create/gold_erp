@@ -37,6 +37,7 @@ from services import numfmt as _nf
 
 WEB_USER = "رابط المدير"
 K_BOXES = "mw_boxes"
+K_SCRAP_OFF = "mw_boxes_scrap_off"  # "1" = حذف المدير «صندوق الكسر» من الصناديق
 K_OPS = "mw_ops_enabled"          # "0" = موقوف من البرنامج
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _post_lock = threading.Lock()
@@ -981,8 +982,9 @@ def load_boxes(conn):
         try:
             data = json.loads(raw)
             if isinstance(data, list):
-                return [b for b in data if isinstance(b, dict)
-                        and b.get("id") and b.get("name")]
+                return _with_scrap(conn, [
+                    b for b in data if isinstance(b, dict)
+                    and b.get("id") and b.get("name")])
         except ValueError:
             pass
     out = []
@@ -1001,13 +1003,34 @@ def load_boxes(conn):
     if not out:
         out = [{"id": "b1", "name": "الصناديق",
                 "codes": ["1400", "1500", "1200", "1210"]}]
-    return out
+    return _with_scrap(conn, out)
 
 
-def _save_boxes(boxes):
+# 5.6.5: «صندوق الكسر» قسمٌ في الصناديق كلوحته في لوحة التحكم — عيار 18
+# برصيده وكشفه أولاً ثم بقية الأعيرة. قسمٌ خاص (kind=scrap): أعيرته من سجل
+# الكسر فلا تُضاف إليه حسابات. ويُضاف مرةً لمن له أقسامٌ محفوظة من قبل،
+# فإن حذفه المدير لم يعد (ويعود بإضافة قسمٍ اسمه «صندوق الكسر»).
+SCRAP_ID = "scrap"
+SCRAP_NAME = "صندوق الكسر"
+
+
+def _scrap_box(name=SCRAP_NAME):
+    return {"id": SCRAP_ID, "name": name, "codes": [], "kind": "scrap"}
+
+
+def _with_scrap(conn, boxes):
+    if any(b.get("kind") == "scrap" for b in boxes) or \
+            _get(conn, K_SCRAP_OFF, "") == "1":
+        return boxes
+    return boxes + [_scrap_box()]
+
+
+def _save_boxes(boxes, flags=None):
     from database.database import db
     with db() as conn:
         _set(conn, K_BOXES, json.dumps(boxes, ensure_ascii=False))
+        for k, v in (flags or {}).items():
+            _set(conn, k, v)
 
 
 def boxes_action(data):
@@ -1026,21 +1049,35 @@ def boxes_action(data):
                     (code,)).fetchone():
                 return {"ok": False, "error": "الحساب غير موجود في الدليل"}
         box = next((b for b in boxes if b["id"] == bid), None)
+        flags = {}
+        scrap = box is not None and box.get("kind") == "scrap"
         if act == "add_box":
             if not name:
                 return {"ok": False, "error": "اكتب اسم القسم"}
             if len(boxes) >= MAX_BOXES:
                 return {"ok": False, "error": "بلغت الأقسام حدّها"}
-            new_id = f"b{int(_t.time() * 1000)}"
-            boxes.append({"id": new_id, "name": name, "codes": []})
+            if name == SCRAP_NAME and not any(b.get("kind") == "scrap"
+                                              for b in boxes):
+                # يعود «صندوق الكسر» بأعيرته إن حُذف من قبل
+                new_id = SCRAP_ID
+                boxes.append(_scrap_box())
+                flags[K_SCRAP_OFF] = "0"
+            else:
+                new_id = f"b{int(_t.time() * 1000)}"
+                boxes.append({"id": new_id, "name": name, "codes": []})
         elif box is None:
             return {"ok": False, "error": "القسم غير موجود — حدّث الصفحة"}
+        elif scrap and act in ("add_acc", "del_acc"):
+            return {"ok": False, "error": "صندوق الكسر يعرض أعيرته من سجل "
+                                          "الكسر — لا تُضاف إليه حسابات"}
         elif act == "ren_box":
             if not name:
                 return {"ok": False, "error": "اكتب الاسم الجديد"}
             box["name"] = name
         elif act == "del_box":
             boxes.remove(box)
+            if scrap:
+                flags[K_SCRAP_OFF] = "1"
         elif act in ("up", "down"):
             i = boxes.index(box)
             j = i - 1 if act == "up" else i + 1
@@ -1058,7 +1095,7 @@ def boxes_action(data):
             box["codes"] = [c for c in box["codes"] if c != code]
         else:
             return {"ok": False, "error": "أمرٌ غير معروف"}
-        _save_boxes(boxes)
+        _save_boxes(boxes, flags)
     return {"ok": True, "id": new_id if act == "add_box" else bid}
 
 
@@ -1077,9 +1114,9 @@ _BOX_JS = r"""
  var p=document.querySelector('[data-box]');if(!p)return;
  var id=p.getAttribute('data-box'),inp=p.querySelector('.accin'),
   add=p.querySelector('.accadd'),picked=null;
- MW.ac(inp,'/api/acc',function(r){picked=r;add.disabled=!r;});
- add.disabled=true;
- add.onclick=function(){if(picked)act({act:'add_acc',id:id,code:picked.code});};
+ if(inp&&add){MW.ac(inp,'/api/acc',function(r){picked=r;add.disabled=!r;});
+  add.disabled=true;
+  add.onclick=function(){if(picked)act({act:'add_acc',id:id,code:picked.code});};}
  p.querySelectorAll('[data-del]').forEach(function(b){b.onclick=function(){
   act({act:'del_acc',id:id,code:b.getAttribute('data-del')});};});
  p.querySelector('.ren').onclick=function(){var n=prompt('الاسم الجديد للقسم:',
@@ -1106,6 +1143,7 @@ font-variant-numeric:tabular-nums}
 .addacc{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;
 margin:14px 0 0}
 .addacc label{flex:1 1 280px}
+.bx tr.on td{background:#FFF6E0}
 .bx .cdm{display:none;color:var(--muted);font-size:12px;font-weight:400;
 direction:ltr;text-align:right}
 @media (max-width:640px){.newbox input{min-width:0;flex:1 1 auto}
@@ -1113,8 +1151,100 @@ direction:ltr;text-align:right}
 .btiles .tile{min-height:96px;padding:12px 6px}
 .btiles .tile .ic{width:28px;height:28px}
 .bx .cd{display:none}.bx .cdm{display:block}.bx .acts .lbl{display:none}
+.bx .acts .btn{padding:5px 7px}.bx .acts{width:1%}
+.bx{font-size:12.5px}.bx th{white-space:normal}
 .bx td,.bx th{padding:7px 4px}}
 """
+
+
+def _box_head(sel, n_label):
+    """رأس القسم المختار: اسمه وأزرار الترتيب والتسمية والحذف."""
+    return (f'<h3>{icon("boxes", 20)}{_e(sel["name"])}'
+            f'<span class="pill">{_e(n_label)}</span><span class="sp">'
+            f'</span><button class="btn sm gh up" title="نقل القسم قبل '
+            f'(يميناً)">▶</button><button class="btn sm gh down" title="نقل '
+            f'القسم بعد (يساراً)">◀</button><button class="btn sm gh ren">'
+            f'{icon("edit", 15)}تسمية</button><button class="btn sm red '
+            f'delbox">{icon("trash", 15)}حذف القسم</button></h3>')
+
+
+def _scrap_section(conn, base, sel, query):
+    """صندوق الكسر كلوحته في البرنامج: كل عيارٍ بوزنه الفعلي ومكافئه —
+    عيار 18 أولاً — والمختار منها كشفُه تحته (`scrap_karat_statement`)."""
+    import config
+    from models import dash_panels as dp
+    from models.inventory import scrap_karat_statement
+    from models.accounts import SCRAP_BOX
+    u = _e(_unit())
+    base_k = config.BASE_KARAT
+    rows = sorted(dp.scrap_rows(conn),
+                  key=lambda r: (r["karat"] != base_k, r["karat"]))
+    kq = str(query.get("k") or "").strip()
+    k = int(kq) if kq.isdigit() and int(kq) in config.KARATS else base_k
+
+    def f2(v):
+        return _m(v) if abs(v) >= 0.0005 else "—"
+    trs = "".join(
+        f'<tr class="{"on" if r["karat"] == k else ""}"><td><b>عيار '
+        f'{r["karat"]}</b></td><td class="n">{f2(r["actual"])}</td>'
+        f'<td class="n">{_w(r["eq18"]) if abs(r["eq18"]) >= 0.0005 else "—"}'
+        f'</td><td class="acts"><a class="btn sm {"gold" if r["karat"] == k else "gh"}"'
+        f' href="{_e(_link(base, "/boxes", b=sel["id"], k=r["karat"]))}">'
+        f'{icon("stmt", 15)}<span class="lbl">كشف</span></a></td></tr>'
+        for r in rows)
+    ta = round(sum(r["actual"] for r in rows), 3)
+    te = round(sum(r["eq18"] for r in rows), 3)
+    table = (f'<div class="scroll"><table class="tbl bx"><tr><th>العيار</th>'
+             f'<th class="n">الوزن الفعلي (جم)</th><th class="n">المكافئ '
+             f'({u})</th><th></th></tr>{trs}<tr class="tot"><td>الإجمالي</td>'
+             f'<td class="n">{_m(ta)}</td><td class="n">{_w(te)}</td><td '
+             f'class="acts"><a class="btn sm gh" href="'
+             f'{_e(_link(base, "/stmt", code=SCRAP_BOX))}" title="كشف الحساب '
+             f'{_e(SCRAP_BOX)} كاملاً">{icon("stmt", 15)}<span class="lbl">'
+             f'كشف الحساب </span>{_e(SCRAP_BOX)}</a></td></tr></table></div>')
+    box = (f'<section class="panel" data-box="{_e(sel["id"])}" data-name="'
+           f'{_e(sel["name"])}">{_box_head(sel, "الأعيرة")}{table}'
+           f'<p class="note" style="margin:10px 0 0">الوزن الفعلي بعيار كل '
+           f'صندوق، والمكافئ هو الرصيد المحاسبي — انقر «كشف» أمام العيار '
+           f'يظهر كشفه تحته.</p></section>')
+    # كشف العيار المختار
+    d1, d2, key = _period(query, "year")
+    try:
+        st = scrap_karat_statement(conn, k, d1, d2)
+    except ValueError as e:
+        return box + f'<div class="msg bad">{_e(str(e))}</div>'
+    srows = []
+    for r in st["rows"]:
+        s = " ".join(str(x) for x in (r.get("doc_no"), r.get("op"),
+                                      r.get("name"), r.get("desc")) if x)
+        acts = ("" if r.get("op") in ("رصيد سابق", "تسوية") else
+                _doc_links(base, r.get("src"), r.get("sid"), r.get("eid")))
+        srows.append(
+            f'<tr data-s="{_e(s.lower())}"><td class="n">{_e(r["date"])}'
+            f'</td><td>{_e(r.get("op") or "")}</td><td class="n">'
+            f'{_e(r.get("doc_no") or "")}</td><td>{_e(r.get("name") or "")}'
+            + (f'<br><small class="note">{_e(r["desc"])}</small>'
+               if r.get("desc") else "") + '</td>'
+            f'<td class="n">{f2(r["inw"])}</td><td class="n">{f2(r["outw"])}'
+            f'</td><td class="n">{_m(r["bal"])}</td><td class="n">'
+            f'{_w(r["bal18"])}</td><td class="acts">{acts}</td></tr>')
+    stmt = (f'<div class="panel"><h3>{icon("stmt", 20)}كشف صندوق الكسر — '
+            f'عيار {k}<span class="pill">الرصيد {_m(st["closing"])} جم</span>'
+            f'<span class="pill">وارد {_m(st["total_in"])}</span><span '
+            f'class="pill">صادر {_m(st["total_out"])}</span><span class="sp">'
+            f'</span><input id="mq" placeholder="ابحث في الكشف…" style="'
+            f'min-width:200px"></h3>'
+            + (f'<div class="scroll"><table class="tbl"><tr><th>التاريخ</th>'
+               f'<th>العملية</th><th>المستند</th><th>الجهة / البيان</th>'
+               f'<th class="n">وارد (جم)</th><th class="n">صادر (جم)</th>'
+               f'<th class="n">الرصيد (عيار {k})</th><th class="n">بمكافئ '
+               f'{u}</th><th></th></tr>{"".join(srows)}</table></div>'
+               '<div id="mnone" class="empty" style="display:none">لا نتائج'
+               '</div>' if srows else
+               f'<div class="empty">لا حركة لعيار {k} في {_e(_span(d1, d2))}'
+               '</div>') + '</div>')
+    return (box + _period_bar(base, "/boxes", key, d1, d2,
+                              {"b": sel["id"], "k": k}) + stmt)
 
 
 def boxes_page(conn, base, csrf, query=None):
@@ -1129,8 +1259,9 @@ def boxes_page(conn, base, csrf, query=None):
         tiles.append(
             f'<a class="tile{" main" if sel is b else ""}" href="'
             f'{_e(_link(base, "/boxes", b=b["id"]))}">{icon("boxes", 32)}'
-            f'<b>{_e(b["name"])}</b><span class="n">{len(b["codes"])} حساب'
-            f'</span></a>')
+            f'<b>{_e(b["name"])}</b><span class="n">'
+            + ("الأعيرة" if b.get("kind") == "scrap"
+               else f'{len(b["codes"])} حساب') + '</span></a>')
     head = (f'<div class="ptitle"><h2>{icon("boxes", 22)}الصناديق</h2>'
             f'<span class="hint">اختر قسماً يظهر تحته جدول حساباته</span>'
             f'<span class="sp"></span><span class="newbox"><input id="nbname"'
@@ -1143,6 +1274,10 @@ def boxes_page(conn, base, csrf, query=None):
     if sel is None:
         return frame(base, "boxes", "الصناديق", head, csrf, css=_BOX_CSS,
                      js=_BOX_JS)
+    if sel.get("kind") == "scrap":
+        return frame(base, "boxes", f"الصناديق — {sel['name']}",
+                     head + _scrap_section(conn, base, sel, query), csrf,
+                     css=_BOX_CSS, js=_BOX_JS + _SEARCH_JS)
     rows = dp.account_rows(conn, sel["codes"]) if sel["codes"] else []
     tg = round(sum(r["gold_balance"] for r in rows), 3)
     tc = round(sum(r["cash_balance"] for r in rows), 2)
@@ -1171,13 +1306,7 @@ def boxes_page(conn, base, csrf, query=None):
              '<div class="empty">لا حسابات في هذا القسم بعد — أضفها من '
              'الخانة أدناه</div>')
     body = (f'<section class="panel" data-box="{_e(sel["id"])}" data-name="'
-            f'{_e(sel["name"])}"><h3>{icon("boxes", 20)}{_e(sel["name"])}'
-            f'<span class="pill">{len(rows)} حساب</span><span class="sp">'
-            f'</span><button class="btn sm gh up" title="نقل القسم قبل '
-            f'(يميناً)">▶</button><button class="btn sm gh down" title="نقل '
-            f'القسم بعد (يساراً)">◀</button><button class="btn sm gh ren">'
-            f'{icon("edit", 15)}تسمية</button><button class="btn sm red '
-            f'delbox">{icon("trash", 15)}حذف القسم</button></h3>{table}'
+            f'{_e(sel["name"])}">{_box_head(sel, f"{len(rows)} حساب")}{table}'
             f'<div class="addacc"><label class="ac">إضافة حساب للقسم — اكتب '
             f'أول الحروف<input class="accin" placeholder="اسم الحساب أو '
             f'رقمه…" autocomplete="off"></label><button class="btn gold '

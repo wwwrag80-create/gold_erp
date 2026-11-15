@@ -140,6 +140,35 @@ check("الأقسام لوحاتٌ في الأعلى، والمختار يُظه
       and 'class="tbl bx"' in h and "/stmt?code=1400" in h
       and "الإجمالي" in h and f'data-box="{bid}"' not in h0, h[-500:])
 check("حسابٌ غير موجود يُرفض", r3["ok"] is False)
+# 5.6.5: «صندوق الكسر» قسمٌ في الصناديق — عيار 18 أولاً برصيده وكشفه
+CS = mw._csrf(TOK, SECRET)
+code, h = call("GET", "boxes", {"b": "scrap"})
+check("صندوق الكسر قسمٌ بأعيرته: 18 أولاً ثم البقية وكشف 18 تحته",
+      code == 200 and "<b>صندوق الكسر</b>" in h
+      and h.index("<b>عيار 18</b>") < h.index("<b>عيار 21</b>")
+      < h.index("<b>عيار 22</b>") < h.index("<b>عيار 24</b>")
+      and "كشف صندوق الكسر — عيار 18" in h and "/stmt?code=1310" in h
+      and 'class="accin"' not in h, h[-400:])
+code, h = call("GET", "boxes", {"b": "scrap", "k": "21", "per": "all"})
+check("«كشف» أمام عيارٍ آخر يُظهر كشفه هو",
+      "كشف صندوق الكسر — عيار 21" in h and 'name="k" value="21"' in h)
+code, h = call("GET", "boxes", {"b": "scrap", "k": "99"})
+check("عيارٌ غير معروف في الرابط يعود إلى 18 بأمان",
+      "كشف صندوق الكسر — عيار 18" in h)
+rs = json.loads(call("POST", "boxes", body={
+    "csrf": CS, "act": "add_acc", "id": "scrap", "code": "1400"})[1])
+check("لا تُضاف حساباتٌ إلى صندوق الكسر", rs["ok"] is False, rs)
+rd = json.loads(call("POST", "boxes", body={
+    "csrf": CS, "act": "del_box", "id": "scrap"})[1])
+with db(readonly=True) as c:
+    gone = not any(b["id"] == "scrap" for b in mweb.load_boxes(c))
+ra = json.loads(call("POST", "boxes", body={
+    "csrf": CS, "act": "add_box", "name": "صندوق الكسر"})[1])
+with db(readonly=True) as c:
+    back = [b for b in mweb.load_boxes(c) if b["id"] == "scrap"]
+check("حذفه يبقى محذوفاً، وإضافة قسمٍ باسمه تعيده بأعيرته",
+      rd["ok"] and gone and ra.get("id") == "scrap" and len(back) == 1
+      and back[0].get("kind") == "scrap", (rd, ra, back))
 bad = json.loads(call("POST", "boxes", body={"csrf": "x", "act": "add_box",
                                              "name": "z"})[1])
 check("رمز تحقّق خاطئ يُرفض", bad["ok"] is False)
