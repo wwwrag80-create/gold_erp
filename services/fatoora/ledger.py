@@ -211,6 +211,15 @@ def build_doc(conn, invoice_id, prof=None):
         raise ValueError("الفاتورة غير موجودة")
     b = pf.buyer(conn, inv["customer_id"]) or {}
     std = pf.buyer_is_b2b(b)
+    # 5.5.1: الفاتورة الضريبية بالأطقم تحمل نوعها صراحةً — المبسطة تبقى
+    # مبسطةً ولو كان للمشتري رقمٌ ضريبي، والمشتري الفرد باسمه المكتوب
+    _keys = inv.keys()
+    _st = (inv["tax_subtype"] if "tax_subtype" in _keys else "") or ""
+    if _st in ("standard", "simplified"):
+        std = _st == "standard" and std
+    _bn = (inv["buyer_name"] if "buyer_name" in _keys else "") or ""
+    if _bn and not std:
+        b = dict(b, name=_bn)
     kind = "invoice" if inv["kind"] == "sale" else "credit"
     created = str(inv["created_at"] or "")
     doc = {

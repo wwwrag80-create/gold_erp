@@ -774,41 +774,63 @@ def _tpl_invoice(conn, invoice_id):
             + _footer(inv["description"] or ""))
 
 
-def _party_vat_rows(conn, entity_id, role):
-    """صفوف الطرف الضريبية: الاسم والرقم الضريبي والعنوان إن وُجد.
-    `role` بأل التعريف: «المشتري» · «المورد»."""
+def _ent(conn, entity_id):
     e = conn.execute("SELECT * FROM entities WHERE id=?",
                      (entity_id,)).fetchone()
-    if not e:
-        return [(role, "—")]
-    keys = e.keys()
-    rows = [(role, e["name"]),
-            (f"الرقم الضريبي ل{role}",
-             en((e["vat_number"] if "vat_number" in keys else "") or "—"))]
-    addr = (e["address"] if "address" in keys else "") or ""
-    if addr.strip():
-        rows.append(("العنوان", addr))
-    return rows
+    return dict(e) if e else {}
 
 
-def _seller_rows():
-    return [("البائع", getattr(config, "COMPANY_NAME", "") or "—"),
-            ("الرقم الضريبي للبائع",
-             en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—"))]
+def _meta_grid(pairs, side=""):
+    """تفاصيل المستند في جدولٍ واحدٍ صغير (5.5.1): زوجان في كل صف —
+    بدل صناديق كبيرة متفرّقة أعلى الورقة. و`side` (رمز QR) في عمودٍ جانبي
+    بارتفاع الجدول كله."""
+    pairs = [(k, v) for k, v in pairs if v not in (None, "")]
+    rows = [pairs[n:n + 2] for n in range(0, len(pairs), 2)]
+    th = ('style="background-color:#F1ECE0; font-weight:bold;'
+          ' white-space:nowrap; padding:3px 6px; border:1px solid #c9c2b0;"')
+    td = ('style="text-align:right; padding:3px 6px;'
+          ' border:1px solid #c9c2b0;"')
+    body = ""
+    for n, r in enumerate(rows):
+        cells_ = ""
+        for k, v in r:
+            cells_ += f'<td {th} width="15%">{k}</td><td {td} width="29%">{v}</td>'
+        if len(r) == 1:
+            cells_ += f'<td {td} colspan="2"></td>'
+        if side and n == 0:
+            cells_ += (f'<td rowspan="{len(rows)}" width="12%" align="center"'
+                       f' style="vertical-align:middle; padding:2px;">{side}'
+                       '</td>')
+        body += f"<tr>{cells_}</tr>"
+    return ('<table width="100%" cellspacing="0" cellpadding="3"'
+            ' style="border-collapse:collapse; font-size:9.5pt;'
+            f' margin:4px 0 8px 0;">{body}</table>')
 
 
-def _kv_table(rows, w=35):
-    return (f"{TBL}" + "".join(
-        f'<tr><th width="{w}%">{k}</th><td style="text-align:right;">{v}'
-        "</td></tr>" for k, v in rows) + "</table>")
+def _totals_box(rows, words=""):
+    """الإجماليات في مربعٍ صغير على اليسار — والمبلغ كتابةً بجانبه."""
+    th = ('style="background-color:#F1ECE0; font-weight:bold;'
+          ' text-align:right; padding:4px 8px; border:1px solid #c9c2b0;"')
+    td = 'style="padding:4px 8px; border:1px solid #c9c2b0;"'
+    trs = ""
+    for k, v, strong in rows:
+        val = f"<b>{v}</b>" if strong else v
+        trs += f"<tr><td {th}>{k}</td><td {td} width=\"38%\">{val}</td></tr>"
+    box = ('<table width="100%" cellspacing="0" cellpadding="3"'
+           f' style="border-collapse:collapse; font-size:10pt;">{trs}</table>')
+    return (f"{TBL_PLAIN}<tr><td width=\"52%\" valign=\"top\""
+            " style=\"padding:6px 0 0 12px; font-size:10pt;\">"
+            f"{('فقط: ' + words) if words else ''}</td>"
+            f"<td width=\"48%\" valign=\"top\">{box}</td></tr></table>")
 
 
 def _tpl_tax_invoice(conn, inv, items, cust):
-    """الفاتورة الضريبية بالأطقم (5.5) — أو مرتجعها «إشعار دائن».
+    """الفاتورة الضريبية/المبسطة بالأطقم (5.5) — أو مرتجعها «إشعار دائن».
 
-    رقم التشغيل · العدد · الوزن المقيد · الوزن القائم · الأجر (أو سعر
-    الطقم) · قيمة الذهب · المصنعية · الصافي — ثم الصافي الخاضع والضريبة
-    والإجمالي، والبائع والمشتري برقميهما الضريبيين، ورمز QR."""
+    5.5.1: ترويسةٌ مرتّبة — جدول تفاصيل صغير واحد (الرقم والتاريخ والمشتري
+    والأرقام الضريبية والتسعير والدفع) وبجانبه رمز QR، ثم الأسطر: رقم
+    التشغيل · العدد · الوزن · العيار · الأجر (أو سعر الطقم) · قيمة الذهب ·
+    المصنعية · الصافي — ثم الإجماليات في مربعٍ صغير."""
     from models import tax_invoices as _ti
     from services import photo_qr
     from services.accounting_engine import account_balance
@@ -823,131 +845,127 @@ def _tpl_tax_invoice(conn, inv, items, cust):
         edoc = _ft.doc_for(conn, "invoices", inv["id"])
     except Exception:
         edoc = None
-    b2b = False
-    try:
-        from services.fatoora import profile as _pf
-        b2b = _pf.buyer_is_b2b(_pf.buyer(conn, inv["customer_id"]) or {})
-    except Exception:
-        b2b = bool(cust and (cust["vat_number"] or "").strip())
-    title = ("إشعار دائن — مرتجع مبيعات" if credit else
-             "فاتورة ضريبية" if b2b else "فاتورة ضريبية مبسطة")
+    sub = inv.get("tax_subtype") or ""
+    if sub not in ("standard", "simplified"):
+        try:
+            from services.fatoora import profile as _pf
+            sub = ("standard" if _pf.buyer_is_b2b(
+                _pf.buyer(conn, inv["customer_id"]) or {}) else "simplified")
+        except Exception:
+            sub = "simplified"
+    std = sub == "standard"
+    title = (("إشعار دائن — مرتجع مبيعات" + ("" if std else " (مبسط)"))
+             if credit else _ti.SUBTYPE_LABEL[sub])
+    e = _ent(conn, inv["customer_id"])
+    buyer = (inv.get("buyer_name") or "").strip() or e.get("name") or "—"
     u = _kunit()
     body_rows = ""
-    t_reg = t_std = t_gv = t_wg = 0.0
-    n_sets = n_pcs = 0
-    # أسطر الفاتورة كاملةً (قيمة الذهب والعدد وسعر الطقم) — لا ما تقرؤه
-    # شاشة التعديل وحدها
+    t_w = t_gv = t_wg = 0.0
+    n_pcs = 0
     items = conn.execute("SELECT * FROM invoice_items WHERE invoice_id=?"
                          " ORDER BY id", (inv["id"],)).fetchall()
     for i, it in enumerate(items, 1):
         it = dict(it)
         wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
                           (it["work_order_id"],)).fetchone()
+        k = int(it.get("karat") or 0) or int(_kactive())
         reg = float(it["registered_weight"] or 0)
-        full = float((wo["registered_weight"] if wo else 0) or 0)
-        std = float((wo["standing_gold"] if wo else 0) or 0)
-        bulk = bool(wo and (wo["is_bulk"] or is_bulk_no(wo["work_order_no"])))
-        std = reg if (bulk or full <= 0) else std * reg / full
         gv = float(it.get("gold_value") or 0)
         wg = float(it["wages"] or 0)
         pcs = int(it.get("pieces") or 0)
-        t_reg += reg
-        t_std += std
+        t_w += reg
         t_gv += gv
         t_wg += wg
-        n_sets += 1
         n_pcs += pcs
         mn = ((wo["model_no"] if wo else "") or "—")
-        pic = _model_thumb(mn) if mn != "—" else ""
+        pic = _model_thumb(mn, 36) if mn != "—" else ""
+        from services import karat_view as _kv
         rate = (_w(it.get("piece_price") or 0, 2) if piece
-                else _w(_krate(it["wage_per_gram"]), 2))
+                else _w(_kv.rate(it["wage_per_gram"], k), 2))
         body_rows += "<tr>" + cells(
             tdw(en(i)),
             (f'<td align="center" style="padding:1px 2px;">{pic}</td>'
              if pic else tdw(en(mn))),
             tdw(en(wo["work_order_no"] if wo else "—")),
-            tdw(en(pcs) if pcs else "—"), tdw(_gw(reg)), tdw(_gw(std)),
-            tdw(rate), tdw(_w(gv, 2) if riyal else "—"), tdw(_w(wg, 2)),
+            tdw(en(pcs) if pcs else "—"), tdw(_w(_kv.g(reg, k), 2)),
+            tdw(en(k)), tdw(rate),
+            *([tdw(_w(gv, 2))] if riyal else []), tdw(_w(wg, 2)),
             tdw(_w(gv + wg, 2))) + "</tr>"
 
     def _th(label, pct):
         return f'<th width="{pct}%" style="width:{pct}%;">{label}</th>'
     head = cells(
-        _th("م", 4), _th("الموديل", 10), _th("رقم<br/>التشغيل", 11),
-        _th("العدد", 6), _th(f"الوزن المقيد<br/>{u}", 10),
-        _th(f"الوزن القائم<br/>{u}", 10),
-        _th("سعر الطقم" if piece else "الأجر/جم", 10),
-        _th("قيمة الذهب", 12), _th("المصنعية", 12), _th("الصافي", 15))
+        _th("م", 4), _th("الموديل", 10), _th("رقم التشغيل", 13),
+        _th("العدد", 7), _th("الوزن", 10), _th("العيار", 7),
+        _th("سعر الطقم" if piece else "الأجر/جم", 11),
+        *([_th("قيمة الذهب", 12)] if riyal else []),
+        _th("المصنعية", 12), _th("الصافي", 14))
     tot = cells(thw(""), thw(""), thw("الإجمالي"), thw(en(n_pcs or "—")),
-                thw(_gw(t_reg)), thw(_gw(t_std)), thw("—"),
-                thw(_w(t_gv, 2) if riyal else "—"), thw(_w(t_wg, 2)),
+                thw(_gw(t_w) + f"<br/><small>{u}</small>"), thw(""), thw(""),
+                *([thw(_w(t_gv, 2))] if riyal else []), thw(_w(t_wg, 2)),
                 thw(_w(t_gv + t_wg, 2)))
     net = round(float(inv["total_wages"] or 0)
                 + float(inv.get("gold_value") or 0), 2)
     vat = float(inv["vat_amount"] or 0)
     grand = float(inv["grand_total"] or 0)
-    time_str = (inv.get("created_at") or "")[11:19] or "—"
-    meta = [("رقم المستند", en(inv["invoice_no"])),
-            ("التاريخ", en(inv["invoice_date"])), ("الوقت", en(time_str))]
+    time_str = (inv.get("created_at") or "")[11:16]
+    price_txt = _ti.PRICING_LABEL.get(pricing, pricing).split(" — ")[0]
+    if riyal:
+        price_txt += (f" · {_w(inv.get('gold_price') or 0, 2)} ريال/جم عيار"
+                      f" {en(inv.get('price_karat') or '')}")
+    pay = inv.get("pay_mode") or ""
+    pairs = [("رقم المستند", en(inv["invoice_no"])),
+             ("التاريخ", en(f"{inv['invoice_date']} {time_str}".strip())),
+             ("المشتري", buyer)]
+    if std:
+        pairs.append(("الرقم الضريبي للمشتري", en(e.get("vat_number") or "—")))
+    elif (inv.get("buyer_phone") or "").strip():
+        pairs.append(("الجوال", en(inv["buyer_phone"])))
+    pairs.append(("الرقم الضريبي للبائع",
+                  en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")))
+    pairs.append(("التسعير", price_txt))
     if credit:
         ref = conn.execute("SELECT invoice_no, invoice_date FROM invoices"
                            " WHERE id=?", (inv.get("ref_invoice_id"),)
                            ).fetchone()
-        meta += [("على الفاتورة", en(f"{ref[0]} — {ref[1]}") if ref
-                  else "—"),
-                 ("سبب الإشعار", inv.get("tax_reason") or
-                  inv.get("description") or "—")]
-    price_txt = _ti.PRICING_LABEL.get(pricing, pricing)
-    if riyal:
-        price_txt += (f" — سعر الجرام {_w(inv.get('gold_price') or 0, 2)}"
-                      f" ريال عيار {en(inv.get('price_karat') or '')}")
-    meta.append(("طريقة التسعير", price_txt))
+        pairs.append(("على الفاتورة",
+                      en(f"{ref[0]} — {ref[1]}") if ref else "—"))
+        pairs.append(("سبب الإشعار", inv.get("tax_reason")
+                      or inv.get("description") or "—"))
+    if pay:
+        pairs.append(("الدفع", _ti.PAY_LABEL.get(pay, pay).split(" — ")[0]))
     qr = ""
     if edoc is None and (inv.get("qr_base64") or ""):
         uri = photo_qr.qr_png_data_uri(inv["qr_base64"], box_size=3,
                                        border=1)
         if uri:
-            qr = (f'<img src="{uri}" style="width:34mm; height:34mm;"'
-                  ' width="130" height="130"/>')
-    info = f'''
-    {TBL_PLAIN}<tr>
-      <td width="50%" valign="top">{_kv_table(_seller_rows()
-                                              + _party_vat_rows(
-                                                  conn, inv["customer_id"],
-                                                  "المشتري"))}</td>
-      <td width="34%" valign="top">{_kv_table(meta, 40)}</td>
-      <td width="16%" valign="top" align="center">{qr}</td>
-    </tr></table>'''
-    gold_rows = ""
+            qr = (f'<img src="{uri}" style="width:24mm; height:24mm;"'
+                  ' width="92" height="92"/>')
+    rate_pct = en(f"{float(inv.get('vat_rate') or config.VAT_RATE) * 100:g}")
+    rows = [("الإجمالي قبل الضريبة", _w(net, 2), False),
+            (f"ضريبة القيمة المضافة {rate_pct}%", _w(vat, 2), False),
+            ("الإجمالي شامل الضريبة", _w(grand, 2), True)]
     if not riyal and cust:
         g, c = account_balance(conn, cust["account_id"])
-        gold_rows = (f'<tr><th>الذهب بالوزن ({u}) — يُقيَّد على الحساب</th>'
-                     f'<td>{_gw(t_reg)}</td></tr>'
-                     f'<tr><th>رصيد الذهب في حسابكم</th><td>{_gw(g)}</td></tr>'
-                     f'<tr><th>رصيد النقد في حسابكم</th><td>{_w(c, 2)}</td>'
-                     '</tr>')
-    totals = f'''
-    {TBL}
-      <tr><th width="70%">الإجمالي الخاضع للضريبة (قبل الضريبة)</th>
-          <td>{_w(net, 2)}</td></tr>
-      <tr><th>ضريبة القيمة المضافة ({en(f"{float(inv.get('vat_rate') or config.VAT_RATE) * 100:g}")}%)</th>
-          <td>{_w(vat, 2)}</td></tr>
-      <tr><th>الإجمالي شامل الضريبة</th><td><b>{_w(grand, 2)}</b></td></tr>
-      {gold_rows}
-    </table>
-    <div class="tafqeet">فقط: {tafqeet(grand)}</div>'''
-    body = (info + _fatoora_block(conn, inv, cust, edoc)
+        rows += [(f"الذهب بالوزن على الحساب ({u})", _gw(t_w), False),
+                 ("رصيد الذهب بعد الفاتورة", _gw(g), False),
+                 ("رصيد النقد بعد الفاتورة", _w(c, 2), False)]
+    body = (_meta_grid(pairs, qr) + _fatoora_block(conn, inv, cust, edoc)
             + f"{TBL}<tr>{head}</tr>{body_rows}<tr>{tot}</tr></table>"
-            + totals)
+            + _totals_box(rows, tafqeet(grand)))
+    note = (inv.get("description") or "").strip()
+    if credit and note == (inv.get("tax_reason") or "").strip():
+        note = ""                    # السبب في جدول التفاصيل — لا يُكرَّر
     return (_header(title, inv["invoice_no"], inv["invoice_date"],
-                    show_meta=False) + body
-            + _footer(inv.get("description") or ""))
+                    show_meta=False) + body + _footer(note))
 
 
 def _tpl_set_purchase(conn, doc_id):
-    """فاتورة المشتريات الضريبية بالأطقم (5.5) — أو مرتجعها."""
+    """فاتورة المشتريات الضريبية بالأطقم (5.5) — أو مرتجعها — بالترويسة
+    المرتّبة نفسها (5.5.1)."""
     from models import set_purchases as _sp
     from models import tax_invoices as _ti
+    from services import karat_view as _kv
     d = _sp.get(conn, doc_id)
     if not d:
         raise ValueError("المستند غير موجود")
@@ -957,70 +975,61 @@ def _tpl_set_purchase(conn, doc_id):
     ret = d["kind"] == "purchase_return"
     u = _kunit()
     rows = ""
-    t_reg = t_std = 0.0
+    t_w = 0.0
     n_pcs = 0
     for li in d["lines"]:
-        k = int(li["karat"] or 0) or None
-        t_reg += float(li["registered_weight"] or 0)
-        t_std += float(li["standing_weight"] or 0)
+        k = int(li["karat"] or 0) or int(_kactive())
+        t_w += float(li["registered_weight"] or 0)
         n_pcs += int(li["pieces"] or 0)
-        from services import karat_view as _kv
         rate = (_w(li["piece_price"], 2) if piece
                 else _w(_kv.rate(li["wage_per_gram"], k), 2))
         rows += "<tr>" + cells(
             tdw(en(li["line_no"])), tdw(en(li["wo_no"])),
             tdw(en(li["pieces"] or "—")),
-            tdw(_w(_kv.g(li["registered_weight"], k), 2)),
-            tdw(_w(_kv.g(li["standing_weight"], k), 2)),
-            tdw(en(li["model_no"] or "—")), tdw(en(k or "—")), tdw(rate),
-            tdw(_w(li["gold_value"], 2) if riyal else "—"),
+            tdw(_w(_kv.g(li["registered_weight"], k), 2)), tdw(en(k)),
+            tdw(en(li["model_no"] or "—")), tdw(rate),
+            *([tdw(_w(li["gold_value"], 2))] if riyal else []),
             tdw(_w(li["wages"], 2)), tdw(_w(li["net"], 2))) + "</tr>"
-    head = cells(thw("م"), thw("رقم التشغيل"), thw("العدد"),
-                 thw("الوزن المقيد"), thw("الوزن القائم"), thw("الموديل"),
-                 thw("العيار"), thw("سعر الطقم" if piece else "الأجر/جم"),
-                 thw("قيمة الذهب"), thw("المصنعية"), thw("الصافي"))
+    head = cells(thw("م"), thw("رقم التشغيل"), thw("العدد"), thw("الوزن"),
+                 thw("العيار"), thw("الموديل"),
+                 thw("سعر الطقم" if piece else "الأجر/جم"),
+                 *([thw("قيمة الذهب")] if riyal else []),
+                 thw("المصنعية"), thw("الصافي"))
     tot = cells(thw(""), thw("الإجمالي"), thw(en(n_pcs or "—")),
-                thw(_gw(t_reg)), thw(_gw(t_std)), thw(""), thw(""), thw("—"),
-                thw(_w(d["gold_value"], 2) if riyal else "—"),
+                thw(_gw(t_w) + f"<br/><small>{u}</small>"), thw(""), thw(""),
+                thw(""), *([thw(_w(d["gold_value"], 2))] if riyal else []),
                 thw(_w(d["wages"], 2)), thw(_w(d["net"], 2)))
-    price_txt = _ti.PRICING_LABEL.get(pricing, pricing)
+    price_txt = _ti.PRICING_LABEL.get(pricing, pricing).split(" — ")[0]
     if riyal:
-        price_txt += (f" — سعر الجرام {_w(d['gold_price'], 2)} ريال عيار "
+        price_txt += (f" · {_w(d['gold_price'], 2)} ريال/جم عيار "
                       f"{en(d['price_karat'])}")
-    meta = [("رقم المستند", en(d["doc_no"] or f"#{doc_id}")),
-            ("التاريخ", en(d["doc_date"])),
-            ("رقم فاتورة المورد", en(d["supplier_inv_no"] or "—")),
-            ("طريقة التسعير", price_txt)]
+    e = _ent(conn, d["supplier_id"])
+    pairs = [("رقم المستند", en(d["doc_no"] or f"#{doc_id}")),
+             ("التاريخ", en(d["doc_date"])),
+             ("المورد", e.get("name") or "—"),
+             ("الرقم الضريبي للمورد", en(e.get("vat_number") or "—")),
+             ("فاتورة المورد", en(d["supplier_inv_no"] or "—")),
+             ("الرقم الضريبي للمنشأة",
+              en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")),
+             ("التسعير", price_txt)]
     if ret:
-        meta += [("على الفاتورة", en(d.get("ref_no") or "—")),
-                 ("سبب المرتجع", d.get("reason") or "—")]
-    parties = (_party_vat_rows(conn, d["supplier_id"], "المورد")
-               + [("المشتري", getattr(config, "COMPANY_NAME", "") or "—"),
-                  ("الرقم الضريبي للمشتري",
-                   en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—"))])
-    info = f'''
-    {TBL_PLAIN}<tr>
-      <td width="55%" valign="top">{_kv_table(parties)}</td>
-      <td width="45%" valign="top">{_kv_table(meta, 40)}</td>
-    </tr></table>'''
+        pairs += [("على الفاتورة", en(d.get("ref_no") or "—")),
+                  ("سبب المرتجع", d.get("reason") or "—")]
     sup_acc = conn.execute("SELECT account_id FROM entities WHERE id=?",
                            (d["supplier_id"],)).fetchone()
-    totals = f'''
-    {TBL}
-      <tr><th width="70%">الإجمالي الخاضع للضريبة (قبل الضريبة)</th>
-          <td>{_w(d["net"], 2)}</td></tr>
-      <tr><th>{"ضريبة مدخلات تُعكس" if ret else "ضريبة المدخلات القابلة للخصم"}
-          ({en(f"{float(d['vat_rate'] or config.VAT_RATE) * 100:g}")}%)</th>
-          <td>{_w(d["vat"], 2)}</td></tr>
-      <tr><th>{"يُنقص من رصيد المورد" if ret else "المستحق للمورد"}</th>
-          <td><b>{_w(d["total"], 2)}</b></td></tr>
-    </table>
-    <div class="tafqeet">فقط: {tafqeet(d["total"])}</div>
-    {_balances_after(conn, d["entry_id"], [sup_acc[0]] if sup_acc else [])}'''
+    rate_pct = en(f"{float(d['vat_rate'] or config.VAT_RATE) * 100:g}")
+    trows = [("الإجمالي قبل الضريبة", _w(d["net"], 2), False),
+             (("ضريبة مدخلات تُعكس" if ret else "ضريبة المدخلات")
+              + f" {rate_pct}%", _w(d["vat"], 2), False),
+             ("يُنقص من رصيد المورد" if ret else "المستحق للمورد",
+              _w(d["total"], 2), True)]
     title = "مرتجع مشتريات ضريبية" if ret else "فاتورة مشتريات ضريبية"
     return (_header(title, d["doc_no"] or f"#{doc_id}", d["doc_date"],
-                    show_meta=False) + info
-            + f"{TBL}<tr>{head}</tr>{rows}<tr>{tot}</tr></table>" + totals
+                    show_meta=False) + _meta_grid(pairs)
+            + f"{TBL}<tr>{head}</tr>{rows}<tr>{tot}</tr></table>"
+            + _totals_box(trows, tafqeet(d["total"]))
+            + _balances_after(conn, d["entry_id"],
+                              [sup_acc[0]] if sup_acc else [])
             + _footer(d.get("notes") or ""))
 
 

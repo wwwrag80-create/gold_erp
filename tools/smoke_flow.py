@@ -10822,10 +10822,15 @@ def main():
         _w134 = {r["work_order_no"]: r["id"] for r in conn.execute(
             "SELECT id, work_order_no FROM work_orders WHERE"
             " work_order_no LIKE 'SP134-%'")}
+        check("الفاتورة الضريبية لمنشأةٍ برقمها — والفرد بلا رقمٍ يُرفض"
+              " ويُوجَّه للمبسطة", _raises(
+                  lambda: _ti134.create_invoice(
+                      conn, _c134, [{"work_order_id": _w134["SP134-1"]}],
+                      _d134, "admin", "gram", 320, 18), "مبسطة"))
         _inv134 = _ti134.create_invoice(
             conn, _c134, [{"work_order_id": _w134["SP134-1"],
                            "wage_override": 20, "pieces": 2}],
-            _d134, "admin", "gram", 320, 18)
+            _d134, "admin", "gram", 320, 18, subtype="simplified")
         check("بيع ضريبي (جرام + أجر): الوعاء = الذهب بالسعر + الأجور",
               abs(_inv134["gold_value"] - 3200) < 0.01
               and abs(_inv134["total_wages"] - 200) < 0.01
@@ -10872,8 +10877,10 @@ def main():
     try:
         from ui.tax_sets_sales import SetsInvoiceTab as _SI134
         from ui.tax_purchases_screen import PurchaseInvoiceTab as _PI134
-        _o134 = ["رقم التشغيل", "العدد", "الوزن المقيد", "الوزن القائم"]
-        check("أعمدة الفاتورتين: رقم التشغيل ← العدد ← الوزن المقيد ← القائم",
+        _o134 = ["رقم التشغيل", "العدد", "الوزن", "العيار"]
+        check("أعمدة الفاتورتين: رقم التشغيل ← العدد ← الوزن ← العيار"
+              " (بلا وزنٍ قائم)", "الوزن القائم" not in _SI134.COLS
+              and "الوزن القائم" not in _PI134.COLS and
               [c for c in _SI134.COLS if c in _o134] == _o134
               and [c for c in _PI134.COLS if c in _o134] == _o134)
     except ImportError:

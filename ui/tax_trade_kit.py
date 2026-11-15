@@ -64,6 +64,27 @@ def fix_rows(t, extra=0):
     fit_columns(t)
 
 
+def karat_combo():
+    """خانة عيار السطر — الوزن والأجر/جم يُكتبان ويُعرضان به."""
+    cb = kit.ComboBox()
+    for k in KARATS:
+        cb.addItem(f"عيار {k}", k)
+    set_karat(cb, kv.active())
+    return cb
+
+
+def set_karat(cb, k):
+    i = cb.findData(int(k or kv.active()))
+    cb.blockSignals(True)
+    cb.setCurrentIndex(i if i >= 0 else 0)
+    cb.blockSignals(False)
+
+
+def wk(v18, karat):
+    """الوزن بعيار السطر (المخزَّن بمكافئ 18)."""
+    return _nf.f2(kv.g(v18, int(karat or kv.active())))
+
+
 def wspin():
     """خانة وزنٍ بمنزلتين (بعيار العرض)."""
     sp = mspin(maximum=1_000_000.0)

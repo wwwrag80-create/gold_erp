@@ -27,6 +27,13 @@
 
 **ولا تعديل ولا نقل ولا عكس لفاتورةٍ ضريبية بعد إصدارها** — الإشعار
 الدائن وحده طريقها (`guard`)، كما تشترط الهيئة.
+
+**نوع الفاتورة** (5.5.1) يُختار صراحةً لا يُستنتج:
+  * ``standard``   فاتورة ضريبية — لمحلٍ أو شركة برقمها الضريبي (إلزامي).
+  * ``simplified`` فاتورة ضريبية مبسطة — لعميلٍ فرد: من الدليل، أو «عميل
+                   نقدي» يُكتب اسمه وجواله على الفاتورة وحدها.
+والدفع: آجلٌ على الحساب، أو نقداً، أو شبكة — والنقد والشبكة يُسدَّدان
+بسند قبضٍ تلقائي في القيد نفسه، والإشعار الدائن يُردّ بالطريقة نفسها.
 """
 import config
 from services import numfmt as _nf
@@ -37,6 +44,17 @@ TAX_PRICING = (("wage", "الأجر فقط — الذهب بالوزن"),
 PRICING_LABEL = dict(TAX_PRICING)
 RIYAL = ("gram", "piece")             # الفاتورة كلها بالريال
 BRIDGE = "6100"                       # مركز التسكير (ذهب ↔ نقد)
+
+SUBTYPES = (("standard", "فاتورة ضريبية — لمحلٍ أو شركة"),
+            ("simplified", "فاتورة مبسطة — لعميلٍ فرد"))
+SUBTYPE_LABEL = {"standard": "فاتورة ضريبية",
+                 "simplified": "فاتورة ضريبية مبسطة"}
+PAY_MODES = (("credit", "آجل — على حسابه"), ("cash", "نقداً"),
+             ("bank", "شبكة / تحويل بنكي"))
+PAY_LABEL = dict(PAY_MODES)
+PAY_BOX = {"cash": "1400", "bank": "1500"}
+WALKIN_NAME = "عميل نقدي — مبيعات مبسطة"
+WALKIN_KEY = "walkin_customer_id"
 
 
 # ══════════════════════════ المخطط ══════════════════════════
@@ -55,7 +73,13 @@ def ensure_schema(conn):
                       ("price_karat", "INTEGER NOT NULL DEFAULT 0"),
                       ("gold_value", "REAL NOT NULL DEFAULT 0"),
                       ("ref_invoice_id", "INTEGER"),
-                      ("tax_reason", "TEXT NOT NULL DEFAULT ''")))
+                      ("tax_reason", "TEXT NOT NULL DEFAULT ''"),
+                      # 5.5.1: نوع الفاتورة والمشتري الفرد والدفع
+                      ("tax_subtype", "TEXT NOT NULL DEFAULT ''"),
+                      ("buyer_name", "TEXT NOT NULL DEFAULT ''"),
+                      ("buyer_phone", "TEXT NOT NULL DEFAULT ''"),
+                      ("pay_mode", "TEXT NOT NULL DEFAULT ''"),
+                      ("pay_voucher_id", "INTEGER")))
     _add("invoice_items", (("gold_value", "REAL NOT NULL DEFAULT 0"),
                            ("pieces", "INTEGER NOT NULL DEFAULT 0"),
                            ("piece_price", "REAL NOT NULL DEFAULT 0"),
@@ -101,10 +125,19 @@ def norm(tax):
     k = int(tax.get("price_karat") or 0)
     if p in RIYAL and k not in (18, 21, 22, 24):
         raise ValueError("عيار سعر الجرام غير معروف")
+    st = str(tax.get("subtype") or "")
+    if st and st not in dict(SUBTYPES):
+        raise ValueError("نوع الفاتورة غير معروف")
+    pm = str(tax.get("pay_mode") or "")
+    if pm and pm not in PAY_LABEL:
+        raise ValueError("طريقة الدفع غير معروفة")
     return {"pricing": p, "gold_price": gp if p in RIYAL else 0.0,
             "price_karat": k if p in RIYAL else 0,
             "ref_invoice_id": tax.get("ref_invoice_id"),
-            "reason": str(tax.get("reason") or "").strip()}
+            "reason": str(tax.get("reason") or "").strip(),
+            "subtype": st, "pay_mode": pm,
+            "buyer_name": str(tax.get("buyer_name") or "").strip()[:120],
+            "buyer_phone": str(tax.get("buyer_phone") or "").strip()[:30]}
 
 
 def weight_in_karat(w18, karat):
@@ -147,24 +180,119 @@ def doc_vat(net):
 
 
 # ══════════════════════════ الإصدار ══════════════════════════
+def walkin_customer(conn, create=True):
+    """حساب «عميل نقدي» للمبيعات المبسطة لأفرادٍ لا يُفتح لهم حساب — يُنشأ
+    مرةً واحدة. اسم المشتري وجواله يُكتبان على الفاتورة وحدها."""
+    from models.entities import add_entity, get_entity
+    from models.fiscal import get_setting, set_setting
+    try:
+        eid = int(get_setting(conn, WALKIN_KEY, "0") or 0)
+    except (TypeError, ValueError):
+        eid = 0
+    ent = get_entity(conn, eid) if eid else None
+    if ent and not ent["is_deleted"]:
+        return eid
+    if not create:
+        return None
+    r = conn.execute("SELECT id FROM entities WHERE name=? AND is_deleted=0"
+                     " AND entity_type='customer'", (WALKIN_NAME,)).fetchone()
+    eid = r["id"] if r else add_entity(conn, WALKIN_NAME, "customer",
+                                       username="system")
+    eid = eid if isinstance(eid, int) else eid["id"]
+    set_setting(conn, WALKIN_KEY, str(eid), "system")
+    return eid
+
+
+def is_walkin(conn, customer_id):
+    return bool(customer_id) and customer_id == walkin_customer(conn, False)
+
+
+def check_buyer(conn, customer_id, subtype):
+    """يتحقّق أن نوع الفاتورة يناسب المشتري — برسالةٍ تقول ما يُفعل."""
+    from services.fatoora import profile as pf
+    if subtype not in dict(SUBTYPES):
+        raise ValueError("اختر نوع الفاتورة: ضريبية لمحلٍ أو شركة، أو "
+                         "مبسطة لعميلٍ فرد")
+    if subtype == "standard":
+        if is_walkin(conn, customer_id):
+            raise ValueError("«العميل النقدي» فرد — فاتورته «مبسطة». الفاتورة"
+                             " الضريبية لمحلٍ أو شركة برقمها الضريبي")
+        b = pf.buyer(conn, customer_id) or {}
+        if not pf.buyer_is_b2b(b):
+            raise ValueError(
+                f"الفاتورة الضريبية لمحلٍ أو شركة برقمها الضريبي — و«"
+                f"{b.get('name') or 'العميل'}» بلا رقمٍ ضريبي صحيح (15 رقماً"
+                " يبدأ وينتهي بـ3).\n\nأضف رقمه من «التكويد الموحّد لجهات"
+                " التعامل»، أو اختر «فاتورة مبسطة» إن كان فرداً.")
+
+
+def _settle(conn, kind, entity_id, amount, mode, doc_date, username, note):
+    """سند قبضٍ (بيع) أو صرفٍ (إشعار دائن) تلقائي للنقد والشبكة."""
+    from models import vouchers
+    if mode not in PAY_BOX or amount <= 0:
+        return None
+    return vouchers.create_voucher(
+        conn, kind, doc_date, username, entity_id=entity_id,
+        cash_amount=round(amount, 2), cash_account_code=PAY_BOX[mode],
+        notes=note, expense_account_id=0)
+
+
 def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
-                   gold_price=0.0, price_karat=0, description=""):
+                   gold_price=0.0, price_karat=0, description="",
+                   subtype="standard", buyer_name="", buyer_phone="",
+                   pay_mode="credit"):
     """فاتورة ضريبية بالأطقم: تخرج من الخزنة كفاتورة البيع تماماً.
 
     `cart` = [{work_order_id, weight (18 — فارغ = الباقي كله),
-               wage_override (18), piece_price, pieces, note}]
+               wage_override (18), piece_price, pieces, karat, note}]
+    `subtype`: standard (محل/شركة برقمها الضريبي) · simplified (فرد).
+    `customer_id` فارغٌ مع المبسطة = «عميل نقدي» (اسمه وجواله على الفاتورة).
+    `pay_mode`: credit (على حسابه) · cash · bank — والأخيران يُسدَّدان
+    بسند قبضٍ تلقائي بإجمالي الفاتورة.
     """
     from models import invoices as inv
     from models.entities import get_entity
     ensure_schema(conn)
+    pay_mode = pay_mode or "credit"
+    if pay_mode not in PAY_LABEL:
+        raise ValueError("طريقة الدفع غير معروفة")
+    if not customer_id:
+        if subtype != "simplified":
+            raise ValueError("اختر المحل أو الشركة (المشتري)")
+        customer_id = walkin_customer(conn)
     ent = get_entity(conn, customer_id)
     if not ent or ent["entity_type"] == "internal":
         raise ValueError("اختر العميل أو الشركة من دليل جهات التعامل")
+    check_buyer(conn, customer_id, subtype)
+    if is_walkin(conn, customer_id):
+        if pay_mode == "credit":
+            raise ValueError("«العميل النقدي» يدفع في الحال — اختر «نقداً» أو"
+                             " «شبكة»، أو اختر عميلاً من الدليل للبيع الآجل")
+        if pricing not in RIYAL:
+            raise ValueError("البيع لعميلٍ نقدي بالريال كاملاً — اختر «سعر"
+                             " الجرام + الأجر» أو «سعر الطقم» (الأجر وحده يُبقي"
+                             " ذهباً على حسابٍ لا صاحب له)")
     tax = {"pricing": pricing, "gold_price": gold_price,
-           "price_karat": price_karat}
-    return inv.create_sale(conn, customer_id, cart, doc_date, username,
-                           apply_vat=True, description=description,
-                           tax=tax)
+           "price_karat": price_karat, "subtype": subtype,
+           "pay_mode": pay_mode,
+           "buyer_name": buyer_name if is_walkin(conn, customer_id) else "",
+           "buyer_phone": buyer_phone if is_walkin(conn, customer_id) else ""}
+    res = inv.create_sale(conn, customer_id, cart, doc_date, username,
+                          apply_vat=True, description=description,
+                          tax=tax)
+    docs = [res] + ([res["split"]] if res.get("split") else [])
+    if pay_mode in PAY_BOX:
+        total = round(sum(float(d["grand_total"]) for d in docs), 2)
+        v = _settle(conn, "receipt", customer_id, total, pay_mode, doc_date,
+                    username, "سداد " + " · ".join(
+                        f"الفاتورة {d['invoice_no']}" for d in docs))
+        if v:
+            for d in docs:
+                conn.execute("UPDATE invoices SET pay_voucher_id=? WHERE id=?",
+                             (v["id"], d["id"]))
+            res["voucher_no"] = v["voucher_no"]
+            res["paid"] = total
+    return res
 
 
 def returnable(conn, invoice_id):
@@ -245,15 +373,37 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
                      "src_item_id": r["item_id"], "karat": r["karat"]})
     if not cart:
         raise ValueError("اختر طقماً واحداً على الأقل للإرجاع")
+    od = dict(o)
     tax = {"pricing": o["pricing"], "gold_price": o["gold_price"],
            "price_karat": o["price_karat"], "ref_invoice_id": o["id"],
-           "reason": str(reason).strip()}
-    return inv.create_sale_return(conn, o["customer_id"], cart, doc_date,
-                                  username, apply_vat=True,
-                                  description=str(reason).strip(), tax=tax)
+           "reason": str(reason).strip(),
+           # 5.5.1: الإشعار بنوع فاتورته ومشتريها وطريقة دفعها
+           "subtype": od.get("tax_subtype") or "",
+           "pay_mode": od.get("pay_mode") or "",
+           "buyer_name": od.get("buyer_name") or "",
+           "buyer_phone": od.get("buyer_phone") or ""}
+    res = inv.create_sale_return(conn, o["customer_id"], cart, doc_date,
+                                 username, apply_vat=True,
+                                 description=str(reason).strip(), tax=tax)
+    mode = od.get("pay_mode") or ""
+    if mode in PAY_BOX:
+        # دُفعت الفاتورة نقداً أو بالشبكة: يُردّ المرتجع بالطريقة نفسها
+        docs = [res] + ([res["split"]] if res.get("split") else [])
+        total = round(sum(float(d["grand_total"]) for d in docs), 2)
+        v = _settle(conn, "payment", o["customer_id"], total, mode, doc_date,
+                    username, f"ردّ قيمة الإشعار {res['invoice_no']} على "
+                    f"الفاتورة {o['invoice_no']}")
+        if v:
+            for d in docs:
+                conn.execute("UPDATE invoices SET pay_voucher_id=? WHERE id=?",
+                             (v["id"], d["id"]))
+            res["voucher_no"] = v["voucher_no"]
+            res["paid"] = total
+    return res
 
 
-def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500):
+def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500,
+           subtype=None):
     """سجل الفواتير والإشعارات الضريبية بالأطقم."""
     ensure_schema(conn)
     sql = ("SELECT i.*, e.name customer_name, o.invoice_no ref_no,"
@@ -266,6 +416,9 @@ def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500):
     if kind:
         sql += " AND i.kind=?"
         args.append(kind)
+    if subtype:
+        sql += " AND COALESCE(i.tax_subtype,'')=?"
+        args.append(subtype)
     if date_from:
         sql += " AND i.invoice_date>=?"
         args.append(date_from)
@@ -273,11 +426,12 @@ def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500):
         sql += " AND i.invoice_date<=?"
         args.append(date_to)
     if q:
-        sql += (" AND (i.invoice_no LIKE ? OR e.name LIKE ? OR EXISTS ("
+        sql += (" AND (i.invoice_no LIKE ? OR e.name LIKE ?"
+                " OR i.buyer_name LIKE ? OR i.buyer_phone LIKE ? OR EXISTS ("
                 "SELECT 1 FROM invoice_items it JOIN work_orders w"
                 " ON w.id=it.work_order_id WHERE it.invoice_id=i.id"
                 " AND w.work_order_no LIKE ?))")
-        args += [f"%{q}%"] * 3
+        args += [f"%{q}%"] * 5
     sql += " ORDER BY i.invoice_date DESC, i.id DESC LIMIT ?"
     args.append(int(limit))
     return [dict(r) for r in conn.execute(sql, args)]

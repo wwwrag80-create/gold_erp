@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
 """المبيعات الضريبية بالأطقم (5.5) — فاتورةٌ تخرج بها الأطقم من الخزنة.
 
-الإدخال: رقم التشغيل ← العدد ← الوزن المقيد ← الوزن القائم ← الأجر (أو
-سعر الطقم) — وEnter يُنزل السطر. والتسعير يُختار في كل فاتورة (الأجر فقط
-· جرام + أجر · بالقطعة)، والمحاسبة كلّها في `models.tax_invoices`:
+**نوع الفاتورة يُختار أولاً** (5.5.1):
+  * ضريبية — لمحلٍ أو شركة برقمها الضريبي (إلزامي).
+  * مبسطة — لعميلٍ فرد: من الدليل، أو «عميل نقدي» بلا حساب يُكتب اسمه
+    وجواله على الفاتورة، ويدفع في الحال (نقداً أو شبكة).
+
+الإدخال: رقم التشغيل ← العدد ← الوزن ← العيار ← الأجر (أو سعر الطقم) —
+وEnter يُنزل السطر. الوزن هو **وزن الذهب المقيد** وحده، والعيار عيار
+السطر: به يُكتب الوزن والأجر ويُعرضان. والمحاسبة في `models.tax_invoices`:
 
 * الفاتورة فاتورة بيعٍ حقيقية: الأطقم تخرج من خزنتها، وتظهر في كشف العميل
-  وحركة الطقم والإقرار الضريبي.
+  وحركة الطقم والإقرار الضريبي. والنقد والشبكة يُسدَّدان بسند قبضٍ تلقائي.
 * **الإشعار الدائن = مرتجع مبيعات**: يُختار من فاتورةٍ ضريبية سابقة،
-  فتعود أطقمه للخزنة ويظهر في كشف الحساب «مرتجع مبيعات» بسعر الأصل.
+  فتعود أطقمه للخزنة ويظهر في كشف الحساب «مرتجع مبيعات» بسعر الأصل،
+  ويُردّ المبلغ بطريقة دفع الفاتورة نفسها.
 * الفاتورة الضريبية لا تُعدَّل بعد إصدارها — التصحيح بالإشعار وحده.
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -28,7 +34,9 @@ from ui.widgets.table_fit import fit_columns
 
 CREDIT_REASONS = ("مرتجع أطقم من العميل", "إلغاء جزئي للفاتورة",
                   "خطأ في الوزن أو السعر", "إلغاء الفاتورة كاملة")
-KIND_LABEL = {"sale": "فاتورة ضريبية", "sale_return": "مرتجع مبيعات"}
+KIND_LABEL = {"sale": "فاتورة", "sale_return": "مرتجع (إشعار دائن)"}
+SUB_SHORT = {"standard": "ضريبية", "simplified": "مبسطة"}
+WALKIN = 0                     # بند «عميل نقدي» في قائمة المشتري
 
 
 def _wo_pieces(wo):
@@ -38,11 +46,17 @@ def _wo_pieces(wo):
         return 1
 
 
-class SetsInvoiceTab(QtWidgets.QWidget):
-    """فاتورةٌ ضريبية بالأطقم من الخزنة."""
+def _buyer_label(row):
+    """اسم المشتري في القوائم والسجل: الفرد باسمه المكتوب على الفاتورة."""
+    name = (row.get("buyer_name") or "").strip()
+    return name or row.get("customer_name") or "—"
 
-    COLS = ["", "م", "رقم التشغيل", "العدد", "الوزن المقيد", "الوزن القائم",
-            "الموديل", "الأجر/جم", "قيمة الذهب", "المصنعية", "الصافي"]
+
+class SetsInvoiceTab(QtWidgets.QWidget):
+    """فاتورةٌ ضريبية (أو مبسطة) بالأطقم من الخزنة."""
+
+    COLS = ["", "م", "رقم التشغيل", "العدد", "الوزن", "العيار", "الموديل",
+            "الأجر/جم", "قيمة الذهب", "المصنعية", "الصافي"]
 
     def __init__(self, user, new_customer=None):
         super().__init__()
@@ -52,11 +66,13 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self._wo = None              # الطقم المستدعى في سطر الإدخال
         self._avail18 = 0.0          # الباقي منه في الخزنة (مكافئ 18)
         self._wage18 = 0.0
+        self._k_shown = int(kv.active())
+        self._parties = []
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(self._build_header())
         lay.addWidget(self._build_entry())
         lay.addWidget(self._build_items(), 1)
-        self.btn_post = kit.PushButton("✔ ترحيل الفاتورة الضريبية")
+        self.btn_post = kit.PushButton("✔ ترحيل الفاتورة")
         self.btn_post.clicked.connect(self.post)
         b_clear = kit.PushButton("تفريغ")
         b_clear.setObjectName("ghost")
@@ -66,42 +82,81 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         row.addWidget(b_clear)
         lay.addLayout(row)
         self.pricing.changed.connect(self._pricing_changed)
+        self._type_changed()
         self._pricing_changed()
 
-    # ── ① العميل والتسعير ──
+    # ══════════ ① نوع الفاتورة والمشتري ══════════
     def _build_header(self):
-        box = QtWidgets.QGroupBox("① العميل وطريقة التسعير")
-        self.customer = search_combo("اكتب اسم العميل أو الشركة…")
-        self.customer.currentIndexChanged.connect(self._on_customer)
-        b_new = kit.PushButton("+ عميل جديد")
-        b_new.setObjectName("ghost")
-        b_new.clicked.connect(self.new_customer)
-        self.buyer_lbl = QtWidgets.QLabel("—")
-        self.buyer_lbl.setWordWrap(True)
+        box = QtWidgets.QGroupBox("① نوع الفاتورة والمشتري")
+        self.b_std = kit.RadioButton("ضريبية — لمحلٍ أو شركة")
+        self.b_std.setToolTip("المشتري منشأةٌ برقمها الضريبي — تخصم ضريبة "
+                              "هذه الفاتورة من إقرارها")
+        self.b_simple = kit.RadioButton("مبسطة — لعميلٍ فرد")
+        self.b_simple.setToolTip("لفردٍ بلا رقمٍ ضريبي: من الدليل، أو «عميل "
+                                 "نقدي» يُكتب اسمه على الفاتورة")
+        grp = QtWidgets.QButtonGroup(self)
+        grp.addButton(self.b_std)
+        grp.addButton(self.b_simple)
+        self.b_std.setChecked(True)
+        self.b_std.toggled.connect(lambda *_: self._type_changed())
         self.date = date_edit()
+        self.cust_lbl = QtWidgets.QLabel("المحل / الشركة:")
+        self.customer = search_combo("اكتب اسم المشتري…")
+        self.customer.currentIndexChanged.connect(self._on_customer)
+        self.b_new = kit.PushButton("+ جديد")
+        self.b_new.setObjectName("ghost")
+        self.b_new.clicked.connect(self.new_customer)
+        self.buyer_lbl = QtWidgets.QLabel("—")
+        self.buyer_lbl.setObjectName("cardSub")
+        self.buyer_lbl.setWordWrap(True)
+        self.w_name = kit.LineEdit()
+        self.w_name.setPlaceholderText("اسم المشتري (يُطبع على الفاتورة)")
+        self.w_phone = kit.LineEdit()
+        self.w_phone.setPlaceholderText("الجوال (اختياري)")
+        self.walkin_box = QtWidgets.QWidget()
+        wl = QtWidgets.QHBoxLayout(self.walkin_box)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.addWidget(self.w_name, 2)
+        wl.addWidget(self.w_phone, 1)
         self.pricing = tk.PricingBox()
+        self.pay = kit.ComboBox()
+        for k, lbl in tx.PAY_MODES:
+            self.pay.addItem(lbl, k)
+        self.pay.setToolTip("النقد والشبكة يُسدَّدان بسند قبضٍ تلقائي بإجمالي "
+                            "الفاتورة — والآجل يبقى على حساب المشتري")
         self.notes = kit.LineEdit()
-        self.notes.setPlaceholderText("البيان (اختياري) — يظهر على الفاتورة")
+        self.notes.setPlaceholderText("البيان (اختياري)")
+
+        types = QtWidgets.QHBoxLayout()
+        types.addWidget(self.b_std)
+        types.addSpacing(18)
+        types.addWidget(self.b_simple)
+        types.addStretch(1)
         crow = QtWidgets.QHBoxLayout()
         crow.addWidget(self.customer, 1)
-        crow.addWidget(b_new)
+        crow.addWidget(self.b_new)
         g = QtWidgets.QGridLayout(box)
         g.setVerticalSpacing(6)
-        g.addWidget(QtWidgets.QLabel("العميل:"), 0, 0)
-        g.addLayout(crow, 0, 1)
-        g.addWidget(QtWidgets.QLabel("نوع الفاتورة:"), 0, 2)
-        g.addWidget(self.buyer_lbl, 0, 3)
+        g.addWidget(QtWidgets.QLabel("النوع:"), 0, 0)
+        g.addLayout(types, 0, 1, 1, 3)
         g.addWidget(QtWidgets.QLabel("التاريخ:"), 0, 4)
         g.addWidget(self.date, 0, 5)
-        g.addWidget(QtWidgets.QLabel("التسعير:"), 1, 0)
-        g.addWidget(self.pricing, 1, 1)
-        g.addWidget(QtWidgets.QLabel("البيان:"), 1, 2)
-        g.addWidget(self.notes, 1, 3, 1, 3)
+        g.addWidget(self.cust_lbl, 1, 0)
+        g.addLayout(crow, 1, 1)
+        g.addWidget(self.walkin_box, 1, 2, 1, 2)
+        g.addWidget(self.buyer_lbl, 1, 2, 1, 4)
+        g.addWidget(QtWidgets.QLabel("التسعير:"), 2, 0)
+        g.addWidget(self.pricing, 2, 1)
+        g.addWidget(QtWidgets.QLabel("الدفع:"), 2, 2)
+        g.addWidget(self.pay, 2, 3)
+        g.addWidget(QtWidgets.QLabel("البيان:"), 2, 4)
+        g.addWidget(self.notes, 2, 5)
         g.setColumnStretch(1, 4)
-        g.setColumnStretch(3, 3)
+        g.setColumnStretch(3, 2)
+        g.setColumnStretch(5, 2)
         return box
 
-    # ── ② سطر الإدخال ──
+    # ══════════ ② سطر الإدخال ══════════
     def _build_entry(self):
         box = QtWidgets.QGroupBox("② إدخال الطقم")
         self.e_wo = kit.LineEdit()
@@ -112,15 +167,14 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.e_pieces.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.e_pieces.setAlignment(QtCore.Qt.AlignCenter)
         self.e_reg = tk.wspin()
-        self.e_reg.setToolTip("الوزن المقيد — الباقي في الخزنة مقترحاً؛ "
-                              "أقلّ منه = بيع جزءٍ من الطقم")
+        self.e_reg.setToolTip("وزن الذهب المقيد بعيار السطر — الباقي في "
+                              "الخزنة مقترحاً؛ أقلّ منه = بيع جزءٍ من الطقم")
         self.e_reg.valueChanged.connect(self._line_changed)
-        self.e_std = kit.LineEdit()
-        self.e_std.setReadOnly(True)
-        self.e_std.setToolTip("الوزن القائم من بطاقة الطقم (بنسبة المباع)")
+        self.e_karat = tk.karat_combo()
+        self.e_karat.currentIndexChanged.connect(self._karat_changed)
         self.e_model = kit.LineEdit()
         self.e_model.setReadOnly(True)
-        self.e_model.setPlaceholderText("يُملأ تلقائياً")
+        self.e_model.setPlaceholderText("تلقائي")
         self.e_rate = mspin()
         self.e_rate.valueChanged.connect(self._rate_typed)
         self.e_net = kit.LineEdit()
@@ -129,19 +183,19 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.btn_add = kit.PushButton("+ إضافة سطر")
         self.btn_add.clicked.connect(self.add_item)
         fields = [("رقم التشغيل", self.e_wo, 3), ("العدد", self.e_pieces, 1),
-                  ("الوزن المقيد", self.e_reg, 2),
-                  ("الوزن القائم", self.e_std, 2),
+                  ("الوزن", self.e_reg, 2), ("العيار", self.e_karat, 2),
                   ("الموديل", self.e_model, 2), (None, self.e_rate, 2),
                   ("صافي السطر", self.e_net, 2)]
         g = QtWidgets.QGridLayout(box)
         g.setHorizontalSpacing(6)
         for c, (label, wd, st) in enumerate(fields):
-            wd.setMinimumWidth(92)
+            wd.setMinimumWidth(86)
             g.addWidget(self.l_rate if label is None else tk.sub(label), 0, c)
             g.addWidget(wd, 1, c)
             g.setColumnStretch(c, st)
         g.addWidget(self.btn_add, 1, len(fields))
-        enter_chain(self, [self.e_wo, self.e_pieces, self.e_reg, self.e_rate],
+        enter_chain(self, [self.e_wo, self.e_pieces, self.e_reg, self.e_karat,
+                           self.e_rate],
                     on_last=lambda: self.e_wo if self.add_item() else False,
                     require={self.e_wo: lambda: bool(
                         self.e_wo.text().strip())})
@@ -153,7 +207,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.tbl.setColumnCount(len(self.COLS))
         self.tbl.setHorizontalHeaderLabels(self.COLS)
         self.tbl.setMinimumHeight(200)
-        fit_columns(self.tbl, [8, 4, 12, 6, 10, 10, 10, 9, 10, 10, 11])
+        fit_columns(self.tbl, [8, 4, 13, 6, 10, 7, 10, 9, 11, 10, 12])
         self.totals = tk.TotalsRow("ضريبة المخرجات")
         self.hint = QtWidgets.QLabel("")
         self.hint.setObjectName("cardSub")
@@ -164,11 +218,49 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         v.addWidget(self.totals)
         return box
 
-    # ── الأطراف ──
+    # ══════════ النوع والمشتري ══════════
+    def _std(self):
+        return self.b_std.isChecked()
+
+    def _subtype(self):
+        return "standard" if self._std() else "simplified"
+
+    def _is_walkin(self):
+        return (not self._std()) and self.customer.currentData() == WALKIN
+
+    def _type_changed(self):
+        std = self._std()
+        self.cust_lbl.setText("المحل / الشركة:" if std else "العميل:")
+        self.b_new.setToolTip("منشأةٌ جديدة برقمها الضريبي" if std
+                              else "عميلٌ فرد جديد في الدليل")
+        self.btn_post.setText("✔ ترحيل الفاتورة الضريبية" if std
+                              else "✔ ترحيل الفاتورة المبسطة")
+        self._fill_parties()
+        # تغيير النوع يبدأ المشتري من جديد — لا يبقى مشتري النوع الآخر
+        if std:
+            if hasattr(self.customer, "clear_selection"):
+                self.customer.clear_selection()
+            else:
+                self.customer.setCurrentIndex(-1)
+        else:
+            self.customer.setCurrentIndex(0)
+        self._on_customer()
+
+    def _fill_parties(self):
+        from services.fatoora import profile as pf
+        rows = self._parties
+        if self._std():
+            shown = [r for r in rows if pf.valid_vat(r.get("vat") or "")]
+        else:
+            shown = [{"id": WALKIN, "name": "👤 عميل نقدي — بلا حساب"}] + rows
+        reload_combo(self.customer, shown, lambda r: r["name"])
+        if not self._std() and self.customer.currentData() is None:
+            self.customer.setCurrentIndex(0)
+
     def new_customer(self):
         if self._new_customer is None:
             return
-        cid = self._new_customer(self)
+        cid = self._new_customer(self, self._std())
         if cid:
             self.reload()
             i = self.customer.findData(cid)
@@ -177,27 +269,45 @@ class SetsInvoiceTab(QtWidgets.QWidget):
 
     def _on_customer(self, *_):
         from services.fatoora import profile as pf
+        walk = self._is_walkin()
+        self.walkin_box.setVisible(walk)
+        self.buyer_lbl.setVisible(not walk)
+        if walk:
+            if self.pay.currentData() == "credit":
+                self.pay.setCurrentIndex(self.pay.findData("cash"))
+            return
         cid = self.customer.currentData()
         if cid is None:
-            self.buyer_lbl.setText("—")
+            self.buyer_lbl.setText("—" if not self._std() else
+                                   "المنشآت ذات الرقم الضريبي وحدها — «+ جديد»"
+                                   " لمنشأةٍ برقمها")
             return
         try:
+            from services.fatoora import ledger
             with db(readonly=True) as conn:
                 b = pf.buyer(conn, cid) or {}
-            self.buyer_lbl.setText(
-                f"✔ فاتورة ضريبية — الرقم الضريبي {b['vat']}"
-                if pf.buyer_is_b2b(b) else
-                "⚠ بلا رقم ضريبي — تصدر «فاتورة ضريبية مبسطة»")
+                live = ledger.enabled(conn)
+            if self._std():
+                txt = f"✔ الرقم الضريبي {b.get('vat') or '—'}"
+                # العنوان يلزم المستند الإلكتروني وحده (الربط مع الهيئة)
+                miss = pf.buyer_problems(b) if live else []
+                if miss:
+                    txt += " · ينقص عنوانه: " + "، ".join(miss)
+            else:
+                txt = "فاتورة مبسطة — بلا رقم ضريبي للمشتري"
+            self.buyer_lbl.setText(txt)
         except Exception as e:                       # noqa: BLE001
             self.buyer_lbl.setText(str(e))
 
-    # ── التسعير ──
+    # ══════════ التسعير والعيار ══════════
+    def _k(self):
+        return int(self.e_karat.currentData() or kv.active())
+
     def _pricing_changed(self):
         piece = self.pricing.is_piece()
-        self.l_rate.setText("سعر الطقم (ريال)" if piece else
-                            f"الأجر/جم ({kv.label()})")
+        self.l_rate.setText("سعر الطقم (ريال)" if piece else "الأجر/جم")
         self.e_rate.blockSignals(True)
-        self.e_rate.setValue(0 if piece else kv.rate(self._wage18))
+        self.e_rate.setValue(0 if piece else kv.rate(self._wage18, self._k()))
         self.e_rate.blockSignals(False)
         hdr = list(self.COLS)
         hdr[7] = "سعر الطقم" if piece else "الأجر/جم"
@@ -205,12 +315,26 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self._line_changed()
         self._render()
 
-    # ── سطر الإدخال ──
+    def _karat_changed(self, *_):
+        """تبديل العيار يعيد كتابة الوزن والأجر/جم به — والذهب نفسه ثابت."""
+        old, new = self._k_shown, self._k()
+        w18 = self._w18(old)
+        self._k_shown = new
+        self.e_reg.blockSignals(True)
+        self.e_reg.setValue(kv.g(w18, new) if w18 else 0)
+        self.e_reg.blockSignals(False)
+        if not self.pricing.is_piece():
+            self.e_rate.blockSignals(True)
+            self.e_rate.setValue(kv.rate(self._wage18, new))
+            self.e_rate.blockSignals(False)
+        self._line_changed()
+
+    # ══════════ سطر الإدخال ══════════
     def _clear_entry(self):
         self._wo = None
         self._avail18 = 0.0
         self._wage18 = 0.0
-        for f in (self.e_wo, self.e_std, self.e_model, self.e_net):
+        for f in (self.e_wo, self.e_model, self.e_net):
             f.clear()
         self.e_pieces.setValue(1)
         for sp in (self.e_reg, self.e_rate):
@@ -255,43 +379,34 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.e_model.setText(wo["model_no"] or ("ايطالي" if bulk else "—"))
         self.e_pieces.setValue(_wo_pieces(wo))
         self.e_reg.blockSignals(True)
-        self.e_reg.setValue(kv.g(avail))
+        self.e_reg.setValue(kv.g(avail, self._k()))
         self.e_reg.blockSignals(False)
         if not self.pricing.is_piece():
             self.e_rate.blockSignals(True)
-            self.e_rate.setValue(kv.rate(self._wage18))
+            self.e_rate.setValue(kv.rate(self._wage18, self._k()))
             self.e_rate.blockSignals(False)
         self._line_changed()
 
-    def _w18(self):
+    def _w18(self, k=None):
         """وزن السطر بمكافئ 18 — الباقي كما خُزِّن إن لم يُغيَّر."""
+        k = int(k or self._k())
         v = self.e_reg.value()
-        if self._avail18 and abs(v - kv.g(self._avail18)) <= 0.0051:
+        if self._avail18 and abs(v - kv.g(self._avail18, k)) <= 0.0051:
             return self._avail18
-        return kv.store(v)
+        return kv.store(v, k)
 
     def _rate_typed(self, *_):
         if not self.pricing.is_piece():
-            self._wage18 = kv.rate_store(self.e_rate.value())
+            self._wage18 = kv.rate_store(self.e_rate.value(), self._k())
         self._line_changed()
-
-    def _std18(self, wo, w18):
-        full = float(wo["registered_weight"] or 0)
-        std = float(wo["standing_gold"] or 0)
-        if wo.get("bulk") or full <= 0:
-            return w18
-        return round(std * w18 / full, 3)
 
     def _line_changed(self, *_):
         if self._wo is None:
             self.e_net.clear()
-            self.e_std.clear()
             return
-        w18 = self._w18()
-        self.e_std.setText(tk.w(self._std18(self._wo, w18)))
         t, _why = self.pricing.preview()
         piece = self.e_rate.value() if self.pricing.is_piece() else 0
-        _wg, _gv, net, why = tk.line_calc(w18, self._wage18, piece, t)
+        _wg, _gv, net, why = tk.line_calc(self._w18(), self._wage18, piece, t)
         self.e_net.setText(tk.m(net) if not why else "—")
         self.e_net.setToolTip(why)
 
@@ -302,11 +417,11 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             return False
         w18 = self._w18()
         if w18 <= 0:
-            err(self, "اكتب الوزن المقيد")
+            err(self, "اكتب الوزن")
             return False
         if not self._wo["bulk"] and w18 > self._avail18 + 0.0005:
             err(self, f"الوزن أكبر من الباقي في الخزنة "
-                      f"({tk.w(self._avail18)})")
+                      f"({tk.wk(self._avail18, self._k())} عيار {self._k()})")
             return False
         if self.pricing.is_piece() and self.e_rate.value() <= 0:
             err(self, "اكتب سعر الطقم بالريال")
@@ -316,8 +431,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             "wo_id": self._wo["id"], "wo_no": self._wo["work_order_no"],
             "model": self.e_model.text(), "bulk": self._wo["bulk"],
             "pieces": self.e_pieces.value(), "w18": w18,
-            "avail18": self._avail18,
-            "std18": self._std18(self._wo, w18), "wage18": self._wage18,
+            "avail18": self._avail18, "karat": self._k(),
+            "wage18": self._wage18,
             "piece_price": (self.e_rate.value() if self.pricing.is_piece()
                             else 0.0), "wo": self._wo})
         self._clear_entry()
@@ -336,15 +451,17 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self._wo = it["wo"]
         self._avail18 = it["avail18"]
         self._wage18 = it["wage18"]
+        tk.set_karat(self.e_karat, it["karat"])
+        self._k_shown = self._k()
         self.e_wo.setText(it["wo_no"])
         self.e_model.setText(it["model"])
         self.e_pieces.setValue(int(it["pieces"]))
         self.e_reg.blockSignals(True)
-        self.e_reg.setValue(kv.g(it["w18"]))
+        self.e_reg.setValue(kv.g(it["w18"], it["karat"]))
         self.e_reg.blockSignals(False)
         self.e_rate.blockSignals(True)
         self.e_rate.setValue(it["piece_price"] if self.pricing.is_piece()
-                             else kv.rate(it["wage18"]))
+                             else kv.rate(it["wage18"], it["karat"]))
         self.e_rate.blockSignals(False)
         self._line_changed()
         self._render()
@@ -371,10 +488,11 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             tgv += gv
             twg += wg
             npcs += int(it["pieces"])
-            vals = [r + 1, it["wo_no"], str(it["pieces"]), tk.w(it["w18"]),
-                    tk.w(it["std18"]), it["model"] or "—",
+            k = it["karat"]
+            vals = [r + 1, it["wo_no"], str(it["pieces"]),
+                    tk.wk(it["w18"], k), str(k), it["model"] or "—",
                     tk.m(it["piece_price"]) if piece
-                    else tk.m(kv.rate(it["wage18"])),
+                    else tk.m(kv.rate(it["wage18"], k)),
                     tk.m(gv) if riyal else "—", tk.m(wg),
                     tk.m(net) if not why else "—"]
             for c, v in enumerate(vals, 1):
@@ -389,22 +507,26 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.totals.show_totals(len(self.items), npcs, tw, tgv, twg, riyal)
         msgs = ([why_p] if (why_p and self.items) else []) + bad
         self.hint.setText("⚠ " + " · ".join(msgs) if msgs else (
-            "الذهب يُقيَّد على العميل وزناً، والضريبة على الأجور وحدها"
+            "الذهب يُقيَّد على المشتري وزناً، والضريبة على الأجور وحدها"
             if not riyal else
             "الفاتورة كلها بالريال — قيمة الذهب والمصنعية خاضعتان للضريبة"))
 
-    # ── الترحيل ──
+    # ══════════ الترحيل ══════════
     def clear(self):
         self.items = []
         self.notes.clear()
+        self.w_name.clear()
+        self.w_phone.clear()
         self._clear_entry()
         self._render()
 
     def post(self):
         try:
             cid = self.customer.currentData()
+            walk = self._is_walkin()
             if cid is None:
-                raise ValueError("اختر العميل")
+                raise ValueError("اختر المحل أو الشركة" if self._std()
+                                 else "اختر العميل أو «عميل نقدي»")
             if self.e_wo.text().strip() and self._wo is not None:
                 if not self.add_item():
                     return
@@ -416,47 +538,65 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                                                it["piece_price"], t)
                 if why:
                     raise ValueError(why)
+            buyer = (self.w_name.text().strip() or "عميل نقدي") if walk \
+                else self.customer.currentText()
             T = self.totals
+            pay = self.pay.currentData()
             if not confirm_post(
-                    self, f"فاتورة ضريبية باسم «{self.customer.currentText()}»"
-                    f" — {self.pricing.label()}\n{len(self.items)} طقم · "
-                    f"الصافي {T.text(T.c_net)} + الضريبة {T.text(T.c_vat)} = "
-                    f"{T.text(T.c_total)} ريال\nالأطقم تخرج من الخزنة.",
-                    self.date):
+                    self, f"{tx.SUBTYPE_LABEL[self._subtype()]} — «{buyer}»\n"
+                    f"{self.pricing.label()} · الدفع: {tx.PAY_LABEL[pay]}\n"
+                    f"{len(self.items)} طقم · الصافي {T.text(T.c_net)} + "
+                    f"الضريبة {T.text(T.c_vat)} = {T.text(T.c_total)} ريال\n"
+                    "الأطقم تخرج من الخزنة."
+                    + ("\nويُسدَّد الإجمالي بسند قبضٍ تلقائي."
+                       if pay != "credit" else ""), self.date):
                 return
             v = self.pricing.values()
             cart = [{"work_order_id": it["wo_id"], "weight": it["w18"],
                      "wage_override": it["wage18"],
                      "piece_price": it["piece_price"],
-                     "pieces": it["pieces"], "karat": int(kv.active())}
+                     "pieces": it["pieces"], "karat": it["karat"]}
                     for it in self.items]
             with db() as conn:
                 res = tx.create_invoice(
-                    conn, cid, cart, dstr(self.date), self.user["username"],
-                    v["pricing"], v["gold_price"], v["price_karat"],
-                    self.notes.text().strip())
+                    conn, None if walk else cid, cart, dstr(self.date),
+                    self.user["username"], v["pricing"], v["gold_price"],
+                    v["price_karat"], self.notes.text().strip(),
+                    subtype=self._subtype(),
+                    buyer_name=self.w_name.text().strip() if walk else "",
+                    buyer_phone=self.w_phone.text().strip() if walk else "",
+                    pay_mode=pay)
             self.clear()
-            msg = (f"تم ترحيل الفاتورة الضريبية {res['invoice_no']} باسم "
-                   f"{res['customer_name']} — الإجمالي "
+            msg = (f"تم ترحيل {tx.SUBTYPE_LABEL[self._subtype()]} "
+                   f"{res['invoice_no']} — «{buyer}» — الإجمالي "
                    f"{tk.m(res['grand_total'])} ريال")
             if res.get("split"):
                 msg += (f"\nوالإيطالي بفاتورةٍ مستقلة {res['split']['invoice_no']}"
                         f" — {tk.m(res['split']['grand_total'])} ريال")
+            if res.get("voucher_no"):
+                msg += (f"\nسُدِّد {tk.m(res['paid'])} ريال بسند القبض "
+                        f"{res['voucher_no']} ({tx.PAY_LABEL[pay]})")
             posted(self, msg, "invoice", res["id"])
         except Exception as e:
             err(self, e)
 
     def reload(self):
         with db(readonly=True) as conn:
-            rows = [r for r in entities.list_entities(conn)
-                    if r["entity_type"] != "internal"]
-        reload_combo(self.customer, rows, lambda r: r["name"])
+            walk = tx.walkin_customer(conn, False)
+            self._parties = [
+                {"id": r["id"], "name": r["name"],
+                 "vat": (r["vat_number"] if "vat_number" in r.keys()
+                         else "") or ""}
+                for r in entities.list_entities(conn)
+                if r["entity_type"] != "internal" and r["id"] != walk]
+        self._fill_parties()
+        self._on_customer()
 
 
 class SetsCreditTab(QtWidgets.QWidget):
     """الإشعار الدائن = مرتجع مبيعات من فاتورةٍ ضريبية بالأطقم."""
 
-    COLS = ["", "رقم التشغيل", "العدد", "المباع", "الباقي", "الوزن القائم",
+    COLS = ["", "رقم التشغيل", "العدد", "الوزن", "الباقي", "العيار",
             "الموديل", "المرتجع", "صافي المرتجع"]
 
     def __init__(self, user):
@@ -465,7 +605,7 @@ class SetsCreditTab(QtWidgets.QWidget):
         self._rows = []
         self._spins = []
         self._orig = None
-        self.inv = search_combo("اكتب رقم الفاتورة أو اسم العميل…")
+        self.inv = search_combo("اكتب رقم الفاتورة أو اسم المشتري…")
         self.inv.currentIndexChanged.connect(self._load)
         self.date = date_edit()
         self.reason = kit.ComboBox()
@@ -474,8 +614,9 @@ class SetsCreditTab(QtWidgets.QWidget):
         self.reason.setCurrentIndex(-1)
         self.reason.lineEdit().setPlaceholderText("سبب الإشعار — إلزامي")
         self.info = QtWidgets.QLabel("—")
+        self.info.setObjectName("cardSub")
         self.info.setWordWrap(True)
-        head = QtWidgets.QGroupBox("① الفاتورة الضريبية الأصلية")
+        head = QtWidgets.QGroupBox("① الفاتورة الأصلية")
         g = QtWidgets.QGridLayout(head)
         g.addWidget(QtWidgets.QLabel("الفاتورة:"), 0, 0)
         g.addWidget(self.inv, 0, 1)
@@ -490,7 +631,7 @@ class SetsCreditTab(QtWidgets.QWidget):
         self.tbl.setColumnCount(len(self.COLS))
         self.tbl.setHorizontalHeaderLabels(self.COLS)
         self.tbl.setMinimumHeight(220)
-        fit_columns(self.tbl, [5, 13, 7, 11, 11, 11, 11, 15, 13])
+        fit_columns(self.tbl, [5, 14, 7, 11, 11, 8, 12, 15, 13])
         self.tbl.itemChanged.connect(self._checked)
         b_all = kit.PushButton("إرجاع الباقي كله")
         b_all.setObjectName("ghost")
@@ -511,9 +652,10 @@ class SetsCreditTab(QtWidgets.QWidget):
 
     @staticmethod
     def _label(r):
-        return (f"{r['invoice_no']} — {r['customer_name']} — "
-                f"{tx.PRICING_LABEL.get(r['pricing'], '')} — "
-                f"{tk.m(r['grand_total'])} ريال — {r['invoice_date']}")
+        sub = SUB_SHORT.get(r.get("tax_subtype") or "", "")
+        return (f"{r['invoice_no']} — {_buyer_label(r)}"
+                + (f" ({sub})" if sub else "")
+                + f" — {tk.m(r['grand_total'])} ريال — {r['invoice_date']}")
 
     def reload(self):
         with db(readonly=True) as conn:
@@ -533,31 +675,36 @@ class SetsCreditTab(QtWidgets.QWidget):
                     (iid,)).fetchone())
                 self._rows = tx.returnable(conn, iid)
             o = self._orig
-            info = (f"العميل: {o['customer_name']} · "
+            pm = o.get("pay_mode") or "credit"
+            info = (f"{tx.SUBTYPE_LABEL.get(o.get('tax_subtype') or '', 'فاتورة')}"
+                    f" · المشتري: {_buyer_label(o)} · "
                     f"{tx.PRICING_LABEL.get(o['pricing'], '')}"
                     + (f" — سعر الجرام {tk.m(o['gold_price'])} عيار "
                        f"{o['price_karat']}" if o["pricing"] in tx.RIYAL
                        else "")
-                    + "\nيُردّ بسعر الفاتورة نفسها، وتعود الأطقم للخزنة،"
-                      " ويظهر في كشف الحساب «مرتجع مبيعات».")
+                    + "\nيُردّ بسعر الفاتورة نفسها وتعود الأطقم للخزنة — "
+                    + ("ويُخصم من حساب المشتري (آجل)." if pm == "credit"
+                       else f"ويُردّ المبلغ {tx.PAY_LABEL[pm]} بسند صرفٍ "
+                            "تلقائي."))
         self.info.setText(info)
         t = self.tbl
         t.blockSignals(True)
+        t.setRowCount(0)
         t.setRowCount(len(self._rows))
         for r, x in enumerate(self._rows):
+            k = int(x["karat"] or kv.active())
             chk = QtWidgets.QTableWidgetItem()
             chk.setFlags(QtCore.Qt.ItemIsUserCheckable
                          | QtCore.Qt.ItemIsEnabled)
             chk.setCheckState(QtCore.Qt.Unchecked)
             t.setItem(r, 0, chk)
-            std = (x["standing"] * x["weight"] / x["full"]
-                   if x["full"] > 0 else x["weight"])
-            vals = [x["wo_no"], str(x["pieces"] or "—"), tk.w(x["weight"]),
-                    tk.w(x["left"]), tk.w(std), x["model_no"] or "—"]
+            vals = [x["wo_no"], str(x["pieces"] or "—"),
+                    tk.wk(x["weight"], k), tk.wk(x["left"], k), str(k),
+                    x["model_no"] or "—"]
             for c, v in enumerate(vals, 1):
                 t.setItem(r, c, text_item(v) if c in (1, 6) else num_item(v))
             sp = tk.wspin()
-            sp.setMaximum(max(kv.g(x["left"]), 0))
+            sp.setMaximum(max(kv.g(x["left"], k), 0))
             sp.setEnabled(x["left"] > 0.0005)
             sp.valueChanged.connect(lambda _v, i=r: self._spin_moved(i))
             t.setCellWidget(r, 7, sp)
@@ -567,13 +714,17 @@ class SetsCreditTab(QtWidgets.QWidget):
         tk.fix_rows(t, 6)
         self._recalc()
 
+    @staticmethod
+    def _kx(x):
+        return int(x["karat"] or kv.active())
+
     def _checked(self, item):
         if item.column() != 0 or item.row() >= len(self._spins):
             return
         x, sp = self._rows[item.row()], self._spins[item.row()]
         on = item.checkState() == QtCore.Qt.Checked
         sp.blockSignals(True)
-        sp.setValue(kv.g(x["left"]) if on else 0)
+        sp.setValue(kv.g(x["left"], self._kx(x)) if on else 0)
         sp.blockSignals(False)
         self._recalc()
 
@@ -598,8 +749,9 @@ class SetsCreditTab(QtWidgets.QWidget):
             v = sp.value()
             if v <= 0:
                 continue
-            w18 = (x["left"] if abs(v - kv.g(x["left"])) <= 0.0051
-                   else kv.store(v))
+            k = self._kx(x)
+            w18 = (x["left"] if abs(v - kv.g(x["left"], k)) <= 0.0051
+                   else kv.store(v, k))
             out.append({"item_id": x["item_id"], "weight": w18})
         return out
 
@@ -631,7 +783,7 @@ class SetsCreditTab(QtWidgets.QWidget):
         try:
             iid = self.inv.currentData()
             if iid is None:
-                raise ValueError("اختر الفاتورة الضريبية الأصلية")
+                raise ValueError("اختر الفاتورة الأصلية")
             reason = self.reason.currentText().strip()
             if not reason:
                 raise ValueError("اكتب سبب الإشعار الدائن (إلزامي)")
@@ -639,38 +791,39 @@ class SetsCreditTab(QtWidgets.QWidget):
             if not rets:
                 raise ValueError("حدّد طقماً واحداً على الأقل للإرجاع")
             T = self.totals
+            pm = self._orig.get("pay_mode") or "credit"
             if not confirm_post(
                     self, f"مرتجع مبيعات (إشعار دائن) على "
-                          f"{self._orig['invoice_no']}\n{len(rets)} طقم — "
+                          f"{self._orig['invoice_no']} — "
+                          f"{_buyer_label(self._orig)}\n{len(rets)} طقم — "
                           f"الإجمالي {T.text(T.c_total)} ريال — السبب: "
-                          f"{reason}\nتعود الأطقم للخزنة.", self.date):
+                          f"{reason}\nتعود الأطقم للخزنة"
+                          + (f"، ويُردّ المبلغ {tx.PAY_LABEL[pm]}."
+                             if pm != "credit" else "."), self.date):
                 return
             with db() as conn:
                 res = tx.create_credit_note(conn, iid, dstr(self.date), rets,
                                             reason, self.user["username"])
+            ref = self._orig["invoice_no"]
             self.reason.setCurrentIndex(-1)
             self.reason.clearEditText()
             self.reload()
-            posted(self, f"تم ترحيل مرتجع المبيعات {res['invoice_no']} على "
-                         f"{self._label_no(iid)} — الإجمالي "
-                         f"{tk.m(res['grand_total'])} ريال",
-                   "invoice", res["id"])
+            msg = (f"تم ترحيل مرتجع المبيعات {res['invoice_no']} على {ref}"
+                   f" — الإجمالي {tk.m(res['grand_total'])} ريال")
+            if res.get("voucher_no"):
+                msg += (f"\nرُدَّ {tk.m(res['paid'])} ريال بسند الصرف "
+                        f"{res['voucher_no']}")
+            posted(self, msg, "invoice", res["id"])
         except Exception as e:
             err(self, e)
 
-    @staticmethod
-    def _label_no(iid):
-        with db(readonly=True) as conn:
-            r = conn.execute("SELECT invoice_no FROM invoices WHERE id=?",
-                             (iid,)).fetchone()
-        return r[0] if r else ""
-
 
 class SetsRegisterTab(QtWidgets.QWidget):
-    """سجل الفواتير الضريبية بالأطقم ومرتجعاتها."""
+    """سجل الفواتير الضريبية والمبسطة بالأطقم ومرتجعاتها."""
 
-    COLS = ["", "الرقم", "النوع", "التاريخ", "العميل", "التسعير", "الوزن",
-            "قيمة الذهب", "المصنعية", "الضريبة", "الإجمالي", "على الفاتورة"]
+    COLS = ["", "الرقم", "المستند", "النوع", "التاريخ", "المشتري",
+            "التسعير", "الدفع", "الوزن", "الصافي", "الضريبة", "الإجمالي",
+            "على الفاتورة"]
 
     def __init__(self, user):
         super().__init__()
@@ -681,17 +834,22 @@ class SetsRegisterTab(QtWidgets.QWidget):
         self.d1.setDate(QtCore.QDate(today.year(), today.month(), 1))
         self.d2 = date_edit()
         self.q = kit.LineEdit()
-        self.q.setPlaceholderText("رقم الفاتورة أو العميل أو رقم التشغيل…")
+        self.q.setPlaceholderText("رقم الفاتورة أو المشتري أو جواله أو رقم "
+                                  "التشغيل…")
         self.q.returnPressed.connect(self.reload)
         self.kind = kit.ComboBox()
-        self.kind.addItem("الكل", None)
+        self.kind.addItem("فواتير ومرتجعات", None)
         for k, lbl in KIND_LABEL.items():
             self.kind.addItem(lbl, k)
+        self.sub = kit.ComboBox()
+        self.sub.addItem("ضريبية ومبسطة", None)
+        for k, lbl in SUB_SHORT.items():
+            self.sub.addItem(lbl, k)
         b = kit.PushButton("عرض")
         b.clicked.connect(self.reload)
         top = QtWidgets.QHBoxLayout()
         for lbl, wd in (("من:", self.d1), ("إلى:", self.d2),
-                        ("النوع:", self.kind)):
+                        ("المستند:", self.kind), ("النوع:", self.sub)):
             top.addWidget(QtWidgets.QLabel(lbl))
             top.addWidget(wd)
         top.addWidget(self.q, 1)
@@ -704,7 +862,7 @@ class SetsRegisterTab(QtWidgets.QWidget):
         self.tbl = make_table()
         self.tbl.setColumnCount(len(self.COLS))
         self.tbl.setHorizontalHeaderLabels(self.COLS)
-        fit_columns(self.tbl, [5, 9, 9, 8, 14, 11, 7, 8, 8, 7, 8, 8])
+        fit_columns(self.tbl, [5, 9, 10, 7, 8, 14, 10, 7, 7, 8, 7, 8, 8])
         self.tbl.doubleClicked.connect(guard_click(
             lambda ix: self._preview(ix.row())))
         lay = QtWidgets.QVBoxLayout(self)
@@ -716,25 +874,29 @@ class SetsRegisterTab(QtWidgets.QWidget):
         a, b = dstr(self.d1), dstr(self.d2)
         with db(readonly=True) as conn:
             rows = tx.search(conn, self.q.text().strip(), a, b,
-                             self.kind.currentData())
+                             self.kind.currentData(),
+                             subtype=self.sub.currentData())
             tot = tx.totals(conn, a, b)
         self._rows = rows
         t = self.tbl
+        t.setRowCount(0)
         t.setRowCount(len(rows))
         red = QtGui.QBrush(QtGui.QColor("#a4262c"))
         for r, s in enumerate(rows):
             ret = s["kind"] == "sale_return"
-            riyal = s["pricing"] in tx.RIYAL
+            net = float(s["total_wages"] or 0) + float(s["gold_value"] or 0)
             vals = [s["invoice_no"], KIND_LABEL.get(s["kind"], s["kind"]),
-                    s["invoice_date"], s["customer_name"],
-                    tx.PRICING_LABEL.get(s["pricing"], ""),
-                    tk.w(s["total_weight"]),
-                    tk.m(s["gold_value"]) if riyal else "—",
-                    tk.m(s["total_wages"]), tk.m(s["vat_amount"]),
-                    tk.m(s["grand_total"]), s["ref_no"] or "—"]
+                    SUB_SHORT.get(s.get("tax_subtype") or "", "—"),
+                    s["invoice_date"], _buyer_label(s),
+                    tx.PRICING_LABEL.get(s["pricing"], "").split(" — ")[0],
+                    tx.PAY_LABEL.get(s.get("pay_mode") or "", "—")
+                    .split(" — ")[0],
+                    tk.w(s["total_weight"]), tk.m(net),
+                    tk.m(s["vat_amount"]), tk.m(s["grand_total"]),
+                    s["ref_no"] or "—"]
             for c, v in enumerate(vals, 1):
-                it = num_item(v) if 6 <= c <= 10 else text_item(v)
-                if ret and (6 <= c <= 10 or c == 2):
+                it = num_item(v) if 8 <= c <= 11 else text_item(v)
+                if ret and (8 <= c <= 11 or c == 2):
                     it.setForeground(red)
                 t.setItem(r, c, it)
         row_action_buttons(t, len(rows), self._preview, None,

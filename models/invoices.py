@@ -624,9 +624,12 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     if tx:
         conn.execute(
             "UPDATE invoices SET pricing=?, gold_price=?, price_karat=?,"
-            " gold_value=?, ref_invoice_id=?, tax_reason=? WHERE id=?",
+            " gold_value=?, ref_invoice_id=?, tax_reason=?, tax_subtype=?,"
+            " buyer_name=?, buyer_phone=?, pay_mode=? WHERE id=?",
             (tx["pricing"], tx["gold_price"], tx["price_karat"], gold_value,
-             tx.get("ref_invoice_id"), tx.get("reason") or "", inv_id))
+             tx.get("ref_invoice_id"), tx.get("reason") or "",
+             tx.get("subtype") or "", tx.get("buyer_name") or "",
+             tx.get("buyer_phone") or "", tx.get("pay_mode") or "", inv_id))
     inv_no = _numbering.next_no(conn, prefix)
     entry_id = post_entry(conn, invoice_date, f"{desc} — {inv_no}", lines,
                           source_table="invoices", source_id=inv_id,

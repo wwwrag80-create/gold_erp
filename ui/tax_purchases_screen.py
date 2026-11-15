@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """شاشة المشتريات الضريبية (5.5) — شراء أطقمٍ بفاتورةٍ ضريبية تدخل الخزنة.
 
-كشاشة المبيعات الضريبية تماماً: رقم التشغيل ← العدد ← الوزن المقيد ←
-الوزن القائم ← الأجر (أو سعر الطقم)، والتسعير يُختار في كل فاتورة. والمحاسبة
+كشاشة المبيعات الضريبية تماماً: رقم التشغيل ← العدد ← الوزن ← العيار ←
+الأجر (أو سعر الطقم)، والتسعير يُختار في كل فاتورة. الوزن وزن الذهب
+المقيد وحده بعيار السطر (5.5.1). والمحاسبة
 في `models.set_purchases`:
 
 * الأطقم تدخل الخزنة ببطاقاتها (والرقمان التجميعيان إلى حساب الإيطالي).
@@ -38,9 +39,8 @@ def _parties(conn):
 
 
 class PurchaseInvoiceTab(QtWidgets.QWidget):
-    COLS = ["", "م", "رقم التشغيل", "العدد", "الوزن المقيد", "الوزن القائم",
-            "الموديل", "العيار", "الأجر/جم", "قيمة الذهب", "المصنعية",
-            "الصافي"]
+    COLS = ["", "م", "رقم التشغيل", "العدد", "الوزن", "العيار", "الموديل",
+            "الأجر/جم", "قيمة الذهب", "المصنعية", "الصافي"]
 
     def __init__(self, user):
         super().__init__()
@@ -104,16 +104,12 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
         self.e_pieces.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.e_pieces.setAlignment(QtCore.Qt.AlignCenter)
         self.e_reg = tk.wspin()
+        self.e_reg.setToolTip("وزن الذهب المقيد كما في فاتورة المورد — "
+                              "بالعيار المختار بجانبه")
         self.e_reg.valueChanged.connect(self._line_changed)
-        self.e_std = tk.wspin()
-        self.e_std.setToolTip("الوزن القائم بالأحجار — فارغاً = المقيد")
         self.e_model = kit.LineEdit()
         self.e_model.setPlaceholderText("اختياري")
-        self.e_karat = kit.ComboBox()
-        for k in tk.KARATS:
-            self.e_karat.addItem(f"عيار {k}", k)
-        i = self.e_karat.findData(int(kv.active()))
-        self.e_karat.setCurrentIndex(i if i >= 0 else 0)
+        self.e_karat = tk.karat_combo()
         self.e_karat.currentIndexChanged.connect(self._rate_typed)
         self.e_rate = mspin()
         self.e_rate.valueChanged.connect(self._rate_typed)
@@ -123,10 +119,9 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
         self.btn_add = kit.PushButton("+ إضافة سطر")
         self.btn_add.clicked.connect(self.add_item)
         fields = [("رقم التشغيل", self.e_wo, 3), ("العدد", self.e_pieces, 1),
-                  ("الوزن المقيد", self.e_reg, 2),
-                  ("الوزن القائم", self.e_std, 2),
-                  ("الموديل", self.e_model, 2), ("العيار", self.e_karat, 2),
-                  (None, self.e_rate, 2), ("صافي السطر", self.e_net, 2)]
+                  ("الوزن", self.e_reg, 2), ("العيار", self.e_karat, 2),
+                  ("الموديل", self.e_model, 2), (None, self.e_rate, 2),
+                  ("صافي السطر", self.e_net, 2)]
         g = QtWidgets.QGridLayout(box)
         g.setHorizontalSpacing(6)
         for c, (label, wd, st) in enumerate(fields):
@@ -135,8 +130,8 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
             g.addWidget(wd, 1, c)
             g.setColumnStretch(c, st)
         g.addWidget(self.btn_add, 1, len(fields))
-        enter_chain(self, [self.e_wo, self.e_pieces, self.e_reg, self.e_std,
-                           self.e_model, self.e_karat, self.e_rate],
+        enter_chain(self, [self.e_wo, self.e_pieces, self.e_reg, self.e_karat,
+                           self.e_model, self.e_rate],
                     on_last=lambda: self.e_wo if self.add_item() else False,
                     require={self.e_wo: lambda: bool(
                         self.e_wo.text().strip())})
@@ -175,7 +170,7 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
         piece = self.pricing.is_piece()
         self.l_rate.setText("سعر الطقم (ريال)" if piece else "الأجر/جم")
         hdr = list(self.COLS)
-        hdr[8] = "سعر الطقم" if piece else "الأجر/جم"
+        hdr[7] = "سعر الطقم" if piece else "الأجر/جم"
         self.tbl.setHorizontalHeaderLabels(hdr)
         self._rate_typed()
         self._render()
@@ -219,7 +214,7 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
         self.e_model.clear()
         self.e_net.clear()
         self.e_pieces.setValue(1)
-        for s in (self.e_reg, self.e_std, self.e_rate):
+        for s in (self.e_reg, self.e_rate):
             s.blockSignals(True)
             s.setValue(0)
             s.blockSignals(False)
@@ -239,11 +234,7 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
                                          " من قبل — لكل طقمٍ رقمه")
             reg = self._w18(self.e_reg)
             if reg <= 0:
-                raise ValueError("اكتب الوزن المقيد")
-            std = self._w18(self.e_std) if self.e_std.value() > 0 else reg
-            if std + 0.0005 < reg:
-                raise ValueError("الوزن القائم أقل من المقيد — القائم يشمل"
-                                 " الأحجار")
+                raise ValueError("اكتب الوزن")
             if self.pricing.is_piece() and self.e_rate.value() <= 0:
                 raise ValueError("اكتب سعر الطقم بالريال")
         except ValueError as e:
@@ -251,7 +242,7 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
             return False
         self.items.append({
             "wo_no": no, "pieces": self.e_pieces.value(), "reg18": reg,
-            "std18": std, "model": self.e_model.text().strip(),
+            "model": self.e_model.text().strip(),
             "karat": self._k(), "wage18": self._wage18,
             "piece_price": (self.e_rate.value() if self.pricing.is_piece()
                             else 0.0)})
@@ -270,13 +261,9 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
         it = self.items.pop(r)
         self.e_wo.setText(it["wo_no"])
         self.e_pieces.setValue(int(it["pieces"]))
-        i = self.e_karat.findData(int(it["karat"]))
-        self.e_karat.blockSignals(True)
-        self.e_karat.setCurrentIndex(i if i >= 0 else 0)
-        self.e_karat.blockSignals(False)
+        tk.set_karat(self.e_karat, it["karat"])
         self.e_model.setText(it["model"])
         for s, v in ((self.e_reg, kv.g(it["reg18"], it["karat"])),
-                     (self.e_std, kv.g(it["std18"], it["karat"])),
                      (self.e_rate, it["piece_price"] if self.pricing.is_piece()
                       else kv.rate(it["wage18"], it["karat"]))):
             s.blockSignals(True)
@@ -310,15 +297,14 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
             npcs += int(it["pieces"])
             k = it["karat"]
             vals = [r + 1, it["wo_no"], str(it["pieces"]),
-                    tk.m(kv.g(it["reg18"], k)), tk.m(kv.g(it["std18"], k)),
-                    it["model"] or "—", str(k),
+                    tk.wk(it["reg18"], k), str(k), it["model"] or "—",
                     tk.m(it["piece_price"]) if piece
                     else tk.m(kv.rate(it["wage18"], k)),
                     tk.m(gv) if riyal else "—", tk.m(wg),
                     tk.m(net) if not why else "—"]
             for c, v in enumerate(vals, 1):
                 cell = text_item(v) if c in (2, 6) else num_item(v)
-                if why and c == 11:
+                if why and c == 10:
                     cell.setForeground(red)
                     cell.setToolTip(why)
                 t.setItem(r, c, cell)
@@ -371,7 +357,7 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
             v = self.pricing.values()
             lines = [{"wo_no": it["wo_no"], "model_no": it["model"],
                       "pieces": it["pieces"], "registered": it["reg18"],
-                      "standing": it["std18"], "karat": it["karat"],
+                      "standing": it["reg18"], "karat": it["karat"],
                       "wage": it["wage18"], "piece_price": it["piece_price"]}
                      for it in self.items]
             with db() as conn:
@@ -398,8 +384,8 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
 
 
 class PurchaseReturnTab(QtWidgets.QWidget):
-    COLS = ["", "رقم التشغيل", "العدد", "الوزن المقيد", "الوزن القائم",
-            "الموديل", "الحالة", "المرتجع", "صافي المرتجع"]
+    COLS = ["", "رقم التشغيل", "العدد", "الوزن", "العيار", "الموديل",
+            "الحالة", "المرتجع", "صافي المرتجع"]
 
     def __init__(self, user):
         super().__init__()
@@ -484,15 +470,15 @@ class PurchaseReturnTab(QtWidgets.QWidget):
                          else QtCore.Qt.NoItemFlags)
             chk.setCheckState(QtCore.Qt.Unchecked)
             t.setItem(r, 0, chk)
+            k = int(x["karat"] or kv.active())
             vals = [x["wo_no"], str(x["pieces"] or "—"),
-                    tk.w(x["registered"]), tk.w(x["standing"]),
-                    x["model_no"] or "—",
+                    tk.wk(x["registered"], k), str(k), x["model_no"] or "—",
                     x["why"] or ("في الخزنة — يُرجع" if ok else "—")]
             for c, v in enumerate(vals, 1):
                 t.setItem(r, c, text_item(v) if c in (1, 5, 6)
                           else num_item(v))
             s = tk.wspin()
-            s.setMaximum(max(kv.g(x["left"]), 0))
+            s.setMaximum(max(kv.g(x["left"], k), 0))
             # الطقم المفرد يُرجع كاملاً — والتجميعي بوزنٍ يُكتب
             s.setEnabled(ok and x["bulk"])
             s.valueChanged.connect(lambda _v, i=r: self._recalc())
@@ -508,8 +494,9 @@ class PurchaseReturnTab(QtWidgets.QWidget):
             return
         x, s = self._rows[item.row()], self._spins[item.row()]
         s.blockSignals(True)
-        s.setValue(kv.g(x["left"]) if item.checkState() == QtCore.Qt.Checked
-                   else 0)
+        k = int(x["karat"] or kv.active())
+        s.setValue(kv.g(x["left"], k)
+                   if item.checkState() == QtCore.Qt.Checked else 0)
         s.blockSignals(False)
         self._recalc()
 
@@ -523,8 +510,9 @@ class PurchaseReturnTab(QtWidgets.QWidget):
                 v = s.value()
                 if v <= 0:
                     continue
-                w18 = (x["left"] if abs(v - kv.g(x["left"])) <= 0.0051
-                       else kv.store(v))
+                k = int(x["karat"] or kv.active())
+                w18 = (x["left"] if abs(v - kv.g(x["left"], k)) <= 0.0051
+                       else kv.store(v, k))
                 out.append({"line_id": x["line_id"], "weight": w18})
             else:
                 out.append({"line_id": x["line_id"], "weight": None})

@@ -244,6 +244,79 @@ with db() as c:
     fixed = wo_moves.resync(c, None, "t")
     check("لا تصحيح يلزم — الحالات متّسقة", not fixed, fixed)
 
+print("── 12) نوع الفاتورة (5.5.1): ضريبية لمنشأة · مبسطة لفرد · عميل نقدي")
+with db() as c:
+    ind = add_entity(c, "فرد بلا رقم", "customer", username="t")
+    r9 = sp.create_purchase(c, sup, D, "SUP-9", [
+        {"wo_no": "T901", "pieces": 1, "registered": 6, "wage": 10},
+        {"wo_no": "T902", "pieces": 1, "registered": 4, "wage": 10}], "t")
+    ids9 = {r["work_order_no"]: r["id"] for r in c.execute(
+        "SELECT id, work_order_no FROM work_orders WHERE work_order_no IN"
+        " ('T901','T902')")}
+    try:
+        ti.create_invoice(c, ind, [{"work_order_id": ids9["T901"]}], D, "t",
+                          "wage")
+        check("الضريبية لفردٍ بلا رقمٍ ضريبي تُرفض", False)
+    except ValueError as e:
+        check("الضريبية لفردٍ بلا رقمٍ ضريبي تُرفض وتدلّ على المبسطة",
+              "مبسطة" in str(e), str(e))
+    try:
+        ti.create_invoice(c, None, [{"work_order_id": ids9["T901"]}], D, "t",
+                          "wage", subtype="simplified", pay_mode="cash")
+        check("العميل النقدي بالأجر وحده يُرفض", False)
+    except ValueError as e:
+        check("العميل النقدي بالأجر وحده يُرفض (لا ذهب على حسابٍ بلا صاحب)",
+              "بالريال" in str(e), str(e))
+    try:
+        ti.create_invoice(c, None, [{"work_order_id": ids9["T901"]}], D, "t",
+                          "piece", 300, 18, subtype="simplified")
+        check("العميل النقدي آجلاً يُرفض", False)
+    except ValueError as e:
+        check("العميل النقدي لا يُباع آجلاً", "نقداً" in str(e), str(e))
+    box0 = bal(c, "1400")[1]
+    w9 = ti.create_invoice(c, None, [{"work_order_id": ids9["T901"],
+                                      "piece_price": 2300, "pieces": 1}],
+                           D, "t", "piece", 300, 18, subtype="simplified",
+                           buyer_name="محمد", buyer_phone="0555",
+                           pay_mode="cash")
+    row = c.execute("SELECT tax_subtype, buyer_name, buyer_phone, pay_mode,"
+                    " pay_voucher_id FROM invoices WHERE id=?",
+                    (w9["id"],)).fetchone()
+    check("المبسطة لعميلٍ نقدي: النوع والاسم والجوال والدفع على الفاتورة",
+          tuple(row)[:4] == ("simplified", "محمد", "0555", "cash")
+          and row[4], tuple(row))
+    wk = ti.walkin_customer(c, False)
+    check("سند قبضٍ تلقائي: الصندوق +2645 وحساب العميل النقدي صفر",
+          round(bal(c, "1400")[1] - box0, 2) == 2645.0
+          and ent_bal(c, wk) == (0.0, 0.0), (bal(c, "1400"), ent_bal(c, wk)))
+    from services.fatoora import ledger as _fl
+    doc = _fl.build_doc(c, w9["id"])
+    check("المستند الإلكتروني: مبسطة باسم المشتري المكتوب",
+          doc["subtype"] == "simplified" and doc["buyer"]["name"] == "محمد",
+          (doc["subtype"], doc["buyer"]))
+    cn9 = ti.create_credit_note(c, w9["id"], D, [{"item_id": ti.returnable(
+        c, w9["id"])[0]["item_id"]}], "مرتجع", "t")
+    rr9 = c.execute("SELECT tax_subtype, buyer_name, pay_mode FROM invoices"
+                    " WHERE id=?", (cn9["id"],)).fetchone()
+    check("الإشعار يرث النوع والمشتري ويُردّ نقداً بسند صرف",
+          tuple(rr9) == ("simplified", "محمد", "cash")
+          and cn9.get("voucher_no") and round(bal(c, "1400")[1] - box0, 2)
+          == 0.0 and ent_bal(c, wk) == (0.0, 0.0),
+          (tuple(rr9), bal(c, "1400"), ent_bal(c, wk)))
+    s9 = ti.create_invoice(c, ind, [{"work_order_id": ids9["T902"],
+                                     "wage_override": 15, "pieces": 1}],
+                           D, "t", "wage", subtype="simplified",
+                           pay_mode="bank")
+    bank = bal(c, "1500")[1]
+    check("مبسطة لفردٍ من الدليل بالشبكة: الأجور + الضريبة للبنك، والذهب "
+          "على حسابه وزناً", ent_bal(c, ind) == (4.0, 0.0)
+          and round(bank, 2) == round(4 * 15 * 1.15, 2),
+          (ent_bal(c, ind), bank))
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+    ok, p = guard_clean(c)
+    check("حارس المخزون", ok, p)
+    _ = (r9, s9)
+
 print()
 print(f"{len(OK)} ✔ · {len(BAD)} ✘")
 for b in BAD:

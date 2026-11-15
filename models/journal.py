@@ -102,8 +102,12 @@ def _doc_info(conn, src, sid, cache):
             label = "مرتجع" if r["kind"] == "sale_return" else "مبيعات"
             # 5.5: الفاتورة الضريبية بالأطقم وإشعارها الدائن (مرتجع مبيعات)
             if "pricing" in r.keys() and (r["pricing"] or ""):
+                simple = ("tax_subtype" in r.keys()
+                          and r["tax_subtype"] == "simplified")
                 label = ("مرتجع مبيعات (إشعار دائن)"
-                         if r["kind"] == "sale_return" else "مبيعات ضريبية")
+                         if r["kind"] == "sale_return" else
+                         "مبيعات ضريبية مبسطة" if simple
+                         else "مبيعات ضريبية")
     elif src == "set_purchases":
         r = conn.execute("SELECT kind FROM set_purchases WHERE id=?",
                          (sid,)).fetchone()

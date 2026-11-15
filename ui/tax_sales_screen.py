@@ -94,10 +94,12 @@ class NewCustomerDialog(QtWidgets.QDialog):
     """عميلٌ جديد برقمه الضريبي — رقمٌ صحيح يجعل فاتورته «ضريبية» لا
     «مبسطة»."""
 
-    def __init__(self, parent, username, etype="customer"):
+    def __init__(self, parent, username, etype="customer", require_vat=False):
         super().__init__(parent)
         self.username = username
         self.etype = etype
+        # 5.5.1: منشأةٌ لفاتورةٍ ضريبية (أو مورد) — رقمها الضريبي إلزامي
+        self.require_vat = bool(require_vat) or etype == "supplier"
         self.customer_id = None
         self.setWindowTitle("مورد جديد" if etype == "supplier"
                             else "عميل جديد")
@@ -106,8 +108,8 @@ class NewCustomerDialog(QtWidgets.QDialog):
         self.phone = kit.LineEdit()
         self.vat = kit.LineEdit()
         self.vat.setPlaceholderText(
-            "15 رقماً يبدأ بـ3 وينتهي بـ3" + (" — إلزامي للمورد"
-                                              if etype == "supplier" else ""))
+            "15 رقماً يبدأ بـ3 وينتهي بـ3"
+            + (" — إلزامي" if self.require_vat else " — أو اتركه للفرد"))
         self.address = kit.LineEdit()
         form = QtWidgets.QFormLayout(self)
         form.addRow("اسم المورد / الشركة:" if etype == "supplier"
@@ -125,6 +127,9 @@ class NewCustomerDialog(QtWidgets.QDialog):
             if not self.name.text().strip():
                 raise ValueError("أدخل الاسم")
             vat = self.vat.text().strip()
+            if self.require_vat and not vat:
+                raise ValueError("اكتب الرقم الضريبي — الفاتورة الضريبية "
+                                 "لمنشأةٍ برقمها")
             if vat and not pf.valid_vat(vat):
                 raise ValueError("الرقم الضريبي غير صحيح: 15 رقماً يبدأ "
                                  "بـ3 وينتهي بـ3 (أو اتركه فارغاً)")
@@ -1074,8 +1079,9 @@ class TaxSalesScreen(QtWidgets.QWidget):
         lay.addWidget(self.tabs, 1)
         self.refresh()
 
-    def _new_customer(self, parent):
-        dlg = NewCustomerDialog(parent, self.user["username"])
+    def _new_customer(self, parent, require_vat=False):
+        dlg = NewCustomerDialog(parent, self.user["username"],
+                                require_vat=require_vat)
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             return dlg.customer_id
         return None
