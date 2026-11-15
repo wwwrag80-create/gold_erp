@@ -698,41 +698,9 @@ def api(conn, rest, query):
 #  الرئيسية
 # ══════════════════════════════════════════════════════════════════
 
-def _kpis(conn):
-    from models import dash_panels as dp
-    from models import models_catalog as mc
-    rows = {r["code"]: r for r in dp.account_rows(conn, ["1200", "1400"])}
-    worked = rows.get("1200", {}).get("gold_balance", 0.0)
-    cash = rows.get("1400", {}).get("cash_balance", 0.0)
-    try:
-        ms = mc.list_models(conn)
-        n_in = sum(m["in_count"] for m in ms)
-        w_in = sum(m["in_weight"] for m in ms)
-    except Exception:
-        n_in, w_in = 0, 0.0
-    today = _today().isoformat()
-    n_today = conn.execute(
-        "SELECT COUNT(*) FROM journal_entries WHERE is_deleted=0 AND"
-        " entry_date=?", (today,)).fetchone()[0]
-    return worked, cash, n_in, w_in, n_today
-
-
 def home(conn, base, csrf):
-    u = _e(_unit())
-    worked, cash, n_in, w_in, n_today = _kpis(conn)
-    kpis = (f'<div class="kpis">'
-            f'<div class="kpi gold"><div class="k">{icon("boxes", 16)}'
-            f'رصيد الخزنة — الذهب المشغول</div><div class="v">{_w(worked)}'
-            f' <small>{u}</small></div></div>'
-            f'<div class="kpi"><div class="k">{icon("guide", 16)}المتاح '
-            f'للبيع</div><div class="v">{n_in} طقم</div><div class="s">'
-            f'{_w(w_in)} {u}</div></div>'
-            f'<div class="kpi"><div class="k">{icon("receipt", 16)}الصندوق '
-            f'النقدي</div><div class="v">{_m(cash)}</div><div class="s">'
-            f'ريال</div></div>'
-            f'<div class="kpi"><div class="k">{icon("day", 16)}عمليات اليوم'
-            f'</div><div class="v">{n_today}</div><div class="s">'
-            f'{_today().isoformat()}</div></div></div>')
+    # 5.6.3: بلا بطاقات الأرقام أعلى الرئيسية (الذهب المشغول · المتاح للبيع ·
+    # الصندوق النقدي · عمليات اليوم) — اللوحات وحدها
 
     def tile(key, title, sub, href, main=False, badge=""):
         return (f'<a class="tile{" main" if main else ""}" href="{_e(href)}">'
@@ -740,8 +708,8 @@ def home(conn, base, csrf):
                 + (f'<span class="n">{_e(badge)}</span>' if badge else "")
                 + '</a>')
     main = "".join((
-        tile("guide", "دليل الموديلات", "صور الموديلات · كم بالخزنة وعند من"
-             " · المتاح للبيع", _link(base, tab="guide"), True),
+        tile("guide", "دليل الموديلات", "صور الموديلات · كم بالخزنة وعند من",
+             _link(base, tab="guide"), True),
         tile("sets", "حركة الطقم", "ابحث برقم التشغيل أو بالوزن — تفصيل "
              "وزنه ودفعته وحركاته", _link(base, "/sets"), True),
         tile("boxes", "الصناديق", "أقسامك وحساباتها وأرصدتها — ذهباً "
@@ -765,7 +733,7 @@ def home(conn, base, csrf):
              _link(base, tab="pnl"))))
     inner = (f'<div class="ptitle"><h2>{icon("home", 22)}الرئيسية</h2>'
              f'<span class="hint">اختر لوحةً — كل الأرقام من جهاز المصنع '
-             f'لحظة الفتح</span></div>{kpis}'
+             f'لحظة الفتح</span></div>'
              f'<div class="tiles">{main}</div>'
              f'<div class="sect">المزيد</div><div class="tiles">{more}</div>')
     return frame(base, "home", "الرئيسية", inner, csrf)
