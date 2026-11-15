@@ -212,11 +212,11 @@ def nav_items(base):
     return [
         ("home", "الرئيسية", base, "home"),
         ("guide", "دليل الموديلات", _link(base, tab="guide"), "guide"),
-        ("sets", "حركة الطقم", _link(base, "/sets"), "sets"),
         ("boxes", "الصناديق", _link(base, "/boxes"), "boxes"),
         ("moves", "حركة المصنع", _link(base, "/moves"), "moves"),
         ("stmt", "كشف حساب", _link(base, "/stmt"), "stmt"),
         ("ops", "تسجيل عمليات", _link(base, "/ops"), "ops"),
+        ("sets", "حركة الطقم", _link(base, "/sets"), "sets"),
         ("received", "الوارد بتاريخ", _link(base, tab="received"),
          "received"),
         ("customers", "العملاء", _link(base, tab="customers"),
@@ -710,8 +710,6 @@ def home(conn, base, csrf):
     main = "".join((
         tile("guide", "دليل الموديلات", "صور الموديلات · كم بالخزنة وعند من",
              _link(base, tab="guide"), True),
-        tile("sets", "حركة الطقم", "ابحث برقم التشغيل أو بالوزن — تفصيل "
-             "وزنه ودفعته وحركاته", _link(base, "/sets"), True),
         tile("boxes", "الصناديق", "أقسامك وحساباتها وأرصدتها — ذهباً "
              "ونقداً", _link(base, "/boxes"), True),
         tile("moves", "حركة المصنع", "الوارد · المبيعات · المرتجعات · القبض"
@@ -724,7 +722,10 @@ def home(conn, base, csrf):
         pnl = _mw()._pnl_title()
     except Exception:
         pnl = "الأرباح والخسائر"
+    # 5.6.4: «حركة الطقم» في «المزيد»
     more = "".join((
+        tile("sets", "حركة الطقم", "ابحث برقم التشغيل أو بالوزن — تفصيل "
+             "وزنه ودفعته وحركاته", _link(base, "/sets")),
         tile("received", "الوارد بتاريخ", "البضاعة الواردة بموديلاتها",
              _link(base, tab="received")),
         tile("customers", "العملاء — المبيعات والسداد",
