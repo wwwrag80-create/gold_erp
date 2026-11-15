@@ -75,6 +75,8 @@ def _mirror_lines(conn, entry_id, tag):
 
 def _reverse_invoice(conn, e, username, day):
     from models import invoices
+    from models import tax_invoices as _txg
+    _txg.guard(conn, e["source_id"], "عكس")
     inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
                        (e["source_id"],)).fetchone()
     if not inv:

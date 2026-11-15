@@ -73,6 +73,12 @@ jobs:
         # لا أنه يعمل فقط: توازن الدفتر في البعدين بعد كل خطوة.
         run: python tools/smoke_flow.py
 
+      - name: 4.5) المبيعات والمشتريات الضريبية بالأطقم · ملف الحساب (5.5)
+        run: |
+          python tools/check_tax_shop.py
+          python tools/check_account_profile.py
+          python tools/check_plans.py
+
       - name: 5) زمن الاستجابة على دفترٍ كبير — ui_stress
         # `verify_all` يثبت أن الشاشات تعمل ولا يقول شيئاً عن بطئها.
         # هذه الخطوة تبني دفتراً بحجم مصنعٍ يعمل منذ سنة، ثم تفتح كل

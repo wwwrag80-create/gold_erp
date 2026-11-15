@@ -1054,7 +1054,8 @@ def main():
                 "كشف حساب", "الوارد من التصنيع", "مبيعات/مرتجعات",
                 # 5.2.4: «المبيعات» — أطقم فواتير مختارة وأين صارت
                 "المبيعات",
-                "المبيعات الضريبية", "سندات قبض/صرف", "العملاء — المبيعات والسداد",
+                "المبيعات الضريبية", "المشتريات الضريبية",
+                "سندات قبض/صرف", "العملاء — المبيعات والسداد",
                 "مجموعات العملاء", "التسكيرات", "المشتريات",
                 "القيود اليومية", "تقارير مبيعات وإنتاج المصنع",
                 "التحليل والدراسات", "الإدارة والتقارير"]
@@ -1065,7 +1066,7 @@ def main():
                     if w1.sidebar.topLevelItem(i).text(0)
                     == "الإدارة والتقارير"), None)
         check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
-              grp is not None and grp.childCount() == len(base) - 16,
+              grp is not None and grp.childCount() == len(base) - 17,
               f"{grp.childCount() if grp else 0} بنداً")
         check("لا شاشة خارج الترتيب المعتمد",
               len(top) == len(want), str(top[len(want):]))
@@ -7454,7 +7455,7 @@ def main():
     try:
         from ui.mfg_costs_screen import MfgCostsScreen as _M82
         from ui.purchases_screen import PurchasesScreen as _P82
-        from ui.tax_sales_screen import TaxSalesScreen as _T82
+        from ui.tax_sales_screen import RepTaxPanel as _T82
         _src82 = open(os.path.join(ROOT, "ui", "mfg_costs_screen.py"),
                       encoding="utf-8").read()
         check("رواتب التصنيع: لا زرّ «حفظ» — حفظٌ تلقائي عند التنقّل"
@@ -9721,7 +9722,7 @@ def main():
           "auth_login2" in _sql119 and "auth_salt" in _sql119
           and "failed_logins" in _sql119
           and "NULL::TEXT, u.tenant_id" in _sql119
-          and _ca119.RPC_EXPECTED in ("3.0.0", "3.1.0")
+          and _ca119.RPC_EXPECTED in ("3.0.0", "3.1.0", "3.2.0")
           and "_secure_login" in _in119.getsource(_ca119.login))
     _sa119 = (Path(ROOT) / "ui" / "super_admin_screen.py").read_text(
         encoding="utf-8")
@@ -10776,6 +10777,108 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
+    # ══════════════════════════════════════════════════════════════
+    step("134) 5.5: مشتريات ومبيعات ضريبية بالأطقم · ملف الحساب")
+    from models import set_purchases as _sp134, tax_invoices as _ti134
+    from models.entities import add_entity as _ae134
+    from services import account_profile as _ap134, plan as _pl134
+    _d134 = date.today().isoformat()
+
+    def _led134(conn):
+        r = conn.execute(
+            "SELECT ROUND(SUM(gold_debit-gold_credit),3) g,"
+            " ROUND(SUM(cash_debit-cash_credit),2) c FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id"
+            " WHERE e.is_deleted=0").fetchone()
+        return abs(r["g"] or 0) < 1e-6 and abs(r["c"] or 0) < 1e-6
+
+    with db() as conn:
+        _s134 = _ae134(conn, "مورد ١٣٤", "supplier", "", "300000000000003",
+                       "admin")
+        _c134 = _ae134(conn, "عميل ١٣٤", "customer", username="admin")
+        _vin0 = conn.execute("SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0)"
+                             " FROM journal_lines l JOIN journal_entries e"
+                             " ON e.id=l.entry_id JOIN accounts a"
+                             " ON a.id=l.account_id WHERE e.is_deleted=0"
+                             " AND a.code='1900'").fetchone()[0]
+        _p134 = _sp134.create_purchase(
+            conn, _s134, _d134, "INV-134",
+            [{"wo_no": "SP134-1", "pieces": 2, "registered": 10,
+              "standing": 11, "piece_price": 4000},
+             {"wo_no": "SP134-2", "pieces": 1, "registered": 5,
+              "standing": 5, "piece_price": 2000}],
+            "admin", "piece", 300, 18)
+        check("شراء ضريبي بالقطعة: الضريبة على الإجمالي والأطقم في الخزنة",
+              abs(_p134["net"] - 6000) < 0.01 and abs(_p134["vat"] - 900) < 0.01
+              and conn.execute("SELECT COUNT(*) FROM work_orders WHERE"
+                               " work_order_no LIKE 'SP134-%' AND is_deleted=0"
+                               " AND status='in_stock'").fetchone()[0] == 2
+              and _led134(conn), str(_p134))
+        check("فاتورة المورد لا تُقيَّد مرتين", _raises(
+            lambda: _sp134.create_purchase(
+                conn, _s134, _d134, "INV-134",
+                [{"wo_no": "SP134-9", "registered": 1, "wage": 1}], "admin"),
+            "مسجّلة من قبل"))
+        _w134 = {r["work_order_no"]: r["id"] for r in conn.execute(
+            "SELECT id, work_order_no FROM work_orders WHERE"
+            " work_order_no LIKE 'SP134-%'")}
+        _inv134 = _ti134.create_invoice(
+            conn, _c134, [{"work_order_id": _w134["SP134-1"],
+                           "wage_override": 20, "pieces": 2}],
+            _d134, "admin", "gram", 320, 18)
+        check("بيع ضريبي (جرام + أجر): الوعاء = الذهب بالسعر + الأجور",
+              abs(_inv134["gold_value"] - 3200) < 0.01
+              and abs(_inv134["total_wages"] - 200) < 0.01
+              and abs(_inv134["vat"] - 510) < 0.01 and _led134(conn),
+              str({k: _inv134[k] for k in ("gold_value", "total_wages",
+                                           "vat")}))
+        check("الفاتورة الضريبية لا تُعدَّل — الإشعار الدائن طريقها",
+              _raises(lambda: _ti134.guard(conn, _inv134["id"]),
+                      "إشعاراً دائناً"))
+        _cn134 = _ti134.create_credit_note(
+            conn, _inv134["id"], _d134,
+            [{"item_id": _ti134.returnable(conn, _inv134["id"])[0]["item_id"]}],
+            "مرتجع", "admin")
+        check("الإشعار الدائن مرتجع مبيعات يشير لأصله ويعيد الطقم",
+              conn.execute("SELECT kind, ref_invoice_id FROM invoices"
+                           " WHERE id=?", (_cn134["id"],)).fetchone()[:]
+              == ("sale_return", _inv134["id"])
+              and conn.execute("SELECT status FROM work_orders WHERE id=?",
+                               (_w134["SP134-1"],)).fetchone()[0] == "in_stock"
+              and _led134(conn))
+        _pr134 = _sp134.create_return(
+            conn, _p134["id"], _d134,
+            [{"line_id": x["line_id"]} for x in
+             _sp134.returnable(conn, _p134["id"]) if not x["why"]],
+            "إرجاع", "admin")
+        _vin1 = conn.execute("SELECT COALESCE(SUM(l.cash_debit-l.cash_credit),0)"
+                             " FROM journal_lines l JOIN journal_entries e"
+                             " ON e.id=l.entry_id JOIN accounts a"
+                             " ON a.id=l.account_id WHERE e.is_deleted=0"
+                             " AND a.code='1900'").fetchone()[0]
+        check("مرتجع المشتريات يعكس ضريبة المدخلات كلها والأطقم تخرج",
+              _pr134["n"] == 2 and abs(_vin1 - _vin0) < 0.01
+              and conn.execute("SELECT COUNT(*) FROM work_orders WHERE"
+                               " work_order_no LIKE 'SP134-%' AND"
+                               " is_deleted=0").fetchone()[0] == 0
+              and _led134(conn), f"{_vin0} → {_vin1}")
+    check("ملف الحساب: قائمةٌ ناقصة تُكمَل في أماكنها لا في مجموعة المدير",
+          (lambda n: {k for k in _flat134(n)} >= set(_pl134.ALL_SCREENS)
+           and n[-1]["text"] == "الإدارة والتقارير")(
+              _ap134.complete_nodes([{"idx": 1, "key": "كشف حساب",
+                                      "text": "الكشف"}]))
+          and "المشتريات الضريبية" in _pl134.MAIN_SCREENS
+          and _pl134.FOLLOWS.get("المشتريات الضريبية") == "المبيعات الضريبية")
+    try:
+        from ui.tax_sets_sales import SetsInvoiceTab as _SI134
+        from ui.tax_purchases_screen import PurchaseInvoiceTab as _PI134
+        _o134 = ["رقم التشغيل", "العدد", "الوزن المقيد", "الوزن القائم"]
+        check("أعمدة الفاتورتين: رقم التشغيل ← العدد ← الوزن المقيد ← القائم",
+              [c for c in _SI134.COLS if c in _o134] == _o134
+              and [c for c in _PI134.COLS if c in _o134] == _o134)
+    except ImportError:
+        print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
+
     print("\n" + "═" * 50)
     print(f"نجح {len(PASS)} فحصاً · فشل {len(FAIL)}")
     if FAIL:
@@ -10784,6 +10887,21 @@ def main():
         return 1
     print("✔ دورة العمل الكاملة سليمة — الأرقام والضوابط صحيحة.")
     return 0
+
+
+def _raises(fn, needle=""):
+    try:
+        fn()
+    except Exception as e:  # noqa: BLE001
+        return needle in str(e)
+    return False
+
+
+def _flat134(nodes):
+    for n in nodes:
+        if not str(n.get("key", "")).startswith("::"):
+            yield n["key"]
+        yield from _flat134(n.get("children") or [])
 
 
 if __name__ == "__main__":

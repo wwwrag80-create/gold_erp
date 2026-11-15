@@ -141,6 +141,16 @@ class SuperAdminScreen(QtWidgets.QWidget):
         btn_plan.setToolTip("نوع النظام · الشاشات الظاهرة · آخر يوم في "
                             "الاشتراك · عدد الأجهزة — للحساب المحدَّد")
         btn_plan.clicked.connect(self.edit_plan)
+        # 5.5: تعديل أي حساب · وتجهيز قائمته وهويته قبل تسليمه
+        btn_edit = kit.PushButton("✎ تعديل الحساب")
+        btn_edit.setToolTip("الاسم الظاهر · اسم المصنع أو المحل · كلمة مرور "
+                            "جديدة — للحساب المحدَّد")
+        btn_edit.clicked.connect(self.edit_account)
+        btn_prof = kit.PushButton("☰ تجهيز القائمة والهوية")
+        btn_prof.setObjectName("homeBtn")
+        btn_prof.setToolTip("ترتيب شاشات الحساب وأسمائها وشاشاتٌ داخل شاشات "
+                            "· هوية المنشأة وشعارها — تصل جاهزةً عند دخوله")
+        btn_prof.clicked.connect(self.edit_profile)
         btn_del = kit.PushButton("🗑 حذف الحساب نهائياً")
         btn_del.setObjectName("ghost")
         btn_del.clicked.connect(self.delete_user)
@@ -168,6 +178,8 @@ class SuperAdminScreen(QtWidgets.QWidget):
         row2 = QtWidgets.QHBoxLayout()
         row2.addWidget(btn_load)
         row2.addWidget(btn_plan)
+        row2.addWidget(btn_prof)
+        row2.addWidget(btn_edit)
         row2.addWidget(btn_add)
         row2.addWidget(btn_toggle)
         row2.addWidget(btn_fac_stop)
@@ -333,6 +345,38 @@ class SuperAdminScreen(QtWidgets.QWidget):
             info(self, f"حُفظت خطة «{name}».\n\n{_plan_text(pv)}\n\n"
                        "تنطبق عند دخوله التالي.")
             self.load_users()
+        except Exception as e:
+            err(self, e)
+
+    def edit_account(self):
+        """تعديل أي حساب: الاسم · اسم المصنع · كلمة المرور (3.2.0)."""
+        try:
+            from ui.account_profile_dialog import EditAccountDialog
+            u = self._selected_user()
+            dlg = EditAccountDialog(self, u)
+            if dlg.exec_() == QtWidgets.QDialog.Accepted:
+                info(self, f"عُدِّل الحساب «{u.get('username')}».")
+                self.load_users()
+        except Exception as e:
+            err(self, e)
+
+    def edit_profile(self):
+        """ترتيب قائمة الحساب وأسماء شاشاته وهويته وشعاره (3.2.0)."""
+        try:
+            from ui.account_profile_dialog import AccountProfileDialog
+            u = self._selected_user()
+            if u.get("role") == "super_admin":
+                raise ValueError("المدير العام بلا ملف — اختر حساب مصنع أو "
+                                 "محل أو عميل")
+            tid = u.get("tenant_id")
+            cur = (getattr(self, "plans", {}) or {}).get(tid) or {}
+            # قائمةٌ فارغة في الخطة = كل الشاشات (كما في `plan.allowed`)
+            screens = cur.get("screens") or None
+            dlg = AccountProfileDialog.create(self, tid,
+                                              u.get("full_name") or tid,
+                                              screens=screens, user=self.user)
+            if dlg is not None:
+                dlg.exec_()
         except Exception as e:
             err(self, e)
 

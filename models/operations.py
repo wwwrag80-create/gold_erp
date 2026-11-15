@@ -123,6 +123,8 @@ def transfer_invoice(conn, invoice_id, new_entity_id, username, notes=""):
     """
     from services.fatoora import ledger as _fatoora
     _fatoora.guard_change(conn, "invoices", invoice_id, "نقل")
+    from models import tax_invoices as _txg
+    _txg.guard(conn, invoice_id, "نقل")
     inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
                        (invoice_id,)).fetchone()
     if not inv:
@@ -230,6 +232,8 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
     """
     from services.fatoora import ledger as _fatoora
     _fatoora.guard_change(conn, "invoices", invoice_id, "تعديل بنود")
+    from models import tax_invoices as _txg
+    _txg.guard(conn, invoice_id, "تعديل بنود")
     inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
                        (invoice_id,)).fetchone()
     if not inv:
@@ -277,6 +281,9 @@ def merge_check(conn, invoice_ids):
     ids = sorted({int(i) for i in invoice_ids if i})
     if len(ids) < 2:
         raise ValueError("اختر فاتورتين أو أكثر للدمج")
+    from models import tax_invoices as _txg
+    for _i in ids:
+        _txg.guard(conn, _i, "دمج")
     q = ",".join("?" * len(ids))
     invs = conn.execute(
         f"SELECT * FROM invoices WHERE id IN ({q}) AND is_deleted=0"
@@ -616,6 +623,8 @@ def flip_invoice_kind(conn, invoice_id, username, notes=""):
     """
     from services.fatoora import ledger as _fatoora
     _fatoora.guard_change(conn, "invoices", invoice_id, "عكس نوع")
+    from models import tax_invoices as _txg
+    _txg.guard(conn, invoice_id, "عكس نوع")
     inv = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0",
                        (invoice_id,)).fetchone()
     if not inv:

@@ -49,6 +49,7 @@ from ui.models_screen import ModelsScreen
 from ui.sales_analytics_screen import SalesAnalyticsScreen
 from ui.sales_screen import SalesScreen
 from ui.tax_sales_screen import TaxSalesScreen
+from ui.tax_purchases_screen import TaxPurchasesScreen
 from ui.workshop_accounts_screen import WorkshopAccountsScreen
 from ui.workshop_losses_screen import WorkshopLossesScreen
 from ui.stocktake_screen import StocktakeScreen
@@ -91,7 +92,7 @@ NAV_SUBS = {
 # تُلحق في ذيل القائمة بأسمائها الجديدة، ويبقى الترتيب القديم فوقها.
 # رفع هذا الرقم يُهمل المحفوظ مرةً واحدة فيظهر الترتيب الجديد كما هو،
 # ثم يُحفظ تخصيص المستخدم فوقه من جديد.
-NAV_VERSION = 13      # 4.46: «التحليل والدراسات» إلى القائمة الرئيسية
+from services.account_profile import NAV_VERSION  # noqa: E402 — 13: «التحليل والدراسات» (4.46)
 
 # ══ شاشاتٌ أُعيدت تسميتها — بلا إهمال ترتيب المستخدم ══
 # المفتاح القديم يُطابَق بالجديد، والاسم القديم المعروض يُستبدل —
@@ -139,6 +140,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.purchases_screen = Lazy(lambda: PurchasesScreen(user), "purchases_screen")
             self.tax_sales_screen = Lazy(lambda: TaxSalesScreen(user),
                                          "tax_sales_screen")
+            self.tax_purchases_screen = Lazy(
+                lambda: TaxPurchasesScreen(user), "tax_purchases_screen")
             self.journal_screen = Lazy(lambda: JournalScreen(user), "journal_screen")
             self.txlog_screen = Lazy(lambda: TransactionLogScreen(user), "txlog_screen")
             self.archive_screen = Lazy(lambda: DocumentArchiveScreen(
@@ -166,8 +169,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     # أين ذهبت (الخزنة أو مندوبٌ آخر)، وطباعتها بالصور
                     ("المبيعات", Lazy(lambda: SalesSetsScreen(user),
                                       "المبيعات")),
-                    # فواتير ضريبية بالريال — لا ذهب ولا مخزون
+                    # 5.5: فواتير ضريبية بالأطقم من الخزنة (ومرتجعها إشعار
+                    # دائن) — وشراء الأطقم بفاتورةٍ ضريبية تدخل الخزنة
                     ("المبيعات الضريبية", self.tax_sales_screen),
+                    ("المشتريات الضريبية", self.tax_purchases_screen),
                     ("سندات قبض/صرف", self.vouchers_screen),
                     # من يسدّد ومن يتأخّر — بعد البيع والقبض مباشرةً
                     ("العملاء — المبيعات والسداد", Lazy(
@@ -2010,6 +2015,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if target is None:
             err(self, "لا توجد شاشة تعديل لهذا النوع من المستندات")
             return
+        if source_table == "invoices":
+            # 5.5: الفاتورة الضريبية لا تُعدَّل — يُقال ذلك قبل فتحها لا
+            # بعد أن يعدّل المستخدم أسطرها ثم يُرفض حفظه
+            try:
+                from database.database import db as _db
+                from models import tax_invoices as _ti
+                with _db(readonly=True) as conn:
+                    _ti.guard(conn, source_id, "تعديل")
+            except ValueError as e:
+                err(self, e)
+                return
         screen, loader = target
         self._goto(screen)
         # التحميل مؤجَّل لدورة أحداث لاحقة: `_goto` يبني الشاشة ويجدول

@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""شاشة المبيعات الضريبية — فاتورةٌ باسم الشركة عن أطقمٍ أخذها المندوب.
+"""شاشة المبيعات الضريبية (5.5).
+
+التبويبات: فاتورة ضريبية بالأطقم من الخزنة · مرتجع مبيعات (إشعار دائن) ·
+السجل (`ui.tax_sets_sales`) — ثم «فواتير المندوب» للمصانع: فاتورةٌ باسم
+الشركة عن أطقمٍ أخذها المندوب (`RepTaxPanel` أدناه).
 
 الإدخال كشاشة «مبيعات/مرتجعات» تماماً: رقم الموديل · رقم التشغيل ·
 الوزن · الأجر — وEnter يُنزل السطر في الجدول. والفرق كلّه في المحاسبة:
@@ -90,19 +94,24 @@ class NewCustomerDialog(QtWidgets.QDialog):
     """عميلٌ جديد برقمه الضريبي — رقمٌ صحيح يجعل فاتورته «ضريبية» لا
     «مبسطة»."""
 
-    def __init__(self, parent, username):
+    def __init__(self, parent, username, etype="customer"):
         super().__init__(parent)
         self.username = username
+        self.etype = etype
         self.customer_id = None
-        self.setWindowTitle("عميل جديد")
+        self.setWindowTitle("مورد جديد" if etype == "supplier"
+                            else "عميل جديد")
         self.setMinimumWidth(460)
         self.name = kit.LineEdit()
         self.phone = kit.LineEdit()
         self.vat = kit.LineEdit()
-        self.vat.setPlaceholderText("15 رقماً يبدأ بـ3 وينتهي بـ3")
+        self.vat.setPlaceholderText(
+            "15 رقماً يبدأ بـ3 وينتهي بـ3" + (" — إلزامي للمورد"
+                                              if etype == "supplier" else ""))
         self.address = kit.LineEdit()
         form = QtWidgets.QFormLayout(self)
-        form.addRow("اسم العميل / الشركة:", self.name)
+        form.addRow("اسم المورد / الشركة:" if etype == "supplier"
+                    else "اسم العميل / الشركة:", self.name)
         form.addRow("الجوال:", self.phone)
         form.addRow("الرقم الضريبي:", self.vat)
         form.addRow("العنوان:", self.address)
@@ -121,7 +130,7 @@ class NewCustomerDialog(QtWidgets.QDialog):
                                  "بـ3 وينتهي بـ3 (أو اتركه فارغاً)")
             with db() as conn:
                 self.customer_id = entities.add_entity(
-                    conn, self.name.text().strip(), "customer",
+                    conn, self.name.text().strip(), self.etype,
                     self.phone.text().strip(), vat, self.username,
                     address=self.address.text().strip())
             self.accept()
@@ -189,7 +198,9 @@ class RepItemsDialog(QtWidgets.QDialog):
                 if self.t.item(r, 0).checkState()]
 
 
-class TaxSalesScreen(QtWidgets.QWidget):
+class RepTaxPanel(QtWidgets.QWidget):
+    """فاتورة الشركة عبر المندوب (بلا مخزون) — قسمٌ مستقل للمصانع."""
+
     def __init__(self, user):
         super().__init__()
         self.user = user
@@ -208,10 +219,21 @@ class TaxSalesScreen(QtWidgets.QWidget):
         self.tabs.addTab(self._build_register_tab(), "السجل")
         self.tabs.currentChanged.connect(lambda _i: self.refresh())
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(title_label("المبيعات الضريبية — فاتورة الشركة عبر "
-                                  "المندوب"))
+        lay.setContentsMargins(0, 0, 0, 0)
+        hint = QtWidgets.QLabel(
+            "فاتورةٌ باسم الشركة عن أطقمٍ بِيعت للمندوب من قبل — لا يتحرّك "
+            "بها مخزون، ولا يُضاف لحساب المندوب إلا الضريبة.")
+        hint.setObjectName("cardSub")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
         lay.addWidget(self.tabs, 1)
-        self.refresh()
+        self._loaded = False
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not self._loaded:
+            self._loaded = True
+            self.refresh()
 
     # ══════════════════════════ ① الأطراف ══════════════════════════
     def _build_invoice_tab(self):
@@ -1015,5 +1037,57 @@ class TaxSalesScreen(QtWidgets.QWidget):
                 self._dn_recalc()
             else:
                 self.refresh_register()
+        except Exception as e:                       # noqa: BLE001
+            err(self, e)
+
+
+def _show_rep_section():
+    """فواتير المندوب للمصانع (ولمن لا خطة له) — والمحل والعميل يبيعان من
+    خزنتهما بالفاتورة الضريبية بالأطقم."""
+    from services import plan
+    return plan.kind() in ("", plan.FACTORY)
+
+
+class TaxSalesScreen(QtWidgets.QWidget):
+    """المبيعات الضريبية: فاتورة بالأطقم · مرتجع مبيعات · السجل — وفواتير
+    المندوب قسمٌ مستقل للمصانع."""
+
+    def __init__(self, user):
+        super().__init__()
+        from ui.tax_sets_sales import (SetsCreditTab, SetsInvoiceTab,
+                                       SetsRegisterTab)
+        self.user = user
+        self.inv_tab = SetsInvoiceTab(user, new_customer=self._new_customer)
+        self.cn_tab = SetsCreditTab(user)
+        self.reg_tab = SetsRegisterTab(user)
+        self.tabs = tab_widget()
+        self.tabs.addTab(_scroll(self.inv_tab), "فاتورة ضريبية")
+        self.tabs.addTab(_scroll(self.cn_tab), "مرتجع مبيعات (إشعار دائن)")
+        self.tabs.addTab(self.reg_tab, "السجل")
+        self.rep = None
+        if _show_rep_section():
+            self.rep = RepTaxPanel(user)
+            self.tabs.addTab(self.rep, "فواتير المندوب")
+        self.tabs.currentChanged.connect(lambda _i: self.refresh())
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(title_label("المبيعات الضريبية"))
+        lay.addWidget(self.tabs, 1)
+        self.refresh()
+
+    def _new_customer(self, parent):
+        dlg = NewCustomerDialog(parent, self.user["username"])
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            return dlg.customer_id
+        return None
+
+    def refresh(self):
+        w = self.tabs.currentWidget()
+        if isinstance(w, QtWidgets.QScrollArea):
+            w = w.widget()
+        try:
+            if w is self.rep:
+                self.rep.refresh()
+            elif w is not None and hasattr(w, "reload"):
+                w.reload()
         except Exception as e:                       # noqa: BLE001
             err(self, e)

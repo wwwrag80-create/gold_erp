@@ -194,7 +194,7 @@ def _group(d):
         return "receipt" if op == "قبض" else "payment"
     if src == "work_orders":
         return "supply"
-    if src == "purchases":
+    if src in ("purchases", "set_purchases"):
         return "purchase"
     return "other"
 

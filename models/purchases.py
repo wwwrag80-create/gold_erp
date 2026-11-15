@@ -381,16 +381,45 @@ def _is_ret(r):
         return False
 
 
+def _set_purchase_rows(conn, date_from, date_to):
+    """فواتير المشتريات الضريبية بالأطقم ومرتجعاتها (5.5) بصيغة سطر السجل
+    — `src` يميّزها: معاينتها قالبها، ولا تُعدَّل من شاشة المشتريات."""
+    try:
+        from models import set_purchases as _sp
+        _sp.ensure_schema(conn)
+        got = conn.execute(
+            "SELECT p.*, e.name supplier_name, e.vat_number supplier_vat"
+            " FROM set_purchases p JOIN entities e ON e.id=p.supplier_id"
+            " WHERE p.is_deleted=0 AND p.doc_date BETWEEN ? AND ?",
+            (date_from, date_to)).fetchall()
+    except Exception:
+        return []
+    return [{"src": "set_purchases", "id": r["id"],
+             "purchase_no": r["doc_no"], "purchase_date": r["doc_date"],
+             "supplier_name": r["supplier_name"],
+             "supplier_vat": r["supplier_vat"],
+             "supplier_invoice_no": r["supplier_inv_no"],
+             "invoice_type": "standard", "pay_mode": "credit",
+             "tax_treatment": "standard", "amount": r["net"],
+             "vat_amount": r["vat"], "total": r["total"], "discount": 0.0,
+             "is_return": 1 if r["kind"] == "purchase_return" else 0,
+             "acc_code": "", "acc_name": "مشتريات أطقم"} for r in got]
+
+
 def vat_register(conn, date_from, date_to):
     """سجل المشتريات الضريبية للفترة — ما يُطلب عند الفحص الضريبي:
-    رقم فاتورة المورد ورقمه الضريبي والصافي والضريبة لكل فاتورة."""
-    rows = conn.execute(
+    رقم فاتورة المورد ورقمه الضريبي والصافي والضريبة لكل فاتورة.
+    (5.5) ومعها فواتير شراء الأطقم الضريبية ومرتجعاتها."""
+    rows = [dict(r) for r in conn.execute(
         "SELECT p.*, COALESCE(e.name, p.supplier) supplier_name,"
         " e.vat_number supplier_vat, a.code acc_code, a.name acc_name"
         " FROM purchases p LEFT JOIN entities e ON e.id=p.supplier_id"
         " LEFT JOIN accounts a ON a.id=p.account_id"
         " WHERE p.is_deleted=0 AND p.purchase_date BETWEEN ? AND ?"
-        " ORDER BY p.purchase_date, p.id", (date_from, date_to)).fetchall()
+        " ORDER BY p.purchase_date, p.id", (date_from, date_to))]
+    rows += _set_purchase_rows(conn, date_from, date_to)
+    rows.sort(key=lambda r: (str(r["purchase_date"] or ""),
+                             r.get("src") or "", r["id"]))
     tot = {"n": len(rows), "net": 0.0, "vat": 0.0, "claimed": 0.0,
            "total": 0.0, "discount": 0.0}
     by = {}

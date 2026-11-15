@@ -1,0 +1,306 @@
+# -*- coding: utf-8 -*-
+"""الفاتورة الضريبية بالأطقم (5.5) — بيعٌ ومرتجعٌ يحرّكان المخزون.
+
+**لماذا ليست في `tax_sales`**: تلك فاتورة الشركة عن أطقمٍ بيعت للمندوب من
+قبل (لا مخزون يتحرّك). أما المحلّ فيبيع من خزنته: الطقم يخرج بفاتورته
+الضريبية ويعود بإشعارها الدائن. فهذه الفواتير **فواتير بيعٍ حقيقية** في
+جدول الفواتير نفسه (`invoices`) — بها تبقى سلسلة حركة الطقم وحارس
+المخزون وكشوف الحسابات والفوترة الإلكترونية على حالها الصحيح — ويزيد
+عليها هنا: طريقة التسعير، وقيمة الذهب بالريال، ومرجع الإشعار الدائن.
+
+**طرق التسعير** (تُختار في كل فاتورة):
+  * ``wage``  الأجر فقط: الذهب يُقيَّد وزناً على الطرف، والأجور بالريال،
+              والضريبة على الأجور — كفاتورة البيع العادية تماماً.
+  * ``gram``  سعر الجرام + الأجر: الفاتورة كلها بالريال — قيمة الذهب
+              (الوزن × سعر الجرام) والأجور، والضريبة على الكل.
+  * ``piece`` سعر الطقم: مبلغ الطقم بالريال، والضريبة عليه كله. وسعر
+              الجرام يُكتب ليُفصل في الدفتر ما هو ذهبٌ عمّا هو مصنعية.
+
+**القيد بالريال كاملاً** (gram · piece) = بيعٌ وتسكيرٌ فوري في قيدٍ واحد:
+الذهب الخارج من الخزنة يُسلَّم وزناً إلى مركز التسكير 6100 (كما يفعل
+التسكير تماماً) ويقابله بالريال قيمته — فلا يبقى على العميل ذهبٌ،
+ويبقى ميزانا الذهب والنقد متوازنين كلٌّ وحده.
+
+**الإشعار الدائن** (مرتجع مبيعات) يشير إلى فاتورته الأصلية ويأخذ منها
+طريقتها وسعرها — فلا يُردّ للعميل أكثر مما دفع ولا بسعرٍ غير سعره،
+ولا يُرتجع من الطقم أكثر مما بيع منه بتلك الفاتورة.
+
+**ولا تعديل ولا نقل ولا عكس لفاتورةٍ ضريبية بعد إصدارها** — الإشعار
+الدائن وحده طريقها (`guard`)، كما تشترط الهيئة.
+"""
+import config
+from services import numfmt as _nf
+
+TAX_PRICING = (("wage", "الأجر فقط — الذهب بالوزن"),
+               ("gram", "سعر الجرام + الأجر — بالريال"),
+               ("piece", "سعر الطقم — بالريال"))
+PRICING_LABEL = dict(TAX_PRICING)
+RIYAL = ("gram", "piece")             # الفاتورة كلها بالريال
+BRIDGE = "6100"                       # مركز التسكير (ذهب ↔ نقد)
+
+
+# ══════════════════════════ المخطط ══════════════════════════
+def ensure_schema(conn):
+    """أعمدة الفاتورة الضريبية — تُضاف مرةً ولا تمسّ الفواتير القائمة."""
+    def _add(table, cols):
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if not have:
+            return
+        for col, ddl in cols:
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    # pricing: '' فاتورة بيعٍ عادية · wage/gram/piece فاتورة ضريبية بالأطقم
+    _add("invoices", (("pricing", "TEXT NOT NULL DEFAULT ''"),
+                      ("gold_price", "REAL NOT NULL DEFAULT 0"),
+                      ("price_karat", "INTEGER NOT NULL DEFAULT 0"),
+                      ("gold_value", "REAL NOT NULL DEFAULT 0"),
+                      ("ref_invoice_id", "INTEGER"),
+                      ("tax_reason", "TEXT NOT NULL DEFAULT ''")))
+    _add("invoice_items", (("gold_value", "REAL NOT NULL DEFAULT 0"),
+                           ("pieces", "INTEGER NOT NULL DEFAULT 0"),
+                           ("piece_price", "REAL NOT NULL DEFAULT 0"),
+                           ("src_item_id", "INTEGER")))
+    # عدد قطع الطقم (عقد · حلق · خاتم…) — يُكتب في الشراء ويُقترح في البيع
+    _add("work_orders", (("pieces", "INTEGER NOT NULL DEFAULT 0"),))
+
+
+def is_tax(conn, invoice_id):
+    """هل الفاتورة ضريبيةٌ صادرة من شاشة المبيعات الضريبية؟"""
+    try:
+        r = conn.execute("SELECT pricing FROM invoices WHERE id=?",
+                         (int(invoice_id),)).fetchone()
+    except Exception:
+        return False
+    return bool(r and (r["pricing"] or ""))
+
+
+def guard(conn, invoice_id, action="تعديل"):
+    """الفاتورة الضريبية لا تُعدَّل ولا تُنقل ولا تُعكس بعد إصدارها."""
+    if is_tax(conn, invoice_id):
+        raise ValueError(
+            f"لا يصح {action} فاتورةٍ ضريبية بعد إصدارها — هذا ما تشترطه "
+            "هيئة الزكاة والضريبة والجمارك.\n\nأصدر «إشعاراً دائناً» (مرتجع "
+            "مبيعات) من شاشة المبيعات الضريبية: يُرجع الأطقم ويعكس المبالغ "
+            "والضريبة ويشير إلى الفاتورة الأصلية.")
+
+
+# ══════════════════════════ الحساب ══════════════════════════
+def norm(tax):
+    """{pricing, gold_price, price_karat, ref_invoice_id, reason} مُتحقَّقاً."""
+    if not tax:
+        return None
+    p = str(tax.get("pricing") or "wage")
+    if p not in PRICING_LABEL:
+        raise ValueError("طريقة التسعير غير معروفة")
+    gp = round(float(tax.get("gold_price") or 0), 4)
+    if gp < 0:
+        raise ValueError("سعر الجرام لا يكون سالباً")
+    if p in RIYAL and gp <= 0:
+        raise ValueError("اكتب سعر جرام الذهب — به تُحسب قيمة الذهب بالريال"
+                         " وتُفصل عن المصنعية في الدفتر")
+    k = int(tax.get("price_karat") or 0)
+    if p in RIYAL and k not in (18, 21, 22, 24):
+        raise ValueError("عيار سعر الجرام غير معروف")
+    return {"pricing": p, "gold_price": gp if p in RIYAL else 0.0,
+            "price_karat": k if p in RIYAL else 0,
+            "ref_invoice_id": tax.get("ref_invoice_id"),
+            "reason": str(tax.get("reason") or "").strip()}
+
+
+def weight_in_karat(w18, karat):
+    """الوزن بمكافئ 18 ← وزنه بالعيار المطلوب (الذهب الخالص نفسه)."""
+    k = int(karat or 18)
+    return float(w18 or 0) * 18.0 / k
+
+
+def gold_value(w18, tx):
+    """قيمة ذهب السطر بالريال: وزنه بعيار السعر × سعر الجرام."""
+    if not tx or tx["pricing"] not in RIYAL:
+        return 0.0
+    return round(weight_in_karat(w18, tx["price_karat"]) * tx["gold_price"],
+                 2)
+
+
+def line_amounts(li, tx, wo_no=""):
+    """(الأجور، قيمة الذهب) لسطرٍ مُحلَّل — بطريقة تسعير الفاتورة."""
+    from services import gold_math
+    w = float(li["weight"] or 0)
+    gv = gold_value(w, tx)
+    if tx["pricing"] == "piece":
+        price = round(float(li.get("piece_price") or 0), 2)
+        if price <= 0:
+            raise ValueError(f"اكتب سعر الطقم {wo_no} بالريال")
+        wages = round(price - gv, 2)
+        if wages < -0.005:
+            raise ValueError(
+                f"سعر الطقم {wo_no} ({_nf.f2(price)}) أقل من قيمة ذهبه بسعر"
+                f" الجرام ({_nf.f2(gv)}) — راجع السعر أو سعر الجرام")
+        return max(0.0, wages), gv
+    return gold_math.total_wages(li["wage"], w), gv
+
+
+def doc_vat(net):
+    """ضريبة المستند على صافيه كلّه مقرّبةً مرةً واحدة — قاعدة الهيئة."""
+    from decimal import Decimal, ROUND_HALF_UP
+    v = Decimal(str(net)) * Decimal(str(config.VAT_RATE))
+    return float(v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+# ══════════════════════════ الإصدار ══════════════════════════
+def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
+                   gold_price=0.0, price_karat=0, description=""):
+    """فاتورة ضريبية بالأطقم: تخرج من الخزنة كفاتورة البيع تماماً.
+
+    `cart` = [{work_order_id, weight (18 — فارغ = الباقي كله),
+               wage_override (18), piece_price, pieces, note}]
+    """
+    from models import invoices as inv
+    from models.entities import get_entity
+    ensure_schema(conn)
+    ent = get_entity(conn, customer_id)
+    if not ent or ent["entity_type"] == "internal":
+        raise ValueError("اختر العميل أو الشركة من دليل جهات التعامل")
+    tax = {"pricing": pricing, "gold_price": gold_price,
+           "price_karat": price_karat}
+    return inv.create_sale(conn, customer_id, cart, doc_date, username,
+                           apply_vat=True, description=description,
+                           tax=tax)
+
+
+def returnable(conn, invoice_id):
+    """ما بقي من كل طقمٍ في الفاتورة الضريبية بعد إشعاراتها الدائنة.
+
+    [{item_id, work_order_id, wo_no, model_no, weight (المبيع), left,
+      pieces, wage, piece_price, gold_value, karat}]"""
+    ensure_schema(conn)
+    out = []
+    for it in conn.execute(
+            "SELECT it.*, w.work_order_no wo_no, w.model_no,"
+            " w.standing_gold, w.registered_weight full_w"
+            " FROM invoice_items it JOIN work_orders w"
+            " ON w.id=it.work_order_id WHERE it.invoice_id=?"
+            " ORDER BY it.id", (int(invoice_id),)):
+        used = conn.execute(
+            "SELECT COALESCE(SUM(r.registered_weight),0) FROM invoice_items r"
+            " JOIN invoices i ON i.id=r.invoice_id WHERE r.src_item_id=?"
+            " AND i.is_deleted=0 AND i.kind='sale_return'",
+            (it["id"],)).fetchone()[0]
+        left = round(float(it["registered_weight"] or 0) - float(used or 0),
+                     3)
+        out.append({"item_id": it["id"], "work_order_id": it["work_order_id"],
+                    "wo_no": it["wo_no"], "model_no": it["model_no"] or "",
+                    "weight": round(float(it["registered_weight"] or 0), 3),
+                    "left": max(0.0, left),
+                    "pieces": int(it["pieces"] or 0),
+                    "standing": float(it["standing_gold"] or 0),
+                    "full": float(it["full_w"] or 0),
+                    "wage": float(it["wage_per_gram"] or 0),
+                    "wages": float(it["wages"] or 0),
+                    "piece_price": float(it["piece_price"] or 0),
+                    "gold_value": float(it["gold_value"] or 0),
+                    "karat": int(it["karat"] or 0)})
+    return out
+
+
+def create_credit_note(conn, original_id, doc_date, returns, reason,
+                       username):
+    """إشعار دائن (مرتجع مبيعات) من فاتورةٍ ضريبية: `returns` =
+    [{item_id, weight (18 — فارغ = الباقي كله)}].
+
+    يعود كل طقمٍ إلى خزنته كمرتجع البيع تماماً، ويُردّ للعميل بسعر
+    الفاتورة نفسها وطريقتها — والمرتجع لا يتجاوز الباقي من كل سطر.
+    """
+    from models import invoices as inv
+    ensure_schema(conn)
+    o = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0"
+                     " AND kind='sale'", (int(original_id),)).fetchone()
+    if not o or not (o["pricing"] or ""):
+        raise ValueError("اختر فاتورةً ضريبية صادرة من شاشة المبيعات"
+                         " الضريبية")
+    if not str(reason or "").strip():
+        raise ValueError("اكتب سبب الإشعار الدائن — يُطبع عليه ويُرسل"
+                         " للهيئة")
+    if str(doc_date) < str(o["invoice_date"]):
+        raise ValueError("تاريخ الإشعار يسبق تاريخ الفاتورة الأصلية")
+    left = {r["item_id"]: r for r in returnable(conn, original_id)}
+    cart = []
+    for x in returns or []:
+        r = left.get(int(x.get("item_id") or 0))
+        if not r:
+            raise ValueError("سطرٌ ليس من أسطر الفاتورة الأصلية")
+        w = x.get("weight")
+        w = r["left"] if w in (None, "", 0) else round(float(w), 3)
+        if w <= 0 or r["left"] <= 0:
+            raise ValueError(f"الطقم {r['wo_no']} أُرجع كله من قبل")
+        if w > r["left"] + 0.0005:
+            raise ValueError(
+                f"الطقم {r['wo_no']}: المرتجع {_nf.f2(w)} أكبر من الباقي"
+                f" من بيعه بهذه الفاتورة ({_nf.f2(r['left'])})")
+        # السعر من سطر الأصل: سعر الطقم يُردّ بنسبة الوزن المرتجع
+        frac = (w / r["weight"]) if r["weight"] > 0 else 1.0
+        cart.append({"work_order_id": r["work_order_id"], "weight": w,
+                     "wage_override": r["wage"],
+                     "piece_price": round(r["piece_price"] * frac, 2),
+                     "pieces": r["pieces"] if frac >= 0.999 else 0,
+                     "src_item_id": r["item_id"], "karat": r["karat"]})
+    if not cart:
+        raise ValueError("اختر طقماً واحداً على الأقل للإرجاع")
+    tax = {"pricing": o["pricing"], "gold_price": o["gold_price"],
+           "price_karat": o["price_karat"], "ref_invoice_id": o["id"],
+           "reason": str(reason).strip()}
+    return inv.create_sale_return(conn, o["customer_id"], cart, doc_date,
+                                  username, apply_vat=True,
+                                  description=str(reason).strip(), tax=tax)
+
+
+def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500):
+    """سجل الفواتير والإشعارات الضريبية بالأطقم."""
+    ensure_schema(conn)
+    sql = ("SELECT i.*, e.name customer_name, o.invoice_no ref_no,"
+           " (SELECT COUNT(*) FROM invoice_items it WHERE"
+           "  it.invoice_id=i.id) n_items"
+           " FROM invoices i JOIN entities e ON e.id=i.customer_id"
+           " LEFT JOIN invoices o ON o.id=i.ref_invoice_id"
+           " WHERE i.is_deleted=0 AND COALESCE(i.pricing,'')<>''")
+    args = []
+    if kind:
+        sql += " AND i.kind=?"
+        args.append(kind)
+    if date_from:
+        sql += " AND i.invoice_date>=?"
+        args.append(date_from)
+    if date_to:
+        sql += " AND i.invoice_date<=?"
+        args.append(date_to)
+    if q:
+        sql += (" AND (i.invoice_no LIKE ? OR e.name LIKE ? OR EXISTS ("
+                "SELECT 1 FROM invoice_items it JOIN work_orders w"
+                " ON w.id=it.work_order_id WHERE it.invoice_id=i.id"
+                " AND w.work_order_no LIKE ?))")
+        args += [f"%{q}%"] * 3
+    sql += " ORDER BY i.invoice_date DESC, i.id DESC LIMIT ?"
+    args.append(int(limit))
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
+def open_invoices(conn):
+    """الفواتير الضريبية التي بقي منها ما يُرتجع — لقائمة الإشعار."""
+    out = []
+    for r in search(conn, kind="sale", limit=2000):
+        if any(x["left"] > 0.0005 for x in returnable(conn, r["id"])):
+            out.append(r)
+    return out
+
+
+def totals(conn, date_from, date_to):
+    """صافي المبيعات الضريبية بالأطقم في الفترة: الوعاء (أجور + ذهب) والضريبة."""
+    ensure_schema(conn)
+    r = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN 1 ELSE -1 END *"
+        " (total_wages + gold_value)),0) base,"
+        " COALESCE(SUM(CASE WHEN kind='sale' THEN 1 ELSE -1 END *"
+        " vat_amount),0) vat, COUNT(*) n FROM invoices WHERE is_deleted=0"
+        " AND COALESCE(pricing,'')<>'' AND invoice_date BETWEEN ? AND ?",
+        (date_from, date_to)).fetchone()
+    return {"base": round(r["base"], 2), "vat": round(r["vat"], 2),
+            "n": r["n"]}

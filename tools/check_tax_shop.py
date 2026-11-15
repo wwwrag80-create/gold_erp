@@ -1,0 +1,251 @@
+"""5.5: المشتريات والمبيعات الضريبية بالأطقم — المحاسبة كاملة.
+
+    python3 tools/check_tax_shop.py
+
+يُشتري المحلّ أطقماً بفاتورةٍ ضريبية (الطرق الثلاث: أجر · سعر جرام · سعر
+طقم)، ويبيعها بفاتورةٍ ضريبية، ويُصدر إشعاراً دائناً (مرتجع مبيعات)،
+ويُرجع للمورد — وحارس المخزون الصارم مفعّل طوال ذلك. ويُفحص بعد كل خطوة:
+الميزانان (ذهب · نقد) · الخزنة = أطقمها · ضريبتا المدخلات والمخرجات ·
+ذمم الأطراف · حالة كل طقم · ومنع تعديل الفاتورة الضريبية.
+"""
+import os
+import pathlib
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+os.chdir(ROOT)
+T = tempfile.mkdtemp(prefix="taxshop_")
+os.environ["GOLD_ERP_DATA_DIR"] = T
+os.environ["JADEITE_STOCK_GUARD"] = "on"
+import config  # noqa: E402
+
+config.DB_PATH = pathlib.Path(T) / "t.db"
+import main  # noqa: E402
+from database.database import db  # noqa: E402
+
+for _l, f in main.prepare_steps():
+    f()
+from models import set_purchases as sp, tax_invoices as ti  # noqa: E402
+from models.accounts import acc_id  # noqa: E402
+from models.entities import add_entity, get_entity  # noqa: E402
+from models import stock_guard, wo_moves  # noqa: E402
+from services.accounting_engine import account_balance  # noqa: E402
+
+OK, BAD = [], []
+
+
+def check(name, cond, info=""):
+    (OK if cond else BAD).append(name)
+    print(("  ✔ " if cond else "  ✘ ") + name + ("" if cond else f"  [{info}]"))
+
+
+def bal(conn, code_or_id):
+    aid = code_or_id if isinstance(code_or_id, int) else acc_id(conn, code_or_id)
+    g, c = account_balance(conn, aid)
+    return round(g, 3), round(c, 2)
+
+
+def ent_bal(conn, eid):
+    return bal(conn, get_entity(conn, eid)["account_id"])
+
+
+def ledger_ok(conn):
+    r = conn.execute(
+        "SELECT ROUND(SUM(gold_debit-gold_credit),3) g,"
+        " ROUND(SUM(cash_debit-cash_credit),2) c FROM journal_lines l"
+        " JOIN journal_entries e ON e.id=l.entry_id WHERE e.is_deleted=0"
+        ).fetchone()
+    return abs(r["g"] or 0) < 1e-6 and abs(r["c"] or 0) < 1e-6, tuple(r)
+
+
+def guard_clean(conn):
+    r = stock_guard.report(conn)
+    w, it = r["worked"] or {}, r["italian"] or {}
+    ok = (abs(w.get("diff", 0)) < 0.001 and abs(it.get("diff", 0)) < 0.001
+          and not r["broken"])
+    return ok, {"worked": w, "italian": it, "broken": r["broken"]}
+
+
+D = "2026-11-10"
+with db() as c:
+    sup = add_entity(c, "شركة الذهب للتوريد", "supplier", vat_number="300000000000003", username="t")
+    cus = add_entity(c, "عميل المحل", "customer", vat_number="311111111111113", username="t")
+    w0 = bal(c, "1200")
+print("── 1) فاتورة شراء ضريبية — الأجر فقط (الذهب بالوزن)")
+with db() as c:
+    r1 = sp.create_purchase(c, sup, D, "SUP-1001", [
+        {"wo_no": "T501", "model_no": "A1", "pieces": 3, "registered": 10,
+         "standing": 11, "wage": 20},
+        {"wo_no": "T502", "pieces": 2, "registered": 5, "standing": 5,
+         "wage": 30}], "t", pricing="wage")
+    check("الفاتورة: صافي 350 · ضريبة 52.50 · إجمالي 402.50",
+          (r1["net"], r1["vat"], r1["total"]) == (350.0, 52.5, 402.5), r1)
+    check("الخزنة +15 جم بالأطقم", bal(c, "1200")[0] == round(w0[0] + 15, 3), bal(c, "1200"))
+    check("المورد دائن 15 جم ذهب و402.50 ريال", ent_bal(c, sup) == (-15.0, -402.5), ent_bal(c, sup))
+    check("ضريبة المدخلات 1900 مدينة 52.50", bal(c, "1900")[1] == 52.5, bal(c, "1900"))
+    check("مصنعية المشتريات 5530 مدينة 350", bal(c, "5530")[1] == 350.0, bal(c, "5530"))
+    wo = c.execute("SELECT * FROM work_orders WHERE work_order_no='T501'").fetchone()
+    check("بطاقة الطقم: مقيد 10 · قائم 11 · عدد 3 · في الخزنة",
+          (wo["registered_weight"], wo["standing_gold"], wo["pieces"], wo["status"]) == (10, 11, 3, "in_stock"),
+          dict(wo))
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+    try:
+        sp.create_purchase(c, sup, D, "SUP-1001", [{"wo_no": "T509", "registered": 1, "wage": 1}], "t")
+        check("فاتورة المورد نفسها لا تُقيَّد مرتين", False)
+    except ValueError:
+        check("فاتورة المورد نفسها لا تُقيَّد مرتين", True)
+    try:
+        sp.create_purchase(c, sup, D, "SUP-1002", [{"wo_no": "T501", "registered": 1, "wage": 1}], "t")
+        check("رقم تشغيلٍ في الخزنة لا يُشترى ثانيةً", False)
+    except ValueError:
+        check("رقم تشغيلٍ في الخزنة لا يُشترى ثانيةً", True)
+
+print("── 2) شراء بسعر الجرام + الأجر (بالريال كاملاً)")
+with db() as c:
+    b6100 = bal(c, "6100")
+    r2 = sp.create_purchase(c, sup, D, "SUP-1003", [
+        {"wo_no": "T503", "pieces": 1, "registered": 8, "standing": 8.5, "wage": 10}],
+        "t", pricing="gram", gold_price=200, price_karat=18)
+    # 8 جم × (200 + 10) = 1680 · ضريبة 252
+    check("صافي 1680 · ضريبة 252 · إجمالي 1932",
+          (r2["net"], r2["vat"], r2["total"]) == (1680.0, 252.0, 1932.0), r2)
+    check("المورد بلا ذهب — ريالٌ فقط", ent_bal(c, sup) == (-15.0, -2334.5), ent_bal(c, sup))
+    g, cc = bal(c, "6100")
+    check("الذهب اشتُري عبر مركز التسكير: −8 جم و+1600 ريال",
+          (round(g - b6100[0], 3), round(cc - b6100[1], 2)) == (-8.0, 1600.0), (g, cc))
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+
+print("── 3) شراء بسعر الطقم + عيار 21 لسعر الجرام")
+with db() as c:
+    r3 = sp.create_purchase(c, sup, D, "SUP-1004", [
+        {"wo_no": "T504", "pieces": 4, "registered": 6, "standing": 6, "piece_price": 2000}],
+        "t", pricing="piece", gold_price=230, price_karat=21)
+    # قيمة الذهب: 6×18/21 × 230 = 1182.86 · المصنعية 817.14 · ضريبة 300
+    check("صافي 2000 · ضريبة 300 · إجمالي 2300",
+          (r3["net"], r3["vat"], r3["total"]) == (2000.0, 300.0, 2300.0), r3)
+    check("قيمة الذهب بعيار السعر 1182.86 والمصنعية 817.14",
+          (r3["gold_value"], r3["wages"]) == (1182.86, 817.14), r3)
+    try:
+        sp.create_purchase(c, sup, D, "SUP-1005", [{"wo_no": "T505", "registered": 6, "piece_price": 500}],
+                           "t", pricing="piece", gold_price=230, price_karat=21)
+        check("سعر طقمٍ أقل من قيمة ذهبه يُرفض", False)
+    except ValueError:
+        check("سعر طقمٍ أقل من قيمة ذهبه يُرفض", True)
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+    ok, p = guard_clean(c)
+    check("حارس المخزون: الخزنة = أطقمها", ok, p)
+
+print("── 4) فاتورة بيع ضريبية — الأجر فقط")
+with db() as c:
+    ids = {r["work_order_no"]: r["id"] for r in c.execute(
+        "SELECT id, work_order_no FROM work_orders WHERE work_order_no LIKE 'T50%' AND is_deleted=0")}
+    s1 = ti.create_invoice(c, cus, [{"work_order_id": ids["T501"], "wage_override": 40, "pieces": 3}],
+                           D, "t", "wage")
+    check("بيع 10 جم × أجر 40 = 400 · ضريبة 60", (s1["total_wages"], s1["vat"], s1["grand_total"]) == (400, 60, 460), s1)
+    check("العميل مدين 10 جم و460 ريال", ent_bal(c, cus) == (10.0, 460.0), ent_bal(c, cus))
+    check("الطقم خرج من الخزنة", c.execute("SELECT status FROM work_orders WHERE id=?", (ids["T501"],)).fetchone()[0] == "sold")
+    check("الفاتورة معلَّمة ضريبية بطريقتها", ti.is_tax(c, s1["id"]))
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+
+print("── 5) فاتورة بيع ضريبية بسعر الجرام (بالريال كاملاً)")
+with db() as c:
+    g0 = bal(c, "6100")
+    s2 = ti.create_invoice(c, cus, [{"work_order_id": ids["T503"], "wage_override": 25, "pieces": 1}],
+                           D, "t", "gram", gold_price=210, price_karat=18)
+    # 8 × (210 + 25) = 1880 · ضريبة 282 · إجمالي 2162
+    check("صافي 1880 · ضريبة 282 · إجمالي 2162",
+          (round(s2["total_wages"] + s2["gold_value"], 2), s2["vat"], s2["grand_total"]) == (1880, 282, 2162), s2)
+    check("العميل بلا ذهبٍ زائد — ريالٌ فقط", ent_bal(c, cus) == (10.0, 2622.0), ent_bal(c, cus))
+    g1 = bal(c, "6100")
+    check("الذهب بيع عبر مركز التسكير: +8 جم و−1680 ريال",
+          (round(g1[0] - g0[0], 3), round(g1[1] - g0[1], 2)) == (8.0, -1680.0), (g0, g1))
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+
+print("── 6) فاتورة بيع بسعر الطقم")
+with db() as c:
+    s3 = ti.create_invoice(c, cus, [{"work_order_id": ids["T504"], "piece_price": 2600, "pieces": 4}],
+                           D, "t", "piece", gold_price=235, price_karat=21)
+    check("صافي 2600 · ضريبة 390 · إجمالي 2990",
+          (round(s3["total_wages"] + s3["gold_value"], 2), s3["vat"], s3["grand_total"]) == (2600, 390, 2990), s3)
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+    ok, p = guard_clean(c)
+    check("حارس المخزون بعد البيع", ok, p)
+
+print("── 7) الفاتورة الضريبية لا تُعدَّل ولا تُنقل ولا تُعكس")
+from models import invoices as inv_mod, operations, reversal  # noqa: E402
+for label, fn in (("تعديل", lambda c: inv_mod.update_invoice(c, s1["id"], [], "t")),
+                  ("نقل", lambda c: operations.transfer_invoice(c, s1["id"], sup, "t")),
+                  ("عكس نوع", lambda c: operations.flip_invoice_kind(c, s1["id"], "t")),
+                  ("عكس", lambda c: reversal.reverse(c, s1["entry_id"], "t"))):
+    try:
+        with db() as c:
+            fn(c)
+        check(f"«{label}» مرفوض للفاتورة الضريبية", False)
+    except ValueError as e:
+        check(f"«{label}» مرفوض للفاتورة الضريبية", "إشعار" in str(e) or "ضريبية" in str(e), str(e)[:90])
+
+print("── 8) إشعار دائن (مرتجع مبيعات) من فاتورة سعر الجرام")
+with db() as c:
+    left = ti.returnable(c, s2["id"])
+    cn = ti.create_credit_note(c, s2["id"], D, [{"item_id": left[0]["item_id"]}], "إرجاع العميل", "t")
+    check("المرتجع يعكس الفاتورة: 1880 + 282", (round(cn["total_wages"] + cn["gold_value"], 2), cn["vat"]) == (1880, 282), cn)
+    check("العميل عاد إلى ما قبلها", ent_bal(c, cus) == (10.0, 3450.0), ent_bal(c, cus))
+    check("الطقم عاد إلى الخزنة", c.execute("SELECT status FROM work_orders WHERE id=?", (ids["T503"],)).fetchone()[0] == "in_stock")
+    ref = c.execute("SELECT ref_invoice_id, pricing FROM invoices WHERE id=?", (cn["id"],)).fetchone()
+    check("الإشعار يشير إلى فاتورته ويأخذ طريقتها", (ref[0], ref[1]) == (s2["id"], "gram"), tuple(ref))
+    try:
+        ti.create_credit_note(c, s2["id"], D, [{"item_id": left[0]["item_id"]}], "مرة ثانية", "t")
+        check("لا يُرتجع الطقم مرتين من الفاتورة نفسها", False)
+    except ValueError:
+        check("لا يُرتجع الطقم مرتين من الفاتورة نفسها", True)
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+    lbl = __import__("models.journal", fromlist=["x"])._doc_info(c, "invoices", cn["id"], {})[1]
+    check("يظهر في كشف الحساب «مرتجع مبيعات»", "مرتجع مبيعات" in lbl, lbl)
+
+print("── 9) مرتجع مشتريات")
+with db() as c:
+    rr = sp.returnable(c, r1["id"])
+    t501 = next(x for x in rr if x["wo_no"] == "T501")
+    t502 = next(x for x in rr if x["wo_no"] == "T502")
+    check("الطقم المباع لا يُرجع للمورد", bool(t501["why"]), t501)
+    check("الطقم في الخزنة يُرجع", not t502["why"] and t502["left"] == 5, t502)
+    before = ent_bal(c, sup)
+    pr = sp.create_return(c, r1["id"], D, [{"line_id": t502["line_id"]}], "عيب صناعة", "t")
+    # 5 جم × 30 = 150 + 22.50
+    check("المرتجع: 150 + 22.50 = 172.50", (pr["net"], pr["vat"], pr["total"]) == (150, 22.5, 172.5), pr)
+    after = ent_bal(c, sup)
+    check("المورد: ينقص 5 جم و172.50 ريال",
+          (round(after[0] - before[0], 3), round(after[1] - before[1], 2)) == (5.0, 172.5), (before, after))
+    w = c.execute("SELECT is_deleted, out_doc FROM work_orders WHERE work_order_no='T502'").fetchone()
+    check("بطاقة الطقم مطويّة ومرجعها المرتجع", w[0] == 1 and w[1] == pr["doc_no"], tuple(w))
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+    ok, p = guard_clean(c)
+    check("حارس المخزون بعد المرتجع", ok, p)
+
+print("── 10) الضريبة والإقرار")
+from models import reports  # noqa: E402
+with db() as c:
+    vr = reports.vat_return(c, "2026-01-01", "2026-12-31")
+    out_exp = 60 + 282 + 390 - 282
+    in_exp = 52.5 + 252 + 300 - 22.5
+    check(f"ضريبة المخرجات {out_exp}", round(vr["output_vat"], 2) == out_exp, vr["output_vat"])
+    check(f"ضريبة المدخلات {in_exp}", round(vr["input_vat"], 2) == in_exp, vr["input_vat"])
+    st = ti.totals(c, "2026-01-01", "2026-12-31")
+    check("وعاء المبيعات الضريبية = 400 + 1880 + 2600 − 1880 = 3000", st["base"] == 3000, st)
+    pt = sp.totals(c, "2026-01-01", "2026-12-31")
+    check("وعاء المشتريات الضريبية = 350 + 1680 + 2000 − 150 = 3880", pt["base"] == 3880, pt)
+    check("وعاء الإقرار للمبيعات يشمل قيمة الذهب",
+          round(vr["sales_base"], 2) == 3000.0, vr["sales_base"])
+
+print("── 11) سلسلة الحركة بعد الإقلاع (resync)")
+with db() as c:
+    fixed = wo_moves.resync(c, None, "t")
+    check("لا تصحيح يلزم — الحالات متّسقة", not fixed, fixed)
+
+print()
+print(f"{len(OK)} ✔ · {len(BAD)} ✘")
+for b in BAD:
+    print("  ✘", b)
+sys.exit(1 if BAD else 0)

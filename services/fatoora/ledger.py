@@ -170,15 +170,28 @@ def _lines(conn, invoice_id):
         except Exception:
             w = it["registered_weight"]
         model = f" · موديل {it['model_no']}" if it["model_no"] else ""
+        # 5.5: الفاتورة الضريبية بالريال كاملاً — السطر ذهبٌ ومصنعية معاً
+        gv = float(it["gold_value"] or 0) if "gold_value" in it.keys() \
+            else 0.0
+        what = "طقم ذهب (ذهب + مصنعية)" if gv else "مصنعية طقم ذهب"
         out.append({
-            "name": (f"مصنعية طقم ذهب {it['work_order_no']}{model} — "
+            "name": (f"{what} {it['work_order_no']}{model} — "
                      f"عيار {k}: {w:,.3f} جم"),
-            "amount": float(it["wages"] or 0)})
+            "amount": round(float(it["wages"] or 0) + gv, 2)})
     return out
 
 
 def _original_refs(conn, invoice_id):
     """فواتير البيع الأصلية لأطقم المرتجع — مرجع الإشعار الدائن."""
+    # 5.5: الإشعار الدائن من شاشة المبيعات الضريبية يحمل فاتورته صراحةً
+    try:
+        r = conn.execute(
+            "SELECT o.invoice_no FROM invoices i JOIN invoices o"
+            " ON o.id=i.ref_invoice_id WHERE i.id=?", (invoice_id,)).fetchone()
+        if r and r["invoice_no"]:
+            return [r["invoice_no"]]
+    except Exception:
+        pass
     rows = conn.execute(
         "SELECT DISTINCT i2.invoice_no FROM invoice_items it"
         " JOIN invoice_items it2 ON it2.work_order_id=it.work_order_id"

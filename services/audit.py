@@ -138,6 +138,12 @@ def reverse_entry(conn, entry_id: int, username: str) -> str:
                     " WHERE invoice_id=?", (sid,))], username)
         elif src == "tax_debit_notes":
             _mark(conn, "tax_debit_notes", sid, username)
+        elif src == "set_purchases":
+            # 5.5: فاتورة الشراء أدخلت أطقماً الخزنة (وقد تُباع)، ومرتجعها
+            # أخرجها — فلا حذف: «مرتجع مشتريات» طريق تصحيح الشراء
+            raise ValueError("مستند المشتريات الضريبية لا يُحذف — لتصحيح"
+                             " الشراء أصدر «مرتجع مشتريات» من شاشة"
+                             " المشتريات الضريبية")
         elif src == "tax_sales":
             # الفاتورة الضريبية لا تُحذف بعد إصدار مستندها الإلكتروني،
             # ولا فاتورةٌ عليها إشعارٌ دائنٌ قائم قبل حذف إشعارها

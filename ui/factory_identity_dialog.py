@@ -48,9 +48,12 @@ def _pix_from_b64(b64):
 
 
 class FactoryIdentityDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None, user=None):
+    def __init__(self, parent=None, user=None, initial=None, on_apply=None):
+        """`on_apply` (5.5): وضع المدير العام — يُحرَّر ملف هوية حسابٍ آخر
+        (`initial`) ويُعاد بـ`on_apply(data)` بدل حفظه في قاعدة هذا الجهاز."""
         super().__init__(parent)
         self.user = user or {}
+        self._on_apply = on_apply
         self.setObjectName("identityDialog")
         self.setWindowTitle("هوية المصنع — الشعار والاسم والعنوان في "
                             "جميع قوالب الطباعة")
@@ -74,6 +77,15 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
         lay.addWidget(self._preview_box(), 1)
         lay.addLayout(self._buttons())
 
+        if on_apply is not None:
+            self._custom = bool(initial)
+            data = dict(branding.blank(), **(initial or {}))
+            self.btn_reset.hide()
+            self.btn_apply.setText("✔ اعتماد الهوية للحساب")
+            self.set_data(data if initial else dict(data,
+                                                    layout="logo_left"))
+            self._editable = True
+            return
         with db(readonly=True) as conn:
             self._custom = branding.is_custom(conn)
             data = branding.load(conn)
@@ -404,6 +416,15 @@ class FactoryIdentityDialog(QtWidgets.QDialog):
         errs = branding.validate(d)
         if errs:
             err(self, "\n".join(errs))
+            return
+        if self._on_apply is not None:
+            try:
+                self._on_apply(d)
+            except Exception as e:                    # noqa: BLE001
+                err(self, e)
+                return
+            self.applied = True
+            self.accept()
             return
         try:
             with db() as conn:

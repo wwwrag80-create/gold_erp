@@ -1582,6 +1582,13 @@ def migrate_schema() -> None:
         except Exception as _e:
             print(f"[supply_docs] {_e}")
 
+        # 5.5: الفاتورة الضريبية بالأطقم (طريقة التسعير وقيمة الذهب ومرجع
+        # الإشعار) · المشتريات الضريبية بالأطقم (تُدخل الأطقم الخزنة)
+        from models import tax_invoices as _txi
+        _txi.ensure_schema(conn)
+        from models import set_purchases as _spu
+        _spu.ensure_schema(conn)
+
         # 4.36: تسويات نهاية الفترة — تاريخ التعيين وأجر نهاية الخدمة
         # للموظفين، وجدول المصروفات المدفوعة مقدماً
         from models.period_end import ensure_schema as _pe_schema

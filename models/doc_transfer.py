@@ -92,6 +92,9 @@ def transfer(conn, source_table, source_id, new_entity_id, username,
 
     ولا يمسّ: التاريخ · الرقم · المبالغ · الأوزان · بقية الأطراف.
     """
+    if source_table == "invoices":
+        from models import tax_invoices as _txg
+        _txg.guard(conn, source_id, "نقل")
     info = preview(conn, source_table, source_id)
     col = DOC_PARTY[source_table]
     old_id = info["from_id"]

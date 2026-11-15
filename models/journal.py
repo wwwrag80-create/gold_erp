@@ -55,6 +55,7 @@ OP_LABELS = {
     "purchases": "مشتريات", "entities": "رصيد افتتاحي",
     "payroll_ledger": "راتب", "tax_debit_notes": "إشعار ضريبي",
     "tax_sales": "مبيعات ضريبية",
+    "set_purchases": "مشتريات ضريبية",
     # 5.2.8: كل مصدرٍ باسم شاشته — لا اسم الجدول بالإنجليزية (رابط المدير وغيره)
     "workshop_losses": "تسوية فواقد الورشة", "mfg_salaries": "رواتب العمال والإدارة",
     "manual": "قيد يومي", "opening_entry": "رصيد افتتاحي",
@@ -70,7 +71,7 @@ DOC_NO_COL = {
     "purchases": "purchase_no", "melting_ops": "op_no",
     "fixing_ops": "op_no", "shrinkage_ops": "op_no",
     "work_orders": "work_order_no", "tax_debit_notes": "note_no",
-    "tax_sales": "doc_no",
+    "tax_sales": "doc_no", "set_purchases": "doc_no",
 }
 
 
@@ -96,9 +97,19 @@ def _doc_info(conn, src, sid, cache):
             label = "قبض" if r["kind"] == "receipt" else "صرف"
 
     elif src == "invoices":
-        r = conn.execute("SELECT kind FROM invoices WHERE id=?", (sid,)).fetchone()
+        r = conn.execute("SELECT * FROM invoices WHERE id=?", (sid,)).fetchone()
         if r:
             label = "مرتجع" if r["kind"] == "sale_return" else "مبيعات"
+            # 5.5: الفاتورة الضريبية بالأطقم وإشعارها الدائن (مرتجع مبيعات)
+            if "pricing" in r.keys() and (r["pricing"] or ""):
+                label = ("مرتجع مبيعات (إشعار دائن)"
+                         if r["kind"] == "sale_return" else "مبيعات ضريبية")
+    elif src == "set_purchases":
+        r = conn.execute("SELECT kind FROM set_purchases WHERE id=?",
+                         (sid,)).fetchone()
+        if r:
+            label = ("مرتجع مشتريات" if r["kind"] == "purchase_return"
+                     else "مشتريات ضريبية")
     elif src == "tax_sales":
         r = conn.execute("SELECT kind FROM tax_sales WHERE id=?",
                          (sid,)).fetchone()

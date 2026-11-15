@@ -32,6 +32,7 @@ DOC_TYPES = [
     ("سندات قبض وصرف", "vouchers"),
     ("المبيعات الضريبية وإشعاراتها", "tax_sales"),
     ("فواتير مشتريات", "purchases"),
+    ("المشتريات الضريبية بالأطقم ومرتجعاتها", "set_purchases"),
     ("صب وتصفية", "melting_ops"),
     ("تسكير", "fixing_ops"),
     ("قيود يومية يدوية", "manual"),
@@ -46,9 +47,21 @@ QUERIES = {
         SELECT i.id, i.invoice_no doc_no, i.invoice_date d,
                COALESCE(e.name,'—') party, i.grand_total cash,
                i.total_weight gold, i.is_deleted,
-               CASE i.kind WHEN 'sale' THEN 'فاتورة مبيعات'
-                           ELSE 'مرتجع مبيعات' END label
+               CASE WHEN COALESCE(i.pricing,'')<>'' THEN
+                    CASE i.kind WHEN 'sale' THEN 'فاتورة ضريبية'
+                         ELSE 'مرتجع مبيعات (إشعار دائن)' END
+                    WHEN i.kind='sale' THEN 'فاتورة مبيعات'
+                    ELSE 'مرتجع مبيعات' END label
         FROM invoices i LEFT JOIN entities e ON e.id=i.customer_id""",
+    "set_purchases": """
+        SELECT p.id, p.doc_no doc_no, p.doc_date d,
+               COALESCE(e.name,'—') party,
+               CASE p.kind WHEN 'purchase_return' THEN -p.total
+                           ELSE p.total END cash,
+               p.total_weight gold, p.is_deleted,
+               CASE p.kind WHEN 'purchase_return' THEN 'مرتجع مشتريات'
+                           ELSE 'فاتورة مشتريات ضريبية' END label
+        FROM set_purchases p LEFT JOIN entities e ON e.id=p.supplier_id""",
     "vouchers": """
         SELECT v.id, v.voucher_no doc_no, v.voucher_date d,
                COALESCE(e.name, a.name, '—') party, v.cash_amount cash,

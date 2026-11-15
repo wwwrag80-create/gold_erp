@@ -14,6 +14,7 @@ from database.database import db
 from services import karat_view as kv
 from models import fixing, inventory, invoices, journal, melting, payroll
 from models import purchases, shrinkage, stocktake, tax_sales, vouchers
+from models import set_purchases
 from services.audit import soft_delete_entry
 from ui.widgets.common import ask, date_edit, dstr, err, info, title_label
 from ui.widgets.ledger_view import LedgerView
@@ -112,6 +113,16 @@ DOC_TYPES = [
                r["vat"], r["total"], r["ref_no"] or "—", r["doc_date"],
                r["entry_id"])),
 
+
+    ("set_purchases", "المشتريات الضريبية بالأطقم ومرتجعاتها",
+     ["الرقم", "النوع", "المورد", "فاتورة المورد", "الصافي", "الضريبة",
+      "الإجمالي", "على الفاتورة", "التاريخ", "رقم القيد"],
+     lambda conn, q, f, t: set_purchases.search(conn, q, f, t),
+     lambda r: (r["doc_no"], "مرتجع مشتريات"
+               if r["kind"] == "purchase_return" else "فاتورة مشتريات",
+               r["supplier_name"], r["supplier_inv_no"] or "—", r["net"],
+               r["vat"], r["total"], r["ref_no"] or "—", r["doc_date"],
+               r["entry_id"])),
 
     ("shrinkage", "تسويات فاقد التصنيع (يدوية)",
      ["الرقم", "التاريخ", "الفترة", "الوزن", "رقم القيد"],

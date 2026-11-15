@@ -223,7 +223,12 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
                     # بيت الطقم: منه يخرج وإليه يعود (stock_home) —
                     # والرقم التجميعي من حساب الإيطالي (5.2.0)
                     "acc": stock_home.line_account(conn, wo),
-                    "note": str(c.get("note") or "").strip()})
+                    "note": str(c.get("note") or "").strip(),
+                    # 5.5: الفاتورة الضريبية بالأطقم — سعر الطقم وعدد قطعه
+                    # وسطر الأصل في الإشعار الدائن (يُتجاهل في غيرها)
+                    "piece_price": c.get("piece_price"),
+                    "pieces": int(c.get("pieces") or 0),
+                    "src_item_id": c.get("src_item_id")})
     return out
 
 
@@ -293,7 +298,7 @@ def _scrap_karat(conn, lines_info, given):
 
 
 def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
-                 apply_vat):
+                 apply_vat, gold_value=0.0, riyal=False):
     """أسطر قيد الفاتورة — المرجع الواحد للإنشاء والتعديل.
 
     الذهب يخرج من **حساب كل طقم** (أو يعود إليه)، فقد تحمل الفاتورة
@@ -329,11 +334,25 @@ def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
         # الإيراد وزناً وأجوراً: الذهب بوزنه في «إيرادات مبيعات ذهب»
         # 4110، ويقابله «الذهب المسلَّم من المخزون» 4950 بالوزن نفسه —
         # فصافي الذهب من البيع صفر (يُباع بوزنه) وربح المصنع أجوره 4120.
-        lines = [
-            {"account_id": ent_acc, "gold_debit": total_w,
-             "cash_debit": grand,
-             "line_desc": "مديونية ذهب + أجور"
-                          + (" وضريبة" if apply_vat else "")},
+        # 5.5 — الفاتورة بالريال كاملاً (سعر جرام أو سعر طقم): لا ذهب على
+        # العميل؛ الذهب يُسلَّم وزناً إلى مركز التسكير 6100 وقيمته بالريال
+        # تقابله فيه — بيعٌ وتسكيرٌ فوري في قيدٍ واحد.
+        if riyal:
+            lines = [
+                {"account_id": ent_acc, "cash_debit": grand,
+                 "line_desc": "قيمة ذهب + أجور + ضريبة (بالريال)"},
+                {"account_id": acc_id(conn, "6100"), "gold_debit": total_w,
+                 "line_desc": "ذهبٌ بيع بالريال — تسكيرٌ فوري (الوزن)"},
+                {"account_id": acc_id(conn, "6100"), "cash_credit": gold_value,
+                 "line_desc": "ذهبٌ بيع بالريال — تسكيرٌ فوري (القيمة)"},
+            ]
+        else:
+            lines = [
+                {"account_id": ent_acc, "gold_debit": total_w,
+                 "cash_debit": grand,
+                 "line_desc": "مديونية ذهب + أجور"
+                              + (" وضريبة" if apply_vat else "")}]
+        lines += [
             {"account_id": acc_id(conn, "4110"), "gold_credit": total_w,
              "line_desc": "إيراد مبيعات ذهب (وزناً)"},
             {"account_id": acc_id(conn, "4120"), "cash_credit": wages,
@@ -367,9 +386,21 @@ def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
         if vat:
             lines.append({"account_id": acc_id(conn, "2100"),
                           "cash_debit": vat})
-        lines.append({"account_id": ent_acc, "gold_credit": total_w,
-                      "cash_credit": grand,
-                      "line_desc": "عكس مديونية الذهب والأجور"})
+        if riyal:
+            # 5.5: مرتجع فاتورةٍ بالريال — يعود الذهب من مركز التسكير
+            # بقيمته، ويُردّ للعميل المبلغ كله بالريال
+            lines.append({"account_id": acc_id(conn, "6100"),
+                          "gold_credit": total_w,
+                          "line_desc": "ذهبٌ عاد بالريال — عكس التسكير (الوزن)"})
+            lines.append({"account_id": acc_id(conn, "6100"),
+                          "cash_debit": gold_value,
+                          "line_desc": "ذهبٌ عاد بالريال — عكس التسكير (القيمة)"})
+            lines.append({"account_id": ent_acc, "cash_credit": grand,
+                          "line_desc": "ردّ قيمة الذهب والأجور والضريبة"})
+        else:
+            lines.append({"account_id": ent_acc, "gold_credit": total_w,
+                          "cash_credit": grand,
+                          "line_desc": "عكس مديونية الذهب والأجور"})
     keys = ("gold_debit", "gold_credit", "cash_debit", "cash_credit")
     lines = [l for l in lines
              if any(abs(float(l.get(k) or 0)) > 1e-9 for k in keys)]
@@ -393,6 +424,8 @@ def _rebuild_invoice_entry(conn, invoice_id):
     نفسها التي أنشأته، فتطابق الفاتورة دائماً: ذهب كل طقمٍ على حسابه،
     والأجور وأسطر الأجر فقط، والضريبة.
     """
+    from models import tax_invoices as _txg
+    _txg.guard(conn, invoice_id, "تعديل")
     inv = conn.execute("SELECT * FROM invoices WHERE id=?",
                        (invoice_id,)).fetchone()
     entry_id = inv["entry_id"]
@@ -494,7 +527,13 @@ def _sync_wo_weight(conn, wo, new_reg, username):
 
 def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
          description="", qr_enabled=False, source_account_id=None,
-         scrap_karat=None):
+         scrap_karat=None, tax=None):
+    # 5.5: `tax` ← فاتورة ضريبية بالأطقم (طريقة التسعير وسعر الجرام ومرجع
+    # الإشعار) — انظر `models.tax_invoices`. بدونه كل شيءٍ كما كان.
+    from models import tax_invoices as _tx
+    tx = _tx.norm(tax)
+    if tx:
+        _tx.ensure_schema(conn)
     ent = get_entity(conn, entity_id)
     if not ent:
         raise ValueError("اختر الطرف المقابل")
@@ -509,10 +548,29 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
             raise ValueError("سطر «أجر فقط» لا يصح في تحويلٍ داخلي —"
                              " لا أجور على خزينة التصنيع")
 
-    item_wages = [_line_wages(li, internal) for li in lines_info]
-    if internal:
+    item_gv = [0.0] * len(lines_info)
+    gold_value = 0.0
+    if tx:
+        if internal:
+            raise ValueError("الفاتورة الضريبية لا تكون لجهةٍ داخلية")
+        if any(li.get("wage_only") for li in lines_info):
+            raise ValueError("سطر «أجر فقط» لا يصح في الفاتورة الضريبية"
+                             " بالأطقم")
+        apply_vat = True
+        amts = [_tx.line_amounts(li, tx, li["wo"]["work_order_no"])
+                for li in lines_info]
+        item_wages = [a[0] for a in amts]
+        item_gv = [a[1] for a in amts]
+        wages = round(sum(item_wages), 2)
+        gold_value = round(sum(item_gv), 2)
+        # الضريبة على صافي المستند كلّه (ذهبٌ + أجور) مقرّبةً مرةً واحدة
+        vat = _tx.doc_vat(round(wages + gold_value, 2))
+        grand = round(wages + gold_value + vat, 2)
+    elif internal:
+        item_wages = [_line_wages(li, internal) for li in lines_info]
         wages = vat = grand = 0.0
     else:
+        item_wages = [_line_wages(li, internal) for li in lines_info]
         wages = round(sum(item_wages), 2)
         vat = gold_math.wages_vat(wages) if apply_vat else 0.0
         grand = round(wages + vat, 2)
@@ -524,8 +582,15 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
                             (src_id,)).fetchone()
     acc_weights = _acc_weights(lines_info, src_id)
     total_w = round(sum(w for _a, w in acc_weights), 3)
+    riyal = bool(tx and tx["pricing"] in _tx.RIYAL)
     desc, lines = _entry_lines(conn, kind, internal, ent, acc_weights,
-                               wages, vat, grand, apply_vat)
+                               wages, vat, grand, apply_vat,
+                               gold_value=gold_value, riyal=riyal)
+    if tx:
+        desc = (("فاتورة ضريبية" if kind == "sale"
+                 else "إشعار دائن — مرتجع مبيعات")
+                + f" ({_tx.PRICING_LABEL[tx['pricing']].split(' — ')[0]})"
+                + f" — {ent['name']}")
     if internal:
         new_status, prefix = ("sold", "T") if kind == "sale" \
             else ("in_stock", "TR")
@@ -556,6 +621,12 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
          int(bool(qr_enabled)), description.strip(), src_id, _karat,
          username))
     inv_id = cur.lastrowid
+    if tx:
+        conn.execute(
+            "UPDATE invoices SET pricing=?, gold_price=?, price_karat=?,"
+            " gold_value=?, ref_invoice_id=?, tax_reason=? WHERE id=?",
+            (tx["pricing"], tx["gold_price"], tx["price_karat"], gold_value,
+             tx.get("ref_invoice_id"), tx.get("reason") or "", inv_id))
     inv_no = _numbering.next_no(conn, prefix)
     entry_id = post_entry(conn, invoice_date, f"{desc} — {inv_no}", lines,
                           source_table="invoices", source_id=inv_id,
@@ -563,9 +634,9 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     conn.execute("UPDATE invoices SET invoice_no=?, entry_id=? WHERE id=?",
                  (inv_no, entry_id, inv_id))
 
-    for li, w in zip(lines_info, item_wages):
+    for li, w, gv in zip(lines_info, item_wages, item_gv):
         wo = li["wo"]
-        conn.execute(
+        _icur = conn.execute(
             "INSERT INTO invoice_items(invoice_id,work_order_id,"
             "registered_weight,wage_per_gram,wages,karat,"
             "stock_account_id,line_note,diamond)"
@@ -573,6 +644,14 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
             (inv_id, wo["id"], li["weight"], li["wage"], w,
              int(li.get("karat") or 0), li.get("acc"),
              li.get("note") or "", li.get("diamond") or 0.0))
+        if tx:
+            conn.execute(
+                "UPDATE invoice_items SET gold_value=?, pieces=?,"
+                " piece_price=?, src_item_id=? WHERE id=?",
+                (gv, int(li.get("pieces") or 0),
+                 round(float(li.get("piece_price") or 0), 2)
+                 if tx["pricing"] == "piece" else 0.0,
+                 li.get("src_item_id"), _icur.lastrowid))
         if li.get("wage_only"):
             continue                 # أجرٌ فقط: لا مخزون يتحرّك
         if kind == "sale_return" and not wo["is_bulk"] and not li.get("acc"):
@@ -610,6 +689,8 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
               f"{inv_no} vat={int(apply_vat)}")
     return {"id": inv_id, "invoice_no": inv_no, "total_weight": total_w,
             "total_wages": wages, "vat": vat, "grand_total": grand,
+            "gold_value": gold_value,
+            "pricing": tx["pricing"] if tx else "",
             "qr_base64": qr_b64, "qr_path": qr_path, "entry_id": entry_id,
             "vat_applied": bool(apply_vat), "internal": internal,
             "source_account_id": src_id,
@@ -644,7 +725,7 @@ def split_cart(conn, cart):
 
 def _save_split(conn, kind, entity_id, cart, invoice_date, username,
                 apply_vat, description, qr_enabled, source_account_id,
-                scrap_karat):
+                scrap_karat, tax=None):
     parts = split_cart(conn, cart)
     if not parts:
         # فاتورة إيطالي وحده: حسابها في رأسها حساب الإيطالي كسطورها
@@ -658,32 +739,32 @@ def _save_split(conn, kind, entity_id, cart, invoice_date, username,
             scrap_karat = None
         return _save(conn, kind, entity_id, cart, invoice_date, username,
                      apply_vat, description, qr_enabled, source_account_id,
-                     scrap_karat)
+                     scrap_karat, tax=tax)
     sets_cart, italian_cart = parts
     res = _save(conn, kind, entity_id, sets_cart, invoice_date, username,
                 apply_vat, description, qr_enabled, source_account_id,
-                scrap_karat)
+                scrap_karat, tax=tax)
     ita = stock_home.italian_account(conn)
     res["split"] = _save(conn, kind, entity_id, italian_cart, invoice_date,
                          username, apply_vat, description, qr_enabled,
-                         ita or source_account_id, None)
+                         ita or source_account_id, None, tax=tax)
     return res
 
 
 def create_sale(conn, entity_id, cart, invoice_date, username,
                 apply_vat=True, description="", qr_enabled=False,
-                source_account_id=None, scrap_karat=None):
+                source_account_id=None, scrap_karat=None, tax=None):
     return _save_split(conn, "sale", entity_id, cart, invoice_date,
                        username, apply_vat, description, qr_enabled,
-                       source_account_id, scrap_karat)
+                       source_account_id, scrap_karat, tax=tax)
 
 
 def create_sale_return(conn, entity_id, cart, invoice_date, username,
                        apply_vat=True, description="", qr_enabled=False,
-                       source_account_id=None, scrap_karat=None):
+                       source_account_id=None, scrap_karat=None, tax=None):
     return _save_split(conn, "sale_return", entity_id, cart, invoice_date,
                        username, apply_vat, description, qr_enabled,
-                       source_account_id, scrap_karat)
+                       source_account_id, scrap_karat, tax=tax)
 
 
 # ملاحظة: `update_sale` القديمة أُزيلت في 4.6.0.
@@ -803,7 +884,8 @@ def create_tax_debit_note(conn, invoice_id, note_date, username):
         raise ValueError("الفاتورة غير موجودة")
     if inv["kind"] != "sale":
         raise ValueError("إشعار المدين الضريبي يخص فواتير البيع فقط")
-    if inv["vat_applied"]:
+    if inv["vat_applied"] or (inv["pricing"] if "pricing" in inv.keys()
+                              else ""):
         raise ValueError("الفاتورة ضريبية أصلاً — لا حاجة لإشعار مدين")
     from services.fatoora import ledger as _fatoora
     if _fatoora.enabled(conn):
@@ -1052,6 +1134,8 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     فعلاً فالأداة الصحيحة فاتورة جديدة أو تسوية وزن، لا تعديل مستند
     قديم.
     """
+    from models import tax_invoices as _txg
+    _txg.guard(conn, invoice_id, "تعديل")
     _wos_before = _invoice_wos(conn, invoice_id)
     from models import wo_moves as _wm
     _bad_before = _wm.bad_ids(conn, _wos_before)

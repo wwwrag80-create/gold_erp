@@ -148,8 +148,8 @@ sql = (ROOT / "cloud" / "admin_rpc.sql").read_text(encoding="utf-8")
 for fn in ("auth_plan(TEXT,TEXT,TEXT,TEXT)", "admin_set_plan(TEXT,TEXT,TEXT,TEXT,DATE,INT)",
            "admin_list_plans(TEXT)", "admin_reset_devices(TEXT,TEXT)"):
     check(f"صلاحية تنفيذ {fn.split('(')[0]}", f"GRANT EXECUTE ON FUNCTION {fn}" in sql)
-check("rpc_version = 3.1.0", "SELECT '3.1.0'::TEXT" in sql)
-check("إعادة تشغيل الملف لا تجدّد رموز المدير", "NOT IN ('3.0.0', '3.1.0')" in sql)
+check("rpc_version = 3.2.0 (5.5: ملف الحساب وتعديله)", "SELECT '3.2.0'::TEXT" in sql)
+check("إعادة تشغيل الملف لا تجدّد رموز المدير", "NOT IN ('3.0.0', '3.1.0', '3.2.0')" in sql)
 check("جدول الأجهزة محميّ", "ALTER TABLE factory_devices ENABLE ROW LEVEL SECURITY" in sql)
 
 print("── البيع المباشر لحساب «عميل»")

@@ -768,17 +768,27 @@ class PurchasesScreen(EditModeMixin, QtWidgets.QWidget):
 
     def _preview_row(self, r):
         if 0 <= r < len(self._reg_rows):
+            row = self._reg_rows[r]
             try:
                 from services import print_manager
-                print_manager.preview_document(self, "purchases",
-                                               self._reg_rows[r]["id"])
+                print_manager.preview_document(
+                    self, "set_purchase" if row.get("src") == "set_purchases"
+                    else "purchases", row["id"])
             except Exception as e:
                 err(self, e)
 
     def _edit_row(self, r):
         if 0 <= r < len(self._reg_rows):
+            row = self._reg_rows[r]
+            if row.get("src") == "set_purchases":
+                # 5.5: فاتورة شراء الأطقم الضريبية لا تُعدَّل بعد ترحيلها —
+                # تصحيحها بمرتجع المشتريات من شاشتها
+                err(self, "فاتورة المشتريات الضريبية بالأطقم لا تُعدَّل بعد "
+                          "ترحيلها — صحّحها بـ«مرتجع مشتريات» من شاشة "
+                          "«المشتريات الضريبية».")
+                return
             self.tabs.setCurrentIndex(0)
-            self.load_document(self._reg_rows[r]["id"])
+            self.load_document(row["id"])
 
     # ══════════════════════════ الأصول والإهلاك ══════════════════════════
     def _build_assets_tab(self):

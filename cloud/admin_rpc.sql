@@ -128,11 +128,16 @@ END $$;
 -- الرموز الإدارية القديمة كانت مكشوفة لمن طلبها — تُستبدل كلها مرةً
 -- واحدة. (المدير العام يسجّل الخروج والدخول فيأخذ رمزه الجديد.)
 DO $$
+DECLARE v TEXT := '';
 BEGIN
   -- 3.1.0: الرموز تُجدَّد مرةً واحدة عند الانتقال من دوالٍ أقدم من 3.0.0
   --        وحدها — فإعادة تشغيل هذا الملف لا تُخرج المدير من حسابه
-  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'rpc_version')
-     OR (SELECT rpc_version()) NOT IN ('3.0.0', '3.1.0') THEN
+  -- 3.2.0: الإصدار يُقرأ ديناميكياً — على خادمٍ جديد لا دالة إصدار بعد،
+  --        والاستدعاء المباشر كان يُفشل الملف كله من أوله
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'rpc_version') THEN
+    EXECUTE 'SELECT rpc_version()' INTO v;
+  END IF;
+  IF COALESCE(v, '') NOT IN ('3.0.0', '3.1.0', '3.2.0') THEN
     UPDATE factory_users SET admin_token = encode(gen_random_bytes(24), 'hex')
      WHERE role = 'super_admin';
   END IF;
@@ -394,10 +399,131 @@ GRANT EXECUTE ON FUNCTION admin_set_plan(TEXT,TEXT,TEXT,TEXT,DATE,INT)
 GRANT EXECUTE ON FUNCTION admin_list_plans(TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION admin_reset_devices(TEXT,TEXT) TO anon, authenticated;
 
+-- ═══════════════════════════════════════════════════════════════
+-- 6.45) تعديل الحساب وملفّه (3.2.0)
+-- ───────────────────────────────────────────────────────────────
+-- المدير العام يعدّل أي حساب: اسمه الظاهر · كلمة مروره · اسم مصنعه.
+-- ولكل مصنعٍ «ملف» يرتّبه المدير مرةً فيصل الحساب جاهزاً:
+--   profile     : JSON — ترتيب القائمة وأسماء شاشاتها وتجميعها (nav)
+--                 وهوية المنشأة وشعارها (identity)
+--   profile_ver : يزيد مع كل حفظ — فيُطبَّق الملف على الجهاز مرةً عند
+--                 الدخول التالي، ويبقى للمستخدم ما يعدّله بعدها حتى
+--                 يحفظ المدير ملفاً جديداً
+-- والملف لا يُعطى إلا لمن أثبت كلمة مروره (كـ`auth_plan`).
+-- ═══════════════════════════════════════════════════════════════
+ALTER TABLE factories ADD COLUMN IF NOT EXISTS profile TEXT;
+ALTER TABLE factories
+  ADD COLUMN IF NOT EXISTS profile_ver INT NOT NULL DEFAULT 0;
+
+CREATE OR REPLACE FUNCTION admin_update_user(
+  p_token TEXT, p_username TEXT, p_full_name TEXT, p_hash TEXT,
+  p_factory_name TEXT
+) RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE ok INT; tid TEXT;
+BEGIN
+  SELECT COUNT(*) INTO ok FROM factory_users fu
+   WHERE fu.admin_token = p_token AND fu.role = 'super_admin'
+     AND fu.is_active;
+  IF ok = 0 THEN RAISE EXCEPTION 'رمز إداري غير صالح'; END IF;
+  SELECT fu.tenant_id INTO tid FROM factory_users fu
+   WHERE fu.username = p_username LIMIT 1;
+  IF NOT FOUND THEN RAISE EXCEPTION 'الحساب غير موجود'; END IF;
+  IF COALESCE(p_hash, '') <> '' AND position('$' IN p_hash) < 2 THEN
+    RAISE EXCEPTION 'صيغة كلمة المرور غير صحيحة';
+  END IF;
+  UPDATE factory_users fu
+     SET full_name = COALESCE(NULLIF(TRIM(COALESCE(p_full_name, '')), ''),
+                              fu.full_name),
+         password_hash = COALESCE(NULLIF(COALESCE(p_hash, ''), ''),
+                                  fu.password_hash),
+         failed_logins = CASE WHEN COALESCE(p_hash, '') <> '' THEN 0
+                              ELSE fu.failed_logins END,
+         locked_until = CASE WHEN COALESCE(p_hash, '') <> '' THEN NULL
+                             ELSE fu.locked_until END
+   WHERE fu.username = p_username;
+  IF COALESCE(TRIM(p_factory_name), '') <> '' THEN
+    UPDATE factories fa SET name = TRIM(p_factory_name)
+     WHERE fa.tenant_id = tid;
+  END IF;
+  RETURN 'ok';
+END $$;
+
+CREATE OR REPLACE FUNCTION admin_set_profile(
+  p_token TEXT, p_tenant TEXT, p_profile TEXT
+) RETURNS INT LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE ok INT; v INT;
+BEGIN
+  SELECT COUNT(*) INTO ok FROM factory_users fu
+   WHERE fu.admin_token = p_token AND fu.role = 'super_admin'
+     AND fu.is_active;
+  IF ok = 0 THEN RAISE EXCEPTION 'رمز إداري غير صالح'; END IF;
+  IF length(COALESCE(p_profile, '')) > 4000000 THEN
+    RAISE EXCEPTION 'ملف الحساب كبير جداً — صغّر الشعار أو الختم';
+  END IF;
+  UPDATE factories fa
+     SET profile = NULLIF(TRIM(COALESCE(p_profile, '')), ''),
+         profile_ver = COALESCE(fa.profile_ver, 0) + 1
+   WHERE fa.tenant_id = p_tenant
+  RETURNING fa.profile_ver INTO v;
+  IF v IS NULL THEN RAISE EXCEPTION 'المصنع غير موجود'; END IF;
+  RETURN v;
+END $$;
+
+CREATE OR REPLACE FUNCTION admin_get_profile(p_token TEXT, p_tenant TEXT)
+RETURNS TABLE (ver INT, data TEXT)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE ok INT;
+BEGIN
+  SELECT COUNT(*) INTO ok FROM factory_users fu
+   WHERE fu.admin_token = p_token AND fu.role = 'super_admin'
+     AND fu.is_active;
+  IF ok = 0 THEN RAISE EXCEPTION 'رمز إداري غير صالح'; END IF;
+  RETURN QUERY SELECT COALESCE(fa.profile_ver, 0), fa.profile
+    FROM factories fa WHERE fa.tenant_id = p_tenant;
+END $$;
+
+-- الملف للحساب نفسه بعد إثبات كلمة مروره — ويُرسل كاملاً فقط إن كان
+-- أحدث مما على الجهاز (`p_have`)، فلا يُنزَّل الشعار مع كل دخول
+CREATE OR REPLACE FUNCTION auth_profile(
+  p_username TEXT, p_proof TEXT, p_have INT
+) RETURNS TABLE (ver INT, data TEXT)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE u factory_users%ROWTYPE; f factories%ROWTYPE;
+BEGIN
+  SELECT * INTO u FROM factory_users fu
+   WHERE fu.username = p_username LIMIT 1;
+  IF NOT FOUND THEN RETURN; END IF;
+  IF u.locked_until IS NOT NULL AND u.locked_until > now() THEN
+    RETURN;
+  END IF;
+  IF COALESCE(p_proof, '') = ''
+     OR split_part(u.password_hash, '$', 2) <> lower(p_proof) THEN
+    UPDATE factory_users fu
+       SET failed_logins = COALESCE(fu.failed_logins, 0) + 1,
+           locked_until = CASE WHEN COALESCE(fu.failed_logins, 0) + 1 >= 8
+                               THEN now() + interval '15 minutes'
+                               ELSE fu.locked_until END
+     WHERE fu.id = u.id;
+    RETURN;
+  END IF;
+  SELECT * INTO f FROM factories fa WHERE fa.tenant_id = u.tenant_id;
+  IF NOT FOUND THEN RETURN; END IF;
+  RETURN QUERY SELECT COALESCE(f.profile_ver, 0),
+         CASE WHEN COALESCE(f.profile_ver, 0) > COALESCE(p_have, 0)
+              THEN f.profile ELSE NULL END;
+END $$;
+
+GRANT EXECUTE ON FUNCTION admin_update_user(TEXT,TEXT,TEXT,TEXT,TEXT)
+  TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION admin_set_profile(TEXT,TEXT,TEXT)
+  TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION admin_get_profile(TEXT,TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION auth_profile(TEXT,TEXT,INT) TO anon, authenticated;
+
 -- 6.5) إصدار الدوال — يكشف تشغيل نسخة قديمة على الخادم
 CREATE OR REPLACE FUNCTION rpc_version()
 RETURNS TEXT LANGUAGE sql SECURITY DEFINER AS $$
-  SELECT '3.1.0'::TEXT;
+  SELECT '3.2.0'::TEXT;
 $$;
 GRANT EXECUTE ON FUNCTION rpc_version() TO anon, authenticated;
 

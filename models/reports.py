@@ -177,9 +177,12 @@ def vat_return(conn, date_from, date_to):
     input_vat = round(account_balance(conn, in_acc["id"], date_from, date_to)[1], 2) \
         if in_acc else 0.0
 
+    # 5.5: وعاء الفاتورة الضريبية بالريال كاملاً = الأجور + قيمة الذهب
+    _icols = {r[1] for r in conn.execute("PRAGMA table_info(invoices)")}
+    _gv = " + COALESCE(gold_value,0)" if "gold_value" in _icols else ""
     s = conn.execute(
-        "SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN total_wages"
-        " ELSE -total_wages END),0) base,"
+        f"SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN total_wages{_gv}"
+        f" ELSE -(total_wages{_gv}) END),0) base,"
         " COALESCE(SUM(CASE WHEN kind='sale' THEN vat_amount"
         " ELSE -vat_amount END),0) vat, COUNT(*) n"
         " FROM invoices WHERE is_deleted=0 AND vat_applied=1"
@@ -208,16 +211,36 @@ def vat_return(conn, date_from, date_to):
         ts = {"net": 0.0, "vat": 0.0, "invoices": {"n": 0},
               "credits": {"n": 0}}
 
+    # 5.5: المشتريات الضريبية بالأطقم — مدخلاتها على 1900 فهي داخل
+    # input_vat أصلاً، وتُضاف هنا إلى تفصيل الوعاء وحده
+    try:
+        from models import set_purchases as _sp
+        sp = _sp.totals(conn, date_from, date_to)
+    except Exception:
+        sp = {"base": 0.0, "vat": 0.0, "n": 0}
+    # 5.5: ومنها فواتير الأطقم الضريبية ومرتجعاتها (داخل sales_base أعلاه)
+    try:
+        from models import tax_invoices as _ti
+        si = _ti.totals(conn, date_from, date_to)
+    except Exception:
+        si = {"base": 0.0, "vat": 0.0, "n": 0}
     net = round(output_vat - input_vat, 2)
     return {"date_from": date_from, "date_to": date_to,
+            "set_sales_base": round(si["base"], 2),
+            "set_sales_vat": round(si["vat"], 2),
+            "set_sales_count": si["n"],
+            "set_purchases_base": round(sp["base"], 2),
+            "set_purchases_vat": round(sp["vat"], 2),
+            "set_purchases_count": sp["n"],
             "tax_sales_base": round(ts["net"], 2),
             "tax_sales_vat": round(ts["vat"], 2),
             "tax_sales_count": ts["invoices"]["n"],
             "tax_sales_credits": ts["credits"]["n"],
             "sales_base": round(s["base"], 2), "sales_vat": round(s["vat"], 2),
             "sales_count": s["n"], "output_vat": output_vat,
-            "purchases_base": round(p["base"], 2),
-            "purchases_vat": round(p["vat"], 2), "purchases_count": p["n"],
+            "purchases_base": round(p["base"] + sp["base"], 2),
+            "purchases_vat": round(p["vat"] + sp["vat"], 2),
+            "purchases_count": p["n"] + sp["n"],
             "input_vat": input_vat, "tdn_vat": round(tdn["vat"], 2),
             "tdn_count": tdn["n"], "net": net,
             "status": "مستحق الدفع لهيئة الزكاة والضريبة والجمارك" if net > 0

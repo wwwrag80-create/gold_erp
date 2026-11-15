@@ -13,6 +13,7 @@ from pathlib import Path
 # الجداول التي تُفرَّغ بالكامل (بيانات مالية وتشغيلية)
 DATA_TABLES = [
     "tax_sale_lines", "tax_sales",
+    "set_purchase_lines", "set_purchases",
     "journal_lines", "journal_entries",
     "invoice_items", "invoices",
     "voucher_lines", "vouchers",

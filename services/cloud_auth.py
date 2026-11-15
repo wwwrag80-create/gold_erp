@@ -29,7 +29,7 @@ ADMIN_TOKEN_FILE = config.BASE_DIR / "data" / "admin_token.json"
 OFFLINE_GRACE_DAYS = 30
 
 # إصدار دوال الخادم المتوقَّع — إن اختلف فالترقية لم تُنفَّذ
-RPC_EXPECTED = "3.1.0"
+RPC_EXPECTED = "3.2.0"
 # أدنى إصدارٍ تعمل به إدارة الحسابات (3.1.0 تضيف الخطط والأجهزة)
 RPC_MIN = "3.0.0"
 
@@ -217,7 +217,52 @@ def _secure_login(username, password, timeout=15):
     row["password_hash"] = f"{salt}${proof}"
     if row.get("role") != ROLE_SUPER:
         row["plan"] = fetch_plan(username, proof, timeout=timeout)
+        # 3.2.0: ملف الحساب (القائمة والهوية) — لا يمنع الدخول أبداً
+        try:
+            row["profile"] = fetch_profile(username, proof, timeout=timeout)
+        except Exception:
+            row["profile"] = None
     return row
+
+
+def _applied_profile_ver():
+    try:
+        from database.database import db
+        from services import account_profile
+        with db(readonly=True) as conn:
+            return account_profile.applied_ver(conn)
+    except Exception:
+        return 0
+
+
+def fetch_profile(username, proof, timeout=15):
+    """ملف الحساب (3.2.0): {ver, data} — والبيانات فقط إن كان أحدث مما
+    طُبِّق على هذا الجهاز. None إن لم تُرقَّ دوال الخادم."""
+    try:
+        row = _first(_rpc("auth_profile", {
+            "p_username": username, "p_proof": proof,
+            "p_have": _applied_profile_ver()}, timeout=timeout))
+    except ValueError as e:
+        if _missing_fn(e) or "auth_profile" in str(e):
+            return None
+        raise
+    if not row:
+        return None
+    return {"ver": int(row.get("ver") or 0), "data": row.get("data") or ""}
+
+
+def _apply_profile(prof, username):
+    """يطبّق ملف المدير على هذا الجهاز إن كان أحدث — بصمت عند أي خطأ."""
+    if not prof or not prof.get("data"):
+        return []
+    try:
+        from database.database import db
+        from services import account_profile
+        with db() as conn:
+            return account_profile.apply(conn, prof.get("ver"),
+                                         prof.get("data"), username)
+    except Exception:
+        return []
 
 
 def fetch_plan(username, proof, timeout=15):
@@ -261,6 +306,8 @@ def _session(username, row, online, notice=""):
     if tid:
         tenant.update(tenant_id=tid,
                       role=(ROLE_SUPER if role == ROLE_SUPER else "factory"))
+    if role != ROLE_SUPER and row.get("profile"):
+        _apply_profile(row.get("profile"), username)
     return {"username": username,
             "full_name": row.get("full_name") or username,
             "role": role, "role_local": "accountant", "tenant_id": tid,
@@ -516,6 +563,63 @@ def set_plan(tenant_id, plan_type, screens, expires_at, max_devices):
         "p_expires": expires_at or None,
         "p_max_devices": int(max_devices or 0)})
     return True
+
+
+# ── تعديل الحساب وملفه (3.2.0) ──
+
+def update_account(username, full_name="", password="", factory_name=""):
+    """يعدّل حساباً قائماً: الاسم الظاهر · كلمة المرور · اسم المصنع.
+    الفارغ يبقى كما هو."""
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("اختر الحساب")
+    if password and len(password) < 4:
+        raise ValueError("كلمة المرور قصيرة — 4 أحرف على الأقل")
+    if not (full_name or password or factory_name):
+        raise ValueError("لا تعديل — اكتب ما تريد تغييره")
+    _require_current_rpc("3.2.0")
+    _admin_call("admin_update_user", {
+        "p_token": _need_token(), "p_username": username,
+        "p_full_name": (full_name or "").strip(),
+        "p_hash": hash_password(password) if password else "",
+        "p_factory_name": (factory_name or "").strip()})
+    if password:
+        # الحساب على هذا الجهاز يدخل بكلمته الجديدة لا القديمة
+        try:
+            data = _cache_read()
+            data.get("users", {}).pop(username.lower(), None)
+            _cache_write(data)
+        except Exception:
+            pass
+    return True
+
+
+def get_profile(tenant_id, timeout=20):
+    """(الملف كقاموس، رقم إصداره) — ({}, 0) إن لم يُحفظ بعد."""
+    from services import account_profile
+    _require_current_rpc("3.2.0")
+    row = _first(_admin_call("admin_get_profile", {
+        "p_token": _need_token(), "p_tenant": tenant_id}, timeout=timeout))
+    if not row:
+        return {}, 0
+    return (account_profile.unpack(row.get("data")),
+            int(row.get("ver") or 0))
+
+
+def set_profile(tenant_id, nav_nodes=None, identity=None, timeout=40):
+    """يحفظ ملف الحساب ويعيد رقم إصداره الجديد — يُطبَّق عند دخوله التالي."""
+    from services import account_profile
+    if not tenant_id:
+        raise ValueError("حدّد الحساب")
+    txt = account_profile.pack(nav_nodes, identity)
+    _require_current_rpc("3.2.0")
+    v = _admin_call("admin_set_profile", {
+        "p_token": _need_token(), "p_tenant": tenant_id,
+        "p_profile": txt}, timeout=timeout)
+    if isinstance(v, list):
+        v = _first(v)
+        v = (list(v.values())[0] if isinstance(v, dict) and v else 0)
+    return int(v or 0)
 
 
 def reset_devices(tenant_id):
