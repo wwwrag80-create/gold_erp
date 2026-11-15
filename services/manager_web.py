@@ -545,7 +545,7 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
         if head == "sets":
             return _resp(200, sets_page(conn, base, csrf, query))
         if head == "boxes":
-            return _resp(200, boxes_page(conn, base, csrf))
+            return _resp(200, boxes_page(conn, base, csrf, query))
         if head == "moves":
             return _resp(200, moves_page(conn, base, csrf, query))
         if head == "stmt":
@@ -1059,13 +1059,13 @@ def boxes_action(data):
         box = next((b for b in boxes if b["id"] == bid), None)
         if act == "add_box":
             if not name:
-                return {"ok": False, "error": "اكتب اسم الصندوق"}
+                return {"ok": False, "error": "اكتب اسم القسم"}
             if len(boxes) >= MAX_BOXES:
-                return {"ok": False, "error": "بلغت الصناديق حدّها"}
-            boxes.append({"id": f"b{int(_t.time() * 1000)}", "name": name,
-                          "codes": []})
+                return {"ok": False, "error": "بلغت الأقسام حدّها"}
+            new_id = f"b{int(_t.time() * 1000)}"
+            boxes.append({"id": new_id, "name": name, "codes": []})
         elif box is None:
-            return {"ok": False, "error": "الصندوق غير موجود — حدّث الصفحة"}
+            return {"ok": False, "error": "القسم غير موجود — حدّث الصفحة"}
         elif act == "ren_box":
             if not name:
                 return {"ok": False, "error": "اكتب الاسم الجديد"}
@@ -1081,152 +1081,141 @@ def boxes_action(data):
             if not code:
                 return {"ok": False, "error": "اختر الحساب من الاقتراحات"}
             if code in box["codes"]:
-                return {"ok": False, "error": "الحساب في الصندوق من قبل"}
+                return {"ok": False, "error": "الحساب في القسم من قبل"}
             if len(box["codes"]) >= MAX_ACCS:
-                return {"ok": False, "error": "بلغ الصندوق حدّه"}
+                return {"ok": False, "error": "بلغ القسم حدّه"}
             box["codes"].append(code)
         elif act == "del_acc":
             box["codes"] = [c for c in box["codes"] if c != code]
         else:
             return {"ok": False, "error": "أمرٌ غير معروف"}
         _save_boxes(boxes)
-    return {"ok": True}
+    return {"ok": True, "id": new_id if act == "add_box" else bid}
 
 
 _BOX_JS = r"""
 (function(){
- function act(d){return MW.post('/boxes',d).then(function(r){
-  if(r.ok){location.reload();}else{MW.toast(r.error||'تعذّر الحفظ',false);}});}
+ function act(d,go){return MW.post('/boxes',d).then(function(r){
+  if(r.ok){if(go)location.href=go(r);else location.reload();}
+  else{MW.toast(r.error||'تعذّر الحفظ',false);}});}
  var nb=document.getElementById('nbname');
  document.getElementById('nbadd').onclick=function(){
-  if(!nb.value.trim()){nb.focus();return;}act({act:'add_box',name:nb.value});};
+  if(!nb.value.trim()){nb.focus();return;}
+  act({act:'add_box',name:nb.value},function(r){
+   return MW.base+'/boxes?b='+encodeURIComponent(r.id);});};
  nb.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();
   document.getElementById('nbadd').click();}});
- document.querySelectorAll('[data-box]').forEach(function(p){
-  var id=p.getAttribute('data-box'),inp=p.querySelector('.accin'),
-   add=p.querySelector('.accadd'),picked=null;
-  MW.ac(inp,'/api/acc',function(r){picked=r;add.disabled=!r;});
-  add.disabled=true;
-  add.onclick=function(){if(picked)act({act:'add_acc',id:id,code:picked.code});};
-  p.querySelectorAll('[data-del]').forEach(function(b){b.onclick=function(e){
-   e.preventDefault();e.stopPropagation();
-   act({act:'del_acc',id:id,code:b.getAttribute('data-del')});};});
-  p.querySelector('.ren').onclick=function(){var n=prompt('الاسم الجديد للصندوق:',
-   p.getAttribute('data-name'));if(n&&n.trim())act({act:'ren_box',id:id,name:n});};
-  p.querySelector('.up').onclick=function(){act({act:'up',id:id});};
-  p.querySelector('.down').onclick=function(){act({act:'down',id:id});};
-  p.querySelector('.delbox').onclick=function(){MW.confirm('حذف الصندوق',
-   'حذف «'+p.getAttribute('data-name')+'» من الرابط؟\nالحسابات نفسها لا '+
-   'تتأثر — يُحذف العرض وحده.').then(function(y){if(y)act({act:'del_box',id:id});});};
- });
+ var p=document.querySelector('[data-box]');if(!p)return;
+ var id=p.getAttribute('data-box'),inp=p.querySelector('.accin'),
+  add=p.querySelector('.accadd'),picked=null;
+ MW.ac(inp,'/api/acc',function(r){picked=r;add.disabled=!r;});
+ add.disabled=true;
+ add.onclick=function(){if(picked)act({act:'add_acc',id:id,code:picked.code});};
+ p.querySelectorAll('[data-del]').forEach(function(b){b.onclick=function(){
+  act({act:'del_acc',id:id,code:b.getAttribute('data-del')});};});
+ p.querySelector('.ren').onclick=function(){var n=prompt('الاسم الجديد للقسم:',
+  p.getAttribute('data-name'));if(n&&n.trim())act({act:'ren_box',id:id,name:n});};
+ p.querySelector('.up').onclick=function(){act({act:'up',id:id});};
+ p.querySelector('.down').onclick=function(){act({act:'down',id:id});};
+ p.querySelector('.delbox').onclick=function(){MW.confirm('حذف القسم',
+  'حذف القسم «'+p.getAttribute('data-name')+'» من الرابط؟\nالحسابات نفسها لا '+
+  'تتأثر — يُحذف العرض وحده.').then(function(y){if(y)act({act:'del_box',id:id},
+  function(){return MW.base+'/boxes';});});};
 })();
 """
 
-# 5.6.1: الصناديق لوحاتٌ متجاورة أفقياً، وحسابات كل صندوقٍ بطاقاتٌ متجاورة
-# كذلك — وعلى الجوال تنزلق اللوحات أفقياً بالإصبع
+# 5.6.1: كـ«حركة المصنع» — الأقسام لوحاتٌ في الأعلى، واختيار قسمٍ يُظهر تحته
+# جدول حساباته بأرصدتها
 _BOX_CSS = """
-.boxes{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));
-gap:14px;align-items:start}
-.box{background:var(--card);border:1px solid var(--line);border-radius:18px;
-padding:12px 14px 14px;box-shadow:0 1px 2px rgba(60,40,10,.04);
-display:flex;flex-direction:column;gap:10px;min-width:0}
-.box .bh{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.box .bh h3{margin:0;font-size:17px;color:var(--brown);display:flex;
-align-items:center;gap:7px}
-.box .bh .sp{flex:1 1 auto}
-.box .bt{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.box .bt div{background:#FFF8E8;border:1px solid #EBD8A8;border-radius:12px;
-padding:7px 10px;font-size:12px;color:var(--muted)}
-.box .bt b{display:block;font-size:17px;color:var(--ink);direction:ltr;
-text-align:right;font-variant-numeric:tabular-nums;margin-top:2px}
-.accs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
-gap:8px}
-.acc{position:relative;display:flex;flex-direction:column;gap:3px;
-border:1px solid var(--line);border-radius:12px;padding:9px 10px 8px;
-background:var(--soft);text-decoration:none;color:var(--ink);min-width:0}
-.acc:hover{border-color:#dcc58c;background:#FFFBF1}
-.acc .nm{font-weight:700;font-size:14px;color:var(--brown);
-white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-inline-end:18px}
-.acc .cd{font-size:11.5px;color:var(--muted)}
-.acc .g,.acc .c{font-size:15px;font-weight:700;direction:ltr;text-align:right;
+.newbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.newbox input{min-width:220px}
+.btiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+gap:12px;margin:0 0 16px}
+.btiles .tile{min-height:118px}
+.btiles .tile .g{font-size:12.5px;color:var(--muted);direction:ltr;
 font-variant-numeric:tabular-nums}
-.acc .c{font-size:13px;font-weight:600;color:#4a3f33}
-.acc .neg{color:var(--bad)}
-.acc .lb{font-size:11px;color:var(--muted);font-weight:400}
-.acc .cover{position:absolute;inset:0;border-radius:12px;z-index:1}
-.acc .x{position:absolute;top:5px;inset-inline-end:5px;border:0;z-index:2;
-background:transparent;color:#b98;cursor:pointer;font-size:14px;
-line-height:1;padding:3px}
-.acc .x:hover{color:var(--bad)}
-.box .addrow{display:flex;gap:8px;align-items:flex-end}
-.box .addrow label{flex:1 1 auto}
-@media (max-width:640px){.boxes{display:flex;overflow-x:auto;
-scroll-snap-type:x mandatory;gap:10px;padding-bottom:6px;
--webkit-overflow-scrolling:touch}
-.box{flex:0 0 88%;scroll-snap-align:start}
-.accs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.addacc{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;
+margin:14px 0 0}
+.addacc label{flex:1 1 280px}
+.bx .cdm{display:none;color:var(--muted);font-size:12px;font-weight:400;
+direction:ltr;text-align:right}
+@media (max-width:640px){.newbox input{min-width:0;flex:1 1 auto}
+.btiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.btiles .tile{min-height:96px;padding:12px 6px}
+.btiles .tile .ic{width:28px;height:28px}
+.bx .cd{display:none}.bx .cdm{display:block}.bx .acts .lbl{display:none}
+.bx td,.bx th{padding:7px 4px}}
 """
 
 
-def _box_card(base, r, u):
-    """بطاقة حسابٍ داخل الصندوق: الاسم ورقمه، رصيد الذهب ثم النقد —
-    والنقرة تفتح كشفه."""
-    g, c = r["gold_balance"], r["cash_balance"]
-    gtxt = (f'{_w(g)} <span class="lb">{u}</span>' if g else
-            '<span class="lb">ذهب —</span>')
-    ctxt = (f'{_m(c)} <span class="lb">ريال</span>' if c else
-            '<span class="lb">نقد —</span>')
-    return (f'<div class="acc"><a class="cover" href="'
-            f'{_e(_link(base, "/stmt", code=r["code"]))}" title="كشف حساب '
-            f'{_e(r["name"])}" aria-label="كشف حساب {_e(r["name"])}"></a>'
-            f'<span class="nm">{_e(r["name"])}</span><span class="cd">'
-            f'{_e(r["code"])}</span>'
-            f'<span class="g{" neg" if g < 0 else ""}">{gtxt}</span>'
-            f'<span class="c{" neg" if c < 0 else ""}">{ctxt}</span>'
-            f'<button class="x" data-del="{_e(r["code"])}" title="إزالة من '
-            f'الصندوق">✕</button></div>')
-
-
-def boxes_page(conn, base, csrf):
+def boxes_page(conn, base, csrf, query=None):
     from models import dash_panels as dp
+    query = query or {}
     u = _e(_unit())
     boxes = load_boxes(conn)
-    panels = []
+    sel = next((b for b in boxes if b["id"] == query.get("b")),
+               boxes[0] if boxes else None)
+    tiles = []
     for b in boxes:
-        rows = dp.account_rows(conn, b["codes"]) if b["codes"] else []
-        tg = round(sum(r["gold_balance"] for r in rows), 3)
-        tc = round(sum(r["cash_balance"] for r in rows), 2)
-        cards = ("".join(_box_card(base, r, u) for r in rows) if rows else
-                 '<div class="empty" style="grid-column:1/-1;padding:16px">'
-                 'لا حسابات بعد — أضفها من الخانة أدناه</div>')
-        panels.append(
-            f'<section class="box" data-box="{_e(b["id"])}" '
-            f'data-name="{_e(b["name"])}"><div class="bh"><h3>'
-            f'{icon("boxes", 19)}{_e(b["name"])}</h3><span class="pill">'
-            f'{len(rows)} حساب</span><span class="sp"></span>'
-            f'<button class="btn sm gh up" title="نقله قبل (يميناً)">▶'
-            f'</button><button class="btn sm gh down" title="نقله بعد '
-            f'(يساراً)">◀</button><button class="btn sm gh ren" title='
-            f'"تسمية">{icon("edit", 14)}</button><button class="btn sm red '
-            f'delbox" title="حذف الصندوق">{icon("trash", 14)}</button></div>'
-            f'<div class="bt"><div>الذهب<b>{_w(tg)} <small>{u}</small></b>'
-            f'</div><div>النقد<b>{_m(tc)} <small>ريال</small></b></div></div>'
-            f'<div class="accs">{cards}</div>'
-            f'<div class="addrow"><label class="ac">إضافة حساب — اكتب أول '
-            f'الحروف<input class="accin" placeholder="اسم الحساب أو رقمه…" '
-            f'autocomplete="off"></label><button class="btn gold accadd">'
-            f'{icon("plus", 16)}إضافة</button></div></section>')
-    inner = (f'<div class="ptitle"><h2>{icon("boxes", 22)}الصناديق</h2>'
-             f'<span class="hint">صناديق تسمّيها وتضع فيها ما تشاء من الحسابات'
-             f' — ورصيد كلّ حسابٍ لحظة الفتح · انقر الحساب يفتح كشفه</span>'
-             f'</div><div class="panel"><div class="fl" style="margin:0">'
-             f'<label style="flex:1 1 260px">صندوق جديد<input id="nbname" '
-             f'maxlength="60" placeholder="مثال: صناديق الذهب · البنوك · '
-             f'المناديب"></label><button class="btn" id="nbadd">'
-             f'{icon("plus", 16)}إضافة الصندوق</button></div></div>'
-             f'<div class="boxes">{"".join(panels)}</div>')
-    return frame(base, "boxes", "الصناديق", inner, csrf, css=_BOX_CSS,
-                 js=_BOX_JS)
+        tiles.append(
+            f'<a class="tile{" main" if sel is b else ""}" href="'
+            f'{_e(_link(base, "/boxes", b=b["id"]))}">{icon("boxes", 32)}'
+            f'<b>{_e(b["name"])}</b><span class="n">{len(b["codes"])} حساب'
+            f'</span></a>')
+    head = (f'<div class="ptitle"><h2>{icon("boxes", 22)}الصناديق</h2>'
+            f'<span class="hint">اختر قسماً يظهر تحته جدول حساباته</span>'
+            f'<span class="sp"></span><span class="newbox"><input id="nbname"'
+            f' maxlength="60" placeholder="اسم القسم الجديد…"><button '
+            f'class="btn" id="nbadd">{icon("plus", 16)}إضافة قسم</button>'
+            f'</span></div>'
+            + (f'<div class="btiles">{"".join(tiles)}</div>' if tiles else
+               '<div class="panel"><div class="empty">لا أقسام بعد — اكتب '
+               'اسم القسم في الأعلى ثم «إضافة قسم»</div></div>'))
+    if sel is None:
+        return frame(base, "boxes", "الصناديق", head, csrf, css=_BOX_CSS,
+                     js=_BOX_JS)
+    rows = dp.account_rows(conn, sel["codes"]) if sel["codes"] else []
+    tg = round(sum(r["gold_balance"] for r in rows), 3)
+    tc = round(sum(r["cash_balance"] for r in rows), 2)
+
+    def num(v, money=False):
+        if not v:
+            return "—"
+        return (f'<span class="{"neg" if v < 0 else ""}">'
+                f'{_m(v) if money else _w(v)}</span>')
+    trs = "".join(
+        f'<tr><td><b>{_e(r["name"])}</b><small class="cdm">{_e(r["code"])}'
+        f'</small></td><td class="n cd">{_e(r["code"])}'
+        f'</td><td class="n">{num(r["gold_balance"])}</td><td class="n">'
+        f'{num(r["cash_balance"], True)}</td><td class="acts"><a class="btn sm'
+        f' gh" href="{_e(_link(base, "/stmt", code=r["code"]))}" title="كشف '
+        f'الحساب">{icon("stmt", 15)}<span class="lbl">كشف</span></a> '
+        f'<button class="btn sm red" data-del="'
+        f'{_e(r["code"])}" title="إزالة من القسم">✕</button></td></tr>'
+        for r in rows)
+    table = (f'<div class="scroll"><table class="tbl bx"><tr><th>الحساب</th>'
+             f'<th class="n cd">الرقم</th><th class="n">الذهب ({u})</th>'
+             f'<th class="n">النقد (ريال)</th><th></th></tr>{trs}'
+             f'<tr class="tot"><td>الإجمالي</td><td class="cd"></td><td class="n">'
+             f'{_w(tg)}</td><td class="n">{_m(tc)}</td><td></td></tr>'
+             f'</table></div>' if rows else
+             '<div class="empty">لا حسابات في هذا القسم بعد — أضفها من '
+             'الخانة أدناه</div>')
+    body = (f'<section class="panel" data-box="{_e(sel["id"])}" data-name="'
+            f'{_e(sel["name"])}"><h3>{icon("boxes", 20)}{_e(sel["name"])}'
+            f'<span class="pill">{len(rows)} حساب</span><span class="sp">'
+            f'</span><button class="btn sm gh up" title="نقل القسم قبل '
+            f'(يميناً)">▶</button><button class="btn sm gh down" title="نقل '
+            f'القسم بعد (يساراً)">◀</button><button class="btn sm gh ren">'
+            f'{icon("edit", 15)}تسمية</button><button class="btn sm red '
+            f'delbox">{icon("trash", 15)}حذف القسم</button></h3>{table}'
+            f'<div class="addacc"><label class="ac">إضافة حساب للقسم — اكتب '
+            f'أول الحروف<input class="accin" placeholder="اسم الحساب أو '
+            f'رقمه…" autocomplete="off"></label><button class="btn gold '
+            f'accadd">{icon("plus", 16)}إضافة الحساب</button></div>'
+            f'</section>')
+    return frame(base, "boxes", f"الصناديق — {sel['name']}", head + body,
+                 csrf, css=_BOX_CSS, js=_BOX_JS)
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -123,12 +123,17 @@ r2 = json.loads(call("POST", "boxes", body={
 r3 = json.loads(call("POST", "boxes", body={
     "csrf": mw._csrf(TOK, SECRET), "act": "add_acc", "id": bid,
     "code": "9999999"})[1])
-code, h = call("GET", "boxes")
+code, h0 = call("GET", "boxes")
+code, h = call("GET", "boxes", {"b": bid})
 check("قسمٌ جديد وحسابٌ فيه برصيده", r["ok"] and r2["ok"]
-      and "صناديق الذهب" in h and "الصندوق الرئيسي" in h, (r, r2))
-check("الصناديق لوحاتٌ متجاورة وحساباتها بطاقاتٌ تفتح كشفها",
-      'class="boxes"' in h and 'class="acc"' in h
-      and "/stmt?code=1400" in h and "<a class=\"acc\"" not in h)
+      and r.get("id") == bid and "صناديق الذهب" in h
+      and "الصندوق الرئيسي" in h, (r, r2))
+# 5.6.1: كـ«حركة المصنع» — لوحات الأقسام في الأعلى، والمختار جدوله تحته
+check("الأقسام لوحاتٌ في الأعلى، والمختار يُظهر جدول حساباته تحته",
+      'class="btiles"' in h and h.count('class="tile') >= 2
+      and 'class="tile main"' in h and f'data-box="{bid}"' in h
+      and 'class="tbl bx"' in h and "/stmt?code=1400" in h
+      and "الإجمالي" in h and f'data-box="{bid}"' not in h0, h[-500:])
 check("حسابٌ غير موجود يُرفض", r3["ok"] is False)
 bad = json.loads(call("POST", "boxes", body={"csrf": "x", "act": "add_box",
                                              "name": "z"})[1])
