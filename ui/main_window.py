@@ -50,6 +50,7 @@ from ui.sales_analytics_screen import SalesAnalyticsScreen
 from ui.sales_screen import SalesScreen
 from ui.tax_sales_screen import TaxSalesScreen
 from ui.tax_purchases_screen import TaxPurchasesScreen
+from ui.daily_moves_screen import DailyMovesScreen
 from ui.workshop_accounts_screen import WorkshopAccountsScreen
 from ui.workshop_losses_screen import WorkshopLossesScreen
 from ui.stocktake_screen import StocktakeScreen
@@ -163,6 +164,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     ("دليل الموديلات", Lazy(lambda: ModelsScreen(user), "دليل الموديلات")),
                     ("حركة الطقم", Lazy(lambda: ItemHistoryScreen(user), "حركة الطقم")),
                     ("كشف حساب", self.gl_screen),
+                    # 5.6.0: عمليات يومٍ واحد كلها — وفرزها بنوعها
+                    ("الحركة اليومية", Lazy(lambda: DailyMovesScreen(user),
+                                            "الحركة اليومية")),
                     ("الوارد من التصنيع", self.production_screen),
                     ("مبيعات/مرتجعات", self.sales_screen),
                     # 5.2.4: أطقم فواتير بيعٍ مختارة — معه أم رجعت، وإلى
@@ -559,6 +563,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if parent:
                 parent.setExpanded(False)
         self.sidebar.itemClicked.connect(self._nav_clicked)
+        # 5.6.0: النقر الأيمن على بندٍ يرتّبه بأوامر صريحة (أعلى · أسفل ·
+        # داخل التي فوقها · إخراجها · إعادة تسمية) — السحب وحده كان يلتبس
+        self.sidebar.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.sidebar.customContextMenuRequested.connect(self._nav_context)
         # الحفظ عند كل تغيير: إعادة تسمية · طيّ · **وسحب وإفلات**
         self.sidebar.itemChanged.connect(lambda *_: self._save_nav_layout())
         try:
@@ -864,6 +872,52 @@ class MainWindow(QtWidgets.QMainWindow):
                     item.child(i).isHidden()
                     for i in range(item.childCount())):
                 item.setHidden(True)
+
+    def _nav_context(self, pos):
+        """قائمة ترتيب البند المنقور بالأيمن (5.6.0)."""
+        from ui.widgets import nav_tools
+        it = self.sidebar.itemAt(pos)
+        if it is None or it.data(0, NAV_SUB_ROLE):
+            return              # أقسام الشاشة الثابتة لا تُرتَّب
+        self.sidebar.setCurrentItem(it)
+        idx = it.data(0, QtCore.Qt.UserRole)
+        key = it.data(0, NAV_KEY_ROLE) or ""
+        group = idx is None or idx < 0
+        orig = key.replace("::group::", "") if group else key
+
+        def movable(x):
+            return not x.data(0, NAV_SUB_ROLE)
+
+        def accepts(x):
+            return not x.data(0, NAV_SUB_ROLE)
+
+        def run(fn):
+            def go():
+                if fn():
+                    self._schedule_nav_save()
+            return go
+
+        def rename():
+            return nav_tools.rename(self, it, orig)
+
+        def original():
+            if group:
+                return False
+            it.setText(0, orig)
+            return True
+        nav_tools.menu(self, self.sidebar, it, [
+            ("▲ أعلى", run(lambda: nav_tools.move(self.sidebar, it, -1,
+                                                 movable))),
+            ("▼ أسفل", run(lambda: nav_tools.move(self.sidebar, it, 1,
+                                                 movable))),
+            ("⇲ داخل الشاشة التي فوقها",
+             run(lambda: nav_tools.indent(self.sidebar, it, accepts))),
+            ("⇱ إخراجها مستوى",
+             run(lambda: nav_tools.outdent(self.sidebar, it)),
+             it.parent() is not None),
+            None,
+            ("✎ إعادة تسمية…", run(rename)),
+            ("⟲ الاسم الأصلي", run(original), not group)])
 
     def reset_nav_layout(self):
         """يعيد القائمة لترتيبها الافتراضي (يُحذف ملف التخصيص)."""

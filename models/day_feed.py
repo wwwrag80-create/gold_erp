@@ -23,6 +23,9 @@ GROUPS = (
     ("payment", "سندات الصرف"),
     ("supply", "الوارد من التصنيع (توريد)"),
     ("purchase", "المشتريات"),
+    # 5.6.0: القيد اليومي والتسكير بابان مستقلان (كانا في «عمليات أخرى»)
+    ("manual", "القيود اليومية"),
+    ("fixing", "التسكيرات"),
     ("other", "عمليات أخرى"),
 )
 GROUP_LABEL = dict(GROUPS)
@@ -196,7 +199,121 @@ def _group(d):
         return "supply"
     if src in ("purchases", "set_purchases"):
         return "purchase"
+    if src == "fixing_ops":
+        return "fixing"
+    if src in (None, "", "manual"):
+        return "manual"
     return "other"
+
+
+def _doc(conn, d, rev_of, rev_src):
+    """مستندٌ من دفتر اليومية بتفصيله — مشتركٌ بين اليوم والفترة."""
+    g = _group(d)
+    doc = {"no": d["doc_no"], "op": d["op"], "src": d.get("src"),
+           "sid": d.get("sid"), "eid": d["eid"], "group": g,
+           "date": d.get("date") or "",
+           "time": (d.get("when") or "")[11:16],
+           "who": d.get("who") or "", "desc": d.get("desc") or "",
+           "gold": float(d.get("gold") or 0),
+           "cash": float(d.get("cash") or 0),
+           "accounts": d.get("accounts") or "",
+           "reversed_by": rev_of.get(d["eid"], ""),
+           "reverses": rev_src.get(d["eid"], ""), "party": "",
+           "detail": None}
+    try:
+        if g in ("sale", "sale_return"):
+            doc["detail"] = _invoice(conn, d["sid"])
+        elif g in ("receipt", "payment"):
+            doc["detail"] = _voucher(conn, d["sid"])
+        elif g == "supply":
+            doc["detail"] = _supply(conn, d["eid"])
+    except Exception:
+        doc["detail"] = None
+    if doc["detail"] is None:
+        doc["lines"] = _lines(conn, d["eid"])
+        doc["party"] = _line_party(doc["lines"])
+    else:
+        doc["party"] = doc["detail"].get("party", "")
+        if g in ("supply",):
+            doc["lines"] = []
+    doc["weight"] = _weight_of(doc)
+    return doc
+
+
+def _line_party(lines):
+    """الطرف في قيدٍ بلا مستند: أول حسابٍ غير الصناديق والمخازن."""
+    for ln in lines or []:
+        code = (ln["account"] or "").split(" — ")[0]
+        if code[:2] not in ("11", "12", "13", "14", "15"):
+            return ln["account"]
+    return (lines[0]["account"] if lines else "")
+
+
+def _weight_of(doc):
+    """وزن المستند المعروض في السطر (مكافئ 18): الأطقم للفاتورة والتوريد،
+    والمكافئ للسند، ومدين الذهب لغيرهما."""
+    det = doc.get("detail") or {}
+    if doc["group"] in ("sale", "sale_return", "supply") and det:
+        return round(float(det.get("weight") or 0), 3)
+    if doc["group"] in ("receipt", "payment") and det:
+        return round(float(det.get("gold_equiv") or 0), 3)
+    return round(float(doc.get("gold") or 0), 3)
+
+
+def _totals(key, docs):
+    t = {"count": len(docs)}
+    dets = [x["detail"] for x in docs if x.get("detail")]
+    if key in ("sale", "sale_return"):
+        t["sets"] = sum(x["n_sets"] for x in dets)
+        t["weight"] = round(sum(x["weight"] for x in dets), 3)
+        t["wages"] = round(sum(x["wages"] for x in dets), 2)
+        t["grand"] = round(sum(x["grand"] for x in dets), 2)
+    elif key in ("receipt", "payment"):
+        ks = {}
+        for x in dets:
+            for k in x["karats"]:
+                a = ks.setdefault(k["karat"], {"karat": k["karat"],
+                                               "weight": 0.0, "equiv": 0.0})
+                a["weight"] = round(a["weight"] + k["weight"], 3)
+                a["equiv"] = round(a["equiv"] + k["equiv"], 3)
+        t["karats"] = sorted(ks.values(), key=lambda k: -k["karat"])
+        t["gold_equiv"] = round(sum(k["equiv"] for k in ks.values()), 3)
+        t["cash"] = round(sum(x["cash"] for x in dets), 2)
+    elif key == "supply":
+        t["sets"] = sum(x["n_sets"] for x in dets)
+        t["weight"] = round(sum(x["weight"] for x in dets), 3)
+    else:
+        t["weight"] = round(sum(x["weight"] for x in docs), 3)
+        t["cash"] = round(sum(x["cash"] for x in docs), 2)
+    return t
+
+
+def period(conn, date_from, date_to, group=None, limit=1500):
+    """مستندات فترةٍ (يومٍ أو أكثر) بتفصيلها — وبنوعٍ واحدٍ إن طُلب (5.6.0).
+
+    {"from","to","group","docs":[…الأحدث أولاً],"counts":{نوع: عدد},
+     "totals": إجماليات النوع المختار (أو كل نوعٍ إن لم يُختر)}.
+    الإحصاء (العدد بكل نوع) من الفترة كلها، والتفصيل لما يُعرض وحده."""
+    from models import journal
+    rows = journal.day_book(conn, date_from, date_to, limit=20000)
+    rev_of, rev_src = _reversals(conn)
+    counts = {k: 0 for k, _t in GROUPS}
+    pick = []
+    for d in rows:
+        g = _group(d)
+        counts[g] += 1
+        if group in (None, "", "all") or g == group:
+            pick.append(d)
+    pick = pick[-int(limit):] if limit else pick
+    docs = [_doc(conn, d, rev_of, rev_src) for d in pick]
+    docs.reverse()                 # الأحدث أولاً
+    by = {}
+    for x in docs:
+        by.setdefault(x["group"], []).append(x)
+    totals = {k: _totals(k, v) for k, v in by.items()}
+    return {"from": date_from, "to": date_to, "group": group or "all",
+            "docs": docs, "counts": counts, "totals": totals,
+            "count": len(rows), "shown": len(docs)}
 
 
 def day(conn, date):
@@ -206,60 +323,14 @@ def day(conn, date):
     rev_of, rev_src = _reversals(conn)
     groups = {k: [] for k, _t in GROUPS}
     for d in s["docs"]:
-        g = _group(d)
-        doc = {"no": d["doc_no"], "op": d["op"], "src": d.get("src"),
-               "sid": d.get("sid"), "eid": d["eid"],
-               "time": (d.get("when") or "")[11:16],
-               "who": d.get("who") or "", "desc": d.get("desc") or "",
-               "gold": float(d.get("gold") or 0),
-               "cash": float(d.get("cash") or 0),
-               "accounts": d.get("accounts") or "",
-               "reversed_by": rev_of.get(d["eid"], ""),
-               "reverses": rev_src.get(d["eid"], ""), "party": "",
-               "detail": None}
-        try:
-            if g in ("sale", "sale_return"):
-                doc["detail"] = _invoice(conn, d["sid"])
-            elif g in ("receipt", "payment"):
-                doc["detail"] = _voucher(conn, d["sid"])
-            elif g == "supply":
-                doc["detail"] = _supply(conn, d["eid"])
-        except Exception:
-            doc["detail"] = None
-        if doc["detail"] is None:
-            doc["lines"] = _lines(conn, d["eid"])
-        else:
-            doc["party"] = doc["detail"].get("party", "")
-            if g in ("supply",):
-                doc["lines"] = []
-        groups[g].append(doc)
+        doc = _doc(conn, d, rev_of, rev_src)
+        groups[doc["group"]].append(doc)
     out = []
     for key, title in GROUPS:
         docs = groups[key]
         if not docs:
             continue
-        t = {"count": len(docs)}
-        dets = [x["detail"] for x in docs if x.get("detail")]
-        if key in ("sale", "sale_return"):
-            t["sets"] = sum(x["n_sets"] for x in dets)
-            t["weight"] = round(sum(x["weight"] for x in dets), 3)
-            t["wages"] = round(sum(x["wages"] for x in dets), 2)
-            t["grand"] = round(sum(x["grand"] for x in dets), 2)
-        elif key in ("receipt", "payment"):
-            ks = {}
-            for x in dets:
-                for k in x["karats"]:
-                    a = ks.setdefault(k["karat"], {"karat": k["karat"],
-                                                   "weight": 0.0,
-                                                   "equiv": 0.0})
-                    a["weight"] = round(a["weight"] + k["weight"], 3)
-                    a["equiv"] = round(a["equiv"] + k["equiv"], 3)
-            t["karats"] = sorted(ks.values(), key=lambda k: -k["karat"])
-            t["gold_equiv"] = round(sum(k["equiv"] for k in ks.values()), 3)
-            t["cash"] = round(sum(x["cash"] for x in dets), 2)
-        elif key == "supply":
-            t["sets"] = sum(x["n_sets"] for x in dets)
-            t["weight"] = round(sum(x["weight"] for x in dets), 3)
-        out.append({"key": key, "title": title, "docs": docs, "totals": t})
+        out.append({"key": key, "title": title, "docs": docs,
+                    "totals": _totals(key, docs)})
     return {"date": s["date"], "summary": s, "groups": out,
             "count": s["count"]}

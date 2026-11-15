@@ -108,6 +108,14 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         g.addWidget(btn_pin, 1, 2)
         g.addWidget(btn_nopin, 1, 3)
         g.addWidget(self.pin_state, 1, 4)
+        # 5.6.0: تسجيل العمليات من الرابط (بيع · مرتجع · قبض · صرف · قيد ·
+        # توريد) — لا يعمل إلا ومعه رمز دخول، ويُوقف من هنا متى شاء المدير
+        self.ops = kit.CheckBox("السماح بتسجيل العمليات من الرابط (يتطلب "
+                                "رمز دخول)")
+        self.ops.setToolTip("بيع · مرتجع · قبض · صرف · قيد يومي · توريد — "
+                            "تُرحَّل في دفاتر هذا الجهاز باسم «رابط المدير»")
+        self.ops.toggled.connect(self._ops_toggled)
+        g.addWidget(self.ops, 2, 1, 1, 4)
         g.setColumnStretch(4, 1)
 
         acts = QtWidgets.QHBoxLayout()
@@ -151,11 +159,30 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         i = self.mode.findData(st["mode"])
         self.mode.setCurrentIndex(max(i, 0))
         self._pin_label(st["has_pin"])
+        try:
+            from services import manager_web
+            with db(readonly=True) as conn:
+                on = manager_web.ops_enabled(conn)
+            self.ops.blockSignals(True)
+            self.ops.setChecked(on)
+            self.ops.blockSignals(False)
+        except Exception:
+            pass
         if st["enabled"]:
             self._run(mw.peek, self._show_peek, "جارٍ قراءة حال الرابط…")
         else:
             self._show(None, "<span style='color:#776b5e'>الرابط موقوف —"
                              " اضغط «تفعيل الرابط»</span>")
+
+    def _ops_toggled(self, on):
+        try:
+            from database.database import db
+            from services import manager_web
+            user = (getattr(self, "user", None) or {}).get("username")
+            with db() as conn:
+                manager_web.set_ops_enabled(conn, on, user)
+        except Exception as e:
+            err(self, e)
 
     def _pin_label(self, has):
         self.pin_state.setText("✔ عليه رمز دخول" if has

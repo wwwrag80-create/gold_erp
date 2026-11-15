@@ -4079,6 +4079,70 @@ def _tpl_invoice_models(conn, invoice_id=0, per_page=4):
             + _gallery(models, sets=_invoice_model_sets(conn, [invoice_id])))
 
 
+def _tpl_supply_models(conn, wo_id=0):
+    """صور موديلات دفعة توريد (5.6.0) — بقالب المعاينة المجمّعة: كل موديلٍ
+    بصورته وداخل إطاره أرقام تشغيل أطقمه بوزنها. `wo_id` أيُّ طقمٍ في
+    الدفعة (كما يحمله القيد)."""
+    from models import models_catalog as mc
+    wo = conn.execute("SELECT entry_id, created_at FROM work_orders WHERE"
+                      " id=?", (wo_id,)).fetchone()
+    if not wo:
+        raise ValueError("رقم التشغيل غير موجود")
+    eid = wo["entry_id"]
+    ent = conn.execute("SELECT entry_date, doc_no FROM journal_entries"
+                       " WHERE id=?", (eid,)).fetchone()
+    rows = conn.execute(
+        "SELECT b.wo_no, COALESCE(NULLIF(TRIM(w.model_no),''),"
+        " '— بلا موديل —') m, b.gold, b.small_stones, b.big_stones,"
+        " w.registered_weight reg, w.standing_gold st,"
+        " COALESCE(w.is_bulk,0) bulk FROM wo_batch_lines b"
+        " LEFT JOIN work_orders w ON w.work_order_no=b.wo_no AND"
+        " w.is_deleted=0 WHERE b.entry_id=? ORDER BY b.seq, b.id",
+        (eid,)).fetchall()
+    if not rows:
+        rows = conn.execute(
+            "SELECT work_order_no wo_no, COALESCE(NULLIF(TRIM(model_no),''),"
+            " '— بلا موديل —') m, registered_weight reg, standing_gold st,"
+            " COALESCE(is_bulk,0) bulk FROM work_orders WHERE entry_id=?"
+            " AND is_deleted=0 ORDER BY id", (eid,)).fetchall()
+    sets, counts = {}, {}
+    wt = 0.0
+    for r in rows:
+        if r["bulk"] or is_bulk_no(r["wo_no"] or ""):
+            continue
+        reg = float(r["reg"] or 0)
+        st = float(r["st"] or 0) or reg
+        wt += reg
+        sets.setdefault(r["m"], []).append((r["wo_no"], reg, st))
+        counts[r["m"]] = counts.get(r["m"], 0) + 1
+    models = sorted(counts.items(), key=lambda x: mc.model_key(x[0]))
+    n = sum(counts.values())
+    date = ent["entry_date"] if ent else ""
+    head = _gallery_head(
+        "دفعة توريد", f'{en(date)}' + (f' · {en(ent["doc_no"])}'
+                                       if ent and ent["doc_no"] else ""),
+        [("الأطقم", f'{en(n)} طقم · {en(len(models))} موديل'),
+         ("الوزن", f'{_gw(wt)} {_kunit()}')])
+    if not models:
+        return head + ('<div style="text-align:center;padding:40px">'
+                       'لا أطقم مفردة في هذه الدفعة</div>')
+    return (head + f'<div class="gsec">دفعة توريد — {en(n)} طقم · '
+            f'{_gw(wt)} {_kunit()}</div>' + _gallery(models, sets=sets))
+
+
+def models_target(src, sid):
+    """(قالب صور الموديلات، رقمه) لمستندٍ له أطقم — أو None (5.6.0)."""
+    if not sid:
+        return None
+    if src in ("invoices", "invoice"):
+        return "invoice_models", sid
+    if src in ("set_purchases", "set_purchase"):
+        return "set_purchase_models", sid
+    if src in ("work_orders", "wo_supply"):
+        return "supply_models", sid
+    return None
+
+
 def _has_cols(conn, table, cols):
     have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     return all(c in have for c in cols)
@@ -5849,6 +5913,7 @@ BUILDERS = {
     "dossier_models": _tpl_dossier_models,
     "invoice_models": _tpl_invoice_models,
     "set_purchase_models": _tpl_set_purchase_models,
+    "supply_models": _tpl_supply_models,
     "model_order": _tpl_model_order,
     "orders_production": _tpl_orders_production,
     "dash_panel": _tpl_dash_panel,

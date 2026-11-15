@@ -31,7 +31,7 @@ def _diagnosed(msg):
                           "النسخة.")
         if not d["reachable"]:
             return msg + "\n\nالسبب: تعذّر الوصول للخادم — تحقق من الإنترنت."
-        if not d["table"]:
+        if not d.get("rpc"):
             return msg + f"\n\nالسبب: {d['message']}"
     except Exception:
         pass

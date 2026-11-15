@@ -218,9 +218,9 @@ class TotalsRow(QtWidgets.QWidget):
         self.c_gv = Card("قيمة الذهب", "بالريال")
         # 5.5.2: لا لوحة «مصنعية» — الصافي يغني عنها
         self.c_net = Card("الصافي الخاضع", "قبل الضريبة")
-        self.c_vat = Card(f"{vat_title} {config.VAT_RATE * 100:g}%", vat_sub,
-                          summary=True)
-        self.c_total = Card("الإجمالي", "")
+        self.c_vat = Card(f"{vat_title} {config.VAT_RATE * 100:g}%", vat_sub)
+        # 5.6.0: الإجمالي شامل الضريبة هو الرقم البارز — لا الضريبة
+        self.c_total = Card("الإجمالي شامل الضريبة", "", summary=True)
         lay = cards(self.c_n, self.c_gv, self.c_net, self.c_vat,
                     self.c_total)
         lay.setContentsMargins(0, 0, 0, 0)

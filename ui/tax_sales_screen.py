@@ -1061,23 +1061,42 @@ class TaxSalesScreen(QtWidgets.QWidget):
         super().__init__()
         from ui.tax_sets_sales import (SetsCreditTab, SetsInvoiceTab,
                                        SetsRegisterTab)
+        from ui.widgets.lazy_tabs import LazyTabs
         self.user = user
-        self.inv_tab = SetsInvoiceTab(user, new_customer=self._new_customer)
-        self.cn_tab = SetsCreditTab(user)
-        self.reg_tab = SetsRegisterTab(user)
         self.tabs = tab_widget()
-        self.tabs.addTab(_scroll(self.inv_tab), "فاتورة ضريبية")
-        self.tabs.addTab(_scroll(self.cn_tab), "مرتجع مبيعات (إشعار دائن)")
-        self.tabs.addTab(self.reg_tab, "السجل")
-        self.rep = None
-        if _show_rep_section():
-            self.rep = RepTaxPanel(user)
-            self.tabs.addTab(self.rep, "فواتير المندوب")
+        # 5.6.0: كل تبويبٍ يُبنى عند أول فتحٍ له — كانت كلها (وفواتير المندوب
+        # بتبويباتها الأربعة) تُبنى مع الشاشة فيتأخر فتحها
+        self._lazy = LazyTabs(self.tabs)
+        self._lazy.add("🧾  فاتورة ضريبية", lambda: SetsInvoiceTab(
+            user, new_customer=self._new_customer), wrap=_scroll)
+        self._lazy.add("↩  مرتجع مبيعات (إشعار دائن)",
+                       lambda: SetsCreditTab(user), wrap=_scroll)
+        self._lazy.add("☰  السجل", lambda: SetsRegisterTab(user))
+        self._has_rep = _show_rep_section()
+        if self._has_rep:
+            self._lazy.add("فواتير المندوب", lambda: RepTaxPanel(user))
         self.tabs.currentChanged.connect(lambda _i: self.refresh())
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("المبيعات الضريبية"))
         lay.addWidget(self.tabs, 1)
         self.refresh()
+
+    # المكوّنات بأسمائها كما كانت — تُبنى عند أول طلب
+    @property
+    def inv_tab(self):
+        return self._lazy.get(0)
+
+    @property
+    def cn_tab(self):
+        return self._lazy.get(1)
+
+    @property
+    def reg_tab(self):
+        return self._lazy.get(2)
+
+    @property
+    def rep(self):
+        return self._lazy.get(3) if self._has_rep else None
 
     def _new_customer(self, parent, require_vat=False):
         dlg = NewCustomerDialog(parent, self.user["username"],
@@ -1087,12 +1106,11 @@ class TaxSalesScreen(QtWidgets.QWidget):
         return None
 
     def refresh(self):
-        w = self.tabs.currentWidget()
-        if isinstance(w, QtWidgets.QScrollArea):
-            w = w.widget()
+        w = self._lazy.current()
         try:
-            if w is self.rep:
-                self.rep.refresh()
+            if self._has_rep and self._lazy.built(3) and \
+                    w is self._lazy.get(3):
+                w.refresh()
             elif w is not None and hasattr(w, "reload"):
                 w.reload()
         except Exception as e:                       # noqa: BLE001

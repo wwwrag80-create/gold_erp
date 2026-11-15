@@ -945,6 +945,12 @@ def handle(method, parts, query, headers, body):
         if rest[:1] == ["img"]:
             return _resp(401, b"", "text/plain")
         return _resp(200, login_page(base))
+    # 5.6.0: الهيكل الجديد — الرئيسية والصناديق وحركة المصنع وكشف الحساب
+    # وتسجيل العمليات (`services.manager_web`)
+    from services import manager_web
+    if manager_web.handles(rest, query):
+        return manager_web.route(method, rest, query, headers, body, base,
+                                 _csrf(token, secret), bool(pin_hash))
     if rest[:1] == ["order"]:
         return _order_route(method, rest[1:], query, body, base,
                             _csrf(token, secret), not pin_hash)
@@ -1603,6 +1609,10 @@ def page_html(conn, query, base):
                                       sort_sel)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     co = _company().strip()
+    # 5.6.0: شريط التنقل الموحّد (الرئيسية واللوحات) في رأس كل صفحة
+    from services import manager_web as _mweb
+    nav = _mweb.nav_html(base, tab)
+    _ = tabs
     board = tab in ("customers", "pnl")
     title = ((pnl_title if tab == "pnl" else
               "حركة اليوم" if tab == "day" else
@@ -1638,16 +1648,15 @@ def page_html(conn, query, base):
 <meta name="viewport" content="width={DESKTOP_W}">
 <meta name="robots" content="noindex,nofollow">{_install_head(base)}{refresh}
 <title>{title}</title>
-<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_PNL_CSS}{_DAY_CSS}</style></head><body>
+<style>{_CSS}{_ORDER_CSS}{_BOARD_CSS}{_PNL_CSS}{_DAY_CSS}{_mweb.NAV_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
 <div class="bar"><button type="button" id="inst" class="inst"
  title="يضع الرابط على سطح مكتب هذا الجهاز أيقونةً تفتحه بنقرة">📌 تثبيت
  على سطح المكتب</button><input id="q" type="search"
  placeholder="{hint}"></div>
-</div><div id="instmsg" class="instmsg" style="display:none"></div></header><main>
-<div class="top"><nav class="tabs">{tabs}</nav><span class="sep"></span>
-<nav class="seg">{seg}</nav><span class="sep"></span>
+</div>{nav}<div id="instmsg" class="instmsg" style="display:none"></div></header><main>
+<div class="top"><nav class="seg">{seg}</nav><span class="sep"></span>
 {tools}
 {cols_bar}</div>
 <section class="sum">{summary}<div id="pick" class="pick"

@@ -54,6 +54,8 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
         lay.addWidget(self._build_entry())
         lay.addWidget(self._build_items(), 1)
         self.btn_post = kit.PushButton("✔ ترحيل فاتورة المشتريات الضريبية")
+        self.btn_post.setObjectName("primary")
+        self.btn_post.setMinimumHeight(40)
         self.btn_post.clicked.connect(self.post)
         b_clear = kit.PushButton("تفريغ")
         b_clear.setObjectName("ghost")
@@ -775,24 +777,36 @@ class TaxPurchasesScreen(QtWidgets.QWidget):
 
     def __init__(self, user):
         super().__init__()
+        from ui.widgets.lazy_tabs import LazyTabs
         self.user = user
-        self.inv_tab = PurchaseInvoiceTab(user)
-        self.ret_tab = PurchaseReturnTab(user)
-        self.reg_tab = PurchaseRegisterTab(user)
         self.tabs = tab_widget()
-        self.tabs.addTab(tk.scroll(self.inv_tab), "فاتورة مشتريات ضريبية")
-        self.tabs.addTab(tk.scroll(self.ret_tab), "مرتجع مشتريات")
-        self.tabs.addTab(self.reg_tab, "السجل")
+        # 5.6.0: التبويب يُبنى عند أول فتحٍ له — فتُفتح الشاشة أسرع
+        self._lazy = LazyTabs(self.tabs)
+        self._lazy.add("🧾  فاتورة مشتريات ضريبية",
+                       lambda: PurchaseInvoiceTab(user), wrap=tk.scroll)
+        self._lazy.add("↩  مرتجع مشتريات", lambda: PurchaseReturnTab(user),
+                       wrap=tk.scroll)
+        self._lazy.add("☰  السجل", lambda: PurchaseRegisterTab(user))
         self.tabs.currentChanged.connect(lambda _i: self.refresh())
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(title_label("المشتريات الضريبية"))
         lay.addWidget(self.tabs, 1)
         self.refresh()
 
+    @property
+    def inv_tab(self):
+        return self._lazy.get(0)
+
+    @property
+    def ret_tab(self):
+        return self._lazy.get(1)
+
+    @property
+    def reg_tab(self):
+        return self._lazy.get(2)
+
     def refresh(self):
-        w = self.tabs.currentWidget()
-        if isinstance(w, QtWidgets.QScrollArea):
-            w = w.widget()
+        w = self._lazy.current()
         try:
             if w is not None and hasattr(w, "reload"):
                 w.reload()

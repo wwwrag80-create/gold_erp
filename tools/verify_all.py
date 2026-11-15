@@ -96,6 +96,7 @@ SCREENS = [
     ("ui.sales_screen", "SalesScreen"),
     ("ui.tax_sales_screen", "TaxSalesScreen"),
     ("ui.tax_purchases_screen", "TaxPurchasesScreen"),
+    ("ui.daily_moves_screen", "DailyMovesScreen"),
     # 5.5: أزرار الفواتير الضريبية بالأطقم في تبويباتها
     ("ui.tax_sets_sales", "SetsInvoiceTab"),
     ("ui.tax_sets_sales", "SetsCreditTab"),

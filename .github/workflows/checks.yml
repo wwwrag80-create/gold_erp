@@ -79,6 +79,11 @@ jobs:
           python tools/check_account_profile.py
           python tools/check_plans.py
 
+      - name: 4.6) رابط المدير — اللوحات وتسجيل العمليات وحمايته (5.6)
+        run: |
+          python tools/check_manager_web.py
+          python tools/check_day_feed.py
+
       - name: 5) زمن الاستجابة على دفترٍ كبير — ui_stress
         # `verify_all` يثبت أن الشاشات تعمل ولا يقول شيئاً عن بطئها.
         # هذه الخطوة تبني دفتراً بحجم مصنعٍ يعمل منذ سنة، ثم تفتح كل

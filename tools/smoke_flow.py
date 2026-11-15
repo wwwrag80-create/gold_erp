@@ -1051,7 +1051,10 @@ def main():
         top = [w1.sidebar.topLevelItem(i).text(0)
                for i in range(w1.sidebar.topLevelItemCount())]
         want = ["لوحة التحكم", "دليل الموديلات", "حركة الطقم",
-                "كشف حساب", "الوارد من التصنيع", "مبيعات/مرتجعات",
+                "كشف حساب",
+                # 5.6.0: عمليات يومٍ واحد كلها وفرزها بنوعها
+                "الحركة اليومية",
+                "الوارد من التصنيع", "مبيعات/مرتجعات",
                 # 5.2.4: «المبيعات» — أطقم فواتير مختارة وأين صارت
                 "المبيعات",
                 "المبيعات الضريبية", "المشتريات الضريبية",
@@ -1066,7 +1069,7 @@ def main():
                     if w1.sidebar.topLevelItem(i).text(0)
                     == "الإدارة والتقارير"), None)
         check("بقية الشاشات كلها داخل «الإدارة والتقارير»",
-              grp is not None and grp.childCount() == len(base) - 17,
+              grp is not None and grp.childCount() == len(base) - 18,
               f"{grp.childCount() if grp else 0} بنداً")
         check("لا شاشة خارج الترتيب المعتمد",
               len(top) == len(want), str(top[len(want):]))
@@ -7653,7 +7656,8 @@ def main():
     _addr86 = _ps86.current()
     _u86 = (_r86["lan"].replace(_addr86[0], "127.0.0.1")
             if _addr86 else "")
-    _s1, _p1 = _get86(_u86) if _u86 else (0, "")
+    # 5.6.0: الرابط المجرّد يفتح الرئيسية (لوحات)، والدليل بـ ?tab=guide
+    _s1, _p1 = _get86(_u86 + "?tab=guide") if _u86 else (0, "")
     check("بلا Tailscale: الرابط يعمل على شبكة المصنع ويقول السبب، والصفحة"
           " تعرض الموديلات ومع من",
           _r86["reason"] == "no_ts" and _s1 == 200
@@ -7665,10 +7669,13 @@ def main():
     _s3, _p3 = _get86(_u86)
     _s4, _p4 = _get86(_u86 + "/login", b"pin=0000")
     import http.cookiejar as _cj86
-    _s5, _p5 = _get86(_u86 + "/login", b"pin=5566", _cj86.CookieJar())
+    _jar86 = _cj86.CookieJar()
+    _s5, _p5 = _get86(_u86 + "/login", b"pin=5566", _jar86)
+    _s6, _p6 = _get86(_u86 + "?tab=guide", None, _jar86)
     check("رمز الدخول: الصفحة تُطلب به، والخاطئ يُرفض، والصحيح يفتحها",
           "أدخل رمز" in _p3 and str(_m86) not in _p3 and _s4 == 401
-          and _s5 == 200 and str(_m86) in _p5)
+          and _s5 == 200 and "أدخل رمز" not in _p5 and "الدليل" in _p5
+          and _s6 == 200 and str(_m86) in _p6)
     _mw86._fails.clear()
     with db() as conn:
         _mw86.set_pin(conn, "", "admin")
@@ -8430,7 +8437,8 @@ def main():
         _v1 = _js98.loads(_mw98.handle("GET", [_tok98, "imgver"], {}, {},
                                        None)["body"])
         _sn98 = _mw98._vkey(_m98)
-        _pg98 = _mw98.handle("GET", [_tok98], {}, {}, None)["body"]
+        _pg98 = _mw98.handle("GET", [_tok98], {"tab": "guide"}, {},
+                             None)["body"]
         _r98 = _mw98.handle("GET", [_tok98, "img", _m98],
                             {"v": _v1.get(_sn98, "")}, {}, None)
         check("رابط الصورة يحمل إصدارها، وبه تُحفظ في الجوال طويلاً",

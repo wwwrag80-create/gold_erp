@@ -11,6 +11,7 @@
   مدير مسبقاً).
 """
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -27,6 +28,9 @@ CACHE = config.BASE_DIR / "data" / "auth_cache.json"
 ADMIN_TOKEN_FILE = config.BASE_DIR / "data" / "admin_token.json"
 
 OFFLINE_GRACE_DAYS = 30
+# 5.6.0: محاولتا دخولٍ سحابي قبل النزول إلى الذاكرة المحلية
+LOGIN_TRIES = 2
+LOGIN_RETRY_WAIT = 1.2
 
 # إصدار دوال الخادم المتوقَّع — إن اختلف فالترقية لم تُنفَّذ
 RPC_EXPECTED = "3.2.0"
@@ -121,6 +125,19 @@ def admin_token():
 # استدعاء دوال الخادم
 # ══════════════════════════════════════════════════════════════════
 
+class ServerBusy(ConnectionError):
+    """تعثّرٌ مؤقت في الخادم (5xx · 408 · 429) — ليس رفضاً لكلمة المرور.
+
+    5.6.0: كان يُرفع `ValueError` برسالة «خطأ من الخادم (503)» فيفشل الدخول
+    كله ولو كانت كلمة المرور صحيحة ومحفوظةً على الجهاز — وهو «الدخول يفشل
+    أحياناً». صار تعثّراً في الاتصال: يُعاد الطلب، ثم يُدخل من الذاكرة
+    المحلية إن لزم."""
+
+
+_TRANSIENT_HTTP = (408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523,
+                   524)
+
+
 def _rpc(fn, payload, timeout=25):
     """ينادي دالة على الخادم بالمفتاح العام ويُرجع نتيجتها."""
     import app_config
@@ -153,6 +170,10 @@ def _rpc(fn, payload, timeout=25):
                 "دوال الإدارة غير موجودة على الخادم.\n\n"
                 "افتح Supabase ← SQL Editor ونفّذ الملف:\n"
                 "    admin_rpc.sql") from e
+        if e.code in _TRANSIENT_HTTP:
+            raise ServerBusy(
+                f"الخادم مشغولٌ مؤقتاً ({e.code}) — أعد المحاولة بعد "
+                "لحظات") from e
         msg = ""
         try:
             msg = json.loads(detail).get("message", "")
@@ -216,7 +237,14 @@ def _secure_login(username, password, timeout=15):
         return {}
     row["password_hash"] = f"{salt}${proof}"
     if row.get("role") != ROLE_SUPER:
-        row["plan"] = fetch_plan(username, proof, timeout=timeout)
+        try:
+            row["plan"] = fetch_plan(username, proof, timeout=timeout)
+        except ValueError:
+            raise                  # رفضٌ صريح (اشتراك · أجهزة) يُعرض كما هو
+        except Exception:
+            # 5.6.0: تحقّقت كلمة المرور وتعثّر جلب الخطة وحدها — تبقى
+            # الخطة المحفوظة على الجهاز ولا يفشل الدخول
+            row["plan"] = (_cache_get(username) or {}).get("plan")
         # 3.2.0: ملف الحساب (القائمة والهوية) — لا يمنع الدخول أبداً
         try:
             row["profile"] = fetch_profile(username, proof, timeout=timeout)
@@ -315,6 +343,18 @@ def _session(username, row, online, notice=""):
             "online": online, "notice": notice}
 
 
+def _retry_pause(seconds):
+    """مهلة قصيرة قبل إعادة محاولة الدخول — خارج خيط الواجهة فقط.
+
+    الدخول يجري عادةً في خيطٍ منفصل (بوابة الدخول)، فتُنتظر لحظةٌ كي
+    يتعافى الخادم. أمّا إن نودي من خيط الواجهة فتُعاد المحاولة فوراً
+    دون انتظار، كي لا تتجمّد النافذة.
+    """
+    if threading.current_thread() is threading.main_thread():
+        return
+    threading.Event().wait(max(0.0, float(seconds)))
+
+
 def login(username, password):
     """الدخول بثلاث مراحل: محلي ← سحابي ← ذاكرة محلية."""
     username = (username or "").strip()
@@ -340,17 +380,25 @@ def login(username, password):
         pass
 
     # (2) الحساب السحابي — بالإثبات الآمن، أو بالطريق القديم إلى أن
-    #     يُنفَّذ ملف SQL الجديد على الخادم
+    #     يُنفَّذ ملف SQL الجديد على الخادم.
+    # 5.6.0: تعثّرٌ عابر في الشبكة أو الخادم يُعاد مرةً بعد لحظة — قبل
+    # النزول إلى الذاكرة المحلية (كان يُحسم من أول تعثّر)
     online, row, net_err = True, None, ""
     secure = None
-    try:
-        secure = _secure_login(username, password)
-        if secure is None:
-            row = _first(_rpc("auth_login", {"p_username": username}))
-    except ValueError:
-        raise                      # رسالة الخادم الواضحة تُعرض كما هي
-    except Exception as e:
-        online, net_err = False, type(e).__name__
+    for attempt in range(LOGIN_TRIES):
+        online, row, net_err, secure = True, None, "", None
+        try:
+            secure = _secure_login(username, password)
+            if secure is None:
+                row = _first(_rpc("auth_login", {"p_username": username}))
+            break
+        except ValueError:
+            raise                  # رسالة الخادم الواضحة تُعرض كما هي
+        except Exception as e:
+            online, net_err = False, (str(e) if isinstance(e, ServerBusy)
+                                      else type(e).__name__)
+            if attempt + 1 < LOGIN_TRIES:
+                _retry_pause(LOGIN_RETRY_WAIT)
 
     if online:
         if secure is not None:
@@ -370,9 +418,12 @@ def login(username, password):
     # (3) بلا اتصال: الذاكرة المحلية
     cached = _cache_get(username)
     if not cached:
+        # 5.6.0: لا يُقال «كلمة المرور غير صحيحة» والسبب انقطاعٌ لا خطأ
         raise ValueError(
-            "اسم المستخدم أو كلمة المرور غير صحيحة.\n\n"
-            "إن كان هذا أول دخول لك على هذا الجهاز فاتصل بالإنترنت.")
+            "تعذّر الوصول إلى الخادم الآن — لم يُتحقَّق من كلمة المرور.\n\n"
+            "أول دخولٍ لهذا الحساب على هذا الجهاز يحتاج اتصالاً بالإنترنت؛ "
+            "تحقّق من الاتصال ثم أعد المحاولة."
+            + (f"\n\n({net_err})" if net_err else ""))
     if not verify_password(password, cached.get("password_hash", "")):
         raise ValueError("اسم المستخدم أو كلمة المرور غير صحيحة")
     if not cached.get("is_active", True):
@@ -420,6 +471,38 @@ def _admin_call(fn, payload, timeout=20):
                 "بحساب المدير العام فيُحفظ رمزه الجديد. وإن حُذفت "
                 "الحسابات فأنشئ المدير العام من جديد.") from e
         raise
+
+
+def refresh_admin_token(username, password):
+    """يجدّد الرمز الإداري بدخولٍ سحابي — بلا تسجيل خروج (5.6.0).
+
+    الرمز يُحفظ عند الدخول السحابي وحده؛ فمن دخل والإنترنت منقطع، أو جُدِّد
+    رمزه على الخادم، وجد «الحسابات والمصانع» ترفض العمل حتى يخرج ويدخل.
+    الآن تُطلب كلمة مروره في الشاشة نفسها ويُجدَّد الرمز."""
+    row = _secure_login((username or "").strip(), password or "")
+    if row is None:
+        row = _first(_rpc("auth_login", {"p_username": username}))
+        if not row or not verify_password(password,
+                                          row.get("password_hash", "")):
+            raise ValueError("كلمة المرور غير صحيحة")
+    if not row:
+        raise ValueError("كلمة المرور غير صحيحة")
+    if row.get("role") != ROLE_SUPER:
+        raise ValueError("هذا الحساب ليس مديراً عاماً")
+    tok = row.get("admin_token") or ""
+    if not tok:
+        raise ValueError("لم يُرسل الخادم رمزاً إدارياً لهذا الحساب — نفّذ "
+                         "ملف admin_rpc.sql المحدَّث على الخادم")
+    save_admin_token(tok)
+    _cache_put(username, row)
+    return True
+
+
+def is_token_error(e):
+    """هل الخطأ أن الرمز الإداري غائبٌ أو منتهٍ؟ (يُجدَّد بكلمة المرور)"""
+    t = str(e)
+    return ("الرمز الإداري" in t or "رمز إداري" in t
+            or "أنشئ حساب المدير العام أولاً" in t)
 
 
 def server_version():

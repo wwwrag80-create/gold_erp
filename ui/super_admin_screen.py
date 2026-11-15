@@ -50,9 +50,23 @@ class SuperAdminScreen(QtWidgets.QWidget):
             pass
         try:
             from services import auth as local_auth
-            return bool(local_auth.verify_login(username, plain))
+            if local_auth.verify_login(username, plain):
+                return True
         except Exception:
-            return False
+            pass
+        # 5.6.0: بصمةٌ محلية قديمة (غُيّرت كلمة المرور من جهازٍ آخر) كانت
+        # تُرفض بها كلمة المرور الصحيحة — فيُتحقَّق منها سحابياً قبل الرفض
+        try:
+            from services import cloud_auth
+            row = cloud_auth._secure_login(username, plain, timeout=12)
+            if row:
+                cloud_auth._cache_put(username, row)
+                if row.get("admin_token"):
+                    cloud_auth.save_admin_token(row["admin_token"])
+                return True
+        except Exception:
+            pass
+        return False
 
     @classmethod
     def request_access(cls, parent=None, username=None):
@@ -302,10 +316,31 @@ class SuperAdminScreen(QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    def _admin(self, fn):
+        """ينفّذ عمليةً إدارية — وإن غاب الرمز الإداري أو انتهى طُلبت كلمة
+        المرور هنا وجُدِّد ثم أُعيدت العملية (5.6.0)، بدل «سجّل الخروج ثم
+        ادخل» الذي كان يوقف الشاشة كلها."""
+        from services import cloud_auth
+        try:
+            return fn()
+        except Exception as e:                   # noqa: BLE001
+            if not cloud_auth.is_token_error(e):
+                raise
+        username = (self.user or {}).get("username") or ""
+        pwd, ok = QtWidgets.QInputDialog.getText(
+            self, "تجديد صلاحية الإدارة",
+            "صلاحية الإدارة على هذا الجهاز تحتاج تجديداً.\n"
+            f"أدخل كلمة مرور حسابك ({username}) — يُجدَّد الرمز ويكمل "
+            "العمل بلا خروج:", QtWidgets.QLineEdit.Password)
+        if not ok or not pwd:
+            raise ValueError("لم تُجدَّد صلاحية الإدارة — أُلغيت العملية")
+        cloud_auth.refresh_admin_token(username, pwd)
+        return fn()
+
     def load_users(self):
         try:
             from services import cloud_auth
-            self.users = cloud_auth.list_users()
+            self.users = self._admin(cloud_auth.list_users)
             try:
                 self.plans = cloud_auth.list_plans()
             except Exception:
@@ -372,6 +407,8 @@ class SuperAdminScreen(QtWidgets.QWidget):
             cur = (getattr(self, "plans", {}) or {}).get(tid) or {}
             # قائمةٌ فارغة في الخطة = كل الشاشات (كما في `plan.allowed`)
             screens = cur.get("screens") or None
+            from services import cloud_auth
+            self._admin(lambda: cloud_auth.get_profile(tid))
             dlg = AccountProfileDialog.create(self, tid,
                                               u.get("full_name") or tid,
                                               screens=screens, user=self.user)

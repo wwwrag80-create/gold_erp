@@ -75,6 +75,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         lay.addWidget(self._build_entry())
         lay.addWidget(self._build_items(), 1)
         self.btn_post = kit.PushButton("✔ ترحيل الفاتورة")
+        self.btn_post.setObjectName("primary")
+        self.btn_post.setMinimumHeight(40)
         self.btn_post.clicked.connect(self.post)
         b_clear = kit.PushButton("تفريغ")
         b_clear.setObjectName("ghost")

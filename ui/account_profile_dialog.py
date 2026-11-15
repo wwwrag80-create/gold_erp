@@ -14,6 +14,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from ui import kit
 
 from services import account_profile, plan
+from ui.widgets import nav_tools
 from ui.widgets.common import ask, err, info
 
 KEY_ROLE = QtCore.Qt.UserRole + 1
@@ -92,6 +93,21 @@ class NavEditor(QtWidgets.QWidget):
             QtWidgets.QAbstractItemView.DoubleClicked
             | QtWidgets.QAbstractItemView.EditKeyPressed)
         self.tree.setIndentation(18)
+        # 5.6.0: أوامر صريحة للترتيب — السحب وحده كان يلتبس (فوق البند =
+        # داخله · بين بندين = بجواره) فلا تنتقل الشاشة حيث أُريد
+        self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context)
+        b_up = kit.PushButton("▲ أعلى")
+        b_up.clicked.connect(lambda: self._do(nav_tools.move, -1))
+        b_down = kit.PushButton("▼ أسفل")
+        b_down.clicked.connect(lambda: self._do(nav_tools.move, 1))
+        b_in = kit.PushButton("⇲ داخل التي فوقها")
+        b_in.setToolTip("تصير الشاشة المحددة شاشةً داخل الشاشة (أو المجموعة)"
+                        " التي فوقها مباشرةً")
+        b_in.clicked.connect(lambda: self._do(nav_tools.indent))
+        b_out = kit.PushButton("⇱ إخراجها مستوى")
+        b_out.setToolTip("تخرج الشاشة من الشاشة أو المجموعة التي هي فيها")
+        b_out.clicked.connect(lambda: self._do(nav_tools.outdent))
         b_group = kit.PushButton("+ مجموعة جديدة")
         b_group.clicked.connect(self.add_group)
         b_ren = kit.PushButton("✎ إعادة تسمية")
@@ -106,14 +122,19 @@ class NavEditor(QtWidgets.QWidget):
         b_def.setObjectName("ghost")
         b_def.clicked.connect(self.load_default)
         side = QtWidgets.QVBoxLayout()
+        for b in (b_up, b_down, b_in, b_out):
+            side.addWidget(b)
+        side.addSpacing(10)
         for b in (b_group, b_ren, b_orig, b_del):
             side.addWidget(b)
         side.addStretch(1)
         side.addWidget(b_def)
         hint = QtWidgets.QLabel(
-            "اسحب الشاشة لترتيبها — وأفلتها فوق شاشةٍ أخرى لتصير داخلها، "
-            "أو فوق مجموعةٍ لتنضمّ إليها. نقرٌ مزدوج يغيّر الاسم. والشاشة "
-            "الرمادية خارج اشتراك الحساب فلا تظهر له.")
+            "حدّد الشاشة ثم: ▲▼ لترتيبها · «داخل التي فوقها» لتصير شاشةً "
+            "داخل الشاشة التي فوقها · «إخراجها» لتعود مستوىً · «إعادة تسمية»"
+            " لاسمها في القائمة (أو النقر الأيمن عليها). ويبقى السحب "
+            "والإفلات متاحاً. والشاشة الرمادية خارج اشتراك الحساب فلا تظهر "
+            "له.")
         hint.setObjectName("cardSub")
         hint.setWordWrap(True)
         row = QtWidgets.QHBoxLayout()
@@ -137,9 +158,7 @@ class NavEditor(QtWidgets.QWidget):
             it.setFont(0, f)
         elif key not in self.screens:
             it.setForeground(0, QtGui.QBrush(QtGui.QColor("#9a9a9a")))
-            it.setToolTip(0, "خارج اشتراك الحساب — لا تظهر له")
-        elif text != key:
-            it.setToolTip(0, f"اسمها الأصلي: {key}")
+        self._hint(it)
         if parent is None:
             self.tree.addTopLevelItem(it)
         else:
@@ -205,10 +224,43 @@ class NavEditor(QtWidgets.QWidget):
         info(self, "اسحب الشاشات وأفلتها فوق المجموعة لتدخلها — والمجموعة "
                    "الفارغة لا تُحفظ.")
 
+    def _do(self, fn, *args):
+        it = self.tree.currentItem()
+        if it is None:
+            err(self, "حدّد شاشةً في القائمة أولاً")
+            return False
+        ok = fn(self.tree, it, *args)
+        if not ok and fn is nav_tools.indent:
+            info(self, "لا شاشة فوقها في المستوى نفسه — رتّبها أولاً تحت "
+                       "الشاشة التي تريدها ثم «داخل التي فوقها».")
+        return ok
+
+    def _context(self, pos):
+        it = self.tree.itemAt(pos)
+        if it is None:
+            return
+        self.tree.setCurrentItem(it)
+        grp = (it.data(0, KEY_ROLE) or "").startswith(GROUP)
+        nav_tools.menu(self, self.tree, it, [
+            ("▲ أعلى", lambda: self._do(nav_tools.move, -1)),
+            ("▼ أسفل", lambda: self._do(nav_tools.move, 1)),
+            ("⇲ داخل الشاشة التي فوقها", lambda: self._do(nav_tools.indent)),
+            ("⇱ إخراجها مستوى", lambda: self._do(nav_tools.outdent),
+             it.parent() is not None),
+            None,
+            ("✎ إعادة تسمية…", self.rename),
+            ("⟲ الاسم الأصلي", self.original_name, not grp),
+            ("فكّ المجموعة", self.ungroup, grp)])
+
     def rename(self):
         it = self.tree.currentItem()
-        if it is not None:
-            self.tree.editItem(it, 0)
+        if it is None:
+            err(self, "حدّد شاشةً في القائمة أولاً")
+            return
+        key = it.data(0, KEY_ROLE) or ""
+        orig = "" if key.startswith(GROUP) else key
+        if nav_tools.rename(self, it, orig) and orig:
+            self._hint(it)
 
     def original_name(self):
         it = self.tree.currentItem()
@@ -217,6 +269,22 @@ class NavEditor(QtWidgets.QWidget):
         key = it.data(0, KEY_ROLE) or ""
         if not key.startswith(GROUP):
             it.setText(0, key)
+            self._hint(it)
+
+    def _hint(self, it):
+        """تلميح الشاشة: خارج الاشتراك أولاً، ثم اسمها الأصلي إن غُيّر."""
+        key = it.data(0, KEY_ROLE) or ""
+        if key.startswith(GROUP):
+            return
+        if key not in self.screens:
+            tip = "خارج اشتراك الحساب — لا تظهر له"
+            if it.text(0) != key:
+                tip += f" (اسمها الأصلي: {key})"
+        elif it.text(0) != key:
+            tip = f"اسمها الأصلي: {key}"
+        else:
+            tip = ""
+        it.setToolTip(0, tip)
 
     def ungroup(self):
         it = self.tree.currentItem()
