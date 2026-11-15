@@ -1126,7 +1126,7 @@ def item_history(conn, wo_no):
             "date": it["invoice_date"], "party": it["party"] or "—",
             "gold": "", "small": "", "big": "", "reg": it["rw"],
             "left": _left.get(it["id"], ""), "inv": it["invoice_no"],
-            "bad": it["id"] in _bad, "_rank": _rank.get(it["id"], 10 ** 9),
+            "inv_id": it["id"], "bad": it["id"] in _bad, "_rank": _rank.get(it["id"], 10 ** 9),
             "type": wo["item_type"] or "—"})
     # تسويات الوزن على هذا الطقم
     for a in conn.execute(

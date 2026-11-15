@@ -87,9 +87,19 @@ def post(kind, data):
 print("── 1) الرئيسية واللوحات")
 code, h = call("GET", "")
 check("الرابط يفتح الرئيسية بلوحاتها", code == 200 and "الرئيسية" in h
-      and h.count('class="tile') >= 10, code)
-check("الدليل أول لوحة", h.index("<b>الدليل</b>") < h.index(
-    "<b>الصناديق</b>") < h.index("<b>حركة المصنع</b>"))
+      and h.count('class="tile') >= 9, code)
+check("«دليل الموديلات» أول لوحة ثم «حركة الطقم»",
+      h.index("<b>دليل الموديلات</b>") < h.index("<b>حركة الطقم</b>")
+      < h.index("<b>الصناديق</b>") < h.index("<b>حركة المصنع</b>"))
+check("«حركة اليوم» و«طلبات العملاء» حُذفتا من الرئيسية وشريط التنقل",
+      "حركة اليوم" not in h and "طلبات العملاء" not in h
+      and "tab=day" not in h and "tab=orders" not in h)
+_c1, h1 = call("GET", "", {"tab": "day"})
+_c2, h2 = call("GET", "", {"tab": "orders"})
+_c3, _h3 = call("GET", "order/new")
+check("روابطهما المحفوظة تفتح الرئيسية، ومسار الطلبات مغلق",
+      "<b>دليل الموديلات</b>" in h1 and "<b>دليل الموديلات</b>" in h2
+      and _c3 == 404, (_c1, _c2, _c3))
 code, h = call("GET", "", {"tab": "guide"})
 check("الدليل بشريط التنقل الموحّد", code == 200 and 'class="mnav"' in h
       and "دليل الموديلات" in h)
@@ -116,6 +126,9 @@ r3 = json.loads(call("POST", "boxes", body={
 code, h = call("GET", "boxes")
 check("قسمٌ جديد وحسابٌ فيه برصيده", r["ok"] and r2["ok"]
       and "صناديق الذهب" in h and "الصندوق الرئيسي" in h, (r, r2))
+check("الصناديق لوحاتٌ متجاورة وحساباتها بطاقاتٌ تفتح كشفها",
+      'class="boxes"' in h and 'class="acc"' in h
+      and "/stmt?code=1400" in h and "<a class=\"acc\"" not in h)
 check("حسابٌ غير موجود يُرفض", r3["ok"] is False)
 bad = json.loads(call("POST", "boxes", body={"csrf": "x", "act": "add_box",
                                              "name": "z"})[1])
@@ -148,13 +161,40 @@ check("صفحة صور الفاتورة بقالب المجمّعة", code == 20
 code, _h = call("GET", "doc/../../etc")
 check("مستندٌ بنوعٍ غير مسموح يُرفض", code == 404)
 
+print("── 3ب) حركة الطقم")
+code, h = call("GET", "sets")
+check("صفحة حركة الطقم بالبحث", code == 200 and 'name="q"' in h
+      and 'name="by"' in h and 'class="mnav"' in h)
+code, h = call("GET", "sets", {"by": "no", "q": "700"})
+check("برقم التشغيل: تفصيل الوزن والدفعة ومكانه وحركاته",
+      code == 200 and "الطقم 700" in h and "الفصوص" in h
+      and "الأحجار" in h and "دفعة التوريد" in h and "سجل حركة الطقم" in h
+      and "عند محل الياسمين" in h and "/doc/invoices/" in h
+      and "/doc/supply_models/" in h, h[-600:])
+code, h = call("GET", "sets", {"by": "reg", "q": "10"})
+check("بالوزن: الأطقم الأقرب أولاً وكلٌّ يفتح حركته",
+      code == 200 and "أقرب" in h and "by=no&amp;q=" in h, h[-400:])
+code, h = call("GET", "sets", {"by": "no", "q": "zz9"})
+code2, h2 = call("GET", "sets", {"by": "standing", "q": "abc"})
+code3, h3 = call("GET", "sets", {"by": "no", "q": "<script>x</script>"})
+check("رقمٌ غير موجود أو وزنٌ غير رقمي: رسالةٌ واضحة بلا خطأ",
+      code == 200 and "لا يوجد طقم" in h and "اكتب الوزن رقماً" in h2
+      and "<script>x" not in h3 and code3 == 200)
+
 print("── 4) الحماية قبل التسجيل")
+# 5.6.1: خيارٌ واحد — يُسمح أو لا يُسمح — بلا اشتراط رمز دخول
 code, h = call("GET", "ops")
-check("بلا رمز دخول: التسجيل مقفل", "رمز" in h and 'class="tile' not in h)
+check("بلا رمز دخول ومسموح: لوحات العمليات الست",
+      h.count('class="tile main"') == 6, h[-300:])
+with db() as c:
+    mweb.set_ops_enabled(c, False)
+code, h = call("GET", "ops")
 r = post("receipt", {"nonce": "n-nopin-01", "party": A, "box": "1400",
                      "date": D0, "rows": [{"kind": "cash", "amount": 5}]})
-check("بلا رمز دخول: الترحيل مرفوض", r["ok"] is False, r)
+check("بلا رمز دخول وغير مسموح: الصفحة والترحيل مقفلان",
+      "موقوف" in h and 'class="tile' not in h and r["ok"] is False, r)
 with db() as c:
+    mweb.set_ops_enabled(c, True)
     mw.set_pin(c, "1234")
 code, h = call("GET", "ops", cookie=False)
 check("برمز الدخول: لا دخول بلا ملف التعريف", "name=\"pin\"" in h

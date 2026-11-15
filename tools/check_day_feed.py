@@ -1,5 +1,5 @@
-# اختبار 5.2.6: «حركة اليوم» في رابط المدير — python3 tools/check_day_feed.py
-import sys, os, tempfile, pathlib, datetime  # noqa: E401
+# اختبار 5.2.6: مصدر «حركة اليوم» (الآن شاشة «الحركة اليومية» في البرنامج) — python3 tools/check_day_feed.py
+import sys, tempfile, pathlib, datetime  # noqa: E401
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 T = tempfile.mkdtemp(prefix="tdf_")
 import config  # noqa: E402
@@ -53,14 +53,15 @@ with db(readonly=True) as conn:
     y = day_feed.day(conn, d1)
     check("أمس: التوريد بأطقمه", any(g["key"] == "supply" and g["totals"]["sets"] == 5 for g in y["groups"]),
           [(g["key"], g["totals"]) for g in y["groups"]])
+    # 5.6.1: تبويب «حركة اليوم» حُذف من الرابط (حلّت محله «حركة المصنع»)،
+    # والمصدر نفسه يغذّي شاشة «الحركة اليومية» في البرنامج
     from services import models_web
     html = models_web.page_html(conn, {"tab": "day"}, "/m/x")
-    check("صفحة الرابط: تبويب «حركة اليوم» و«عرض» لكل مستند",
-          "حركة اليوم" in html and html.count('class="dayd"') == day["count"] and "عيار 21" in html)
-    html_y = models_web.page_html(conn, {"tab": "day", "d": d1}, "/m/x")
-    check("واختيار يومٍ آخر (أمس)", "الوارد من التصنيع" in html_y and "أمس" in html_y)
-    html_bad = models_web.page_html(conn, {"tab": "day", "d": "x';--"}, "/m/x")
-    check("تاريخٌ غير صالح في الرابط يُعرض اليوم بأمان", "حركة اليوم" in html_bad and "x';--" not in html_bad)
+    check("الرابط: «حركة اليوم» محذوفة — الرابط القديم يعرض الدليل بأمان",
+          'class="dayd"' not in html and "دليل الموديلات" in html)
+    per = day_feed.period(conn, d1, d0)
+    check("الفترة (أمس ← اليوم) تجمع مستندات اليومين للشاشة المكتبية",
+          per["count"] == day["count"] + y["count"], (per["count"], day["count"], y["count"]))
 # 5.2.8: كل مصدرٍ باسم شاشته بالعربية — لا اسم الجدول (كان «workshop_losses» يظهر في رابط المدير)
 import re  # noqa: E402
 from models.journal import OP_LABELS, _doc_info  # noqa: E402

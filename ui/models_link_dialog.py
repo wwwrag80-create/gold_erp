@@ -109,9 +109,8 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         g.addWidget(btn_nopin, 1, 3)
         g.addWidget(self.pin_state, 1, 4)
         # 5.6.0: تسجيل العمليات من الرابط (بيع · مرتجع · قبض · صرف · قيد ·
-        # توريد) — لا يعمل إلا ومعه رمز دخول، ويُوقف من هنا متى شاء المدير
-        self.ops = kit.CheckBox("السماح بتسجيل العمليات من الرابط (يتطلب "
-                                "رمز دخول)")
+        # توريد). 5.6.1: خيارٌ واحد — يُسمح أو لا يُسمح — بلا اشتراط رمز
+        self.ops = kit.CheckBox("السماح بتسجيل العمليات من الرابط")
         self.ops.setToolTip("بيع · مرتجع · قبض · صرف · قيد يومي · توريد — "
                             "تُرحَّل في دفاتر هذا الجهاز باسم «رابط المدير»")
         self.ops.toggled.connect(self._ops_toggled)

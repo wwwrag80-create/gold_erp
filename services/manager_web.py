@@ -146,6 +146,9 @@ _ICON = {
                 '-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7'
                 ' 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7'
                 ' 5 8.7-5"/><path d="M12 22V12"/>',
+    "sets": '<path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13'
+            '-3-6"/><path d="M2 9h20"/>',
+    "search": '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
     "day": '<rect x="3" y="4" width="18" height="18" rx="2"/>'
            '<path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
     "orders": '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2'
@@ -208,15 +211,14 @@ def nav_items(base):
         pnl = "الأرباح والخسائر"
     return [
         ("home", "الرئيسية", base, "home"),
-        ("guide", "الدليل", _link(base, tab="guide"), "guide"),
+        ("guide", "دليل الموديلات", _link(base, tab="guide"), "guide"),
+        ("sets", "حركة الطقم", _link(base, "/sets"), "sets"),
         ("boxes", "الصناديق", _link(base, "/boxes"), "boxes"),
         ("moves", "حركة المصنع", _link(base, "/moves"), "moves"),
         ("stmt", "كشف حساب", _link(base, "/stmt"), "stmt"),
         ("ops", "تسجيل عمليات", _link(base, "/ops"), "ops"),
         ("received", "الوارد بتاريخ", _link(base, tab="received"),
          "received"),
-        ("day", "حركة اليوم", _link(base, tab="day"), "day"),
-        ("orders", "طلبات العملاء", _link(base, tab="orders"), "orders"),
         ("customers", "العملاء", _link(base, tab="customers"),
          "customers"),
         ("pnl", pnl, _link(base, tab="pnl"), "pnl"),
@@ -494,7 +496,7 @@ def frame(base, active, title, inner, csrf="", css="", js="", sub=""):
 #  التوجيه
 # ══════════════════════════════════════════════════════════════════
 
-ROUTES = ("home", "boxes", "moves", "stmt", "ops", "doc", "api")
+ROUTES = ("home", "sets", "boxes", "moves", "stmt", "ops", "doc", "api")
 
 
 def handles(rest, query):
@@ -502,13 +504,15 @@ def handles(rest, query):
     وروابط الدليل المحفوظة قبل 5.6.0 (بفرزٍ أو عرض) تبقى تفتح الدليل."""
     if not rest:
         if query.get("tab"):
-            return query.get("tab") == "home"
+            # 5.6.1: «حركة اليوم» و«طلبات العملاء» حُذفتا — روابطهما
+            # المحفوظة تفتح الرئيسية
+            return query.get("tab") in ("home", "day", "orders")
         return not any(query.get(k) for k in ("view", "sort", "day", "st",
                                               "d", "from", "to"))
     return rest[0] in ROUTES
 
 
-def route(method, rest, query, headers, body, base, csrf, pin_set):
+def route(method, rest, query, headers, body, base, csrf, pin_set=False):
     from database.database import db
     head = rest[0] if rest else "home"
     if method == "POST":
@@ -526,7 +530,7 @@ def route(method, rest, query, headers, body, base, csrf, pin_set):
         if head == "boxes":
             return _json(boxes_action(data))
         if head == "api" and len(rest) == 3 and rest[1] == "post":
-            return _json(post_op(rest[2], data, pin_set))
+            return _json(post_op(rest[2], data))
         return _json({"ok": False, "error": "غير موجود"}, 404)
     if method != "GET":
         return _resp(405, "")
@@ -538,6 +542,8 @@ def route(method, rest, query, headers, body, base, csrf, pin_set):
     with db(readonly=True) as conn:
         if head == "home":
             return _resp(200, home(conn, base, csrf))
+        if head == "sets":
+            return _resp(200, sets_page(conn, base, csrf, query))
         if head == "boxes":
             return _resp(200, boxes_page(conn, base, csrf))
         if head == "moves":
@@ -545,8 +551,7 @@ def route(method, rest, query, headers, body, base, csrf, pin_set):
         if head == "stmt":
             return _resp(200, stmt_page(conn, base, csrf, query))
         if head == "ops":
-            return _resp(200, ops_page(conn, base, csrf, rest[1:],
-                                       pin_set))
+            return _resp(200, ops_page(conn, base, csrf, rest[1:]))
     return _resp(404, _mw()._GONE)
 
 
@@ -715,11 +720,6 @@ def _kpis(conn):
 def home(conn, base, csrf):
     u = _e(_unit())
     worked, cash, n_in, w_in, n_today = _kpis(conn)
-    try:
-        from models import model_orders as _mo
-        n_orders = _mo.count_open(conn)
-    except Exception:
-        n_orders = 0
     kpis = (f'<div class="kpis">'
             f'<div class="kpi gold"><div class="k">{icon("boxes", 16)}'
             f'رصيد الخزنة — الذهب المشغول</div><div class="v">{_w(worked)}'
@@ -740,8 +740,10 @@ def home(conn, base, csrf):
                 + (f'<span class="n">{_e(badge)}</span>' if badge else "")
                 + '</a>')
     main = "".join((
-        tile("guide", "الدليل", "صور الموديلات · كم بالخزنة وعند من · "
-             "المتاح للبيع", _link(base, tab="guide"), True),
+        tile("guide", "دليل الموديلات", "صور الموديلات · كم بالخزنة وعند من"
+             " · المتاح للبيع", _link(base, tab="guide"), True),
+        tile("sets", "حركة الطقم", "ابحث برقم التشغيل أو بالوزن — تفصيل "
+             "وزنه ودفعته وحركاته", _link(base, "/sets"), True),
         tile("boxes", "الصناديق", "أقسامك وحساباتها وأرصدتها — ذهباً "
              "ونقداً", _link(base, "/boxes"), True),
         tile("moves", "حركة المصنع", "الوارد · المبيعات · المرتجعات · القبض"
@@ -757,11 +759,6 @@ def home(conn, base, csrf):
     more = "".join((
         tile("received", "الوارد بتاريخ", "البضاعة الواردة بموديلاتها",
              _link(base, tab="received")),
-        tile("day", "حركة اليوم", "كل مستندات اليوم بتفصيلها",
-             _link(base, tab="day")),
-        tile("orders", "طلبات العملاء", "تسجيل الطلبات وطباعتها",
-             _link(base, tab="orders"),
-             badge=f"{n_orders} مفتوح" if n_orders else ""),
         tile("customers", "العملاء — المبيعات والسداد",
              "من يسدّد ومن يتأخر", _link(base, tab="customers")),
         tile("pnl", pnl, "لوحة الأرباح كما في البرنامج",
@@ -772,6 +769,232 @@ def home(conn, base, csrf):
              f'<div class="tiles">{main}</div>'
              f'<div class="sect">المزيد</div><div class="tiles">{more}</div>')
     return frame(base, "home", "الرئيسية", inner, csrf)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  حركة الطقم (5.6.1) — كشاشة البرنامج: برقم التشغيل أو بالوزن
+# ------------------------------------------------------------------
+#  برقم التشغيل: بطاقة تفاصيله (الأوزان والذهب والفصوص والأحجار، ودفعة
+#  توريده، ومكانه الآن) وصورة موديله، ثم سجل حركاته زمنياً بأزرار الصور
+#  والفاتورة. وبالوزن المقيد أو القائم: الأطقم الأقرب إليه، الأقرب أولاً.
+#  المصدر `inventory.item_history` و`set_lookup` — قراءةٌ محضة.
+# ══════════════════════════════════════════════════════════════════
+
+SET_MODES = (("no", "رقم التشغيل"), ("reg", "الوزن المقيد"),
+             ("standing", "الوزن القائم"))
+
+_SETS_CSS = """
+.sform{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:0}
+.sform .q{flex:1 1 240px}
+.sform .q input{width:100%;font-size:17px}
+.shead{display:flex;gap:16px;flex-wrap:wrap;align-items:stretch}
+.shead .ph{flex:0 0 220px;max-width:100%;border:1px solid var(--line);
+border-radius:14px;overflow:hidden;background:#fff;display:flex;
+align-items:center;justify-content:center;min-height:160px}
+.shead .ph img{width:100%;height:auto;display:block}
+.shead .ph .none{color:var(--muted);font-size:13px;padding:20px}
+.shead .info{flex:1 1 380px;display:flex;flex-direction:column;gap:10px;
+min-width:0}
+.shead .wo{font-size:26px;font-weight:800;color:var(--brown);display:flex;
+gap:10px;align-items:center;flex-wrap:wrap}
+.shead .where{font-size:15px;font-weight:600}
+.shead .where.in{color:var(--ok)}
+.shead .where.out{color:var(--out)}
+.wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));
+gap:8px}
+.wgrid div{background:var(--soft);border:1px solid var(--line);
+border-radius:12px;padding:8px 11px;font-size:12px;color:var(--muted)}
+.wgrid div.main{background:#FFF8E8;border-color:#EBD8A8}
+.wgrid b{display:block;font-size:18px;color:var(--ink);direction:ltr;
+text-align:right;font-variant-numeric:tabular-nums;margin-top:2px}
+.batch{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+background:#F7F2E7;border:1px dashed #DCCDAE;border-radius:12px;
+padding:9px 12px;font-size:14px}
+.batch > .ic{color:var(--gold)}
+.batch .sp{flex:1 1 auto}
+.tbl tr.bad td{background:#FBEAEA}
+@media (max-width:640px){.shead .ph{flex-basis:100%;min-height:0}
+.shead .ph .none{padding:12px}
+.wgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.shead .wo{font-size:22px}}
+"""
+
+
+def _num_in(txt):
+    """وزنٌ مكتوب (بأرقامٍ عربية أو بفاصلة) ← رقم، أو None."""
+    t = str(txt or "").strip().translate(str.maketrans(
+        "٠١٢٣٤٥٦٧٨٩٫،", "0123456789.,")).replace(",", ".")
+    try:
+        v = float(t)
+    except ValueError:
+        return None
+    return v if 0 < v < 1e6 else None
+
+
+def _wv(v):
+    """وزنٌ لعمود الجدول — «—» للفارغ."""
+    if v in ("", None):
+        return "—"
+    try:
+        return _w(float(v))
+    except (TypeError, ValueError):
+        return _e(v)
+
+
+def _set_photo(base, model):
+    m = _mw()
+    try:
+        ver = m._img_versions().get(m._vkey(model), "") if model else ""
+    except Exception:
+        ver = ""
+    if not model or not ver:
+        return (f'<div class="ph"><span class="none">'
+                f'{"لا توجد صورة للموديل" if model else "بلا موديل"}</span>'
+                '</div>')
+    return (f'<a class="ph" target="_blank" rel="noopener" href="'
+            f'{_e(m._img_url(base, model, ver, True))}"><img alt="'
+            f'{_e(model)}" src="{_e(m._img_url(base, model, ver))}"></a>')
+
+
+def _set_detail(conn, base, no):
+    from models import inventory, set_lookup, wo_moves
+    wo, rows = inventory.item_history(conn, no)
+    det = set_lookup.details(conn, wo)
+    keys = wo.keys()
+    u = _e(_unit())
+    w = det["where"]
+    bulk = bool(wo["is_bulk"])
+    where_cls = "in" if w["place"] == "treasury" else "out"
+    where_txt = w["label"] + (f" · فاتورة {w['invoice_no']}"
+                              if w.get("invoice_no") else "")
+    if not bulk:
+        st = wo_moves.state(conn, wo)
+        split = (f'<div>في الخزنة<b>{_w(st["rem"])}</b></div>'
+                 f'<div>عند الجهات<b>{_w(st["out"])}</b></div>')
+    else:
+        split = ""
+    dia = (float(wo["diamond_weight"] or 0)
+           if "diamond_weight" in keys else 0.0)
+    cells = (f'<div class="main">الوزن المقيد ({u})<b>{_w(det["reg"])}</b>'
+             f'</div><div class="main">الوزن القائم<b>{_w(det["standing"])}'
+             f'</b></div><div>الذهب<b>{_w(det["gold"])}</b></div>'
+             f'<div>الفصوص<b>{_w(det["small"])}</b></div>'
+             f'<div>الأحجار<b>{_w(det["big"])}</b></div>'
+             + (f'<div>الألماس (قيراط)<b>{_m(dia)}</b></div>' if dia else "")
+             + split)
+    b = rows[0].get("batch") if rows else None
+    if b:
+        batch = (f'<div class="batch">{icon("supply", 18)}<span>دفعة التوريد:'
+                 f' <b>{_e(b["label"])}</b></span><span class="sp"></span>'
+                 f'{_doc_links(base, "work_orders", wo["id"], wo["entry_id"])}'
+                 '</div>')
+    else:
+        batch = (f'<div class="batch">{icon("supply", 18)}<span>'
+                 f'{_e(rows[0]["party"] if rows else "—")}</span></div>')
+    status = ('<span class="pill sale">بالخزنة</span>'
+              if wo["status"] == "in_stock" else
+              '<span class="pill sale_return">خارج / مباع</span>')
+    head = (f'<div class="panel"><div class="shead">'
+            f'{_set_photo(base, det["model_no"])}<div class="info">'
+            f'<div class="wo">{icon("sets", 26)}الطقم {_e(wo["work_order_no"])}'
+            f'{status}<span class="pill">الموديل {_e(det["model_no"] or "—")}'
+            f'</span>'
+            + (f'<span class="pill">{_e(det["item_type"])}</span>'
+               if det["item_type"] else "")
+            + f'</div><div class="where {where_cls}">📍 {_e(where_txt)}</div>'
+            f'<div class="wgrid">{cells}</div>{batch}</div></div></div>')
+    trs = []
+    for r in rows:
+        acts = (_doc_links(base, "invoices", r["inv_id"], None)
+                if r.get("inv_id") else "")
+        party = _e(r["party"]) + (f' <span class="pill">{_e(r["inv"])}</span>'
+                                  if r.get("inv") else "")
+        kind = _e(r["kind"]) + (' <span class="pill sale_return">⚠ غير '
+                                'منتظمة</span>' if r.get("bad") else "")
+        trs.append(
+            f'<tr class="{"bad" if r.get("bad") else ""}"><td>{kind}</td>'
+            f'<td class="n">{_e(r["date"] or "")}</td><td>{party}</td>'
+            f'<td class="n">{_wv(r["gold"])}</td>'
+            f'<td class="n">{_wv(r["small"])}</td>'
+            f'<td class="n">{_wv(r["big"])}</td>'
+            f'<td class="n">{_wv(r["reg"])}</td>'
+            f'<td class="n">{_wv(r.get("left"))}</td>'
+            f'<td class="acts">{acts}</td></tr>')
+    table = (f'<div class="panel"><h3>{icon("moves", 19)}سجل حركة الطقم'
+             f'<span class="pill">{len(rows)} حركة</span></h3>'
+             f'<div class="scroll"><table class="tbl"><tr><th>نوع الحركة</th>'
+             f'<th class="n">التاريخ</th><th>الجهة المقابلة</th>'
+             f'<th class="n">الذهب</th><th class="n">الفصوص</th>'
+             f'<th class="n">الأحجار</th><th class="n">الوزن المقيد</th>'
+             f'<th class="n">في الخزنة بعدها</th><th></th></tr>'
+             f'{"".join(trs)}</table></div></div>')
+    return head + table
+
+
+def _set_near(conn, base, by, v):
+    from models import set_lookup
+    from services import karat_view as kv
+    rows = set_lookup.near_weight(conn, kv.store(v), by, limit=40)
+    u = _e(_unit())
+    label = dict(SET_MODES)[by]
+    trs = "".join(
+        f'<tr><td><a class="btn sm gh" href="'
+        f'{_e(_link(base, "/sets", by="no", q=r["work_order_no"]))}">'
+        f'{_e(r["work_order_no"])}</a></td><td>{_e(r["model_no"] or "—")}'
+        f'</td><td class="n">{_w(r["reg"])}</td>'
+        f'<td class="n">{_w(r["standing"])}</td><td class="n">'
+        f'{_w(r["gold"])}</td><td class="n">{_w(r["small"])}</td>'
+        f'<td class="n">{_w(r["big"])}</td><td class="n">{_w(r["diff"])}</td>'
+        f'<td>{_e(r["where"]["label"])}</td></tr>' for r in rows)
+    if not rows:
+        return '<div class="panel"><div class="empty">لا أطقم مفردة</div></div>'
+    return (f'<div class="panel"><h3>{icon("search", 19)}أقرب {len(rows)} طقماً'
+            f' إلى {_e(label)} {_m(v)} {u}<span class="hint" style="font-'
+            f'weight:400;font-size:13px;color:var(--muted)">— الأقرب أولاً · '
+            f'انقر رقم التشغيل يفتح حركته</span></h3><div class="scroll">'
+            f'<table class="tbl"><tr><th>رقم التشغيل</th><th>الموديل</th>'
+            f'<th class="n">الوزن المقيد</th><th class="n">الوزن القائم</th>'
+            f'<th class="n">الذهب</th><th class="n">الفصوص</th>'
+            f'<th class="n">الأحجار</th><th class="n">الفرق</th>'
+            f'<th>مكانه الآن</th></tr>{trs}</table></div></div>')
+
+
+def sets_page(conn, base, csrf, query):
+    by = query.get("by") if query.get("by") in dict(SET_MODES) else "no"
+    q = str(query.get("q") or "").strip()[:40]
+    opts = "".join(f'<option value="{k}"{" selected" if k == by else ""}>'
+                   f'{t}</option>' for k, t in SET_MODES)
+    ph = ("اكتب رقم التشغيل…" if by == "no" else
+          f"اكتب الوزن ({_unit()}) — تظهر الأطقم الأقرب إليه…")
+    form = (f'<div class="panel"><form class="sform" method="get" action="'
+            f'{_e(base + "/sets")}"><label>البحث بـ<select name="by" '
+            f'onchange="this.form.q.placeholder=this.value===\'no\'?'
+            f'\'اكتب رقم التشغيل…\':\'اكتب الوزن — تظهر الأطقم الأقرب '
+            f'إليه…\';this.form.q.focus()">{opts}</select></label>'
+            f'<label class="q">رقم التشغيل أو الوزن<input name="q" value="'
+            f'{_e(q)}" placeholder="{_e(ph)}" autocomplete="off" autofocus '
+            f'inputmode="{"text" if by == "no" else "decimal"}"></label>'
+            f'<button class="btn">{icon("search", 16)}بحث</button></form>'
+            '</div>')
+    body = ""
+    if q:
+        try:
+            if by == "no":
+                body = _set_detail(conn, base, q)
+            else:
+                v = _num_in(q)
+                if v is None:
+                    raise ValueError("اكتب الوزن رقماً (مثال: 12.5)")
+                body = _set_near(conn, base, by, v)
+        except ValueError as e:
+            body = f'<div class="msg bad">{_e(str(e))}</div>'
+    else:
+        body = ('<div class="panel"><div class="empty">اكتب رقم التشغيل ثم '
+                '«بحث» — تظهر تفاصيل الطقم ودفعته وحركاته كاملةً. أو اختر '
+                '«الوزن المقيد» أو «الوزن القائم» واكتب الوزن.</div></div>')
+    inner = (f'<div class="ptitle"><h2>{icon("sets", 22)}حركة الطقم</h2>'
+             f'<span class="hint">كشاشة البرنامج — الأوزان والدفعة ومكانه'
+             f' الآن وكل حركاته</span></div>{form}{body}')
+    return frame(base, "sets", "حركة الطقم", inner, csrf, css=_SETS_CSS)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -836,13 +1059,13 @@ def boxes_action(data):
         box = next((b for b in boxes if b["id"] == bid), None)
         if act == "add_box":
             if not name:
-                return {"ok": False, "error": "اكتب اسم القسم"}
+                return {"ok": False, "error": "اكتب اسم الصندوق"}
             if len(boxes) >= MAX_BOXES:
-                return {"ok": False, "error": "بلغت الأقسام حدّها"}
+                return {"ok": False, "error": "بلغت الصناديق حدّها"}
             boxes.append({"id": f"b{int(_t.time() * 1000)}", "name": name,
                           "codes": []})
         elif box is None:
-            return {"ok": False, "error": "القسم غير موجود — حدّث الصفحة"}
+            return {"ok": False, "error": "الصندوق غير موجود — حدّث الصفحة"}
         elif act == "ren_box":
             if not name:
                 return {"ok": False, "error": "اكتب الاسم الجديد"}
@@ -858,9 +1081,9 @@ def boxes_action(data):
             if not code:
                 return {"ok": False, "error": "اختر الحساب من الاقتراحات"}
             if code in box["codes"]:
-                return {"ok": False, "error": "الحساب في القسم من قبل"}
+                return {"ok": False, "error": "الحساب في الصندوق من قبل"}
             if len(box["codes"]) >= MAX_ACCS:
-                return {"ok": False, "error": "بلغ القسم حدّه"}
+                return {"ok": False, "error": "بلغ الصندوق حدّه"}
             box["codes"].append(code)
         elif act == "del_acc":
             box["codes"] = [c for c in box["codes"] if c != code]
@@ -872,7 +1095,7 @@ def boxes_action(data):
 
 _BOX_JS = r"""
 (function(){
- function act(d,msg){return MW.post('/boxes',d).then(function(r){
+ function act(d){return MW.post('/boxes',d).then(function(r){
   if(r.ok){location.reload();}else{MW.toast(r.error||'تعذّر الحفظ',false);}});}
  var nb=document.getElementById('nbname');
  document.getElementById('nbadd').onclick=function(){
@@ -885,18 +1108,83 @@ _BOX_JS = r"""
   MW.ac(inp,'/api/acc',function(r){picked=r;add.disabled=!r;});
   add.disabled=true;
   add.onclick=function(){if(picked)act({act:'add_acc',id:id,code:picked.code});};
-  p.querySelectorAll('[data-del]').forEach(function(b){b.onclick=function(){
+  p.querySelectorAll('[data-del]').forEach(function(b){b.onclick=function(e){
+   e.preventDefault();e.stopPropagation();
    act({act:'del_acc',id:id,code:b.getAttribute('data-del')});};});
-  p.querySelector('.ren').onclick=function(){var n=prompt('الاسم الجديد للقسم:',
+  p.querySelector('.ren').onclick=function(){var n=prompt('الاسم الجديد للصندوق:',
    p.getAttribute('data-name'));if(n&&n.trim())act({act:'ren_box',id:id,name:n});};
   p.querySelector('.up').onclick=function(){act({act:'up',id:id});};
   p.querySelector('.down').onclick=function(){act({act:'down',id:id});};
-  p.querySelector('.delbox').onclick=function(){MW.confirm('حذف القسم',
-   'حذف القسم «'+p.getAttribute('data-name')+'» من الرابط؟\nالحسابات نفسها لا '+
+  p.querySelector('.delbox').onclick=function(){MW.confirm('حذف الصندوق',
+   'حذف «'+p.getAttribute('data-name')+'» من الرابط؟\nالحسابات نفسها لا '+
    'تتأثر — يُحذف العرض وحده.').then(function(y){if(y)act({act:'del_box',id:id});});};
  });
 })();
 """
+
+# 5.6.1: الصناديق لوحاتٌ متجاورة أفقياً، وحسابات كل صندوقٍ بطاقاتٌ متجاورة
+# كذلك — وعلى الجوال تنزلق اللوحات أفقياً بالإصبع
+_BOX_CSS = """
+.boxes{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));
+gap:14px;align-items:start}
+.box{background:var(--card);border:1px solid var(--line);border-radius:18px;
+padding:12px 14px 14px;box-shadow:0 1px 2px rgba(60,40,10,.04);
+display:flex;flex-direction:column;gap:10px;min-width:0}
+.box .bh{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.box .bh h3{margin:0;font-size:17px;color:var(--brown);display:flex;
+align-items:center;gap:7px}
+.box .bh .sp{flex:1 1 auto}
+.box .bt{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.box .bt div{background:#FFF8E8;border:1px solid #EBD8A8;border-radius:12px;
+padding:7px 10px;font-size:12px;color:var(--muted)}
+.box .bt b{display:block;font-size:17px;color:var(--ink);direction:ltr;
+text-align:right;font-variant-numeric:tabular-nums;margin-top:2px}
+.accs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+gap:8px}
+.acc{position:relative;display:flex;flex-direction:column;gap:3px;
+border:1px solid var(--line);border-radius:12px;padding:9px 10px 8px;
+background:var(--soft);text-decoration:none;color:var(--ink);min-width:0}
+.acc:hover{border-color:#dcc58c;background:#FFFBF1}
+.acc .nm{font-weight:700;font-size:14px;color:var(--brown);
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-inline-end:18px}
+.acc .cd{font-size:11.5px;color:var(--muted)}
+.acc .g,.acc .c{font-size:15px;font-weight:700;direction:ltr;text-align:right;
+font-variant-numeric:tabular-nums}
+.acc .c{font-size:13px;font-weight:600;color:#4a3f33}
+.acc .neg{color:var(--bad)}
+.acc .lb{font-size:11px;color:var(--muted);font-weight:400}
+.acc .cover{position:absolute;inset:0;border-radius:12px;z-index:1}
+.acc .x{position:absolute;top:5px;inset-inline-end:5px;border:0;z-index:2;
+background:transparent;color:#b98;cursor:pointer;font-size:14px;
+line-height:1;padding:3px}
+.acc .x:hover{color:var(--bad)}
+.box .addrow{display:flex;gap:8px;align-items:flex-end}
+.box .addrow label{flex:1 1 auto}
+@media (max-width:640px){.boxes{display:flex;overflow-x:auto;
+scroll-snap-type:x mandatory;gap:10px;padding-bottom:6px;
+-webkit-overflow-scrolling:touch}
+.box{flex:0 0 88%;scroll-snap-align:start}
+.accs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+"""
+
+
+def _box_card(base, r, u):
+    """بطاقة حسابٍ داخل الصندوق: الاسم ورقمه، رصيد الذهب ثم النقد —
+    والنقرة تفتح كشفه."""
+    g, c = r["gold_balance"], r["cash_balance"]
+    gtxt = (f'{_w(g)} <span class="lb">{u}</span>' if g else
+            '<span class="lb">ذهب —</span>')
+    ctxt = (f'{_m(c)} <span class="lb">ريال</span>' if c else
+            '<span class="lb">نقد —</span>')
+    return (f'<div class="acc"><a class="cover" href="'
+            f'{_e(_link(base, "/stmt", code=r["code"]))}" title="كشف حساب '
+            f'{_e(r["name"])}" aria-label="كشف حساب {_e(r["name"])}"></a>'
+            f'<span class="nm">{_e(r["name"])}</span><span class="cd">'
+            f'{_e(r["code"])}</span>'
+            f'<span class="g{" neg" if g < 0 else ""}">{gtxt}</span>'
+            f'<span class="c{" neg" if c < 0 else ""}">{ctxt}</span>'
+            f'<button class="x" data-del="{_e(r["code"])}" title="إزالة من '
+            f'الصندوق">✕</button></div>')
 
 
 def boxes_page(conn, base, csrf):
@@ -908,47 +1196,37 @@ def boxes_page(conn, base, csrf):
         rows = dp.account_rows(conn, b["codes"]) if b["codes"] else []
         tg = round(sum(r["gold_balance"] for r in rows), 3)
         tc = round(sum(r["cash_balance"] for r in rows), 2)
-        trs = "".join(
-            f'<tr><td>{_e(r["name"])} <span class="pill">{_e(r["code"])}'
-            f'</span></td><td class="n{" neg" if r["gold_balance"] < 0 else ""}'
-            f'">{_w(r["gold_balance"]) if r["gold_balance"] else "—"}</td>'
-            f'<td class="n{" neg" if r["cash_balance"] < 0 else ""}">'
-            f'{_m(r["cash_balance"]) if r["cash_balance"] else "—"}</td>'
-            f'<td class="acts"><a class="btn sm gh" href="'
-            f'{_e(_link(base, "/stmt", code=r["code"]))}">كشف</a> '
-            f'<button class="btn sm red" data-del="{_e(r["code"])}" '
-            f'title="إزالة من القسم">✕</button></td></tr>'
-            for r in rows)
-        body = (f'<div class="scroll"><table class="tbl"><tr><th>الحساب</th>'
-                f'<th class="n">الذهب ({u})</th><th class="n">النقد (ريال)'
-                f'</th><th></th></tr>{trs}<tr class="tot"><td>الإجمالي</td>'
-                f'<td class="n">{_w(tg)}</td><td class="n">{_m(tc)}</td>'
-                f'<td></td></tr></table></div>' if rows else
-                '<div class="empty">لا حسابات في هذا القسم بعد — أضفها من'
-                ' الخانة أدناه</div>')
+        cards = ("".join(_box_card(base, r, u) for r in rows) if rows else
+                 '<div class="empty" style="grid-column:1/-1;padding:16px">'
+                 'لا حسابات بعد — أضفها من الخانة أدناه</div>')
         panels.append(
-            f'<section class="panel" data-box="{_e(b["id"])}" '
-            f'data-name="{_e(b["name"])}"><h3>{icon("boxes", 20)}'
-            f'{_e(b["name"])}<span class="pill">{len(rows)} حساب</span>'
-            f'<span class="sp"></span><button class="btn sm gh up" '
-            f'title="أعلى">▲</button><button class="btn sm gh down" '
-            f'title="أسفل">▼</button><button class="btn sm gh ren">'
-            f'{icon("edit", 15)}تسمية</button><button class="btn sm red '
-            f'delbox">{icon("trash", 15)}حذف</button></h3>{body}'
-            f'<div class="fl" style="margin:12px 0 0"><label class="ac" '
-            f'style="flex:1 1 280px">إضافة حساب — اكتب أول الحروف<input '
-            f'class="accin" placeholder="اسم الحساب أو رقمه…" '
+            f'<section class="box" data-box="{_e(b["id"])}" '
+            f'data-name="{_e(b["name"])}"><div class="bh"><h3>'
+            f'{icon("boxes", 19)}{_e(b["name"])}</h3><span class="pill">'
+            f'{len(rows)} حساب</span><span class="sp"></span>'
+            f'<button class="btn sm gh up" title="نقله قبل (يميناً)">▶'
+            f'</button><button class="btn sm gh down" title="نقله بعد '
+            f'(يساراً)">◀</button><button class="btn sm gh ren" title='
+            f'"تسمية">{icon("edit", 14)}</button><button class="btn sm red '
+            f'delbox" title="حذف الصندوق">{icon("trash", 14)}</button></div>'
+            f'<div class="bt"><div>الذهب<b>{_w(tg)} <small>{u}</small></b>'
+            f'</div><div>النقد<b>{_m(tc)} <small>ريال</small></b></div></div>'
+            f'<div class="accs">{cards}</div>'
+            f'<div class="addrow"><label class="ac">إضافة حساب — اكتب أول '
+            f'الحروف<input class="accin" placeholder="اسم الحساب أو رقمه…" '
             f'autocomplete="off"></label><button class="btn gold accadd">'
             f'{icon("plus", 16)}إضافة</button></div></section>')
     inner = (f'<div class="ptitle"><h2>{icon("boxes", 22)}الصناديق</h2>'
-             f'<span class="hint">أقسامٌ تسمّيها وتضع فيها ما تشاء من الحسابات'
-             f' — ورصيد كلّ حسابٍ لحظة الفتح</span></div>'
-             f'<div class="panel"><div class="fl" style="margin:0"><label '
-             f'style="flex:1 1 260px">قسم جديد<input id="nbname" maxlength="60"'
-             f' placeholder="مثال: صناديق الذهب · البنوك · المناديب"></label>'
-             f'<button class="btn" id="nbadd">{icon("plus", 16)}إضافة القسم'
-             f'</button></div></div>' + "".join(panels))
-    return frame(base, "boxes", "الصناديق", inner, csrf, js=_BOX_JS)
+             f'<span class="hint">صناديق تسمّيها وتضع فيها ما تشاء من الحسابات'
+             f' — ورصيد كلّ حسابٍ لحظة الفتح · انقر الحساب يفتح كشفه</span>'
+             f'</div><div class="panel"><div class="fl" style="margin:0">'
+             f'<label style="flex:1 1 260px">صندوق جديد<input id="nbname" '
+             f'maxlength="60" placeholder="مثال: صناديق الذهب · البنوك · '
+             f'المناديب"></label><button class="btn" id="nbadd">'
+             f'{icon("plus", 16)}إضافة الصندوق</button></div></div>'
+             f'<div class="boxes">{"".join(panels)}</div>')
+    return frame(base, "boxes", "الصناديق", inner, csrf, css=_BOX_CSS,
+                 js=_BOX_JS)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1106,9 +1384,9 @@ def moves_page(conn, base, csrf, query):
             f'<span class="pill">{_w(tw)} {u}</span><span class="sp"></span>'
             f'<input id="mq" placeholder="ابحث بالطرف أو الرقم أو رقم التشغيل'
             f'…" style="min-width:240px"></h3>'
-            + (f'<div class="scroll"><table class="tbl"><tr><th>التاريخ</th>'
-               f'<th>العملية</th><th>المستند</th><th>الطرف</th>'
-               f'<th class="n">الوزن</th><th>الأجور / النقد</th><th></th></tr>'
+            + ('<div class="scroll"><table class="tbl"><tr><th>التاريخ</th>'
+               '<th>العملية</th><th>المستند</th><th>الطرف</th>'
+               '<th class="n">الوزن</th><th>الأجور / النقد</th><th></th></tr>'
                + "".join(rows) + '</table></div>'
                '<div id="mnone" class="empty" style="display:none">لا نتائج'
                '</div>' if rows else
@@ -1270,16 +1548,14 @@ def _lock_page(base, csrf, why):
     return frame(base, "ops", "تسجيل عمليات", (
         f'<div class="ptitle"><h2>{icon("lock", 22)}تسجيل العمليات</h2></div>'
         f'<div class="panel"><div class="msg info">{_e(why)}</div>'
-        '<p class="note">التسجيل من الرابط يكتب في دفاتر المصنع مباشرةً، فلا '
-        'يعمل إلا بحمايةٍ كاملة: رمز دخولٍ للرابط، وتفعيلٌ صريح من البرنامج. '
-        'افتح في البرنامج: «🔗 رابط المدير» ← اضبط «رمز الدخول» وفعّل '
-        '«السماح بتسجيل العمليات من الرابط».</p></div>'), csrf)
+        '<p class="note">التسجيل من الرابط يكتب في دفاتر المصنع مباشرةً. '
+        'لتفعيله افتح في البرنامج: «🔗 رابط المدير» ← علّم خانة «السماح '
+        'بتسجيل العمليات من الرابط».</p></div>'), csrf)
 
 
-def ops_page(conn, base, csrf, rest, pin_set):
-    if not pin_set:
-        return _lock_page(base, csrf, "تسجيل العمليات متوقّف: الرابط بلا رمز "
-                                      "دخول (PIN).")
+def ops_page(conn, base, csrf, rest):
+    # 5.6.1: خيارٌ واحد يقرّره المدير — «يُسمح» أو «لا يُسمح» — بلا اشتراط
+    # رمز دخول (الرمز يبقى حمايةً اختيارية للرابط كله)
     if not ops_enabled(conn):
         return _lock_page(base, csrf, "تسجيل العمليات من الرابط موقوفٌ من "
                                       "البرنامج.")
@@ -1938,13 +2214,11 @@ def _post_supply(conn, data):
             "msg": f"رُحّلت دفعة التوريد {no} — {len(rows)} طقم"}
 
 
-def post_op(kind, data, pin_set):
+def post_op(kind, data):
     """يرحّل عمليةً من الرابط — أو {"ok": False, "error"} بسببٍ مفهوم."""
     from database.database import db
     if kind not in dict((k, t) for k, t, _s in OPS):
         return {"ok": False, "error": "عمليةٌ غير معروفة"}
-    if not pin_set:
-        return {"ok": False, "error": "التسجيل يتطلب رمز دخولٍ للرابط"}
     nonce = _txt(data.get("nonce"), 40)
     if len(nonce) < 8:
         return {"ok": False, "error": "حدّث الصفحة ثم أعد المحاولة"}

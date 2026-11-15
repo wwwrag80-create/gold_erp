@@ -7674,7 +7674,8 @@ def main():
     _s6, _p6 = _get86(_u86 + "?tab=guide", None, _jar86)
     check("رمز الدخول: الصفحة تُطلب به، والخاطئ يُرفض، والصحيح يفتحها",
           "أدخل رمز" in _p3 and str(_m86) not in _p3 and _s4 == 401
-          and _s5 == 200 and "أدخل رمز" not in _p5 and "الدليل" in _p5
+          and _s5 == 200 and "أدخل رمز" not in _p5
+          and "دليل الموديلات" in _p5
           and _s6 == 200 and str(_m86) in _p6)
     _mw86._fails.clear()
     with db() as conn:
@@ -8354,55 +8355,32 @@ def main():
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
-    step("97) 4.65: طلبات العملاء من رابط المدير — تسجيلٌ وتعديلٌ وطباعة")
+    step("97) 5.6.1: «طلبات العملاء» حُذفت من رابط المدير (باقيةٌ في البرنامج)")
     try:
-        import re as _re97
         from urllib.parse import urlencode as _ue97
         from models import model_orders as _mo97
         from services import models_web as _mw97
         with db() as conn:
             _tok97 = _mw97.ensure_token(conn)
             _mw97.set_enabled(conn, True, "admin")
-            _wo97 = conn.execute(
-                "SELECT TRIM(model_no) m FROM work_orders WHERE is_deleted=0"
-                " AND model_no IS NOT NULL AND TRIM(model_no)<>''"
-                " LIMIT 1").fetchone()
-        _mdl97 = _wo97["m"] if _wo97 else None
+            _cs97 = _mw97._csrf(_tok97, _mw97._get(conn, _mw97.K_SECRET))
+            _n0 = len(_mo97.list_orders(conn, "all"))
         _r97 = _mw97.handle("GET", [_tok97, "order", "new"], {}, {}, None)
-        _cs97 = _re97.search(r'name="csrf" value="([0-9a-f]+)"',
-                             str(_r97["body"]))
-        check("الرابط: نموذج «طلب جديد» بالموديلات ورمز التحقّق",
-              _r97["code"] == 200 and _cs97 is not None and _mdl97
-              and f'data-n="{_mdl97}"' in _r97["body"])
-        _form97 = [("customer", "عميل الرابط"), ("date", "2026-10-12"),
-                   ("m", _mdl97 or ""), ("q", "2"), ("n", "")]
-        _bad97 = _mw97.handle("POST", [_tok97, "order", "save"], {}, {},
-                              _ue97(_form97).encode())
-        with db(readonly=True) as conn:
-            _n97 = len(_mo97.list_orders(conn, "all", "عميل الرابط"))
-        check("الحفظ بلا رمز التحقّق يُرفض ولا يكتب", _bad97["code"] == 403
-              and _n97 == 0)
-        _ok97 = _mw97.handle(
+        _p97 = _mw97.handle(
             "POST", [_tok97, "order", "save"], {}, {},
-            _ue97(_form97 + [("csrf", _cs97.group(1) if _cs97 else "")])
-            .encode())
+            _ue97([("customer", "عميل الرابط"), ("date", "2026-10-12"),
+                   ("csrf", _cs97)]).encode())
+        _t97 = _mw97.handle("GET", [_tok97], {"tab": "orders"}, {}, None)
         with db(readonly=True) as conn:
-            _rows97 = _mo97.list_orders(conn, "all", "عميل الرابط")
-            _o97 = _mo97.get_order(conn, _rows97[0]["id"]) if _rows97 \
-                else None
-        check("والحفظ برمزه يسجّل الطلب في قاعدة جهاز المصنع",
-              _ok97["code"] == 303 and _o97 is not None
-              and _o97["lines"][0]["qty"] == 2
-              and _o97["created_by"] == _mw97.WEB_USER, str(_ok97))
-        _pg97 = _mw97.handle("GET", [_tok97, "order", str(_o97["id"])],
-                             {"print": "1"}, {}, None) if _o97 else {}
-        check("وصفحة الطلب جاهزة للطباعة A4",
-              _pg97.get("code") == 200 and "@page{size:A4" in _pg97["body"]
-              and "window.print" in _pg97["body"])
+            _n1 = len(_mo97.list_orders(conn, "all"))
+        check("الرابط: لا نموذج طلب ولا حفظ — ولا يُكتب شيء",
+              _r97["code"] == 404 and _p97["code"] in (404, 405)
+              and _n1 == _n0, str((_r97["code"], _p97["code"], _n0, _n1)))
+        check("ورابط «طلبات العملاء» المحفوظ يفتح الرئيسية",
+              _t97["code"] == 200 and "طلبات العملاء" not in _t97["body"]
+              and "دليل الموديلات" in _t97["body"])
         with db() as conn:
             _mw97.set_enabled(conn, False, "admin")
-            if _o97:
-                _mo97.delete_order(conn, _o97["id"], "admin")
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 
