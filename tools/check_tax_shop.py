@@ -317,6 +317,97 @@ with db() as c:
     check("حارس المخزون", ok, p)
     _ = (r9, s9)
 
+print("── 13) 5.5.2: سعر الجرام لكل سطر · «إلى حساب» (الألماس) والبيع منه")
+with db() as c:
+    from models import coa
+    from models.invoices import GOLD_GROUP
+    dia = coa.add_sub_account(c, acc_id(c, GOLD_GROUP), "الألماس", "t",
+                              measurement="gold")["id"]
+    names = [r["code"] for r in sp.dest_accounts(c)]
+    check("«إلى حساب»: الذهب المشغول والألماس — بلا الكسر ولا الإيطالي ولا"
+          " خزينة التصنيع ولا التسويات",
+          "1200" in names and any(r["id"] == dia for r in sp.dest_accounts(c))
+          and not {"1100", "1210", "1250", "1310"} & set(names), names)
+    for bad_code in ("1310", "1210", "1100"):
+        try:
+            sp.create_purchase(c, sup, D, f"SUP-X{bad_code}", [
+                {"wo_no": f"TX{bad_code}", "registered": 1, "wage": 1}], "t",
+                dest_account_id=acc_id(c, bad_code))
+            check(f"الشراء إلى {bad_code} يُرفض", False)
+        except ValueError:
+            check(f"الشراء إلى {bad_code} يُرفض", True)
+    w1200 = bal(c, "1200")
+    # سطران بعيارين وسعرين: 10 جم عيار 18 بسعر 250 · 6 جم عيار 21 (مكافئها
+    # 7 بعيار 18 — الأوزان تُمرَّر للدفتر بمكافئ 18) بسعر 290
+    r13 = sp.create_purchase(c, sup, D, "SUP-13", [
+        {"wo_no": "T131", "pieces": 1, "registered": 10, "wage": 20,
+         "karat": 18, "gold_price": 250},
+        {"wo_no": "T132", "pieces": 1, "registered": 7.0, "wage": 15,
+         "karat": 21, "gold_price": 290}], "t", pricing="gram",
+        gold_price=250, price_karat=18, dest_account_id=dia)
+    # T131: 10 × (250 + 20) = 2700 · T132: ذهب 6 × 290 = 1740 + أجر 7 × 15
+    # = 105 → 1845 · الصافي 4545
+    lines = c.execute("SELECT wo_no, gold_price, gold_value, wages FROM"
+                      " set_purchase_lines WHERE doc_id=? ORDER BY line_no",
+                      (r13["id"],)).fetchall()
+    check("قيمة ذهب كل سطرٍ بسعره وعياره: 2500 · 1740 (6 جم عيار 21 × 290)",
+          [round(x["gold_value"], 2) for x in lines] == [2500.0, 1740.0]
+          and [x["gold_price"] for x in lines] == [250, 290],
+          [tuple(x) for x in lines])
+    check("صافي الفاتورة = Σ (قيمة الذهب + الأجور) = 4545",
+          r13["net"] == 4545.0, r13)
+    check("الأطقم دخلت حساب الألماس لا الذهب المشغول",
+          bal(c, dia)[0] == 17.0 and bal(c, "1200") == w1200,
+          (bal(c, dia), bal(c, "1200")))
+    homes = {r[0]: r[1] for r in c.execute(
+        "SELECT work_order_no, stock_account_id FROM work_orders WHERE"
+        " work_order_no IN ('T131','T132')")}
+    check("بيت كل طقمٍ حساب الألماس", set(homes.values()) == {dia}, homes)
+    ok, p = guard_clean(c)
+    check("حارس المخزون بعد الشراء إلى الألماس", ok, p)
+    ids13 = {r["work_order_no"]: r["id"] for r in c.execute(
+        "SELECT id, work_order_no FROM work_orders WHERE work_order_no IN"
+        " ('T131','T132')")}
+    s13 = ti.create_invoice(c, cus, [
+        {"work_order_id": ids13["T131"], "wage_override": 30, "pieces": 1,
+         "karat": 18, "gold_price": 300},
+        {"work_order_id": ids13["T132"], "wage_override": 20,
+         "pieces": 1, "karat": 21, "gold_price": 340}], D, "t", "gram",
+        gold_price=300, price_karat=18)
+    its = c.execute("SELECT gold_price, gold_value, wages FROM invoice_items"
+                    " WHERE invoice_id=? ORDER BY id", (s13["id"],)).fetchall()
+    check("البيع: سعر جرام كل سطرٍ محفوظ وقيمته 3000 · 2040 (6 × 340)",
+          [x["gold_price"] for x in its] == [300, 340]
+          and [round(x["gold_value"], 2) for x in its] == [3000.0, 2040.0],
+          [tuple(x) for x in its])
+    # 10×(300+30) = 3300 · 2040 + 7×20 = 2180 → 5480 · ضريبة 822
+    check("صافي 5480 · ضريبة 822",
+          (round(s13["total_wages"] + s13["gold_value"], 2), s13["vat"])
+          == (5480.0, 822.0), s13)
+    check("البيع خرج من حساب الألماس (برقم التشغيل)", bal(c, dia)[0] == 0.0,
+          bal(c, dia))
+    cn13 = ti.create_credit_note(c, s13["id"], D, [
+        {"item_id": ti.returnable(c, s13["id"])[1]["item_id"]}], "مرتجع", "t")
+    check("الإشعار الدائن بسعر جرام السطر نفسه (2040) ويعود للألماس",
+          round(cn13["gold_value"], 2) == 2040.0 and bal(c, dia)[0] == 7.0,
+          (cn13.get("gold_value"), bal(c, dia)))
+    pr13 = sp.create_return(c, r13["id"], D, [
+        {"line_id": sp.returnable(c, r13["id"])[1]["line_id"]}], "عيب", "t")
+    check("مرتجع المشتريات يخرج من الألماس", bal(c, dia)[0] == 0.0
+          and pr13["total"] > 0, (bal(c, dia), pr13))
+    check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
+    ok, p = guard_clean(c)
+    check("حارس المخزون", ok, p)
+    from services import print_manager as pm
+    h = pm.build_html("invoice", s13["id"])
+    hp = pm.build_html("set_purchase", r13["id"])
+    hm = pm.build_html("invoice_models", s13["id"])
+    check("الطباعة: لا «المصنعية»، و«سعر الجرام» لكل سطر، و«إلى حساب»",
+          "المصنعية" not in h and "سعر الجرام" in h and "340.00" in h
+          and "المصنعية" not in hp and "290.00" in hp and "الألماس" in hp)
+    check("صور موديلات الفاتورة بقالب المجمّعة: أرقام التشغيل داخل الإطار",
+          'class="gwos"' in hm and "T131" in hm and "T132" in hm)
+
 print()
 print(f"{len(OK)} ✔ · {len(BAD)} ✘")
 for b in BAD:

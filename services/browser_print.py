@@ -228,7 +228,8 @@ _TITLES = {"invoice": "فاتورة", "invoices": "فاتورة", "voucher": "س
            "vouchers": "سند", "statement": "كشف حساب",
            "income_statement": "قائمة الدخل", "customer_board":
            "العملاء — المبيعات والسداد", "aging": "أعمار الديون",
-           "dash_panel": "لوحة التحكم", "invoice_models": "موديلات الفاتورة"}
+           "dash_panel": "لوحة التحكم", "invoice_models": "موديلات الفاتورة",
+           "set_purchase_models": "موديلات فاتورة المشتريات"}
 
 
 def _title(doc_type):

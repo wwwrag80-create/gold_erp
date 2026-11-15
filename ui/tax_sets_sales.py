@@ -55,8 +55,10 @@ def _buyer_label(row):
 class SetsInvoiceTab(QtWidgets.QWidget):
     """فاتورةٌ ضريبية (أو مبسطة) بالأطقم من الخزنة."""
 
+    # 5.5.2: لا عمود «مصنعية» (الصافي يغني عنه) — وسعر الجرام عمودٌ لكل سطر
     COLS = ["", "م", "رقم التشغيل", "العدد", "الوزن", "العيار", "الموديل",
-            "الأجر/جم", "قيمة الذهب", "المصنعية", "الصافي"]
+            "سعر الجرام", "الأجر/جم", "قيمة الذهب", "الصافي"]
+    C_GP, C_RATE, C_GV, C_NET = 7, 8, 9, 10
 
     def __init__(self, user, new_customer=None):
         super().__init__()
@@ -118,7 +120,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         wl.setContentsMargins(0, 0, 0, 0)
         wl.addWidget(self.w_name, 2)
         wl.addWidget(self.w_phone, 1)
-        self.pricing = tk.PricingBox()
+        self.pricing = tk.PricingBox(with_price=False)
         self.pay = kit.ComboBox()
         for k, lbl in tx.PAY_MODES:
             self.pay.addItem(lbl, k)
@@ -175,6 +177,12 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.e_model = kit.LineEdit()
         self.e_model.setReadOnly(True)
         self.e_model.setPlaceholderText("تلقائي")
+        # سعر الجرام بعيار السطر — يبقى من سطرٍ لسطر (يظهر بالتسعير بالريال)
+        self.e_gp = mspin()
+        self.e_gp.setToolTip("سعر جرام الذهب بعيار هذا السطر — قيمة الذهب ="
+                             " الوزن × سعر الجرام")
+        self.e_gp.valueChanged.connect(self._line_changed)
+        self.l_gp = tk.sub("سعر الجرام")
         self.e_rate = mspin()
         self.e_rate.valueChanged.connect(self._rate_typed)
         self.e_net = kit.LineEdit()
@@ -184,18 +192,20 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.btn_add.clicked.connect(self.add_item)
         fields = [("رقم التشغيل", self.e_wo, 3), ("العدد", self.e_pieces, 1),
                   ("الوزن", self.e_reg, 2), ("العيار", self.e_karat, 2),
-                  ("الموديل", self.e_model, 2), (None, self.e_rate, 2),
-                  ("صافي السطر", self.e_net, 2)]
+                  ("الموديل", self.e_model, 2), ("gp", self.e_gp, 2),
+                  (None, self.e_rate, 2), ("صافي السطر", self.e_net, 2)]
         g = QtWidgets.QGridLayout(box)
         g.setHorizontalSpacing(6)
         for c, (label, wd, st) in enumerate(fields):
             wd.setMinimumWidth(86)
-            g.addWidget(self.l_rate if label is None else tk.sub(label), 0, c)
+            lbl = (self.l_rate if label is None else
+                   self.l_gp if label == "gp" else tk.sub(label))
+            g.addWidget(lbl, 0, c)
             g.addWidget(wd, 1, c)
             g.setColumnStretch(c, st)
         g.addWidget(self.btn_add, 1, len(fields))
         enter_chain(self, [self.e_wo, self.e_pieces, self.e_reg, self.e_karat,
-                           self.e_rate],
+                           self.e_gp, self.e_rate],
                     on_last=lambda: self.e_wo if self.add_item() else False,
                     require={self.e_wo: lambda: bool(
                         self.e_wo.text().strip())})
@@ -207,7 +217,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.tbl.setColumnCount(len(self.COLS))
         self.tbl.setHorizontalHeaderLabels(self.COLS)
         self.tbl.setMinimumHeight(200)
-        fit_columns(self.tbl, [8, 4, 13, 6, 10, 7, 10, 9, 11, 10, 12])
+        fit_columns(self.tbl, [8, 4, 13, 6, 10, 7, 10, 10, 9, 11, 12])
         self.totals = tk.TotalsRow("ضريبة المخرجات")
         self.hint = QtWidgets.QLabel("")
         self.hint.setObjectName("cardSub")
@@ -304,16 +314,28 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         return int(self.e_karat.currentData() or kv.active())
 
     def _pricing_changed(self):
-        piece = self.pricing.is_piece()
+        piece, riyal = self.pricing.is_piece(), self.pricing.is_riyal()
         self.l_rate.setText("سعر الطقم (ريال)" if piece else "الأجر/جم")
         self.e_rate.blockSignals(True)
         self.e_rate.setValue(0 if piece else kv.rate(self._wage18, self._k()))
         self.e_rate.blockSignals(False)
+        # سعر الجرام لا يلزم «الأجر فقط» — يظهر بالريال وحده
+        self.l_gp.setVisible(riyal)
+        self.e_gp.setVisible(riyal)
+        self.l_gp.setText("سعر الجرام" + (" (للفصل)" if piece else ""))
         hdr = list(self.COLS)
-        hdr[7] = "سعر الطقم" if piece else "الأجر/جم"
+        hdr[self.C_RATE] = "سعر الطقم" if piece else "الأجر/جم"
         self.tbl.setHorizontalHeaderLabels(hdr)
+        self.tbl.setColumnHidden(self.C_GP, not riyal)
+        self.tbl.setColumnHidden(self.C_GV, not riyal)
         self._line_changed()
         self._render()
+
+    def _line_pricing(self, gold_price=None, karat=None):
+        return tk.line_pricing(
+            self.pricing.pricing(),
+            self.e_gp.value() if gold_price is None else gold_price,
+            self._k() if karat is None else karat)
 
     def _karat_changed(self, *_):
         """تبديل العيار يعيد كتابة الوزن والأجر/جم به — والذهب نفسه ثابت."""
@@ -404,7 +426,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         if self._wo is None:
             self.e_net.clear()
             return
-        t, _why = self.pricing.preview()
+        t = self._line_pricing()
         piece = self.e_rate.value() if self.pricing.is_piece() else 0
         _wg, _gv, net, why = tk.line_calc(self._w18(), self._wage18, piece, t)
         self.e_net.setText(tk.m(net) if not why else "—")
@@ -423,6 +445,10 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             err(self, f"الوزن أكبر من الباقي في الخزنة "
                       f"({tk.wk(self._avail18, self._k())} عيار {self._k()})")
             return False
+        if self.pricing.is_riyal() and self.e_gp.value() <= 0:
+            err(self, f"اكتب سعر الجرام (عيار {self._k()})")
+            self.e_gp.setFocus()
+            return False
         if self.pricing.is_piece() and self.e_rate.value() <= 0:
             err(self, "اكتب سعر الطقم بالريال")
             self.e_rate.setFocus()
@@ -433,6 +459,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             "pieces": self.e_pieces.value(), "w18": w18,
             "avail18": self._avail18, "karat": self._k(),
             "wage18": self._wage18,
+            "gold_price": (self.e_gp.value() if self.pricing.is_riyal()
+                           else 0.0),
             "piece_price": (self.e_rate.value() if self.pricing.is_piece()
                             else 0.0), "wo": self._wo})
         self._clear_entry()
@@ -463,6 +491,10 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.e_rate.setValue(it["piece_price"] if self.pricing.is_piece()
                              else kv.rate(it["wage18"], it["karat"]))
         self.e_rate.blockSignals(False)
+        if it.get("gold_price"):
+            self.e_gp.blockSignals(True)
+            self.e_gp.setValue(it["gold_price"])
+            self.e_gp.blockSignals(False)
         self._line_changed()
         self._render()
         self.e_rate.setFocus()
@@ -473,13 +505,13 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         # الصفوف تُفرَّغ أولاً فتذهب أزرارها معها — لا تبقى أزرار سطرٍ قديم
         t.setRowCount(0)
         t.setRowCount(len(self.items))
-        tp, why_p = self.pricing.preview()
         piece, riyal = self.pricing.is_piece(), self.pricing.is_riyal()
         tw = tgv = twg = 0.0
         npcs = 0
         bad = []
         red = QtGui.QBrush(QtGui.QColor("#a4262c"))
         for r, it in enumerate(self.items):
+            tp = self._line_pricing(it.get("gold_price") or 0, it["karat"])
             wg, gv, net, why = tk.line_calc(it["w18"], it["wage18"],
                                             it["piece_price"], tp)
             if why:
@@ -491,13 +523,14 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             k = it["karat"]
             vals = [r + 1, it["wo_no"], str(it["pieces"]),
                     tk.wk(it["w18"], k), str(k), it["model"] or "—",
+                    tk.m(it.get("gold_price") or 0) if riyal else "—",
                     tk.m(it["piece_price"]) if piece
                     else tk.m(kv.rate(it["wage18"], k)),
-                    tk.m(gv) if riyal else "—", tk.m(wg),
+                    tk.m(gv) if riyal else "—",
                     tk.m(net) if not why else "—"]
             for c, v in enumerate(vals, 1):
                 cell = (text_item(v) if c in (2, 6) else num_item(v))
-                if why and c == 10:
+                if why and c == self.C_NET:
                     cell.setForeground(red)
                     cell.setToolTip(why)
                 t.setItem(r, c, cell)
@@ -505,11 +538,13 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                            edit_tip="تصحيح السطر", del_tip="حذف السطر")
         tk.fix_rows(t, 10)
         self.totals.show_totals(len(self.items), npcs, tw, tgv, twg, riyal)
-        msgs = ([why_p] if (why_p and self.items) else []) + bad
+        msgs = bad
         self.hint.setText("⚠ " + " · ".join(msgs) if msgs else (
             "الذهب يُقيَّد على المشتري وزناً، والضريبة على الأجور وحدها"
             if not riyal else
-            "الفاتورة كلها بالريال — قيمة الذهب والمصنعية خاضعتان للضريبة"))
+            "الفاتورة كلها بالريال: الصافي = الوزن × (سعر الجرام + الأجر)"
+            " — والضريبة عليه كله" if not piece else
+            "الفاتورة كلها بالريال: الصافي سعر الطقم — والضريبة عليه كله"))
 
     # ══════════ الترحيل ══════════
     def clear(self):
@@ -532,12 +567,12 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                     return
             if not self.items:
                 raise ValueError("أضف رقم تشغيلٍ واحداً على الأقل")
-            t = self.pricing.checked()
             for it in self.items:
+                t = self._line_pricing(it.get("gold_price") or 0, it["karat"])
                 _a, _b, _n, why = tk.line_calc(it["w18"], it["wage18"],
                                                it["piece_price"], t)
                 if why:
-                    raise ValueError(why)
+                    raise ValueError(f"{it['wo_no']}: {why}")
             buyer = (self.w_name.text().strip() or "عميل نقدي") if walk \
                 else self.customer.currentText()
             T = self.totals
@@ -552,10 +587,15 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                        if pay != "credit" else ""), self.date):
                 return
             v = self.pricing.values()
+            if self.pricing.is_riyal():
+                # سعر الفاتورة سعرُ أول سطر — ولكل سطرٍ سعره بعياره
+                v["gold_price"] = self.items[0]["gold_price"]
+                v["price_karat"] = self.items[0]["karat"]
             cart = [{"work_order_id": it["wo_id"], "weight": it["w18"],
                      "wage_override": it["wage18"],
                      "piece_price": it["piece_price"],
-                     "pieces": it["pieces"], "karat": it["karat"]}
+                     "pieces": it["pieces"], "karat": it["karat"],
+                     "gold_price": it.get("gold_price") or 0}
                     for it in self.items]
             with db() as conn:
                 res = tx.create_invoice(
@@ -679,9 +719,6 @@ class SetsCreditTab(QtWidgets.QWidget):
             info = (f"{tx.SUBTYPE_LABEL.get(o.get('tax_subtype') or '', 'فاتورة')}"
                     f" · المشتري: {_buyer_label(o)} · "
                     f"{tx.PRICING_LABEL.get(o['pricing'], '')}"
-                    + (f" — سعر الجرام {tk.m(o['gold_price'])} عيار "
-                       f"{o['price_karat']}" if o["pricing"] in tx.RIYAL
-                       else "")
                     + "\nيُردّ بسعر الفاتورة نفسها وتعود الأطقم للخزنة — "
                     + ("ويُخصم من حساب المشتري (آجل)." if pm == "credit"
                        else f"ويُردّ المبلغ {tx.PAY_LABEL[pm]} بسند صرفٍ "

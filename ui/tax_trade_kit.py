@@ -98,8 +98,11 @@ class PricingBox(QtWidgets.QWidget):
     `changed` تُطلق عند أي تغيير فيُعاد حساب الأسطر."""
     changed = QtCore.pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, with_price=True):
         super().__init__(parent)
+        # 5.5.2: سعر الجرام صار في سطر الإدخال (لكل طقمٍ بعياره) — فالرأس
+        # يحمل طريقة التسعير وحدها (`with_price=False`)
+        self.with_price = bool(with_price)
         self.mode = kit.ComboBox()
         for key, label in tx.TAX_PRICING:
             self.mode.addItem(label, key)
@@ -128,7 +131,7 @@ class PricingBox(QtWidgets.QWidget):
         self._mode_changed()
 
     def _mode_changed(self, *_):
-        riyal = self.pricing() in tx.RIYAL
+        riyal = self.pricing() in tx.RIYAL and self.with_price
         for wd in (self.l_price, self.price, self.karat):
             wd.setVisible(riyal)
         self.changed.emit()
@@ -173,10 +176,19 @@ class PricingBox(QtWidgets.QWidget):
 
     def label(self):
         p = self.values()
-        if p["pricing"] in tx.RIYAL:
+        if p["pricing"] in tx.RIYAL and self.with_price:
             return (f"{tx.PRICING_LABEL[p['pricing']]} — سعر الجرام "
                     f"{m(p['gold_price'])} عيار {p['price_karat']}")
         return tx.PRICING_LABEL[p["pricing"]]
+
+
+def line_pricing(pricing, gold_price=0.0, karat=0):
+    """تسعير سطرٍ للعرض: طريقة الفاتورة وسعر جرام السطر بعياره."""
+    riyal = pricing in tx.RIYAL
+    return {"pricing": pricing,
+            "gold_price": float(gold_price or 0) if riyal else 0.0,
+            "price_karat": int(karat or kv.active()) if riyal else 0,
+            "ref_invoice_id": None, "reason": ""}
 
 
 def line_calc(weight18, wage18, piece_price, t):
@@ -187,7 +199,10 @@ def line_calc(weight18, wage18, piece_price, t):
         wages, gv = tx.line_amounts(li, t)
         return wages, gv, round(wages + gv, 2), ""
     except ValueError as e:
-        gv = tx.gold_value(li["weight"], t)
+        try:
+            gv = tx.gold_value(li["weight"], t)
+        except Exception:                            # noqa: BLE001
+            gv = 0.0
         return 0.0, gv, 0.0, str(e)
 
 
@@ -201,13 +216,13 @@ class TotalsRow(QtWidgets.QWidget):
         self.c_n = Card("الأطقم", "")
         self.c_w = self.c_n
         self.c_gv = Card("قيمة الذهب", "بالريال")
-        self.c_wages = Card("المصنعية", "الأجور")
+        # 5.5.2: لا لوحة «مصنعية» — الصافي يغني عنها
         self.c_net = Card("الصافي الخاضع", "قبل الضريبة")
         self.c_vat = Card(f"{vat_title} {config.VAT_RATE * 100:g}%", vat_sub,
                           summary=True)
         self.c_total = Card("الإجمالي", "")
-        lay = cards(self.c_n, self.c_gv, self.c_wages, self.c_net,
-                    self.c_vat, self.c_total)
+        lay = cards(self.c_n, self.c_gv, self.c_net, self.c_vat,
+                    self.c_total)
         lay.setContentsMargins(0, 0, 0, 0)
         self.setLayout(lay)
 
@@ -219,7 +234,7 @@ class TotalsRow(QtWidgets.QWidget):
             + (f" · {pieces} قطعة" if pieces else "")
             + ("" if riyal else " — ذهبٌ بالوزن"))
         self.c_gv.set_value(m(gv) if riyal else "—")
-        self.c_wages.set_value(m(wages))
+        self.c_gv.setVisible(riyal)
         self.c_net.set_value(m(net))
         self.c_vat.set_value(m(vat))
         self.c_total.set_value(m(net + vat))

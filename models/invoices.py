@@ -228,7 +228,8 @@ def _fetch_cart_lines(conn, cart, kind, skip_ids=None, invoice_date=None):
                     # وسطر الأصل في الإشعار الدائن (يُتجاهل في غيرها)
                     "piece_price": c.get("piece_price"),
                     "pieces": int(c.get("pieces") or 0),
-                    "src_item_id": c.get("src_item_id")})
+                    "src_item_id": c.get("src_item_id"),
+                    "gold_price": c.get("gold_price")})
     return out
 
 
@@ -650,11 +651,13 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
         if tx:
             conn.execute(
                 "UPDATE invoice_items SET gold_value=?, pieces=?,"
-                " piece_price=?, src_item_id=? WHERE id=?",
+                " piece_price=?, src_item_id=?, gold_price=? WHERE id=?",
                 (gv, int(li.get("pieces") or 0),
                  round(float(li.get("piece_price") or 0), 2)
                  if tx["pricing"] == "piece" else 0.0,
-                 li.get("src_item_id"), _icur.lastrowid))
+                 li.get("src_item_id"),
+                 float(_tx.line_tx(li, tx).get("gold_price") or 0),
+                 _icur.lastrowid))
         if li.get("wage_only"):
             continue                 # أجرٌ فقط: لا مخزون يتحرّك
         if kind == "sale_return" and not wo["is_bulk"] and not li.get("acc"):

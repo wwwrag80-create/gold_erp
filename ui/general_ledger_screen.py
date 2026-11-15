@@ -300,6 +300,19 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                 elif picked is a_inv:
                     print_manager.preview_document(self, src, sid)
                 return
+            if src in ("set_purchases", "set_purchase"):
+                # 5.5.2: المشتريات الضريبية كالفاتورة — المستند أو صور
+                # موديلاته بأرقام تشغيلها
+                menu = QtWidgets.QMenu(self)
+                a_doc = menu.addAction("📄 معاينة المستند")
+                a_mdl = menu.addAction("🖼 صور موديلات المستند")
+                picked = menu.exec_(QtGui.QCursor.pos())
+                if picked is a_mdl:
+                    print_manager.preview_document(
+                        self, "set_purchase_models", sid)
+                elif picked is a_doc:
+                    print_manager.preview_document(self, src, sid)
+                return
             print_manager.preview_document(self, src, sid)
         except Exception as e:
             err(self, e)

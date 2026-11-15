@@ -82,6 +82,13 @@ def ensure_schema(conn):
                  " ON set_purchase_lines(work_order_id)")
     _tx.ensure_schema(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(work_orders)")}
+    # 5.5.2: حساب الوجهة (الذهب المشغول · الماس · أي مخزن) وسعر جرام السطر
+    for table, col, ddl in (("set_purchases", "dest_account_id", "INTEGER"),
+                            ("set_purchase_lines", "gold_price",
+                             "REAL NOT NULL DEFAULT 0")):
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if have and col not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
     if cols and "out_doc" not in cols:
         # مرتجع المشتريات الذي أخرج الطقم من ملك المحلّ — دليلٌ على البطاقة
         conn.execute("ALTER TABLE work_orders ADD COLUMN out_doc TEXT"
@@ -133,36 +140,42 @@ def _prepare_line(conn, i, x, tx, seen):
     wage = round(float(0 if _wg in (None, "") else _wg), 4)
     if wage < 0:
         raise ValueError(f"الطقم {wo_no}: الأجر لا يكون سالباً")
-    li = {"weight": reg, "wage": wage, "piece_price": x.get("piece_price")}
+    karat = int(x.get("karat") or 0)
+    li = {"weight": reg, "wage": wage, "piece_price": x.get("piece_price"),
+          "karat": karat, "gold_price": x.get("gold_price")}
     wages, gv = _tx.line_amounts(li, tx, wo_no)
+    gp = float(_tx.line_tx(li, tx).get("gold_price") or 0) \
+        if tx["pricing"] in _tx.RIYAL else 0.0
     return {"wo_no": wo_no, "bulk": bulk,
             "model_no": model_for(wo_no, x.get("model_no")) or "",
             "pieces": pieces, "reg": reg, "std": std,
-            "karat": int(x.get("karat") or 0), "wage": wage,
+            "karat": karat, "wage": wage, "gold_price": gp,
             "piece_price": (round(float(x.get("piece_price") or 0), 2)
                             if tx["pricing"] == "piece" else 0.0),
             "wages": wages, "gv": gv, "net": round(wages + gv, 2),
             "notes": str(x.get("notes") or "").strip()}
 
 
-def _post(conn, kind, sup, doc_no, doc_date, tx, set_w, bulk_w, wages, gv,
-          vat, total, username, note):
-    """قيد الشراء أو مرتجعه — بطريقة التسعير. `set_w` وزن الأطقم (بيتها
-    حساب الخزنة)، و`bulk_w` وزن التجميعي (حساب الإيطالي)."""
+def _post(conn, kind, sup, doc_no, doc_date, tx, set_by_acc, bulk_w, wages,
+          gv, vat, total, username, note):
+    """قيد الشراء أو مرتجعه — بطريقة التسعير. `set_by_acc` = {حساب: وزن}
+    للأطقم (5.5.2: تدخل الحساب المختار وتخرج منه)، و`bulk_w` وزن التجميعي
+    (حساب الإيطالي)."""
     from models.stock_home import italian_account
-    from models.inventory import resolve_dest
     riyal = tx["pricing"] in _tx.RIYAL
     buy = kind == "purchase"
+    set_w = round(sum(set_by_acc.values()), 3)
     total_w = round(set_w + bulk_w, 3)
     g_in, g_out = ("gold_debit", "gold_credit") if buy else \
         ("gold_credit", "gold_debit")
     c_in, c_out = ("cash_debit", "cash_credit") if buy else \
         ("cash_credit", "cash_debit")
     lines = []
-    if set_w > 0:
-        lines.append({"account_id": resolve_dest(conn, None), g_in: set_w,
-                      "line_desc": ("دخول الأطقم المشتراة الخزنة" if buy
-                                    else "خروج الأطقم المرتجعة من الخزنة")})
+    for acc, w in set_by_acc.items():
+        if w > 0:
+            lines.append({"account_id": acc, g_in: round(w, 3),
+                          "line_desc": ("دخول الأطقم المشتراة" if buy
+                                        else "خروج الأطقم المرتجعة للمورد")})
     if bulk_w > 0:
         lines.append({"account_id": italian_account(conn), g_in: bulk_w,
                       "line_desc": "ايطالي / نواعم (0010 · 00010)"})
@@ -192,20 +205,52 @@ def _post(conn, kind, sup, doc_no, doc_date, tx, set_w, bulk_w, wages, gv,
                       note=note, doc_no=doc_no)
 
 
+# حساباتٌ تحت مجموعة الذهب لا تدخلها أطقمٌ مشتراة: خزينة التصنيع (تشغيل
+# الورش) · الإيطالي (للرقمين التجميعيين وحدهما) · تسويات الأوزان · الكسر
+# (بالعيار وحده)
+_NOT_DEST = ("1100", "1210", "1250", "1310")
+
+
+def dest_accounts(conn):
+    """الحسابات التي تدخلها أطقم الشراء (5.5.2): الذهب المشغول وحساب
+    الألماس وكل حسابٍ يُضاف تحت مجموعة الذهب — ما عدا `_NOT_DEST`."""
+    from models.accounts import gold_accounts
+    return [r for r in gold_accounts(conn) if r["code"] not in _NOT_DEST]
+
+
+def check_dest(conn, account_id=None):
+    """حساب الوجهة متحقَّقاً — وبلا اختيارٍ فالذهب المشغول كما كان."""
+    from models.inventory import resolve_dest
+    dest = resolve_dest(conn, account_id)
+    if dest not in {int(r["id"]) for r in dest_accounts(conn)}:
+        r = conn.execute("SELECT code, name FROM accounts WHERE id=?",
+                         (dest,)).fetchone()
+        raise ValueError(
+            "لا تدخل الأطقم المشتراة إلى "
+            + (f"{r['code']} — {r['name']}" if r else str(dest))
+            + "\nخزينة التصنيع للتشغيل، والإيطالي للرقمين التجميعيين،"
+              " والتسويات والكسر لهما شأنهما — اختر الذهب المشغول أو"
+              " حساباً مثله (كالألماس)")
+    return dest
+
+
 def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
                     username, pricing="wage", gold_price=0.0, price_karat=0,
-                    notes=""):
+                    notes="", dest_account_id=None):
     """فاتورة مشتريات ضريبية بالأطقم — تُدخل الأطقم الخزنة.
 
     `lines` = [{wo_no, model_no, pieces, registered (18), standing (18),
                 karat, wage (18) | piece_price, notes}]
     """
     from models.inventory import (adjust_bulk_wo, classify_item,
-                                  generate_work_order_barcode, resolve_dest)
+                                  generate_work_order_barcode)
     from models.stock_home import italian_account
     from services import gold_math
     ensure_schema(conn)
     sup = _supplier(conn, supplier_id)
+    # الحساب الذي تدخله الأطقم (وبلا اختيارٍ الذهب المشغول) — وتخرج منه
+    # عند بيعها، فهو بيتها (`stock_home`)
+    dest = check_dest(conn, dest_account_id)
     inv_no = str(supplier_inv_no or "").strip()
     if not inv_no:
         raise ValueError("اكتب رقم فاتورة المورد — بها تُخصم ضريبة المدخلات"
@@ -236,15 +281,15 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
     cur = conn.execute(
         "INSERT INTO set_purchases(kind,supplier_id,doc_date,supplier_inv_no,"
         "pricing,gold_price,price_karat,vat_rate,total_weight,wages,"
-        "gold_value,net,vat,total,notes,created_by) VALUES('purchase',?,?,?,"
-        "?,?,?,?,?,?,?,?,?,?,?,?)",
+        "gold_value,net,vat,total,notes,created_by,dest_account_id)"
+        " VALUES('purchase',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (supplier_id, doc_date, inv_no, tx["pricing"], tx["gold_price"],
          tx["price_karat"], float(config.VAT_RATE), round(set_w + bulk_w, 3),
-         wages, gv, net, vat, total, (notes or "").strip(), username))
+         wages, gv, net, vat, total, (notes or "").strip(), username, dest))
     pid = cur.lastrowid
     doc_no = _numbering.next_no(conn, PREFIX["purchase"])
-    entry_id = _post(conn, "purchase", sup, doc_no, doc_date, tx, set_w,
-                     bulk_w, wages, gv, vat, total, username,
+    entry_id = _post(conn, "purchase", sup, doc_no, doc_date, tx,
+                     {dest: set_w}, bulk_w, wages, gv, vat, total, username,
                      f"فاتورة المورد {inv_no}"
                      + (f" — {notes.strip()}" if (notes or "").strip()
                         else ""))
@@ -252,7 +297,6 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
                  (doc_no, entry_id, pid))
     conn.execute("UPDATE journal_entries SET source_id=? WHERE id=?",
                  (pid, entry_id))
-    dest = resolve_dest(conn, None)
     for i, p in enumerate(prep, 1):
         if p["bulk"]:
             wo = adjust_bulk_wo(conn, p["reg"], username, wo_no=p["wo_no"])
@@ -278,11 +322,11 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
         conn.execute(
             "INSERT INTO set_purchase_lines(doc_id,line_no,work_order_id,"
             "wo_no,model_no,pieces,registered_weight,standing_weight,karat,"
-            "wage_per_gram,piece_price,wages,gold_value,net) VALUES(?,?,?,?,"
-            "?,?,?,?,?,?,?,?,?,?)",
+            "wage_per_gram,piece_price,wages,gold_value,net,gold_price)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (pid, i, wid, p["wo_no"], p["model_no"], p["pieces"], p["reg"],
              p["std"], p["karat"], p["wage"], p["piece_price"], p["wages"],
-             p["gv"], p["net"]))
+             p["gv"], p["net"], p["gold_price"]))
     _ = italian_account
     log_action(conn, username, "create", "set_purchases", pid,
                f"{doc_no} total={total}")
@@ -332,6 +376,7 @@ def returnable(conn, purchase_id):
                     "standing": ln["standing_weight"], "karat": ln["karat"],
                     "wage": ln["wage_per_gram"],
                     "piece_price": ln["piece_price"], "bulk": bool(ln["bulk"]),
+                    "gold_price": float(ln["gold_price"] or 0),
                     "left": 0.0 if why else max(0.0, left), "why": why})
     return out
 
@@ -368,7 +413,8 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
                                  f" ({_nf.f2(r['left'])})")
         frac = (w / float(r["registered"])) if r["registered"] else 1.0
         li = {"weight": w, "wage": r["wage"],
-              "piece_price": round(float(r["piece_price"] or 0) * frac, 2)}
+              "piece_price": round(float(r["piece_price"] or 0) * frac, 2),
+              "karat": r["karat"], "gold_price": r["gold_price"]}
         wages, gv = _tx.line_amounts(li, tx, r["wo_no"])
         prep.append({**r, "w": w, "wages": wages, "gv": gv,
                      "net": round(wages + gv, 2),
@@ -384,6 +430,17 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
     total = round(net + vat, 2)
     set_w = round(sum(p["w"] for p in prep if not p["bulk"]), 3)
     bulk_w = round(sum(p["w"] for p in prep if p["bulk"]), 3)
+    # 5.5.2: كل طقمٍ يخرج من الحساب الذي هو فيه (بيته) — لا من حسابٍ ثابت
+    from models.stock_home import line_account
+    by_acc = {}
+    for p in prep:
+        if p["bulk"]:
+            continue
+        wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
+                          (p["work_order_id"],)).fetchone()
+        acc = line_account(conn, wo) if wo else None
+        acc = acc or o["dest_account_id"] or acc_id(conn, "1200")
+        by_acc[acc] = round(by_acc.get(acc, 0.0) + p["w"], 3)
     cur = conn.execute(
         "INSERT INTO set_purchases(kind,supplier_id,doc_date,supplier_inv_no,"
         "pricing,gold_price,price_karat,vat_rate,total_weight,wages,"
@@ -396,7 +453,7 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
     rid = cur.lastrowid
     doc_no = _numbering.next_no(conn, PREFIX["purchase_return"])
     entry_id = _post(conn, "purchase_return", sup, doc_no, doc_date, tx,
-                     set_w, bulk_w, wages, gv, vat, total, username,
+                     by_acc, bulk_w, wages, gv, vat, total, username,
                      f"مرتجع من {o['doc_no']} (فاتورة المورد"
                      f" {o['supplier_inv_no']}) — {str(reason).strip()}")
     conn.execute("UPDATE set_purchases SET doc_no=?, entry_id=? WHERE id=?",

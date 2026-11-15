@@ -83,7 +83,9 @@ def ensure_schema(conn):
     _add("invoice_items", (("gold_value", "REAL NOT NULL DEFAULT 0"),
                            ("pieces", "INTEGER NOT NULL DEFAULT 0"),
                            ("piece_price", "REAL NOT NULL DEFAULT 0"),
-                           ("src_item_id", "INTEGER")))
+                           ("src_item_id", "INTEGER"),
+                           # 5.5.2: سعر الجرام لكل سطر — بعيار السطر نفسه
+                           ("gold_price", "REAL NOT NULL DEFAULT 0")))
     # عدد قطع الطقم (عقد · حلق · خاتم…) — يُكتب في الشراء ويُقترح في البيع
     _add("work_orders", (("pieces", "INTEGER NOT NULL DEFAULT 0"),))
 
@@ -154,10 +156,25 @@ def gold_value(w18, tx):
                  2)
 
 
+def line_tx(li, tx):
+    """تسعير السطر (5.5.2): سعر الجرام يُكتب لكل سطرٍ بعياره — فقيمة ذهبه
+    وزنُه بعيار السطر × سعره. وبلا سعرٍ للسطر يبقى سعر الفاتورة."""
+    if not tx or tx["pricing"] not in RIYAL:
+        return tx
+    gp = float(li.get("gold_price") or 0)
+    if gp <= 0:
+        return tx
+    k = int(li.get("karat") or 0) or int(tx.get("price_karat") or 0) or 18
+    return dict(tx, gold_price=round(gp, 4), price_karat=k)
+
+
 def line_amounts(li, tx, wo_no=""):
     """(الأجور، قيمة الذهب) لسطرٍ مُحلَّل — بطريقة تسعير الفاتورة."""
     from services import gold_math
     w = float(li["weight"] or 0)
+    tx = line_tx(li, tx)
+    if tx["pricing"] in RIYAL and float(tx.get("gold_price") or 0) <= 0:
+        raise ValueError(f"اكتب سعر الجرام للطقم {wo_no}")
     gv = gold_value(w, tx)
     if tx["pricing"] == "piece":
         price = round(float(li.get("piece_price") or 0), 2)
@@ -326,6 +343,7 @@ def returnable(conn, invoice_id):
                     "wages": float(it["wages"] or 0),
                     "piece_price": float(it["piece_price"] or 0),
                     "gold_value": float(it["gold_value"] or 0),
+                    "gold_price": float(it["gold_price"] or 0),
                     "karat": int(it["karat"] or 0)})
     return out
 
@@ -370,7 +388,8 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
                      "wage_override": r["wage"],
                      "piece_price": round(r["piece_price"] * frac, 2),
                      "pieces": r["pieces"] if frac >= 0.999 else 0,
-                     "src_item_id": r["item_id"], "karat": r["karat"]})
+                     "src_item_id": r["item_id"], "karat": r["karat"],
+                     "gold_price": r["gold_price"]})
     if not cart:
         raise ValueError("اختر طقماً واحداً على الأقل للإرجاع")
     od = dict(o)

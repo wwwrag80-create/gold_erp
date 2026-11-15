@@ -10883,6 +10883,17 @@ def main():
               and "الوزن القائم" not in _PI134.COLS and
               [c for c in _SI134.COLS if c in _o134] == _o134
               and [c for c in _PI134.COLS if c in _o134] == _o134)
+        # 5.5.2: لا «مصنعية» (الصافي يغني عنها) · سعر الجرام عمودٌ لكل سطر
+        # قبل الأجر · «إلى حساب» في المشتريات
+        check("5.5.2: بلا عمود «المصنعية» وسعر الجرام قبل الأجر في الشاشتين",
+              all("المصنعية" not in K.COLS and K.COLS.index("سعر الجرام") + 1
+                  == K.COLS.index("الأجر/جم") for K in (_SI134, _PI134)))
+        from models import set_purchases as _sp1345
+        with db(readonly=True) as conn:
+            _dst = {r["code"] for r in _sp1345.dest_accounts(conn)}
+        check("5.5.2: «إلى حساب» فيها الذهب المشغول بلا الكسر والإيطالي",
+              "1200" in _dst and not {"1210", "1310", "1100"} & _dst,
+              " · ".join(sorted(_dst)))
     except ImportError:
         print("  … تُخطّى فحوص الواجهة (PyQt5 غير متاح)")
 

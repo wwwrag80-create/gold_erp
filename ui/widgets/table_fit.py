@@ -27,6 +27,7 @@ class ColumnFitter(QtCore.QObject):
         self._busy = False
         self._last_w = -1
         self._last_n = -1
+        self._last_shown = None
         # مؤقّت تهدئة: تغييرات الحجم المتتالية تُجمَّع في نداء واحد.
         # بدونه يُطلق كل `setColumnWidth` حدثَ تغيير حجم جديداً فتنشأ
         # سلسلة لا تنتهي تُجمّد الواجهة عند إظهار/إخفاء الشريط الجانبي.
@@ -50,11 +51,13 @@ class ColumnFitter(QtCore.QObject):
     def set_weights(self, weights):
         self.weights = list(weights)
         self._last_w = self._last_n = -1
+        self._last_shown = None
         self.apply()
 
     def refit(self):
         """يُجبر إعادة الحساب — بعد تعبئة بيانات جديدة."""
         self._last_w = self._last_n = -1
+        self._last_shown = None
         self.apply()
 
     def eventFilter(self, obj, ev):
@@ -111,15 +114,19 @@ class ColumnFitter(QtCore.QObject):
             # الحساب ↔ اليومية · تقرير يغيّر بعده) كانت تحتفظ بعروض
             # الأعمدة القديمة، فيبقى الجدول أضيق من إطاره ويظهر فراغ
             # أبيض في طرفه لا يملؤه شيء.
-            if avail == self._last_w and n == self._last_n:
-                return
-            self._last_w, self._last_n = avail, n
             # **العمود المخفيّ لا يأخذ حصّة**: كان يُحجز له الحدّ الأدنى
             # ويُحسب في المجموع، فيضيق آخرُ عمودٍ ظاهر بقدره ويبقى في
-            # طرف الجدول فراغٌ أبيض لا يملؤه شيء.
+            # طرف الجدول فراغٌ أبيض لا يملؤه شيء. (5.5.2) والأعمدة
+            # الظاهرة شرطٌ كالعرض: شاشةٌ تُظهر عموداً وتخفي آخر (طريقة
+            # التسعير) كانت تُبقي العروض القديمة فيضيق الجدول عن إطاره.
             shown = [i for i in range(n) if not t.isColumnHidden(i)]
             if not shown:
                 return
+            if (avail == self._last_w and n == self._last_n
+                    and tuple(shown) == self._last_shown):
+                return
+            self._last_w, self._last_n = avail, n
+            self._last_shown = tuple(shown)
             total = float(sum(w[i] for i in shown)) or 1.0
             share = {i: max(self.min_px, avail * w[i] / total)
                      for i in shown}
