@@ -84,14 +84,18 @@ def main():
     # وتُغلق البطاقة حين يكتمل المشهد الداكن (`revealed`) — فلا يُرى
     # سطحُ المكتب ولا شعارٌ ينبثق ثم يختفي. والمؤقّت حارسٌ إن لم تصل
     # الإشارة (بيئةٌ بلا عرض): لا تبقى البطاقة فوق البوابة بحال.
-    gate.revealed.connect(_close_splash)
+    # 5.4: بطاقة البدء تبقى حتى يبدأ العرض (`curtain`) — التجهيز يجري تحتها
+    # والستارة ساكنة، ثم تُرفع البطاقة والمشهد يخرج من العتمة. والمؤقّت
+    # حارسٌ إن طال التجهيز أو لم تصل الإشارة: لا تبقى البطاقة بحال.
+    gate.curtain.connect(_close_splash)
     gate.revealed.connect(lambda: crash_guard.trace("ظهرت البوابة"))
-    QtCore.QTimer.singleShot(3000, _close_splash)
+    gate.curtain.connect(lambda: crash_guard.trace("بدأ العرض"))
+    QtCore.QTimer.singleShot(9000, _close_splash)
     gate.showFullScreen()
     app.processEvents()
     crash_guard.trace("عُرضت البوابة")
     gate.prepare([(lbl, crash_guard.traced(lbl, fn))
-                  for lbl, fn in prepare_steps()])
+                  for lbl, fn in prepare_steps() + _ui_steps()])
     # البوابة ظهرت والقاعدة جُهّزت بالكود المحدَّث: الإقلاع سليم
     try:
         import code_overlay
@@ -103,6 +107,10 @@ def main():
     single_instance.set_target(lambda: holder.get("win") or gate)
     crash_guard.trace("حلقة الأحداث")
     sys.exit(app.exec_())
+
+
+# 5.4: اتّضاح النظام فوق مشهد البوابة الساكن — هادئٌ لا خاطف
+REVEAL_MS = 700
 
 
 def fade_ok():
@@ -123,9 +131,13 @@ def wire_gate(app, gate, main_window_factory=None):
     """
     from PyQt5 import QtCore
 
-    if main_window_factory is None:
+    # 5.4: الشاشات تُحمَّل في خطوات التجهيز على الستارة الساكنة (`main`) —
+    # لا هنا: استيرادها كان يحبس خيط الواجهة لحظةَ بدء الحركة فتتقطّع
+    def _factory(session):
+        if main_window_factory is not None:
+            return main_window_factory(session)
         from ui.main_window import MainWindow
-        main_window_factory = MainWindow
+        return MainWindow(session)
 
     # ══ مشهدٌ متّصل: البوابة لا تختفي حتى يصير النظام على الشاشة ══
     #
@@ -161,25 +173,24 @@ def wire_gate(app, gate, main_window_factory=None):
             except Exception:
                 pass
             return
+        # ══ 5.4: النظام يتّضح **فوق** مشهدٍ ساكن — والبوابة لا تُمسّ ══
+        # كانت البوابة تبهت هي أيضاً والنظام يظهر: نافذتان شفّافتان معاً
+        # وبينهما سطحُ المكتب لحظة، والمشهد الحيّ لا يأتمن شفافية النافذة.
+        # الآن البوابة ثابتةٌ بمشهدها الهادئ، والنظام وحده يتّضح فوقها
+        # تدريجاً، ثم تُغلق من تحته وقد غطّاها — فلا فراغ ولا سواد.
         up = QtCore.QPropertyAnimation(win, b"windowOpacity", win)
         up.setStartValue(0.0)
         up.setEndValue(1.0)
-        up.setDuration(380)        # 4.97: تمازجٌ أقصر وأسلس
-        up.setEasingCurve(QtCore.QEasingCurve.OutCubic)
-        down = QtCore.QPropertyAnimation(gate, b"windowOpacity", gate)
-        down.setStartValue(1.0)
-        down.setEndValue(0.0)
-        down.setDuration(300)
-        down.setEasingCurve(QtCore.QEasingCurve.InCubic)
-        down.finished.connect(_close_gate)
+        up.setDuration(REVEAL_MS)
+        up.setEasingCurve(QtCore.QEasingCurve.InOutSine)
+        up.finished.connect(lambda: QtCore.QTimer.singleShot(60, _close_gate))
         # احتياط: إن لم تكتمل حركة الشفافية (بطاقة عرضٍ لا تدعمها) تُغلق
-        # البوابة بعد ثانيتين على أي حال — لا نافذةٌ سوداء تبقى خلف النظام
-        QtCore.QTimer.singleShot(2000, _close_gate)
-        up.start()
-        down.start()
-        win._boot_anim = (up, down)    # مرجعٌ يمنعهما من الجمع مبكراً
+        # البوابة على أي حال — لا نافذةٌ سوداء تبقى خلف النظام
+        QtCore.QTimer.singleShot(REVEAL_MS + 1600, _close_gate)
+        win._boot_anim = (up,)         # مرجعٌ يمنعها من الجمع مبكراً
         win.raise_()
         win.activateWindow()
+        up.start()
         try:
             win.play_entrance()
         except Exception:
@@ -196,7 +207,7 @@ def wire_gate(app, gate, main_window_factory=None):
         from services import crash_guard
         crash_guard.trace("بناء النافذة الرئيسية")
         try:
-            win = main_window_factory(session)
+            win = _factory(session)
         except Exception as e:                   # noqa: BLE001
             # فشلُ البناء يُقال على البوابة — ويعود مشهدها كما كان
             crash_guard.trace(f"تعذّر بناء النافذة: {e}")
@@ -209,18 +220,10 @@ def wire_gate(app, gate, main_window_factory=None):
             return
         crash_guard.trace("بُنيت النافذة الرئيسية")
         holder["win"] = win
-        # تُعرض مخفيّةَ الشفافية خلف البوابة، ثم تتمازجان
+        # تُعرض شفّافةً تماماً **فوق** البوابة (5.4) — فيُرى المشهد الساكن
+        # من خلالها، ثم تتّضح هي وحدها (`_reveal`)
         win.setWindowOpacity(0.0 if fade_ok() else 1.0)
         win.showMaximized()
-        # ويندوز يمنح النافذة الجديدة الواجهة فور عرضها، فتنزل
-        # البوابة خلفها — والبوابة هي التي تُغطّي المشهد الآن
-        # (النظام شفافٌ تماماً بعد). رفعُها يُبقي الشاشة مشغولة
-        # حتى يبدأ التمازج، فلا يظهر سطح المكتب لحظةً واحدة.
-        try:
-            gate.raise_()
-            gate.activateWindow()
-        except Exception:
-            pass
         # ══ حارس التجمّد ══
         # يرصد توقّف خيط الواجهة عن معالجة أحداثه — وهو ما يراه
         # المستخدم «شاشة سوداء ولا يستجيب» — ويكتب في السجل موضعه
@@ -236,12 +239,13 @@ def wire_gate(app, gate, main_window_factory=None):
                 9000))
         except Exception:
             pass
-        # إطارٌ واحد يُرسم فيه النظام خلف البوابة قبل التمازج
-        QtCore.QTimer.singleShot(30, lambda: _reveal(win))
+        # إطارٌ يُرسم فيه النظام كاملاً (وهو شفّاف) قبل أن يبدأ اتّضاحه —
+        # فلا يُرسم أول مرةٍ في منتصف الحركة فتتعثّر
+        QtCore.QTimer.singleShot(60, lambda: _reveal(win))
 
     def _on_signed_in(session):
-        # الموجة الذهبية تنطلق فوراً من لحظة النجاح، والنظام يُبنى في
-        # نهايتها — والبوابة ظاهرةٌ طوال ذلك
+        # 5.4: التحيّة والسكون يبدآن فوراً من لحظة النجاح، والنظام يُبنى حين
+        # يسكن المشهد — والبوابة ظاهرةٌ طوال ذلك
         gate.hand_off(lambda: QtCore.QTimer.singleShot(
             16, lambda: _build_system(session)))
 
@@ -250,6 +254,20 @@ def wire_gate(app, gate, main_window_factory=None):
     gate.rejected.connect(
         lambda: (None if holder.get("win") else app.quit()))
     return holder
+
+
+def _ui_steps():
+    """5.4: تحميل الشاشات خطوةً على الستارة الساكنة — لا لحظةَ يتحرّك المشهد.
+
+    كان استيرادها يجري في `wire_gate` بعد ظهور البوابة مباشرةً، فيحبس خيط
+    الواجهة ثانيةً أو أكثر على ويندوز في أول لحظات الحركة.
+    """
+    def _warm():
+        try:
+            import ui.main_window  # noqa: F401
+        except Exception:
+            pass                       # يُستورد عند البناء ويُقال عطله هناك
+    return [("جارٍ تحميل الشاشات…", _warm)]
 
 
 def prepare_steps():

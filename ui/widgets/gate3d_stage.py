@@ -196,6 +196,7 @@ class Gate3DStage(QtWidgets.QWidget):
         # خصائص المسرح — تضبطها البوابة كما مع المقطع
         self.intro = 0.0
         self.exit = 0.0
+        self.settle = 0.0
         self.ripple = -1.0
         self.focus_y = 0.5
         self.logo_center = None
@@ -208,7 +209,9 @@ class Gate3DStage(QtWidgets.QWidget):
         self._built = False
         self._dead = False
         self._want_start = False
+        self._want_warm = False     # 5.4: يُرسم في عتمته قبل أن تبدأ حركته
         self._sent_exit = -1.0
+        self._sent_settle = -1.0
         self._logo = None
 
         self.view = _web.QWebEngineView(self)
@@ -262,7 +265,7 @@ class Gate3DStage(QtWidgets.QWidget):
             self.view.show()            # الصفحة سوداء — والمشهد يبدأ من العتمة
             if self._logo is not None:
                 self._js("gate3d.setLogoRect(%f,%f,%f,%f)" % self._logo)
-            if self._want_start:
+            if self._want_start or self._want_warm:
                 self._kick()
         elif kind == "ready":
             self._ready_timer.stop()
@@ -270,8 +273,7 @@ class Gate3DStage(QtWidgets.QWidget):
                 self.is_ready = True
                 _trace("جاهز " + msg[6:80])
                 self.ready.emit()
-                if not forced():
-                    QtCore.QTimer.singleShot(WATCH_DELAY_MS, self._watch_start)
+                self._arm_watch()
         elif kind == "nogl":            # كرتٌ لا يرسم WebGL2 أو يرسم بالمعالج
             self._fail(msg, remember=True)
         elif kind == "fail":
@@ -282,6 +284,15 @@ class Gate3DStage(QtWidgets.QWidget):
             _trace(msg)
 
     # ─────────────────────────────── حارس السلاسة
+    def _arm_watch(self):
+        """القياس يبدأ بعد أن تبدأ الحركة فعلاً (5.4) — لا أثناء الإحماء
+        والبرنامجُ يجهّز قاعدته: تأخّرُ تلك اللحظات من التجهيز لا من العرض."""
+        if forced() or not (self.is_ready and self._want_start) \
+                or getattr(self, "_watch_armed", False):
+            return
+        self._watch_armed = True
+        QtCore.QTimer.singleShot(WATCH_DELAY_MS, self._watch_start)
+
     def _watch_start(self):
         if self._dead or not self.isVisible():
             return
@@ -334,21 +345,32 @@ class Gate3DStage(QtWidgets.QWidget):
 
     # ─────────────────────────────── واجهة المسرح
     def _kick(self):
-        """أول تشغيل: المشهد يخرج من العتمة — ويُنتظر أول إطارٍ منه."""
-        if getattr(self, "_kicked", False):
-            return
-        self._kicked = True
-        self._ready_timer.start(READY_MS)
-        self._js("gate3d.start()")
+        """أول تشغيل: المشهد يُرسم — ويُنتظر أول إطارٍ منه.
+
+        5.4: إن طُلب الإحماء وحده (`hold`) يُرسم في عتمته بلا حركة: تُبنى
+        مظلّلاته ويُعلَن جاهزاً، وتبدأ الحركة مع `start` حين يفرغ البرنامج
+        من تجهيز قاعدته — فلا تقطعها خطوات التجهيز."""
+        if not getattr(self, "_kicked", False):
+            self._kicked = True
+            self._ready_timer.start(READY_MS)
+        self._js("gate3d.start()" if self._want_start else "gate3d.warm()")
+
+    def hold(self):
+        """المشهد في عتمته ساكناً حتى يُطلب العرض (5.4)."""
+        self._want_warm = True
+        if self._built:
+            self._kick()
 
     def start(self):
+        first = not self._want_start
         self._want_start = True
         if not self._built:
             return                      # يبدأ حين يُبنى
-        if getattr(self, "_kicked", False):
+        if getattr(self, "_kicked", False) and not first:
             self._js("gate3d.resume()")
         else:
             self._kick()
+        self._arm_watch()
 
     def stop(self):
         self._js("gate3d.pause()")
@@ -359,6 +381,14 @@ class Gate3DStage(QtWidgets.QWidget):
         if abs(v - self._sent_exit) >= 0.01 or v in (0.0, 1.0):
             self._sent_exit = v
             self._js("gate3d.setExit(%f)" % v)
+
+    def set_settle(self, v):
+        """هدوء المشهد قبل الدخول (5.4): 0 حيٌّ · 1 ساكنٌ تماماً."""
+        v = max(0.0, min(1.0, float(v)))
+        self.settle = v
+        if abs(v - self._sent_settle) >= 0.01 or v in (0.0, 1.0):
+            self._sent_settle = v
+            self._js("gate3d.setSettle(%f)" % v)
 
     def set_logo_rect(self, rect):
         """الشعار المجسّم في هذا المستطيل (إحداثيات المسرح) — أو None لإخفائه."""

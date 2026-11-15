@@ -304,8 +304,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.quick.lineEdit().returnPressed.connect(self._quick_open)
         except Exception:
             pass
-        # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة
-        QtCore.QTimer.singleShot(400, self._load_quick_index)
+        # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة — وبعد اتّضاح
+        # النظام فوق البوابة (5.4: 0.7 ث) لا في أثنائه فيتعثّر
+        QtCore.QTimer.singleShot(1400, self._load_quick_index)
         # 4.52: رابط دليل الموديلات للمدير — إن كان مفعّلاً يعود مع البرنامج
         # (في خيطٍ خلفي: أوامر Tailscale قد تستغرق ثواني)
         QtCore.QTimer.singleShot(3000, self._start_models_link)
@@ -1037,6 +1038,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_nav_icons(self):
         """أيقونةٌ لكل بندٍ في القائمة بلون الهوية — وتُعاد مع تبديل المظهر."""
+        # 5.4: وضعُ الأيقونة «تغييرٌ» في البند يحفظ ملف الترتيب — فكان يُكتب
+        # على القرص مرةً لكل بند (أكثر من خمسين) مع كل دخول. الأيقونة ليست
+        # ترتيباً: يُعلَّق الحفظ أثناءها
+        was = getattr(self, "_nav_loading", False)
+        self._nav_loading = True
         try:
             from ui.widgets import nav_icons
             nav_icons.clear()
@@ -1045,6 +1051,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 it.setIcon(0, nav_icons.icon_for(it.data(0, NAV_KEY_ROLE)))
         except Exception:
             pass
+        finally:
+            self._nav_loading = was
 
     def _toggle_nav(self, on):
         """«☰»: القائمة الجانبية داخل الشاشة — وتُطوى مع فتح أي شاشة."""

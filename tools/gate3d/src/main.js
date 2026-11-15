@@ -14,8 +14,8 @@
 //   يظهر من العتمة ويستدير ثم تعبره لمعة.
 // · الكاميرا تقترب ببطءٍ ثم تدور حول السبائك ذهاباً وإياباً (GSAP).
 //
-// الصلة بالبرنامج (`window.gate3d`): start · setLogoRect · setExit · pause ·
-// resume — والإبلاغ برسائل وحدة التحكّم «GATE3D:…».
+// الصلة بالبرنامج (`window.gate3d`): warm · start · setLogoRect · setExit ·
+// setSettle · pause · resume — والإبلاغ برسائل وحدة التحكّم «GATE3D:…».
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -397,6 +397,8 @@ let W = 1, H = 1;
 let composer, bloom, grade, floor, dustFar, dustNear, beamMesh, logoGroup, logoParts = [];
 let key, rim, fill;
 let running = false, last = 0, clock = 0, exitK = 0, intro = null;
+// 5.4: الهدوء قبل الدخول — الزمن يتباطأ حتى يسكن (1 = حيّ، 0 = ساكن)
+let tscale = 1, played = false;
 const perf = { frames: 0, acc: 0, tier: 2, checked: false };
 
 function placeCamera() {
@@ -618,7 +620,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = last ? Math.min(0.1, (now - last) / 1000) : 0.016;
   last = now;
-  clock += dt;
+  clock += dt * tscale;
   apply(clock);
   composer.render(dt);
   if (!perf.checked) tune(dt);
@@ -647,15 +649,28 @@ function tune(dt) {
 
 // ══════════════════════════════ الصلة بالبرنامج
 window.gate3d = {
-  start() {
+  // 5.4: الإحماء — يُرسم المشهد في عتمته (الضوء صفر) فتُبنى المظلّلات ويُعلَن
+  // «ready»، والحركة لم تبدأ بعد: تبدأ مع `start` حين يفرغ البرنامج من تجهيزه
+  warm() {
+    if (!intro) { intro = timeline(); intro.eventCallback('onComplete', idle); }
     if (running) return;
     running = true;
     last = 0;
-    if (!intro) { intro = timeline(); intro.eventCallback('onComplete', idle); intro.play(); }
     requestAnimationFrame(frame);
+  },
+  start() {
+    this.warm();
+    if (!played) { played = true; intro.play(); }
   },
   pause() { running = false; gsap.globalTimeline.pause(); },
   resume() { if (!running) { gsap.globalTimeline.resume(); this.start(); } },
+  // 5.4: لحظة الدخول — الكاميرا والغبار والضوء تتباطأ حتى تسكن (v = 1)،
+  // فيُبنى النظام فوق مشهدٍ ساكنٍ بطبعه لا متجمّد
+  setSettle(v) {
+    const k = Math.max(0, Math.min(1, Number(v) || 0));
+    tscale = 1 - k;
+    gsap.globalTimeline.timeScale(Math.max(0.001, tscale));
+  },
   setLogoRect(cx, cy, w, h) {
     Object.assign(logoRect, { cx, cy, w, h, on: true });
     placeLogo();

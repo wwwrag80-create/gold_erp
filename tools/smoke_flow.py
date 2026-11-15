@@ -3935,13 +3935,16 @@ def main():
     # 4.97: المشهد يُبنى كاملاً قبل أول إطار والنافذة شفّافةٌ حتى تظهر
     # مرةً واحدة — فلا يومض شيءٌ ولا تتابعَ يتقطّع
     _show9 = _insp9.getsource(_gw9.GateWindow.showEvent)
+    # 5.4: الحركة لا تبدأ مع أول إطار بل بعد التجهيز (`_begin_show`)
+    _beg9 = _insp9.getsource(_gw9.GateWindow._begin_show)
     check("البوابة تظهر من الشفافية مرةً واحدة بمشهدها كاملاً فلا تومض",
           "self.card = None" in _init9
           and "self.hero.hide()" in _init9
           and "setWindowOpacity(0.0)" in _init9
           and "QDialog#gateWindow { background:" in _gw9.GATE_QSS
           and "self._ensure_card()" in _show9 and "_fade_in" in _show9
-          and "_intro.start" in _show9 and _gw9.FADE_IN <= 500,
+          and "_fade_in" in _beg9 and "_intro.start" in _beg9
+          and _gw9.FADE_IN <= 500,
           f"الظهور {_gw9.FADE_IN}مث")
 
     step("43) تعديل تاريخ العملية ينقلها وقيدَها معاً")
@@ -8592,7 +8595,7 @@ def main():
               "make_stage(self)" in _src100
               and "return CinemaStage(parent)" in _ms100
               and ("_set_opacity" not in _ac100
-                   or "if self._3d" in _ac100)
+                   or "self._3d" in _ac100)
               and _gw100.BLOCK_X > 0.6
               and _cs100.CinemaStage.uses_overlay is False
               and "GlassCard" not in _in100.getsource(
@@ -10712,6 +10715,64 @@ def main():
         from services import maintenance as _mt132
         check("ودمج WAL لا يمنع الحفظ (بلا انتظار)",
               _mt132.checkpoint(truncate=True) is not None)
+    except ImportError:
+        print("  … تُخطّى (PyQt5 غير متاح)")
+
+    step("133) 5.4: إقلاعٌ هادئ ودخولٌ مريح · ما في لوحة السند يُسأل عنه")
+    try:
+        import inspect as _in133
+        import main as _main133
+        from ui import gate_window as _gw133
+        from ui.widgets import cinema_stage as _cs133
+        from ui.widgets import gate3d_stage as _g3133
+        _G = _gw133.GateWindow
+        _show133 = _in133.getsource(_G.showEvent)
+        check("الإقلاع: ستارةٌ ساكنة والتجهيز يجري — لا حركة تقطعها الخطوات",
+              '"boot"' in _show133 and "self.stage.hold()" in _show133
+              and "self._start_prepare()" in _show133
+              and "self.card.hide()" in _show133
+              and "_intro.start" not in _show133.split("if not animations_on")[0])
+        _fin133 = _in133.getsource(_G._finish_prepare)
+        _may133 = _in133.getsource(_G._maybe_begin_show)
+        check("والعرض يبدأ حين يفرغ التجهيز — والمشهد الحيّ يُنتظر قليلاً لا أكثر",
+              "_maybe_begin_show" in _fin133 and "BOOT_GRACE" in _may133
+              and 0 < _gw133.BOOT_GRACE <= 2000)
+        check("والشاشات تُحمَّل خطوةً على الستارة لا بعد ظهور الحركة",
+              any("الشاشات" in l for l, _f in _main133._ui_steps())
+              and "from ui.main_window import MainWindow\n        main_"
+              not in _in133.getsource(_main133.wire_gate))
+        check("والمشهد الحيّ يُحمّى في عتمته ثم يبدأ (warm ثم start)",
+              hasattr(_g3133.Gate3DStage, "hold")
+              and hasattr(_g3133.Gate3DStage, "set_settle")
+              and "gate3d.warm()" in _in133.getsource(_g3133.Gate3DStage._kick)
+              and "setSettle" in (pathlib.Path(ROOT) / "assets" / "gate3d"
+                                  / "gate3d.js").read_text(encoding="utf-8")
+              and hasattr(_cs133.CinemaStage, "hold"))
+        _ho133 = _in133.getsource(_G.hand_off)
+        _lv133 = _in133.getsource(_G._on_leave)
+        _ex133 = _in133.getsource(_G._exit_done)
+        check("الدخول: التحيّة مكان الحقول والمشهد يسكن — لا عتمةَ ولا إطفاء",
+              "_place_farewell" in _ho133 and "set_settle" in _lv133
+              and "SETTLE_DIM" in _lv133 and _gw133.SETTLE_DIM <= 0.35
+              and "dispose" not in _ex133)
+        _rv133 = _in133.getsource(_main133.wire_gate)
+        _rv133 = _rv133[_rv133.index("def _reveal"):_rv133.index("def _build_system")]
+        check("والنظام يتّضح فوق البوابة الثابتة ثم تُغلق من تحته",
+              'QPropertyAnimation(gate' not in _rv133
+              and "up.finished.connect" in _rv133 and "_close_gate" in _rv133)
+        check("وأيقونات القائمة لا تحفظ ملف الترتيب مرةً لكل بند",
+              "_nav_loading = True" in _in133.getsource(
+                  __import__("ui.main_window", fromlist=["x"])
+                  .MainWindow._apply_nav_icons))
+        from ui import vouchers_screen as _vs133
+        _sv133 = _in133.getsource(_vs133.VouchersScreen.save)
+        _ask133 = _in133.getsource(_vs133.VouchersScreen._ask_pending)
+        check("سند القبض/الصرف: ما في لوحتي الذهب والنقد ولم يُضف يُسأل عنه"
+              " (أضِفه · رحّل بدونه · إلغاء) — لا يُرحَّل ولا يُهمل بصمت",
+              "_pending_panel" in _sv133 and "_ask_pending" in _sv133
+              and '"add"' in _ask133 and '"skip"' in _ask133
+              and 'default="cancel"' in _ask133
+              and "rows.append" not in _sv133)
     except ImportError:
         print("  … تُخطّى (PyQt5 غير متاح)")
 

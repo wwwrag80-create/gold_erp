@@ -542,12 +542,28 @@ class CinemaStage(QtWidgets.QWidget):
         self._movie = None
 
     # ─────────────────────────────── التشغيل
+    def hold(self):
+        """ستارةٌ مسدلة حتى يُطلب العرض (5.4): المشهد في عتمته ساكناً.
+
+        البوابة تجهّز قاعدة البيانات أولاً وهي ساكنة، ثم يبدأ العرض كاملاً
+        بلا خطوةٍ تقطعه — فلا يُرى المقطع قبل ذلك ولا تبدأ حلقته."""
+        if self._animate and not getattr(self, "_revealed", False):
+            self.reveal, self.settle = 0.0, 1.0
+            self._held = True
+            self.update()
+
+    def set_settle(self, v):
+        """لا زمنَ يُبطَّأ في مقطعٍ مسجَّل — يُوقف على إطاره عند تمامه."""
+        if float(v) >= 1.0:
+            self.stop()
+
     def start(self):
         """يبدأ المشهد: ظهورٌ من العتمة واستقرارٌ للكاميرا ثم الحلقة."""
         if self._movie is not None \
                 and self._movie.state() != QtGui.QMovie.Running:
-            self._movie.start()
-        if self._animate and self.reveal >= 1.0 and self.intro <= 0.0 \
+            self._movie.start()            # والمتوقّف يُستأنف من إطاره
+        if self._animate and self.intro <= 0.0 \
+                and (self.reveal >= 1.0 or getattr(self, "_held", False)) \
                 and not getattr(self, "_revealed", False):
             self._revealed = True
             self.reveal, self.settle = 0.0, 1.0

@@ -74,6 +74,23 @@ LOGO_W_3D = 236             # الشعار المجسّم أكبر قليلاً 
 FADE_IN = 450               # ظهور البوابة نفسها من الشفافية
 SLIDE = 26                  # مسافة الانزلاق بالبكسل
 
+# ══ 5.4: إقلاعٌ هادئ ودخولٌ مريح ══
+# **الإقلاع**: كانت الحركة كلها تبدأ مع أول إطار — المشهد يخرج من العتمة
+# والشعار والترحيب والحقول تنزلق — بينما تُجهَّز القاعدة وتُحمَّل الشاشات
+# على الخيط نفسه، فتتقطّع الحركة وتقفز. الآن: ستارةٌ ساكنة ما دام التجهيز
+# جارياً (لا شيء يتحرّك فيُرى تقطّعه)، ثم العرض كاملاً بتتابعه والخيط فارغ.
+# **الدخول**: كان المشهد يعتم حتى السواد ويُطفأ، ثم يُبنى النظام، ثم يظهر —
+# «يخرج كاملاً ثم يدخل». الآن: الحقول تفسح للتحيّة في مكانها، والمشهد يهدأ
+# حتى يسكن بإضاءةٍ أخفض قليلاً (لا سواد)، فيُبنى النظام فوق مشهدٍ ساكنٍ
+# بطبعه، ثم يتّضح النظام فوقه تدريجاً وتُغلق البوابة من تحته.
+BOOT_GRACE = 1600           # أقصى انتظارٍ للمشهد الحيّ بعد التجهيز
+BOOT_SLOW = 1500            # إقلاعٌ طال: تظهر الستارة وسطر التجهيز (المقطع)
+HERO_AT_3D = 700            # الترحيب بعد بدء المشهد الحيّ (المجسّم يستدير)
+HERO_AT = 380               # ومع المقطع حين تكون النافذة ظاهرةً أصلاً
+CARD_AFTER = 480            # والحقول بعد الترحيب
+LEAVE_MS = 1000             # الدخول: التحيّة مكان الحقول والمشهد يسكن
+SETTLE_DIM = 0.24           # إضاءةٌ أخفض قليلاً عند السكون — لا عتمة
+
 GATE_QSS = """
 /* أولُ إطارٍ يُرسم قبل أن يبدأ المسرح: لو بقي على لون النظام
    الفاتح لرأى المستخدم ومضةً بيضاء قبل الليل. فيُصبغ هنا بلون
@@ -88,6 +105,8 @@ QLabel#gateGem { color: #E6CF98; font-size: 13px; }
 QWidget#gateHero { background: transparent; }
 QLabel#gateWelcome { color: #F6E7B6; font-size: 30px; font-weight: bold; }
 QLabel#gateFarewell { color: #F6E7B6; font-size: 38px; font-weight: bold; }
+QLabel#gateFarewellSub { color: #CDBB8A; font-size: 15px; }
+QLabel#gateBoot    { color: #A2916A; font-size: 13px; }
 QLabel#gateHello   { color: #C9A227; font-size: 15px; font-weight: bold; }
 QLabel#gateAsk     { color: #E8D9A8; font-size: 16px; }
 QLabel#gateNote    { color: #A2916A; font-size: 12px; }
@@ -369,6 +388,9 @@ class GateWindow(QtWidgets.QDialog):
     # يُطلق حين يكتمل ظهور البوابة من الشفافية: شاشة بدء الـexe تُغلق
     # عندها — فوق مشهدٍ داكنٍ مكتمل لا فوق سطح المكتب.
     revealed = QtCore.pyqtSignal()
+    # 5.4: يُطلق حين يبدأ العرض بعد التجهيز — شاشة بدء الـexe تبقى حتى
+    # هذه اللحظة (بطاقة التحميل)، فلا يُرى سوادٌ بينها وبين المشهد
+    curtain = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -423,7 +445,7 @@ class GateWindow(QtWidgets.QDialog):
         self.hero.setFixedWidth(HERO_W)
         self._build_hero()
         self.hero.hide()
-        self.card = None            # تُبنى في `_begin_card`
+        self.card = None            # تُبنى في `showEvent` قبل أول إطار
         # تحيّةُ الوداع: تظهر وحدها في وسط المشهد الهادئ بعد الموجة،
         # بينما يُبنى النظام خلفها
         self.farewell = QtWidgets.QLabel(self)
@@ -434,6 +456,20 @@ class GateWindow(QtWidgets.QDialog):
         _ff.setBold(True)
         self.farewell.setFont(_ff)
         self.farewell.hide()
+        # 5.4: وتحتها سطرٌ هادئ يقول ما يجري — والنظام يُبنى خلفها
+        self.farewell_sub = QtWidgets.QLabel("جارٍ تجهيز النظام…", self)
+        self.farewell_sub.setObjectName("gateFarewellSub")
+        self.farewell_sub.setAlignment(QtCore.Qt.AlignCenter)
+        self.farewell_sub.hide()
+        # 5.4: سطر التجهيز على الستارة الساكنة قبل العرض (أسفل الشاشة)
+        self.boot = QtWidgets.QLabel("", self)
+        self.boot.setObjectName("gateBoot")
+        self.boot.setAlignment(QtCore.Qt.AlignCenter)
+        self.boot.hide()
+        # مراحل المشهد: new ← boot (التجهيز والستارة ساكنة) ← show (العرض)
+        # ← leave (الدخول: التحيّة والسكون) ← done (سُلّم النظام)
+        self._phase = "new"
+        self._steps_given = False
         self._worker = None
 
         # ومقاس الشاشة يُؤخذ قبل العرض: نافذةٌ تُرسم بمقاسٍ صغير ثم
@@ -463,7 +499,7 @@ class GateWindow(QtWidgets.QDialog):
         self._intro.valueChanged.connect(self._on_intro)
         # المؤثّرات تُرفع عند اكتمال الظهور: مؤثّرُ شفافيةٍ باقٍ على
         # حقلٍ نشط يعيد رسمَه في كل نبضة مؤشّر بلا داعٍ.
-        self._intro.finished.connect(self._layout_scene)
+        self._intro.finished.connect(self._intro_done)
 
         # الموجة: حلقاتٌ تتّسع من موضع البطاقة لحظةَ ظهورها
         self._ripple = QtCore.QVariantAnimation(self)
@@ -484,12 +520,14 @@ class GateWindow(QtWidgets.QDialog):
         self._card_in.valueChanged.connect(self._apply_card)
         self._card_in.finished.connect(self._card_done)
 
+        # 5.4: الدخول — التحيّة مكان الحقول، والمشهد يهدأ حتى يسكن. خطّيٌّ
+        # هنا: لكل عنصرٍ منحناه في `_on_leave`
         self._exit = QtCore.QVariantAnimation(self)
         self._exit.setStartValue(0.0)
         self._exit.setEndValue(1.0)
-        self._exit.setDuration(560)
-        self._exit.setEasingCurve(QtCore.QEasingCurve.InCubic)
-        self._exit.valueChanged.connect(self._on_exit)
+        self._exit.setDuration(LEAVE_MS)
+        self._exit.setEasingCurve(QtCore.QEasingCurve.Linear)
+        self._exit.valueChanged.connect(self._on_leave)
         self._exit.finished.connect(self._exit_done)
 
     # ─────────────────────────────── البناء
@@ -678,32 +716,35 @@ class GateWindow(QtWidgets.QDialog):
 
     # ─────────────────────────────── العرض والحركة
     def showEvent(self, e):
-        """المشهد على ثلاث مراحل — ولوحةُ الدخول آخرُها.
+        """المشهد على مرحلتين (5.4): ستارةٌ ساكنة ثم عرضٌ كامل.
 
-        **ما كان يُشكى منه**: أول ما يُنقر البرنامج تُلمح لوحة
-        البيانات ثم تختفي ثم تعود. والسبب أن اللوحة كانت **موجودة**
-        منذ بناء النافذة، وويندوز يرسم أول إطارٍ قبل أن يصل أمرُ
-        الإخفاء.
+        **ما كان يُشكى منه** (5.3): الحركة كلها تبدأ مع أول إطار — المشهد
+        يخرج من العتمة والترحيب والحقول تنزلق — وخطوات تجهيز القاعدة
+        وتحميل الشاشات تجري على الخيط نفسه بينها، فتتقطّع الحركة وتقفز.
+        وقبلها (4.x): اللوحة كانت تُلمح ثم تختفي — فلا تُرسم أبداً قبل وقتها.
 
         **المشهد الآن**:
-          ١) مسرحٌ داكن وحده — لا شيء غيره.
-          ٢) «مرحباً بك في نظام إدارة مصانع الذهب» يظهر متدرّجاً.
-          ٣) بعد أن تُقرأ الجملة: تُبنى لوحة الدخول لأول مرة وتصعد
-             مع موجةٍ، والترحيبُ يرتفع قليلاً ليُفسح لها.
+          ١) **الستارة**: المسرح في عتمته ساكناً (المشهد الحيّ يُرسم فيها
+             بلا حركة فتُبنى مظلّلاته)، والتجهيز يجري خطوةً خطوة. لا شيء
+             يتحرّك فلا يُرى تقطّع — وبطاقة بدء الـexe فوقها حتى تنتهي.
+          ٢) **العرض** (`_begin_show`) حين يفرغ الخيط: المشهد يخرج من العتمة،
+             فالشعار، فالترحيب، فالحقول — كلٌّ بعد سابقه، والزرّ جاهز.
         """
         super().showEvent(e)
         self.stage.setGeometry(self.rect())
         self._build_overlay()
-        # المشهد كاملاً قبل أول إطار (فلا يومض شيء) — ثم الحركة: النافذة
-        # تظهر من الشفافية، والمقطع يخرج من العتمة، والترحيب ثم الحقول
-        # ينزلقان إلى مكانهما
-        self.hero.show()
-        self._ensure_card()
-        self.card.show()
-        self._card_shown = True
-        self._apply_hero(1.0)
-        self._clear_effects()
+        if self._phase != "new":
+            # ظهورٌ ثانٍ (استعادةٌ بعد تصغير): المشهد في مرحلته كما هو
+            self._layout_scene()
+            return
         if not animations_on():
+            self._phase = "show"
+            self.hero.show()
+            self._ensure_card()
+            self.card.show()
+            self._card_shown = True
+            self._apply_hero(1.0)
+            self._clear_effects()
             self._hero_k = 1.0
             self._apply_card(1.0)
             self._card_done()
@@ -711,16 +752,134 @@ class GateWindow(QtWidgets.QDialog):
             self.stage.start()
             self._start_prepare()
             QtCore.QTimer.singleShot(0, self.revealed.emit)
+            QtCore.QTimer.singleShot(0, self._emit_curtain)
             return
+        # ١) الستارة: اللوحة تُبنى الآن (قبل أول إطار) مخفيّةً، والترحيب مخفيّ
+        self._phase = "boot"
+        self._ensure_card()
+        self.card.hide()
+        self.hero.hide()
         self._hero_k = 0.0
         self._card_k = 0.0
         self._layout_scene()
         self.stage.intro = 0.0
+        if hasattr(self.stage, "hold"):
+            self.stage.hold()           # عتمةٌ ساكنة — الحركة مع العرض
+        self._place_boot()
+        if self._3d:
+            # المشهد الحيّ بلا شفافية نافذة: الستارة السوداء تظهر الآن
+            self._fade_in()
+        else:
+            # المقطع: النافذة تبقى شفّافة (بطاقة البدء فوق سطح المكتب) حتى
+            # يبدأ العرض فتظهر منها مرةً واحدة — إلا إن طال التجهيز
+            QtCore.QTimer.singleShot(BOOT_SLOW, self._boot_slow)
+        self._start_prepare()
+        # احتياط: بوابةٌ عُرضت بلا خطوات تجهيز (اختبار) لا تبقى ستارةً
+        QtCore.QTimer.singleShot(1200, self._boot_without_steps)
+
+    def _place_boot(self):
+        """سطر التجهيز أسفل الشاشة في وسطها — هادئٌ لا يلفت."""
+        try:
+            self.boot.setText(self._pending_state or "جارٍ تجهيز النظام…")
+            self.boot.adjustSize()
+            w = max(420, self.boot.width() + 40)
+            self.boot.resize(w, self.boot.height() + 8)
+            self.boot.move(int((self.width() - w) / 2),
+                           int(self.height() * 0.90))
+            self.boot.show()
+            self.boot.raise_()
+        except Exception:
+            pass
+
+    def _boot_slow(self):
+        """تجهيزٌ طال (قاعدةٌ كبيرة تُرقّى): تظهر الستارة بسطرها — لا فراغ."""
+        if self._phase == "boot":
+            self._fade_in()
+
+    def _boot_without_steps(self):
+        if self._phase == "boot" and not self._steps_given \
+                and not self._queue and not self._prep_running:
+            self._finish_prepare()
+
+    def _maybe_begin_show(self):
+        """العرض يبدأ حين يفرغ التجهيز — ومعه المشهد الحيّ إن جهز في وقته."""
+        if self._phase != "boot" or not self._ready:
+            return
+        if self._3d and not getattr(self.stage, "is_ready", False):
+            # المشهد الحيّ لم يُرسم أول إطاره بعد: يُنتظر قليلاً لا أكثر
+            if not getattr(self, "_grace_armed", False):
+                self._grace_armed = True
+                QtCore.QTimer.singleShot(BOOT_GRACE, self._begin_show)
+            return
+        self._begin_show()
+
+    def _begin_show(self):
+        """٢) العرض: المشهد يخرج من العتمة، فالشعار، فالترحيب، فالحقول."""
+        if self._phase != "boot":
+            return
+        self._phase = "show"
+        self.boot.hide()
+        self.stage.intro = 0.0
         self.stage.start()
+        # النافذة ظاهرةٌ أصلاً (المشهد الحيّ، أو مقطعٌ طال تجهيزه أو حلّ محلّ
+        # المشهد): الترحيب ثم الحقول **يتّضحان** وهما يصعدان — لا ينبثقان
+        staged = self._3d or getattr(self, "_revealed_done", False)
+        self._staged = staged
+        if staged:
+            self._emit_curtain()        # وإلا فعند اكتمال ظهور النافذة
+            if self._logo3d and getattr(self.stage, "is_ready", False) \
+                    and not getattr(self, "_logo_swapped", False):
+                self._go3d()            # المجسّم جاهز: لا صورةَ تذوب قبله
+            # الترحيب يتّضح وهو يصعد بعد أن يبدأ المشهد خروجه، ثم الحقول
+            at = HERO_AT_3D if self._3d else HERO_AT
+            QtCore.QTimer.singleShot(at, self._hero_in)
+            QtCore.QTimer.singleShot(at + CARD_AFTER, self._card_in_now)
+            return
+        # المقطع: النافذة تظهر من الشفافية ومعها الترحيب والحقول ينزلقان
+        # (تتابع 4.98 كما هو — بعد التجهيز لا أثناءه)
+        self.hero.show()
+        self._apply_hero(1.0)
+        self._clear_effects()
+        self._layout_scene()
         self._fade_in()
         self._intro.start()
-        QtCore.QTimer.singleShot(CARD_DELAY, self._card_in.start)
-        self._start_prepare()
+        QtCore.QTimer.singleShot(CARD_DELAY, self._card_in_now)
+
+    def _hero_in(self):
+        """الترحيب يتّضح وهو يصعد — الشعار فالتحية فالعنوان فالدعوة."""
+        if self._phase != "show":
+            return
+        self._hero_fading = True
+        self._hero_k = 0.0
+        self._apply_hero(0.0)
+        self.hero.show()
+        self._layout_scene()
+        self._intro.start()
+
+    def _intro_done(self):
+        if getattr(self, "_hero_fading", False):
+            self._hero_fading = False
+            self._apply_hero(1.0)
+            self._clear_effects()       # تعود اللافتات لورقة الأنماط
+        self._layout_scene()
+
+    def _card_in_now(self):
+        """الحقول والزر تصعد — والكتابة ممكنةٌ من أول لحظة."""
+        if self._phase != "show" or self.card is None:
+            return
+        self._card_shown = True
+        self._card_k = 0.0
+        self._apply_card(0.0)
+        self.card.show()
+        self._layout_scene()
+        self._card_in.start()
+        try:
+            self.raise_()
+            self.activateWindow()
+            (self.password if self.username.text().strip()
+             else self.username).setFocus()
+        except Exception:
+            pass
 
     # ─────────────────────────────── المشهد ثلاثي الأبعاد (5.3)
     @staticmethod
@@ -751,10 +910,19 @@ class GateWindow(QtWidgets.QDialog):
         البوابة ظاهرةٌ كاملةً من أول لحظة (5.3.2) — لا تنتظر المشهد.
         """
         if not self._logo3d or getattr(self, "_logo_swapped", False):
+            self._maybe_begin_show()
             return
         self._logo_swapped = True
-        self.logo._src_pix = QtGui.QPixmap(self._logo_pix2d)
         blank = self._blank_like(self._logo_pix2d, LOGO_W_3D)
+        if self._phase in ("new", "boot") or not self.hero.isVisible():
+            # 5.4: الترحيب لم يظهر بعد — المجسّم يستدير من العتمة في مكانه
+            # فلا صورةَ تُرى ثم تذوب قبله
+            self.logo._src_pix = None
+            self.logo.setPixmap(blank)
+            self._layout_scene()
+            self._maybe_begin_show()
+            return
+        self.logo._src_pix = QtGui.QPixmap(self._logo_pix2d)
         fade = QtCore.QVariantAnimation(self)
         fade.setStartValue(1.0)
         fade.setEndValue(0.0)
@@ -773,6 +941,7 @@ class GateWindow(QtWidgets.QDialog):
     def _stage_failed(self, why):
         """تعذّر المشهد الحيّ: المقطع المصوَّر مكانه — والدخول كما هو."""
         self._swap_to_movie()
+        self._maybe_begin_show()
 
     def _swap_to_movie(self):
         old = self.stage
@@ -798,7 +967,10 @@ class GateWindow(QtWidgets.QDialog):
         self._layout_scene()
         if self.isVisible():
             st.intro = 0.0
-            st.start()
+            if self._phase in ("new", "boot"):
+                st.hold()               # العرض لم يبدأ: عتمةٌ ساكنة حتى يبدأ
+            else:
+                st.start()
 
     def _fade_in(self):
         """البوابة تظهر من الشفافية مرةً واحدة — لا تنبثق دفعةً.
@@ -834,7 +1006,20 @@ class GateWindow(QtWidgets.QDialog):
             self.activateWindow()
         except Exception:
             pass
+        self._revealed_done = True
         self.revealed.emit()
+        if self._phase == "show":
+            self._emit_curtain()
+
+    def _emit_curtain(self):
+        """بدأ العرض (5.4) — مرةً واحدة: تُرفع بطاقة بدء الـexe الآن.
+
+        مع المشهد الحيّ: لحظة يبدأ خروجه من العتمة (الستارة سوداء تحتها).
+        ومع المقطع: حين تكتمل النافذة ظاهرةً — فلا يُرى سطح المكتب بينهما.
+        """
+        if not getattr(self, "_curtain_sent", False):
+            self._curtain_sent = True
+            self.curtain.emit()
 
     def paintEvent(self, e):
         """أول رسمٍ حقيقي: تُعلن البوابة أنها صارت على الشاشة.
@@ -856,45 +1041,18 @@ class GateWindow(QtWidgets.QDialog):
             except Exception:
                 pass
 
-    def _begin_hero(self):
-        """الترحيب يظهر وحده — والتجهيز يبدأ تحته بلا ضجيج."""
-        if not self.isVisible():
-            return
-        self.hero.show()
-        self._layout_scene()
-        self._intro.start()
-        self._start_prepare()
-
     def _ensure_card(self):
         if self.card is None:
             self._build_card()
             self._layout_scene()
-
-    def _begin_card(self):
-        """تُبنى اللوحة وتصعد مع موجةٍ تنبثق من موضعها."""
-        if not self.isVisible():
-            return
-        self._ensure_card()
-        self._card_shown = True
-        # مركز الموجة = مركز اللوحة، فالحلقات تخرج من تحتها لا من
-        # وسط الشاشة — والفرق يُرى وإن لم يُقَل.
-        try:
-            c = self.card
-            self.stage.focus_y = max(0.15, min(0.85, (
-                c.y() + c.height() / 2.0) / max(1.0, self.height())))
-        except Exception:
-            pass
-        self.card.show()
-        self.stage.ripple = 0.0
-        self._ripple.start()
-        self._card_in.start()
-        self._start_prepare()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.stage.setGeometry(self.rect())
         self._build_overlay()
         self._layout_scene()
+        if self._phase == "boot":
+            self._place_boot()
 
     def _build_overlay(self):
         """حواف الشاشة: تعتيمٌ وإطارٌ ذهبي بأركانٍ مزخرفة — مرةً للمقاس."""
@@ -990,9 +1148,12 @@ class GateWindow(QtWidgets.QDialog):
             pass
 
     def _on_intro(self, v):
-        """الترحيب ينزلق صاعداً إلى مكانه — موضعٌ يتغيّر لا لونٌ يُعاد."""
+        """الترحيب ينزلق صاعداً إلى مكانه — ومع المشهد الحيّ يتّضح معه."""
         self._hero_k = float(v)
-        self._layout_scene()
+        if getattr(self, "_hero_fading", False):
+            self._apply_hero(float(v))  # يرتّب المشهد بعد التلوين
+        else:
+            self._layout_scene()
 
     def _apply_hero(self, v):
         """ظهور الترحيب: الشعار أولاً، فالتحية، فالعنوان، فالدعوة.
@@ -1017,7 +1178,8 @@ class GateWindow(QtWidgets.QDialog):
         """حقول الدخول تنزلق صاعدةً تحت الترحيب — بلا مؤثّر شفافية (كان
         يرسم الحقول صورةً في كل إطار فيتقطّع الصعود)."""
         self._card_k = max(0.0, min(1.0, float(v)))
-        if self._3d and self.card is not None and self._card_k < 1.0:
+        if (self._3d or getattr(self, "_staged", False)) \
+                and self.card is not None and self._card_k < 1.0:
             # مع المشهد الحيّ: الحقول والزر تتّضح وهي تصعد (مؤثّرٌ مؤقّت
             # يُرفع عند الاستقرار في `_card_done`)
             self._set_opacity(self.card, min(1.0, self._card_k * 1.25))
@@ -1120,6 +1282,11 @@ class GateWindow(QtWidgets.QDialog):
         """
         msg = str(msg or "")
         self._pending_state = msg
+        if self._phase == "boot" and msg:
+            try:
+                self.boot.setText(msg)      # سطر الستارة يتقدّم مع الخطوات
+            except Exception:
+                pass
         if self.card is None:
             return          # اللوحة لم تُبنَ بعد — يُحفظ ليظهر معها
         self.state.setText(msg)
@@ -1143,17 +1310,22 @@ class GateWindow(QtWidgets.QDialog):
         self._queue = list(steps or [])
         self._failed = []
         self._ready = False
+        self._steps_given = True
         if self.card is not None:
             self.btn.setEnabled(False)
-        # إن كانت البطاقة قد ظهرت فعلاً (أو لا حركة أصلاً) يبدأ
-        # الطابور فوراً؛ وإلا يبدأ مع ظهورها فلا يُزاحم موجتها.
-        if self.isVisible() and (self._card_shown or not animations_on()):
+        # 5.4: البوابة ظاهرة (الستارة الساكنة) — يبدأ الطابور فوراً؛ وإلا
+        # يبدأ مع ظهورها
+        if self.isVisible():
             self._start_prepare()
         return None
 
     def _start_prepare(self):
-        if getattr(self, "_prep_running", False) or not self._queue:
-            if not self._queue:
+        if getattr(self, "_prep_running", False):
+            return
+        if not self._queue:
+            # الستارة لا ترفع نفسها قبل أن تصل خطوات التجهيز (5.4) — تصل من
+            # `main` بعد العرض بلحظة
+            if self._steps_given or self._phase != "boot":
                 self._finish_prepare()
             return
         self._prep_running = True
@@ -1182,6 +1354,8 @@ class GateWindow(QtWidgets.QDialog):
         تومض ثم تختفي بلا سبب.
         """
         self._ready = True
+        # 5.4: فرغ الخيط — يبدأ العرض (بعد أن يكتمل ما بعد هذا السطر)
+        QtCore.QTimer.singleShot(0, self._maybe_begin_show)
         if self.card is None:
             # اللوحة تُبنى لاحقاً وتُولد بزرٍّ صالح — لا شيء يُلمس
             if self._failed:
@@ -1311,22 +1485,32 @@ class GateWindow(QtWidgets.QDialog):
         self._reject_shake(str(msg))
 
     def _restore_scene(self):
-        """بعد موجةٍ لم يُفتح بعدها النظام: يعود المشهد كما كان."""
+        """بعد دخولٍ لم يُفتح بعده النظام: يعود المشهد كما كان."""
         self._handed_off = False
         try:
             self._exit.stop()
         except Exception:
             pass
         self._after_exit = None
+        if self._phase in ("leave", "done"):
+            self._phase = "show"
         if getattr(self.stage, "disposed", False):
             self._swap_to_movie()       # أُطلق المشهد الحيّ بعد الخروج
+        if hasattr(self.stage, "set_settle"):
+            self.stage.set_settle(0.0)
         if hasattr(self.stage, "set_exit"):
             self.stage.set_exit(0.0)
         else:
             self.stage.exit = 0.0
         self.farewell.hide()
+        self.farewell_sub.hide()
+        self._clear_effects()           # الترحيب بألوانه كما كان
         self.hero.show()
         if self.card is not None:
+            try:
+                self.card.setGraphicsEffect(None)
+            except Exception:
+                pass
             self.card.show()
         self._layout_scene()
         self.stage.start()
@@ -1367,47 +1551,88 @@ class GateWindow(QtWidgets.QDialog):
 
     # ─────────────────────────────── التسليم للنظام
     def hand_off(self, on_done):
-        """موجةٌ ذهبية تتّسع، ثم تُسلَّم الشاشة لمن بعدها.
+        """الدخول (5.4): التحيّة مكان الحقول، والمشهد يهدأ حتى يسكن.
 
-        `on_done()` يُنادى مرةً واحدة عند اكتمال الموجة — وتُنادى ولو
-        كانت الحركة مُطفأة، فلا يعتمد فتحُ النظام على زينة.
+        كان المشهد يعتم حتى السواد ويُطفأ ثم يُبنى النظام ثم يظهر — فيرى
+        صاحبه البرنامج «يخرج كاملاً ثم يدخل». الآن لا سواد: الحقول والترحيب
+        تخفت والتحيّة تتّضح في مكانها، والكاميرا والغبار يتباطآن حتى يسكنا
+        والضوء ينخفض قليلاً. وعلى هذا المشهد الساكن بطبعه يُبنى النظام (فلا
+        يُرى توقّف)، ثم يتّضح النظام فوقه وتُغلق البوابة من تحته (`main`).
+
+        `on_done()` يُنادى مرةً واحدة عند السكون — ويُنادى ولو كانت الحركة
+        مُطفأة، فلا يعتمد فتحُ النظام على زينة.
         """
         self._after_exit = on_done
+        self._phase = "leave"
+        try:
+            self.busy_line.run(False)
+        except Exception:
+            pass
         if not animations_on():
             self._exit_done()
             return
-        # 4.98: المشهد يعتم ويقترب (يُجهَّز في الخيط الخلفي) والتحيّة تتّضح
-        # بمؤثّر شفافيةٍ على سطرها وحده — ثم يُبنى النظام خلفها ويتمازجان
-        for w in (self.card, self.hero):
-            if w is not None:
-                w.hide()
-        self.stage.card_k = 0.0         # لا هالةَ للوحةٍ غابت
         name = getattr(self, "_name", "")
         self.farewell.setText(f"أهلاً {name}" if name else "أهلاً بك")
+        self._place_farewell()
+        self._fade_text(self.farewell, "#F6E7B6", 0.0)
+        self._fade_text(self.farewell_sub, "#CDBB8A", 0.0)
+        self.farewell.show()
+        self.farewell_sub.show()
+        self.farewell.raise_()
+        self.farewell_sub.raise_()
+        self._leave_poster = getattr(self.stage, "mode", "movie") == "poster" \
+            and not self._3d
+        self._exit.start()
+
+    def _place_farewell(self):
+        """التحيّة في موضع العنوان نفسه — تحلّ محلّه لا تقفز إلى الوسط."""
         self.farewell.adjustSize()
         self.farewell.resize(max(420, self.farewell.width() + 60),
                              self.farewell.height() + 16)
-        self.farewell.move(int(self._block_x() - self.farewell.width() / 2),
-                           int(self.height() * 0.44
-                               - self.farewell.height() / 2))
-        self._set_opacity(self.farewell, 0.0)
-        self.farewell.show()
-        self.farewell.raise_()
-        if getattr(self.stage, "mode", "movie") != "movie":
-            # صورةٌ ساكنة: اقترابها يُعيد تحجيمها كل إطار — فلا اقتراب
-            self._set_opacity(self.farewell, 1.0)
-            QtCore.QTimer.singleShot(60, self._exit_done)
-            return
-        self._exit.start()
+        try:
+            c = self.welcome.mapTo(self, self.welcome.rect().center())
+            cy = float(c.y())
+        except Exception:
+            cy = self.height() * 0.44
+        cx = self._block_x()
+        self.farewell.move(int(cx - self.farewell.width() / 2),
+                           int(cy - self.farewell.height() / 2))
+        self.farewell_sub.adjustSize()
+        self.farewell_sub.resize(max(360, self.farewell_sub.width() + 40),
+                                 self.farewell_sub.height() + 8)
+        self.farewell_sub.move(
+            int(cx - self.farewell_sub.width() / 2),
+            self.farewell.y() + self.farewell.height() + 6)
 
-    def _on_exit(self, v):
+    def _on_leave(self, v):
+        v = float(v)
+
+        def seg(a, b):
+            return max(0.0, min(1.0, (v - a) / max(1e-6, b - a)))
+
+        def smooth(x):
+            return x * x * (3.0 - 2.0 * x)
+
+        gone = smooth(seg(0.0, 0.42))           # الحقول والترحيب يخفتان
+        if self.card is not None:
+            self._set_opacity(self.card, 1.0 - gone)
+        for lbl, col in ((self.hello, "#C9A227"), (self.welcome, "#F6E7B6"),
+                         (self.ask, "#E8D9A8")):
+            self._fade_text(lbl, col, 1.0 - gone)
+        # التحيّة تتّضح مكان العنوان، وسطرها بعدها بلحظة
+        self._fade_text(self.farewell, "#F6E7B6", smooth(seg(0.38, 0.86)))
+        self._fade_text(self.farewell_sub, "#CDBB8A", smooth(seg(0.55, 1.0)))
+        if self.card is not None and gone >= 0.999 and self.card.isVisible():
+            self.card.hide()
+        if getattr(self, "_leave_poster", False):
+            return                  # صورةٌ ساكنة أصلاً: لا تعتيمَ يُعاد تحجيمه
+        calm = smooth(v)
+        if hasattr(self.stage, "set_settle"):
+            self.stage.set_settle(calm)     # الزمن يتباطأ حتى يسكن
         if hasattr(self.stage, "set_exit"):
-            self.stage.set_exit(float(v))   # تعتيمٌ واقترابٌ خفيف
+            self.stage.set_exit(SETTLE_DIM * calm)
         else:
-            self.stage.exit = float(v)
-        # التحيّة تتّضح في النصف الثاني، حين يهدأ المشهد
-        self._set_opacity(self.farewell,
-                          max(0.0, min(1.0, (float(v) - 0.35) / 0.5)))
+            self.stage.exit = SETTLE_DIM * calm
         self.stage.update()
 
     def _exit_done(self):
@@ -1417,11 +1642,15 @@ class GateWindow(QtWidgets.QDialog):
         # الدخول كان يمنع `close()` أيضاً — فـQDialog يُغلق عبر `reject`
         # — فتبقى البوابة سوداء بتحيّتها خلف النظام ولا تختفي
         self._handed_off = True
-        self.stage.stop()
-        # المشهد الحيّ عتم تماماً: يُطلق كرتُ الشاشة قبل بناء النظام، ويبقى
-        # الليلُ والتحيّة — والتمازج الأخير بين نافذتين بلا عرضٍ حيّ
-        if hasattr(self.stage, "dispose"):
-            self.stage.dispose()
+        self._phase = "done"
+        # 5.4: المشهد ساكنٌ أصلاً — يُوقف رسمه ويبقى إطاره الهادئ ظاهراً
+        # تحت النظام وهو يتّضح؛ ويُطلق كرت الشاشة مع إغلاق البوابة
+        try:
+            if hasattr(self.stage, "set_settle"):
+                self.stage.set_settle(1.0)
+            self.stage.stop()
+        except Exception:
+            pass
         if callable(fn):
             fn()
 
@@ -1433,7 +1662,8 @@ class GateWindow(QtWidgets.QDialog):
             return
         if e.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
             # Enter على البوابة لا يصل إلى زرٍّ غير «دخول» أبداً
-            if self.card is not None and self.btn.isEnabled():
+            if self.card is not None and self.card.isVisible() \
+                    and self.btn.isEnabled():
                 self.try_login()
             e.accept()
             return

@@ -18,6 +18,8 @@ on:
       - "main.py"
       - "tools/ci_build_exe.py"
       - "tools/ci_webengine_probe.py"
+      - "tools/gate_checks/flow_capture.py"
+      - "ui/widgets/cinema_stage.py"
       - ".github/workflows/desktop-exe.yml"
 
 concurrency:
@@ -69,6 +71,28 @@ jobs:
           }
           $env:QTWEBENGINE_DISABLE_SANDBOX = ""
           $env:QTWEBENGINE_CHROMIUM_FLAGS = ""
+
+      # 5.4: الإقلاع والدخول على شاشة ويندوز حقيقية — لقطةٌ كل 150 م.ث من
+      # النقرة حتى تُغلق البوابة، وسطوعُ كلٍّ منها (لا سوادَ بين البوابة
+      # والنظام). الدخول محاكى في ملف الفحص وحده.
+      - name: الإقلاع والدخول — لقطاتٌ متتابعة (المشهد ثلاثي الأبعاد)
+        shell: pwsh
+        continue-on-error: true
+        timeout-minutes: 6
+        env:
+          JADEITE_GATE3D: force
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          python tools/gate_checks/flow_capture.py out/flow-3d 2>&1 | Select-Object -Last 70
+
+      - name: الإقلاع والدخول — لقطاتٌ متتابعة (المقطع المصوَّر)
+        shell: pwsh
+        continue-on-error: true
+        timeout-minutes: 6
+        env:
+          JADEITE_GATE3D: "0"
+        run: |
+          python tools/gate_checks/flow_capture.py out/flow-movie 2>&1 | Select-Object -Last 70
 
       - name: بناء الملف التنفيذي (ملفٌّ واحد، مع المشهد)
         run: python tools/ci_build_exe.py

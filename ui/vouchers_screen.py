@@ -418,6 +418,58 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         except Exception as e:
             err(self, e)
 
+    # ══ ما كُتب في اللوحة ولم يُضف (5.4) ══
+    def _pending_panel(self):
+        """ما في لوحتي الذهب والنقد ولم يُضف سطراً: [(النوع، القيمة)]."""
+        out = []
+        wt = round(self.g_weight.value(), 2)
+        if wt > 0:
+            out.append(("gold", wt))
+        amt = round(self.c_amount.value(), 2)
+        if amt > 0 and self.c_amount.isEnabled():
+            out.append(("cash", amt))
+        return out
+
+    def _pending_text(self, pend):
+        parts = []
+        for kind, val in pend:
+            if kind == "gold":
+                parts.append(f"لوحة الذهب: وزن {_nf.f2(val)} جم "
+                             f"عيار {self.g_karat.currentData()}")
+            else:
+                parts.append(f"لوحة النقد: مبلغ {_nf.f2(val)} ريال")
+        return parts
+
+    def _ask_pending(self, pend, others):
+        """يُقال ما في اللوحة صراحةً — ويختار المستخدم: يُضاف أو لا يُرحَّل.
+
+        «رحّل بدونه» لا يُعرض إلا إن كان في السند غيره — وإلا فلا شيء
+        يُرحَّل أصلاً.
+        """
+        lines = self._pending_text(pend)
+        what = ("مبلغ" if all(k == "cash" for k, _ in pend)
+                else "وزن" if all(k == "gold" for k, _ in pend)
+                else "قيمٌ")
+        head = (f"هناك {what} في اللوحة لم تُضِفه سطراً في السند"
+                if what != "قيمٌ" else
+                "هناك قيمٌ في اللوحة لم تُضِفها أسطراً في السند")
+        buttons = [("add", "➕ أضِفه ثم رحّل", "primary")]
+        if others:
+            buttons.append(("skip", "رحّل بدونه", "secondary"))
+        buttons.append(("cancel", "إلغاء — أراجع", "secondary"))
+        detail = "\n".join("• " + t for t in lines) + "\n\n" + (
+            "«أضِفه ثم رحّل» يضيفه سطراً إلى جدول السند ثم يعرض تأكيد"
+            " الترحيل." + ("\n«رحّل بدونه» يرحّل أسطر الجدول وحدها ولا"
+                           " يدخل ما في اللوحة في السند." if others else ""))
+        return kit.message(self, head, "مبلغٌ لم يُضَف", "warning",
+                           buttons=tuple(buttons), detail=detail,
+                           default="cancel")     # الإغلاق = مراجعة لا ترحيل
+
+    def _add_pending(self, pend):
+        """يضيف ما في اللوحة سطراً — كما يفعل زرّ «إضافة سطر» تماماً."""
+        for kind, _v in pend:
+            (self.add_gold_row if kind == "gold" else self.add_cash_row)()
+
     def del_row(self):
         i = self.rows_table.currentRow()
         if 0 <= i < len(self.rows):
@@ -476,20 +528,20 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             mode, val = self._current_target()
             if val is None:
                 raise ValueError("اختر جهة التعامل أو الحساب المباشر")
-            # الأسطر المضافة للجدول هي مصدر السند. وإن لم يُضف المستخدم
-            # سطراً، تُستخدم القيم المكتوبة في الحقول مباشرة (سطر واحد).
+            # الأسطر المضافة للجدول هي مصدر السند. وما بقي مكتوباً في
+            # لوحتي الذهب والنقد ولم يُضف سطراً **يُسأل عنه صراحةً** (5.4):
+            # كان يُرحَّل وحده إن لم يكن في الجدول شيء، ويُهمَل بصمتٍ إن كان
+            # — فيُرحَّل سندٌ ناقص ويُمحى المكتوب بعده بلا أثر.
             nd, dc, dg = self.adj_values()
+            pend = self._pending_panel()
+            if pend:
+                choice = self._ask_pending(
+                    pend, others=bool(self.rows) or any((nd, dc, dg)))
+                if choice == "cancel":
+                    return
+                if choice == "add":
+                    self._add_pending(pend)
             rows = list(self.rows)
-            if not rows:
-                if self.g_weight.value() > 0:
-                    rows.append({"kind": "gold",
-                                 "weight": self.g_weight.value(),
-                                 "karat": self.g_karat.currentData(),
-                                 "notes": self.g_note.text().strip()})
-                if self.c_amount.value() > 0:
-                    rows.append({"kind": "cash",
-                                 "amount": self.c_amount.value(),
-                                 "notes": self.c_note.text().strip()})
             if not rows and not any((nd, dc, dg)):
                 raise ValueError("أضف سطراً واحداً على الأقل في السند")
             # تأكيد الترحيل قبل إحداث أي أثر في الحسابات
