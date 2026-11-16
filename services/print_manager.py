@@ -872,7 +872,8 @@ def _tpl_tax_invoice(conn, inv, items, cust):
         except Exception:
             sub = "simplified"
     std = sub == "standard"
-    title = (("إشعار دائن — مرتجع مبيعات" + ("" if std else " (مبسط)"))
+    title = (("إشعار دائن — مرتجع مبيعات ضريبي"
+              + ("" if std else " (مبسط)"))
              if credit else _ti.SUBTYPE_LABEL[sub])
     e = _ent(conn, inv["customer_id"])
     buyer = (inv.get("buyer_name") or "").strip() or e.get("name") or "—"
@@ -880,12 +881,29 @@ def _tpl_tax_invoice(conn, inv, items, cust):
     body_rows = ""
     t_w = t_gv = t_wg = 0.0
     n_pcs = 0
-    items = conn.execute("SELECT * FROM invoice_items WHERE invoice_id=?"
-                         " ORDER BY id", (inv["id"],)).fetchall()
+    free = bool(inv.get("free_lines"))
+    if free:
+        # 5.8.0: الإدخال اليدوي — السطر برقمه كما كُتب (لا بطاقة طقم)
+        from models import tax_free as _tf
+        items = []
+        for ln in _tf.lines_of(conn, inv["id"]):
+            items.append({"work_order_id": None, "karat": ln["karat"],
+                          "registered_weight": ln["weight"],
+                          "gold_value": ln["gold_value"],
+                          "wages": ln["wages"], "pieces": ln["pieces"],
+                          "piece_price": ln["piece_price"],
+                          "gold_price": ln["gold_price"],
+                          "wage_per_gram": ln["wage_per_gram"],
+                          "_wo": {"model_no": ln["model_no"],
+                                  "work_order_no": ln["wo_no"]}})
+    else:
+        items = conn.execute("SELECT * FROM invoice_items WHERE invoice_id=?"
+                             " ORDER BY id", (inv["id"],)).fetchall()
     for i, it in enumerate(items, 1):
         it = dict(it)
-        wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
-                          (it["work_order_id"],)).fetchone()
+        wo = it.get("_wo") or conn.execute(
+            "SELECT * FROM work_orders WHERE id=?",
+            (it["work_order_id"],)).fetchone()
         k = int(it.get("karat") or 0) or int(_kactive())
         reg = float(it["registered_weight"] or 0)
         gv = float(it.get("gold_value") or 0)
@@ -916,7 +934,8 @@ def _tpl_tax_invoice(conn, inv, items, cust):
         return f'<th width="{pct}%" style="width:{pct}%;">{label}</th>'
     head = cells(
         _th("م", 4), _th("الموديل", 10), _th("رقم التشغيل", 13),
-        _th("العدد", 7), _th("الوزن", 10), _th("العيار", 7),
+        _th("العدد", 7), _th("وزن المرتجع" if credit else "الوزن", 10),
+        _th("العيار", 7),
         *([_th("سعر الجرام", 11)] if riyal else []),
         _th("سعر الطقم" if piece else "الأجر/جم", 11),
         *([_th("قيمة الذهب", 12)] if riyal else []),
@@ -928,11 +947,13 @@ def _tpl_tax_invoice(conn, inv, items, cust):
                 thw(_w(t_gv + t_wg, 2)))
     net = round(float(inv["total_wages"] or 0)
                 + float(inv.get("gold_value") or 0), 2)
+    disc = round(float(inv.get("discount") or 0), 2)
     vat = float(inv["vat_amount"] or 0)
     grand = float(inv["grand_total"] or 0)
     time_str = (inv.get("created_at") or "")[11:16]
-    # سعر الجرام صار لكل سطرٍ بعياره (5.5.2) — في عمود الجدول لا في الرأس
-    price_txt = _ti.PRICING_LABEL.get(pricing, pricing).split(" — ")[0]
+    # سعر الجرام صار لكل سطرٍ بعياره (5.5.2) — في عمود الجدول لا في الرأس.
+    # 5.8.0: نوع التسعير بنصّه الكامل (الأجر فقط — الذهب بالوزن …)
+    price_txt = _ti.PRICING_LABEL.get(pricing, pricing)
     pay = inv.get("pay_mode") or ""
     pairs = [("رقم المستند", en(inv["invoice_no"])),
              ("التاريخ", en(f"{inv['invoice_date']} {time_str}".strip())),
@@ -943,7 +964,14 @@ def _tpl_tax_invoice(conn, inv, items, cust):
         pairs.append(("الجوال", en(inv["buyer_phone"])))
     pairs.append(("الرقم الضريبي للبائع",
                   en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")))
-    pairs.append(("التسعير", price_txt))
+    pairs.append(("نوع التسعير", price_txt))
+    # 5.8.0: الحساب الذي خرج منه الوزن (أو عاد إليه) ومصدر الأسطر
+    _src = conn.execute("SELECT code, name FROM accounts WHERE id=?",
+                        (inv.get("source_account_id"),)).fetchone()
+    if _src:
+        pairs.append(("إلى حساب" if credit else "من حساب",
+                      f"{en(_src['code'])} — {_src['name']}"))
+    pairs.append(("الأسطر", "إدخال يدوي" if free else "من أطقم الخزنة"))
     if credit:
         ref = conn.execute("SELECT invoice_no, invoice_date FROM invoices"
                            " WHERE id=?", (inv.get("ref_invoice_id"),)
@@ -962,9 +990,12 @@ def _tpl_tax_invoice(conn, inv, items, cust):
             qr = (f'<img src="{uri}" style="width:24mm; height:24mm;"'
                   ' width="92" height="92"/>')
     rate_pct = en(f"{float(inv.get('vat_rate') or config.VAT_RATE) * 100:g}")
-    rows = [("الإجمالي قبل الضريبة", _w(net, 2), False),
-            (f"ضريبة القيمة المضافة {rate_pct}%", _w(vat, 2), False),
-            ("الإجمالي شامل الضريبة", _w(grand, 2), True)]
+    rows = ([("الإجمالي قبل الخصم", _w(net, 2), False),
+             ("خصم نقدي" + (" مردود" if credit else ""), _w(disc, 2), False),
+             ("الإجمالي الخاضع للضريبة", _w(net - disc, 2), False)]
+            if disc else [("الإجمالي قبل الضريبة", _w(net, 2), False)])
+    rows += [(f"ضريبة القيمة المضافة {rate_pct}%", _w(vat, 2), False),
+             ("الإجمالي شامل الضريبة", _w(grand, 2), True)]
     if not riyal and cust:
         g, c = account_balance(conn, cust["account_id"])
         rows += [(f"الذهب بالوزن على الحساب ({u})", _gw(t_w), False),
@@ -1012,7 +1043,8 @@ def _tpl_set_purchase(conn, doc_id):
             tdw(rate),
             *([tdw(_w(li["gold_value"], 2))] if riyal else []),
             tdw(_w(li["net"], 2))) + "</tr>"
-    head = cells(thw("م"), thw("رقم التشغيل"), thw("العدد"), thw("الوزن"),
+    head = cells(thw("م"), thw("رقم التشغيل"), thw("العدد"),
+                 thw("وزن المرتجع" if ret else "الوزن"),
                  thw("العيار"), thw("الموديل"),
                  *([thw("سعر الجرام")] if riyal else []),
                  thw("سعر الطقم" if piece else "الأجر/جم"),
@@ -1023,7 +1055,7 @@ def _tpl_set_purchase(conn, doc_id):
                 *([thw("")] if riyal else []), thw(""),
                 *([thw(_w(d["gold_value"], 2))] if riyal else []),
                 thw(_w(d["net"], 2)))
-    price_txt = _ti.PRICING_LABEL.get(pricing, pricing).split(" — ")[0]
+    price_txt = _ti.PRICING_LABEL.get(pricing, pricing)
     e = _ent(conn, d["supplier_id"])
     pairs = [("رقم المستند", en(d["doc_no"] or f"#{doc_id}")),
              ("التاريخ", en(d["doc_date"])),
@@ -1032,24 +1064,39 @@ def _tpl_set_purchase(conn, doc_id):
              ("فاتورة المورد", en(d["supplier_inv_no"] or "—")),
              ("الرقم الضريبي للمنشأة",
               en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")),
-             ("التسعير", price_txt)]
-    if not ret and d.get("dest_account_id"):
+             ("نوع التسعير", price_txt)]
+    # 5.8.0: الحساب على الفاتورة ومرتجعها (المرتجع يخرج من حساب أصله)
+    _dest = d.get("dest_account_id")
+    if not _dest and ret and d.get("ref_id"):
+        _r = conn.execute("SELECT dest_account_id FROM set_purchases WHERE"
+                          " id=?", (d["ref_id"],)).fetchone()
+        _dest = _r[0] if _r else None
+    if _dest:
         acc = conn.execute("SELECT code, name FROM accounts WHERE id=?",
-                           (d["dest_account_id"],)).fetchone()
+                           (_dest,)).fetchone()
         if acc:
-            pairs.append(("إلى حساب", f"{en(acc['code'])} — {acc['name']}"))
+            pairs.append(("من حساب" if ret else "إلى حساب",
+                          f"{en(acc['code'])} — {acc['name']}"))
+    pairs.append(("الأسطر", "إدخال يدوي" if d.get("free_lines")
+                  else "أطقم الخزنة"))
     if ret:
         pairs += [("على الفاتورة", en(d.get("ref_no") or "—")),
                   ("سبب المرتجع", d.get("reason") or "—")]
     sup_acc = conn.execute("SELECT account_id FROM entities WHERE id=?",
                            (d["supplier_id"],)).fetchone()
     rate_pct = en(f"{float(d['vat_rate'] or config.VAT_RATE) * 100:g}")
-    trows = [("الإجمالي قبل الضريبة", _w(d["net"], 2), False),
-             (("ضريبة مدخلات تُعكس" if ret else "ضريبة المدخلات")
+    disc = round(float(d.get("discount") or 0), 2)
+    trows = ([("الإجمالي قبل الخصم", _w(d["net"], 2), False),
+              ("خصم نقدي" + (" مردود" if ret else " من المورد"),
+               _w(disc, 2), False),
+              ("الإجمالي الخاضع للضريبة", _w(d["net"] - disc, 2), False)]
+             if disc else
+             [("الإجمالي قبل الضريبة", _w(d["net"], 2), False)])
+    trows += [(("ضريبة مدخلات تُعكس" if ret else "ضريبة المدخلات")
               + f" {rate_pct}%", _w(d["vat"], 2), False),
-             ("يُنقص من رصيد المورد" if ret else "المستحق للمورد",
-              _w(d["total"], 2), True)]
-    title = "مرتجع مشتريات ضريبية" if ret else "فاتورة مشتريات ضريبية"
+              ("يُنقص من رصيد المورد" if ret else "المستحق للمورد",
+               _w(d["total"], 2), True)]
+    title = "مرتجع مشتريات ضريبي" if ret else "فاتورة مشتريات ضريبية"
     return (_header(title, d["doc_no"] or f"#{doc_id}", d["doc_date"],
                     show_meta=False) + _meta_grid(pairs)
             + f"{TBL}<tr>{head}</tr>{rows}<tr>{tot}</tr></table>"
@@ -4158,7 +4205,7 @@ def _tpl_set_purchase_models(conn, doc_id=0):
     if not d:
         raise ValueError("المستند غير موجود")
     ret = d["kind"] == "purchase_return"
-    kind = "مرتجع مشتريات ضريبية" if ret else "فاتورة مشتريات ضريبية"
+    kind = "مرتجع مشتريات ضريبي" if ret else "فاتورة مشتريات ضريبية"
     sets, counts = {}, {}
     wt = 0.0
     for li in d["lines"]:

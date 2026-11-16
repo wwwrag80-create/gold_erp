@@ -158,6 +158,40 @@ def _seller(p):
 
 
 def _lines(conn, invoice_id):
+    """أسطر المستند الإلكتروني — وبعد الخصم النقدي (5.8.0) كل سطرٍ بصافيه
+    بنسبته، فمجموعها = (الصافي − الخصم) = وعاء الضريبة بالهللة."""
+    from models import tax_free as _tf
+    out = (_free_lines(conn, invoice_id) if _tf.is_free(conn, invoice_id)
+           else _set_lines(conn, invoice_id))
+    r = conn.execute("SELECT * FROM invoices WHERE id=?",
+                     (invoice_id,)).fetchone()
+    disc = float(r["discount"] or 0) if r is not None and \
+        "discount" in r.keys() else 0.0
+    if disc > 0 and out:
+        amts = _tf.spread([li["amount"] for li in out], disc)
+        out = [dict(li, amount=a) for li, a in zip(out, amts)]
+    return out
+
+
+def _free_lines(conn, invoice_id):
+    """أسطر فاتورة الإدخال اليدوي: رقم التشغيل كما كُتب ووزنه وعياره."""
+    from models import tax_free as _tf
+    out = []
+    for ln in _tf.lines_of(conn, invoice_id):
+        k = int(ln["karat"] or 18)
+        w = float(ln["weight"] or 0) * 18.0 / k       # الوزن بعيار السطر
+        model = f" · موديل {ln['model_no']}" if ln["model_no"] else ""
+        gv = float(ln["gold_value"] or 0)
+        what = "طقم ذهب (ذهب + مصنعية)" if gv else "مصنعية طقم ذهب"
+        out.append({
+            "name": (f"{what} {ln['wo_no']}{model} — عيار {k}: {w:,.3f} جم"
+                     + (f" · {ln['pieces']} قطعة"
+                        if int(ln["pieces"] or 1) > 1 else "")),
+            "amount": round(float(ln["wages"] or 0) + gv, 2)})
+    return out
+
+
+def _set_lines(conn, invoice_id):
     from services import karat_view as kv
     out = []
     for it in conn.execute(

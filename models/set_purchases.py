@@ -37,7 +37,7 @@ from services.audit import log_action
 
 PREFIX = {"purchase": "PS", "purchase_return": "PSR"}
 KIND_LABEL = {"purchase": "فاتورة مشتريات ضريبية",
-              "purchase_return": "مرتجع مشتريات"}
+              "purchase_return": "مرتجع مشتريات ضريبي"}
 COST = "5530"          # تكلفة مصنعية الأطقم المشتراة
 VAT_IN = "1900"        # ضريبة القيمة المضافة — المدخلات
 
@@ -89,6 +89,9 @@ def ensure_schema(conn):
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if have and col not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    # 5.8.0: عمودا الإدخال الحر والخصم (وحساب مخزون الذهب الضريبي)
+    from models import tax_free as _tf
+    _tf.ensure_schema(conn)
     if cols and "out_doc" not in cols:
         # مرتجع المشتريات الذي أخرج الطقم من ملك المحلّ — دليلٌ على البطاقة
         conn.execute("ALTER TABLE work_orders ADD COLUMN out_doc TEXT"
@@ -109,14 +112,15 @@ def _vat_ok(conn):
 
 
 # ══════════════════════════ الشراء ══════════════════════════
-def _prepare_line(conn, i, x, tx, seen):
+def _prepare_line(conn, i, x, tx, seen, free=False):
     from models.inventory import (assert_not_legacy, is_bulk_no,
                                   model_for)
-    wo_no = str(x.get("wo_no") or "").strip()
+    wo_no = " ".join(str(x.get("wo_no") or "").split())[:40]
     if not wo_no:
         raise ValueError(f"السطر {i}: اكتب رقم التشغيل كما في فاتورة المورد")
-    bulk = is_bulk_no(wo_no)
-    if not bulk:
+    # 5.8.0: الإدخال الحر — الرقم وصفٌ للسطر (ولو تكرّر أو وُجد في الخزنة)
+    bulk = False if free else is_bulk_no(wo_no)
+    if not bulk and not free:
         assert_not_legacy(wo_no)
         if wo_no in seen:
             raise ValueError(f"رقم التشغيل {wo_no} مكرّر في الفاتورة")
@@ -147,7 +151,9 @@ def _prepare_line(conn, i, x, tx, seen):
     gp = float(_tx.line_tx(li, tx).get("gold_price") or 0) \
         if tx["pricing"] in _tx.RIYAL else 0.0
     return {"wo_no": wo_no, "bulk": bulk,
-            "model_no": model_for(wo_no, x.get("model_no")) or "",
+            "model_no": (" ".join(str(x.get("model_no") or "").split())[:60]
+                         if free else
+                         model_for(wo_no, x.get("model_no")) or ""),
             "pieces": pieces, "reg": reg, "std": std,
             "karat": karat, "wage": wage, "gold_price": gp,
             "piece_price": (round(float(x.get("piece_price") or 0), 2)
@@ -157,7 +163,7 @@ def _prepare_line(conn, i, x, tx, seen):
 
 
 def _post(conn, kind, sup, doc_no, doc_date, tx, set_by_acc, bulk_w, wages,
-          gv, vat, total, username, note):
+          gv, vat, total, username, note, discount=0.0):
     """قيد الشراء أو مرتجعه — بطريقة التسعير. `set_by_acc` = {حساب: وزن}
     للأطقم (5.5.2: تدخل الحساب المختار وتخرج منه)، و`bulk_w` وزن التجميعي
     (حساب الإيطالي)."""
@@ -194,6 +200,13 @@ def _post(conn, kind, sup, doc_no, doc_date, tx, set_by_acc, bulk_w, wages,
     if vat:
         lines.append({"account_id": acc_id(conn, VAT_IN), c_in: vat,
                       "line_desc": f"ضريبة مدخلات {doc_no}"})
+    if discount:
+        # 5.8.0: خصمٌ نقدي من المورد — يُنقص ما له ويُقيَّد خصماً مكتسباً
+        from models.tax_free import DISC_EARNED
+        lines.append({"account_id": acc_id(conn, DISC_EARNED),
+                      c_out: discount,
+                      "line_desc": ("خصم نقدي من المورد" if buy
+                                    else "ردّ الخصم بنسبة المرتجع")})
     lines.append({"account_id": sup["account_id"], **party,
                   "line_desc": f"{KIND_LABEL[kind]} {doc_no}"})
     keys = ("gold_debit", "gold_credit", "cash_debit", "cash_credit")
@@ -236,8 +249,14 @@ def check_dest(conn, account_id=None):
 
 def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
                     username, pricing="wage", gold_price=0.0, price_karat=0,
-                    notes="", dest_account_id=None):
+                    notes="", dest_account_id=None, mode="vault",
+                    discount=0.0):
     """فاتورة مشتريات ضريبية بالأطقم — تُدخل الأطقم الخزنة.
+
+    5.8.0 — `mode`: ``vault`` (كما كان: لكل طقمٍ بطاقته في الخزنة برقمٍ
+    فريد) · ``free`` (إدخال يدوي: الرقم وصفٌ للسطر ولو تكرّر، والوزن يدخل
+    «مخزون الذهب الضريبي» أو الحساب المختار — بلا بطاقات). و`discount`
+    خصمٌ نقدي على الفاتورة يُطرح من الوعاء قبل الضريبة.
 
     `lines` = [{wo_no, model_no, pieces, registered (18), standing (18),
                 karat, wage (18) | piece_price, notes}]
@@ -246,11 +265,16 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
                                   generate_work_order_barcode)
     from models.stock_home import italian_account
     from services import gold_math
+    from models import tax_free as _tf
     ensure_schema(conn)
+    _tf.ensure_schema(conn)
+    free = mode == "free"
     sup = _supplier(conn, supplier_id)
     # الحساب الذي تدخله الأطقم (وبلا اختيارٍ الذهب المشغول) — وتخرج منه
-    # عند بيعها، فهو بيتها (`stock_home`)
-    dest = check_dest(conn, dest_account_id)
+    # عند بيعها، فهو بيتها (`stock_home`). والإدخال الحر: مخزون الذهب
+    # الضريبي أو حسابٌ مثله (لا الذهب المشغول ولا الإيطالي)
+    dest = (_tf.check_stock(conn, dest_account_id) if free
+            else check_dest(conn, dest_account_id))
     inv_no = str(supplier_inv_no or "").strip()
     if not inv_no:
         raise ValueError("اكتب رقم فاتورة المورد — بها تُخصم ضريبة المدخلات"
@@ -265,15 +289,16 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
     tx = _tx.norm({"pricing": pricing, "gold_price": gold_price,
                    "price_karat": price_karat})
     seen = set()
-    prep = [_prepare_line(conn, i, x, tx, seen)
+    prep = [_prepare_line(conn, i, x, tx, seen, free=free)
             for i, x in enumerate(lines or [], 1)]
     if not prep:
         raise ValueError("أضف طقماً واحداً على الأقل")
     wages = round(sum(p["wages"] for p in prep), 2)
     gv = round(sum(p["gv"] for p in prep), 2)
     net = round(wages + gv, 2)
-    vat = _tx.doc_vat(net)
-    total = round(net + vat, 2)
+    disc = _tf.check_discount(net, discount)
+    vat = _tx.doc_vat(round(net - disc, 2))
+    total = round(net - disc + vat, 2)
     if total <= 0:
         raise ValueError("إجمالي الفاتورة صفر")
     set_w = round(sum(p["reg"] for p in prep if not p["bulk"]), 3)
@@ -287,18 +312,22 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
          tx["price_karat"], float(config.VAT_RATE), round(set_w + bulk_w, 3),
          wages, gv, net, vat, total, (notes or "").strip(), username, dest))
     pid = cur.lastrowid
+    conn.execute("UPDATE set_purchases SET free_lines=?, discount=? WHERE"
+                 " id=?", (int(free), disc, pid))
     doc_no = _numbering.next_no(conn, PREFIX["purchase"])
     entry_id = _post(conn, "purchase", sup, doc_no, doc_date, tx,
                      {dest: set_w}, bulk_w, wages, gv, vat, total, username,
                      f"فاتورة المورد {inv_no}"
                      + (f" — {notes.strip()}" if (notes or "").strip()
-                        else ""))
+                        else ""), discount=disc)
     conn.execute("UPDATE set_purchases SET doc_no=?, entry_id=? WHERE id=?",
                  (doc_no, entry_id, pid))
     conn.execute("UPDATE journal_entries SET source_id=? WHERE id=?",
                  (pid, entry_id))
     for i, p in enumerate(prep, 1):
-        if p["bulk"]:
+        if free:
+            wid = None              # الحر: لا بطاقة طقمٍ في الخزنة
+        elif p["bulk"]:
             wo = adjust_bulk_wo(conn, p["reg"], username, wo_no=p["wo_no"])
             wid = wo["id"]
         else:
@@ -333,6 +362,7 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
     return {"id": pid, "doc_no": doc_no, "entry_id": entry_id,
             "supplier_name": sup["name"], "net": net, "vat": vat,
             "total": total, "wages": wages, "gold_value": gv,
+            "discount": disc, "free": free, "dest_account_id": dest,
             "weight": round(set_w + bulk_w, 3), "n": len(prep),
             "vat_number_set": _vat_ok(conn)}
 
@@ -344,6 +374,11 @@ def returnable(conn, purchase_id):
     الطقم المفرد: يُرجع كاملاً ما دام في الخزنة بوزنه كله (لم يُبع منه
     شيء). والتجميعي: ما بقي من سطره بعد مرتجعاته، وفي حدود رصيده."""
     ensure_schema(conn)
+    from models import tax_free as _tf
+    _tf.ensure_schema(conn)
+    free = bool((conn.execute("SELECT free_lines FROM set_purchases WHERE"
+                              " id=?", (int(purchase_id),)).fetchone()
+                 or {"free_lines": 0})["free_lines"])
     out = []
     for ln in conn.execute(
             "SELECT l.*, w.status, w.is_deleted wdel,"
@@ -361,6 +396,8 @@ def returnable(conn, purchase_id):
         why = ""
         if left <= 0.0005:
             why = "أُرجع من قبل"
+        elif free:
+            pass                    # الحر: يُرجع ما بقي من وزنه — بلا خزنة
         elif ln["bulk"]:
             bal = float(ln["wreg"] or 0)
             if bal + 0.0005 < left:
@@ -375,7 +412,11 @@ def returnable(conn, purchase_id):
                     "pieces": ln["pieces"], "registered": ln["registered_weight"],
                     "standing": ln["standing_weight"], "karat": ln["karat"],
                     "wage": ln["wage_per_gram"],
-                    "piece_price": ln["piece_price"], "bulk": bool(ln["bulk"]),
+                    "piece_price": ln["piece_price"],
+                    "bulk": bool(ln["bulk"]) and not free, "free": free,
+                    "wages": float(ln["wages"] or 0),
+                    "gold_value": float(ln["gold_value"] or 0),
+                    "net": float(ln["net"] or 0),
                     "gold_price": float(ln["gold_price"] or 0),
                     "left": 0.0 if why else max(0.0, left), "why": why})
     return out
@@ -397,6 +438,8 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
     sup = _supplier(conn, o["supplier_id"])
     tx = _tx.norm({"pricing": o["pricing"], "gold_price": o["gold_price"],
                    "price_karat": o["price_karat"]})
+    from models import tax_free as _tf
+    free = bool(dict(o).get("free_lines"))
     avail = {r["line_id"]: r for r in returnable(conn, purchase_id)}
     prep = []
     for x in returns or []:
@@ -406,7 +449,7 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
         if r["why"]:
             raise ValueError(f"الطقم {r['wo_no']}: {r['why']} — لا يُرجع")
         w = r["left"]
-        if r["bulk"] and x.get("weight") not in (None, "", 0):
+        if (r["bulk"] or free) and x.get("weight") not in (None, "", 0):
             w = round(float(x["weight"]), 3)
             if w <= 0 or w > r["left"] + 0.0005:
                 raise ValueError(f"{r['wo_no']}: الوزن المرتجع أكبر من الباقي"
@@ -426,8 +469,10 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
     wages = round(sum(p["wages"] for p in prep), 2)
     gv = round(sum(p["gv"] for p in prep), 2)
     net = round(wages + gv, 2)
-    vat = _tx.doc_vat(net)
-    total = round(net + vat, 2)
+    # 5.8.0: يُردّ من خصم الأصل بنسبة ما أُرجع من صافيه
+    disc = _tf.share(dict(o).get("discount") or 0, net, o["net"])
+    vat = _tx.doc_vat(round(net - disc, 2))
+    total = round(net - disc + vat, 2)
     set_w = round(sum(p["w"] for p in prep if not p["bulk"]), 3)
     bulk_w = round(sum(p["w"] for p in prep if p["bulk"]), 3)
     # 5.5.2: كل طقمٍ يخرج من الحساب الذي هو فيه (بيته) — لا من حسابٍ ثابت
@@ -435,6 +480,10 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
     by_acc = {}
     for p in prep:
         if p["bulk"]:
+            continue
+        if free:
+            acc = o["dest_account_id"] or _tf.check_stock(conn)
+            by_acc[acc] = round(by_acc.get(acc, 0.0) + p["w"], 3)
             continue
         wo = conn.execute("SELECT * FROM work_orders WHERE id=?",
                           (p["work_order_id"],)).fetchone()
@@ -451,11 +500,15 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
          round(set_w + bulk_w, 3), wages, gv, net, vat, total, o["id"],
          str(reason).strip(), username))
     rid = cur.lastrowid
+    conn.execute("UPDATE set_purchases SET free_lines=?, discount=?,"
+                 " dest_account_id=? WHERE id=?",
+                 (int(free), disc, o["dest_account_id"], rid))
     doc_no = _numbering.next_no(conn, PREFIX["purchase_return"])
     entry_id = _post(conn, "purchase_return", sup, doc_no, doc_date, tx,
                      by_acc, bulk_w, wages, gv, vat, total, username,
                      f"مرتجع من {o['doc_no']} (فاتورة المورد"
-                     f" {o['supplier_inv_no']}) — {str(reason).strip()}")
+                     f" {o['supplier_inv_no']}) — {str(reason).strip()}",
+                     discount=disc)
     conn.execute("UPDATE set_purchases SET doc_no=?, entry_id=? WHERE id=?",
                  (doc_no, entry_id, rid))
     conn.execute("UPDATE journal_entries SET source_id=? WHERE id=?",
@@ -469,6 +522,8 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
             (rid, i, p["work_order_id"], p["wo_no"], p["model_no"],
              p["pieces"], p["w"], p["std_r"], p["karat"], p["wage"], p["pp"],
              p["wages"], p["gv"], p["net"], p["line_id"]))
+        if free:
+            continue                # الحر: لا بطاقة طقمٍ تُطوى
         if p["bulk"]:
             adjust_bulk_wo(conn, -p["w"], username, wo_id=p["work_order_id"])
         else:
@@ -481,8 +536,8 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
                f"{doc_no} ← {o['doc_no']} total={total}")
     return {"id": rid, "doc_no": doc_no, "entry_id": entry_id,
             "supplier_name": sup["name"], "net": net, "vat": vat,
-            "total": total, "weight": round(set_w + bulk_w, 3),
-            "n": len(prep)}
+            "total": total, "discount": disc, "free": free,
+            "weight": round(set_w + bulk_w, 3), "n": len(prep)}
 
 
 # ══════════════════════════ القراءة ══════════════════════════
@@ -538,8 +593,9 @@ def totals(conn, date_from, date_to):
     """صافي المشتريات الضريبية بالأطقم في الفترة (للإقرار): الوعاء والضريبة."""
     ensure_schema(conn)
     r = conn.execute(
-        "SELECT COALESCE(SUM(CASE WHEN kind='purchase' THEN net ELSE -net"
-        " END),0) base, COALESCE(SUM(CASE WHEN kind='purchase' THEN vat"
+        "SELECT COALESCE(SUM(CASE WHEN kind='purchase' THEN 1 ELSE -1 END"
+        " * (net - COALESCE(discount,0))),0) base,"
+        " COALESCE(SUM(CASE WHEN kind='purchase' THEN vat"
         " ELSE -vat END),0) vat, COUNT(*) n FROM set_purchases"
         " WHERE is_deleted=0 AND doc_date BETWEEN ? AND ?",
         (date_from, date_to)).fetchone()

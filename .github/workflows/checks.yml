@@ -79,6 +79,7 @@ jobs:
       - name: 4.5) المبيعات والمشتريات الضريبية بالأطقم · ملف الحساب (5.5)
         run: |
           python tools/check_tax_shop.py
+          python tools/check_tax_free.py
           python tools/check_account_profile.py
           python tools/check_plans.py
 

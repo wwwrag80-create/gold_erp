@@ -180,6 +180,9 @@ def vat_return(conn, date_from, date_to):
     # 5.5: وعاء الفاتورة الضريبية بالريال كاملاً = الأجور + قيمة الذهب
     _icols = {r[1] for r in conn.execute("PRAGMA table_info(invoices)")}
     _gv = " + COALESCE(gold_value,0)" if "gold_value" in _icols else ""
+    # 5.8.0: والخصم النقدي على الفاتورة يُطرح من الوعاء
+    if "discount" in _icols:
+        _gv += " - COALESCE(discount,0)"
     s = conn.execute(
         f"SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN total_wages{_gv}"
         f" ELSE -(total_wages{_gv}) END),0) base,"
@@ -463,7 +466,9 @@ def balance_sheet(conn, date_to=None, date_from=None):
     # ── أصول ثابتة القيد (تبقى أصولاً دائماً) ──
     boxes_g, boxes_c = bal(["1400", "1410", "1500"])
     # 4.39: الفصوص (5520) خرجت من المخزون إلى تكلفة الإيرادات
-    vault_g, vault_c = bal(["1100", "1200", "1210", "1250", "1300"])
+    # 5.8.0: «مخزون الذهب الضريبي» 1230 (الإدخال اليدوي) ضمن الخزائن
+    vault_g, vault_c = bal(["1100", "1200", "1210", "1230", "1250",
+                            "1300"])
     # سلف الموظفين والعمال والعهد — كلها أصول متداولة
     emp_g, emp_c = bal(["1950", "1960", "1970"])
     fixed_g, fixed_c = bal(["1700"])

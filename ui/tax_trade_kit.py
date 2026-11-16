@@ -226,19 +226,93 @@ class TotalsRow(QtWidgets.QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         self.setLayout(lay)
 
-    def show_totals(self, n, pieces, weight18, gv, wages, riyal):
+    def show_totals(self, n, pieces, weight18, gv, wages, riyal,
+                    discount=0.0):
         net = round(gv + wages, 2)
-        vat = tx.doc_vat(net)
+        # 5.8.0: الخصم النقدي يُطرح من الوعاء قبل الضريبة
+        disc = min(max(0.0, round(float(discount or 0), 2)), net)
+        base = round(net - disc, 2)
+        vat = tx.doc_vat(base)
         self.c_n.set_value(
             str(n), f"{w(weight18)} {kv.unit()}"
             + (f" · {pieces} قطعة" if pieces else "")
             + ("" if riyal else " — ذهبٌ بالوزن"))
         self.c_gv.set_value(m(gv) if riyal else "—")
         self.c_gv.setVisible(riyal)
-        self.c_net.set_value(m(net))
+        self.c_net.set_value(m(base), (f"{m(net)} − خصم {m(disc)}" if disc
+                                       else "قبل الضريبة"))
         self.c_vat.set_value(m(vat))
-        self.c_total.set_value(m(net + vat))
-        return net, vat, round(net + vat, 2)
+        self.c_total.set_value(m(base + vat))
+        return base, vat, round(base + vat, 2)
 
     def text(self, card):
         return card.value_lbl.text()
+
+
+# ══════════════════════════════════════════════════════════════════
+#  5.8.0: الإدخال اليدوي الحر · حساب المخزون · الخصم النقدي
+# ══════════════════════════════════════════════════════════════════
+class ModeBox(QtWidgets.QWidget):
+    """مصدر الأسطر: «إدخال يدوي حر» (أي رقم تشغيل بوزنه وعياره — الافتراضي)
+    أو «من أطقم الخزنة» (الطريق القديم: الطقم يخرج من خزنتك أو يدخلها)."""
+    changed = QtCore.pyqtSignal()
+
+    def __init__(self, vault_text="من أطقم الخزنة", parent=None):
+        super().__init__(parent)
+        self.b_free = kit.RadioButton("إدخال يدوي حر")
+        self.b_free.setToolTip(
+            "أي رقم تشغيل — ولو تكرّر أو لم يكن عندك — تكتب وزنه وعياره بيدك،"
+            "\nويتحرك الوزن في «مخزون الذهب الضريبي» (ويقبل السالب)")
+        self.b_vault = kit.RadioButton(vault_text)
+        self.b_vault.setToolTip("الطقم الحقيقي في خزنتك برقمه — كما كان")
+        g = QtWidgets.QButtonGroup(self)
+        g.addButton(self.b_free)
+        g.addButton(self.b_vault)
+        self.b_free.setChecked(True)
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.b_free)
+        lay.addSpacing(14)
+        lay.addWidget(self.b_vault)
+        lay.addStretch(1)
+        self.b_free.toggled.connect(lambda *_: self.changed.emit())
+
+    def is_free(self):
+        return self.b_free.isChecked()
+
+    def mode(self):
+        return "free" if self.is_free() else "vault"
+
+    def set_mode(self, mode):
+        (self.b_free if mode != "vault" else self.b_vault).setChecked(True)
+
+
+def fill_stock_accounts(cb, conn, keep=None):
+    """حسابات الإدخال الحر: مخزون الذهب الضريبي أولاً، ثم ما يصلح مثله."""
+    from models import tax_free
+    cur = keep if keep is not None else cb.currentData()
+    cb.blockSignals(True)
+    cb.clear()
+    for r in tax_free.stock_accounts(conn):
+        cb.addItem(f"{r['code']} — {r['name']}", int(r["id"]))
+    i = cb.findData(cur) if cur is not None else -1
+    cb.setCurrentIndex(i if i >= 0 else 0)
+    cb.blockSignals(False)
+
+
+def discount_spin():
+    sp = mspin()
+    sp.setToolTip("خصمٌ نقدي على الفاتورة كلها (ريال) — يُطرح من الصافي قبل "
+                  "الضريبة، فالضريبة على ما بعد الخصم")
+    return sp
+
+
+def balance_text(conn, account_id):
+    """«رصيد الحساب: X جم» — والسالب منبَّهٌ عليه (مسموحٌ به)."""
+    from models import tax_free
+    try:
+        b = tax_free.balance(conn, account_id)
+    except Exception:                                # noqa: BLE001
+        return ""
+    t = f"رصيده الآن: {w(b)} {kv.unit()}"
+    return t + (" — سالب (بيعٌ قبل شراء: مسموح)" if b < -0.0005 else "")

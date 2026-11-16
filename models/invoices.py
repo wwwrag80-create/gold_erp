@@ -551,6 +551,7 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
 
     item_gv = [0.0] * len(lines_info)
     gold_value = 0.0
+    disc = 0.0
     if tx:
         if internal:
             raise ValueError("الفاتورة الضريبية لا تكون لجهةٍ داخلية")
@@ -564,9 +565,14 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
         item_gv = [a[1] for a in amts]
         wages = round(sum(item_wages), 2)
         gold_value = round(sum(item_gv), 2)
-        # الضريبة على صافي المستند كلّه (ذهبٌ + أجور) مقرّبةً مرةً واحدة
-        vat = _tx.doc_vat(round(wages + gold_value, 2))
-        grand = round(wages + gold_value + vat, 2)
+        # 5.8.0: خصمٌ نقدي على المستند يُطرح من الوعاء قبل الضريبة
+        from models import tax_free as _tf
+        _tf.ensure_schema(conn)
+        disc = _tf.check_discount(round(wages + gold_value, 2),
+                                  tx.get("discount"))
+        # الضريبة على صافي المستند كلّه (ذهبٌ + أجور − الخصم) مرةً واحدة
+        vat = _tx.doc_vat(round(wages + gold_value - disc, 2))
+        grand = round(wages + gold_value - disc + vat, 2)
     elif internal:
         item_wages = [_line_wages(li, internal) for li in lines_info]
         wages = vat = grand = 0.0
@@ -587,9 +593,14 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     desc, lines = _entry_lines(conn, kind, internal, ent, acc_weights,
                                wages, vat, grand, apply_vat,
                                gold_value=gold_value, riyal=riyal)
+    if tx and disc:
+        lines.append({"account_id": acc_id(conn, _tf.DISC_ALLOWED),
+                      ("cash_debit" if kind == "sale" else "cash_credit"):
+                      disc, "line_desc": "خصم نقدي على الفاتورة"
+                      if kind == "sale" else "ردّ الخصم بنسبة المرتجع"})
     if tx:
         desc = (("فاتورة ضريبية" if kind == "sale"
-                 else "إشعار دائن — مرتجع مبيعات")
+                 else "إشعار دائن — مرتجع مبيعات ضريبي")
                 + f" ({_tx.PRICING_LABEL[tx['pricing']].split(' — ')[0]})"
                 + f" — {ent['name']}")
     if internal:
@@ -631,6 +642,9 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
              tx.get("ref_invoice_id"), tx.get("reason") or "",
              tx.get("subtype") or "", tx.get("buyer_name") or "",
              tx.get("buyer_phone") or "", tx.get("pay_mode") or "", inv_id))
+        if disc:
+            conn.execute("UPDATE invoices SET discount=? WHERE id=?",
+                         (disc, inv_id))
     inv_no = _numbering.next_no(conn, prefix)
     entry_id = post_entry(conn, invoice_date, f"{desc} — {inv_no}", lines,
                           source_table="invoices", source_id=inv_id,
@@ -695,7 +709,7 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
               f"{inv_no} vat={int(apply_vat)}")
     return {"id": inv_id, "invoice_no": inv_no, "total_weight": total_w,
             "total_wages": wages, "vat": vat, "grand_total": grand,
-            "gold_value": gold_value,
+            "gold_value": gold_value, "discount": disc,
             "pricing": tx["pricing"] if tx else "",
             "qr_base64": qr_b64, "qr_path": qr_path, "entry_id": entry_id,
             "vat_applied": bool(apply_vat), "internal": internal,

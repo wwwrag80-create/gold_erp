@@ -91,6 +91,13 @@ def _invoice(conn, sid):
                "weight": round(float(r["rw"] or 0), 3),
                "wages": float(r["wages"] or 0)}
         (italian if r["bulk"] else sets).append(row)
+    # 5.8.0: فاتورة ضريبية بالإدخال اليدوي — أسطرها برقمها كما كُتب
+    if "free_lines" in inv.keys() and inv["free_lines"]:
+        from models import tax_free as _tf
+        for ln in _tf.lines_of(conn, sid):
+            sets.append({"wo": ln["wo_no"], "model": ln["model_no"] or "",
+                         "weight": round(float(ln["weight"] or 0), 3),
+                         "wages": float(ln["wages"] or 0)})
     return {
         "kind": inv["kind"], "party": _party(conn, inv["customer_id"]),
         "models": _models(sets), "italian": italian,
@@ -204,7 +211,10 @@ def _lines(conn, eid):
 def _group(d):
     src, op = d.get("src"), d.get("op") or ""
     if src == "invoices":
-        return "sale_return" if op == "مرتجع" else "sale"
+        # 5.8.0: «مرتجع مبيعات ضريبي (إشعار دائن)» مرتجعٌ أيضاً
+        return "sale_return" if op.startswith("مرتجع") else "sale"
+    if src == "set_purchases":
+        return "purchase"
     if src == "vouchers":
         return "receipt" if op == "قبض" else "payment"
     if src == "work_orders":

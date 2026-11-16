@@ -400,8 +400,12 @@ def _set_purchase_rows(conn, date_from, date_to):
              "supplier_vat": r["supplier_vat"],
              "supplier_invoice_no": r["supplier_inv_no"],
              "invoice_type": "standard", "pay_mode": "credit",
-             "tax_treatment": "standard", "amount": r["net"],
-             "vat_amount": r["vat"], "total": r["total"], "discount": 0.0,
+             # 5.8.0: الصافي الخاضع بعد الخصم النقدي (الخصم للبيان)
+             "tax_treatment": "standard",
+             "amount": round(float(r["net"] or 0)
+                             - float(r["discount"] or 0), 2),
+             "vat_amount": r["vat"], "total": r["total"],
+             "discount": float(r["discount"] or 0),
              "is_return": 1 if r["kind"] == "purchase_return" else 0,
              "acc_code": "", "acc_name": "مشتريات أطقم"} for r in got]
 

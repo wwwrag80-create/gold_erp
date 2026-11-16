@@ -104,7 +104,7 @@ def _doc_info(conn, src, sid, cache):
             if "pricing" in r.keys() and (r["pricing"] or ""):
                 simple = ("tax_subtype" in r.keys()
                           and r["tax_subtype"] == "simplified")
-                label = ("مرتجع مبيعات (إشعار دائن)"
+                label = ("مرتجع مبيعات ضريبي (إشعار دائن)"
                          if r["kind"] == "sale_return" else
                          "مبيعات ضريبية مبسطة" if simple
                          else "مبيعات ضريبية")
@@ -112,7 +112,7 @@ def _doc_info(conn, src, sid, cache):
         r = conn.execute("SELECT kind FROM set_purchases WHERE id=?",
                          (sid,)).fetchone()
         if r:
-            label = ("مرتجع مشتريات" if r["kind"] == "purchase_return"
+            label = ("مرتجع مشتريات ضريبي" if r["kind"] == "purchase_return"
                      else "مشتريات ضريبية")
     elif src == "tax_sales":
         r = conn.execute("SELECT kind FROM tax_sales WHERE id=?",
@@ -129,6 +129,8 @@ SHORT_NAMES = {
     "1100": "خزينة التصنيع", "5520": "فصوص وأحجار",
     "5190": "مسترجع التصفية",
     "1200": "الذهب المشغول", "1210": "ايطالي / نواعم", "1250": "تسويات الأوزان",
+    "1230": "مخزون الذهب الضريبي", "4600": "خصم مكتسب",
+    "5200": "خصم مسموح به",
     "1300": "صناديق الكسر",
     "1310": "صندوق الكسر",
     "5125": "فاقد التصفية والصب", "5140": "فاقد بيع الذهب",

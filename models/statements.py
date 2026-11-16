@@ -1068,10 +1068,15 @@ def _cf_doc_type(conn, src, sid):
     from models import journal
     try:
         if src == "invoices" and sid:
-            r = conn.execute("SELECT kind FROM invoices WHERE id=?",
+            r = conn.execute("SELECT * FROM invoices WHERE id=?",
                              (sid,)).fetchone()
             if r:
+                # 5.8.0: الضريبية باسمها (مبيعات ضريبية · مرتجع مبيعات ضريبي)
+                if "pricing" in r.keys() and (r["pricing"] or ""):
+                    return journal._doc_info(conn, src, sid, {})[1]
                 return _CF_KIND_LABEL.get(r["kind"], "فاتورة")
+        if src in ("set_purchases", "tax_sales") and sid:
+            return journal._doc_info(conn, src, sid, {})[1]
         if src == "vouchers" and sid:
             r = conn.execute("SELECT kind FROM vouchers WHERE id=?",
                              (sid,)).fetchone()

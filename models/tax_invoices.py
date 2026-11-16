@@ -138,6 +138,7 @@ def norm(tax):
             "ref_invoice_id": tax.get("ref_invoice_id"),
             "reason": str(tax.get("reason") or "").strip(),
             "subtype": st, "pay_mode": pm,
+            "discount": round(float(tax.get("discount") or 0), 2),
             "buyer_name": str(tax.get("buyer_name") or "").strip()[:120],
             "buyer_phone": str(tax.get("buyer_phone") or "").strip()[:30]}
 
@@ -257,7 +258,7 @@ def _settle(conn, kind, entity_id, amount, mode, doc_date, username, note):
 def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
                    gold_price=0.0, price_karat=0, description="",
                    subtype="standard", buyer_name="", buyer_phone="",
-                   pay_mode="credit"):
+                   pay_mode="credit", discount=0.0):
     """فاتورة ضريبية بالأطقم: تخرج من الخزنة كفاتورة البيع تماماً.
 
     `cart` = [{work_order_id, weight (18 — فارغ = الباقي كله),
@@ -291,9 +292,12 @@ def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
                              " ذهباً على حسابٍ لا صاحب له)")
     tax = {"pricing": pricing, "gold_price": gold_price,
            "price_karat": price_karat, "subtype": subtype,
-           "pay_mode": pay_mode,
+           "pay_mode": pay_mode, "discount": discount,
            "buyer_name": buyer_name if is_walkin(conn, customer_id) else "",
            "buyer_phone": buyer_phone if is_walkin(conn, customer_id) else ""}
+    if float(discount or 0) > 0 and inv.split_cart(conn, cart):
+        raise ValueError("الخصم مع فاتورةٍ تجمع أطقماً وإيطالياً (0010 · "
+                         "00010) لا يُقسَم — أصدرهما فاتورتين")
     res = inv.create_sale(conn, customer_id, cart, doc_date, username,
                           apply_vat=True, description=description,
                           tax=tax)
@@ -318,6 +322,9 @@ def returnable(conn, invoice_id):
     [{item_id, work_order_id, wo_no, model_no, weight (المبيع), left,
       pieces, wage, piece_price, gold_value, karat}]"""
     ensure_schema(conn)
+    from models import tax_free as _tf
+    if _tf.is_free(conn, invoice_id):
+        return _tf.returnable(conn, invoice_id)
     out = []
     for it in conn.execute(
             "SELECT it.*, w.work_order_no wo_no, w.model_no,"
@@ -368,6 +375,10 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
                          " للهيئة")
     if str(doc_date) < str(o["invoice_date"]):
         raise ValueError("تاريخ الإشعار يسبق تاريخ الفاتورة الأصلية")
+    from models import tax_free as _tf
+    if _tf.is_free(conn, original_id):
+        return _tf.create_credit_note(conn, o, doc_date, returns, reason,
+                                      username)
     left = {r["item_id"]: r for r in returnable(conn, original_id)}
     cart = []
     for x in returns or []:
@@ -393,8 +404,24 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
     if not cart:
         raise ValueError("اختر طقماً واحداً على الأقل للإرجاع")
     od = dict(o)
+    # 5.8.0: يُردّ من خصم الأصل بنسبة ما أُرجع من صافيه
+    _disc = 0.0
+    if float(od.get("discount") or 0) > 0:
+        _t = norm({"pricing": o["pricing"], "gold_price": o["gold_price"],
+                   "price_karat": o["price_karat"]})
+        _rn = 0.0
+        for c in cart:
+            _w, _g = line_amounts({"weight": c["weight"],
+                                   "wage": c["wage_override"],
+                                   "piece_price": c["piece_price"],
+                                   "karat": c["karat"],
+                                   "gold_price": c["gold_price"]}, _t)
+            _rn += _w + _g
+        _on = float(o["total_wages"] or 0) + float(o["gold_value"] or 0)
+        _disc = _tf.share(od["discount"], round(_rn, 2), round(_on, 2))
     tax = {"pricing": o["pricing"], "gold_price": o["gold_price"],
            "price_karat": o["price_karat"], "ref_invoice_id": o["id"],
+           "discount": _disc,
            "reason": str(reason).strip(),
            # 5.5.1: الإشعار بنوع فاتورته ومشتريها وطريقة دفعها
            "subtype": od.get("tax_subtype") or "",
@@ -425,9 +452,12 @@ def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500,
            subtype=None):
     """سجل الفواتير والإشعارات الضريبية بالأطقم."""
     ensure_schema(conn)
+    from models import tax_free as _tf
+    _tf.ensure_schema(conn)
     sql = ("SELECT i.*, e.name customer_name, o.invoice_no ref_no,"
            " (SELECT COUNT(*) FROM invoice_items it WHERE"
-           "  it.invoice_id=i.id) n_items"
+           "  it.invoice_id=i.id) + (SELECT COUNT(*) FROM tax_free_lines f"
+           "  WHERE f.invoice_id=i.id) n_items"
            " FROM invoices i JOIN entities e ON e.id=i.customer_id"
            " LEFT JOIN invoices o ON o.id=i.ref_invoice_id"
            " WHERE i.is_deleted=0 AND COALESCE(i.pricing,'')<>''")
@@ -449,8 +479,10 @@ def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500,
                 " OR i.buyer_name LIKE ? OR i.buyer_phone LIKE ? OR EXISTS ("
                 "SELECT 1 FROM invoice_items it JOIN work_orders w"
                 " ON w.id=it.work_order_id WHERE it.invoice_id=i.id"
-                " AND w.work_order_no LIKE ?))")
-        args += [f"%{q}%"] * 5
+                " AND w.work_order_no LIKE ?) OR EXISTS (SELECT 1 FROM"
+                " tax_free_lines f WHERE f.invoice_id=i.id AND f.wo_no"
+                " LIKE ?))")
+        args += [f"%{q}%"] * 6
     sql += " ORDER BY i.invoice_date DESC, i.id DESC LIMIT ?"
     args.append(int(limit))
     return [dict(r) for r in conn.execute(sql, args)]
@@ -468,9 +500,11 @@ def open_invoices(conn):
 def totals(conn, date_from, date_to):
     """صافي المبيعات الضريبية بالأطقم في الفترة: الوعاء (أجور + ذهب) والضريبة."""
     ensure_schema(conn)
+    from models import tax_free as _tf
+    _tf.ensure_schema(conn)
     r = conn.execute(
         "SELECT COALESCE(SUM(CASE WHEN kind='sale' THEN 1 ELSE -1 END *"
-        " (total_wages + gold_value)),0) base,"
+        " (total_wages + gold_value - COALESCE(discount,0))),0) base,"
         " COALESCE(SUM(CASE WHEN kind='sale' THEN 1 ELSE -1 END *"
         " vat_amount),0) vat, COUNT(*) n FROM invoices WHERE is_deleted=0"
         " AND COALESCE(pricing,'')<>'' AND invoice_date BETWEEN ? AND ?",
