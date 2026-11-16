@@ -318,11 +318,21 @@ def _legacy(conn):
 
 
 # ─────────────────────────────── الفحص قبل التثبيت
+# الوضع الافتراضي حين لا يُضبط `JADEITE_STOCK_GUARD`:
+#   "on"     — يرفض كل عمليةٍ تُحدث فرقاً (الأصل)
+#   "report" — حمايةٌ موقوفة مؤقتاً: لا يرفض، ويسجّل كل تغيّرٍ في الفرق في
+#              سجل التتبع ويعتمد الوضع الجديد خطَّ أساس — فإذا عادت الحماية
+#              لم يعطّل العملَ شيءٌ مما صُحّح أثناء إيقافها
+# 5.7.1: "report" مؤقتاً بطلب صاحب النظام — لتصحيح قيدين يوميين قديمين على
+# الذهب المشغول — ويعود "on" في التحديث التالي.
+DEFAULT_MODE = "report"
+
+
 def mode():
-    """"on" (الافتراضي: يرفض) · "report" (يسجّل ولا يرفض — للاختبار) ·
-    "off" (معطّل). من `JADEITE_STOCK_GUARD`."""
+    """"on" (يرفض) · "report" (يسجّل ولا يرفض) · "off" (معطّل).
+    من `JADEITE_STOCK_GUARD`، وإلا `DEFAULT_MODE`."""
     import os
-    v = (os.environ.get("JADEITE_STOCK_GUARD") or "on").strip().lower()
+    v = (os.environ.get("JADEITE_STOCK_GUARD") or DEFAULT_MODE).strip().lower()
     return {"0": "off", "off": "off", "report": "report"}.get(v, "on")
 
 

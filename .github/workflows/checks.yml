@@ -27,6 +27,9 @@ jobs:
       # تثبيت مجلد البيانات: الفحص لا يتأثر بما قد يوجد على المشغّل،
       # ولا يكتب خارج مساحة العمل.
       JADEITE_DATA_DIR: ${{ github.workspace }}/.ci-data
+      # الفحوص تختبر حارس المخزون في وضعه الصارم دائماً — مهما كان وضعه
+      # الافتراضي في إصدارٍ بعينه
+      JADEITE_STOCK_GUARD: "on"
 
     steps:
       - uses: actions/checkout@v4

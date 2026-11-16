@@ -319,6 +319,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # 4.52: رابط دليل الموديلات للمدير — إن كان مفعّلاً يعود مع البرنامج
         # (في خيطٍ خلفي: أوامر Tailscale قد تستغرق ثواني)
         QtCore.QTimer.singleShot(3000, self._start_models_link)
+        # 5.7.1: إن كانت حماية المخزون موقوفةً مؤقتاً — تنبيهٌ واضح عند الدخول
+        QtCore.QTimer.singleShot(2200, self._warn_guard_off)
 
         # ── عيار المصنع ──
         # وحدة القراءة والكتابة في النظام كله. التخزين يبقى بمكافئ 18
@@ -2996,6 +2998,21 @@ class MainWindow(QtWidgets.QMainWindow):
         app = QtWidgets.QApplication.instance()
         if app is not None:
             app.quit()
+
+    def _warn_guard_off(self):
+        """حماية المخزون (الذهب المشغول · ايطالي/نواعم · حركة الأطقم) ليست
+        في وضعها الكامل — يُنبَّه المستخدم ليعيدها بعد ما يصحّحه."""
+        try:
+            from models import stock_guard
+            if stock_guard.mode() == "on":
+                return
+            info(self, "⚠ حماية المخزون موقوفةٌ مؤقتاً في هذا الإصدار.\n\n"
+                       "تستطيع الآن تعديل القيود اليومية القديمة على الذهب "
+                       "المشغول وتصحيحها — وكل تغيّرٍ يُسجَّل في سجل التتبع."
+                       "\n\nبعد أن تنتهي من التصحيح ثبّت التحديث التالي فوراً"
+                       " لتعود الحماية كاملة.")
+        except Exception:
+            pass
 
     def _start_models_link(self):
         try:
