@@ -740,11 +740,14 @@ def mark_cancelled(invoice_id, company=""):
         base = f"{tenant.effective_tenant_id()}/{r['share_token']}"
         # الإعلان صورةً كذلك: نفس سبب صفحة الفاتورة — التخزين لا يعرض
         # HTML، فإعلانٌ لا يُقرأ كإعلانٍ لم يكن.
-        shot = render_cancelled_image(r["invoice_no"], company)
+        # 5.7.0: المحذوف يحمل رقمه بعلامة الحذف (حُرِّر رقمه لمستندٍ تالٍ)
+        from models.numbering import RETIRED
+        no = str(r["invoice_no"] or "").split(RETIRED)[0]
+        shot = render_cancelled_image(no, company)
         if shot and _put(url, key, f"{base}/invoice.jpg", shot,
                          "image/jpeg"):
             return public_url(url, f"{base}/invoice.jpg")
-        page = _CANCELLED.format(no=_esc(r["invoice_no"]),
+        page = _CANCELLED.format(no=_esc(no),
                                  company=_esc(company))
         if _put(url, key, f"{base}/index.html", page.encode("utf-8"),
                 "text/html; charset=utf-8"):

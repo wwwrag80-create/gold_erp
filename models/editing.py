@@ -112,6 +112,43 @@ def repost(conn, entry_id, username, create_fn, *args, **kwargs):
     return res
 
 
+def repost_manual(conn, entry_id, entry_date, description, lines, username):
+    """تعديل قيد يومية يدوي **برقمه نفسه** (5.7.0).
+
+    يُعكس القديم ويُلغى (`void_for_edit`) ثم يُرحَّل الجديد بالرقم ذاته —
+    والقديم يُعاد تسميته (`…·محذوف·<معرّفه>`) فلا يتكرّر الرقم ولا تبقى
+    فجوة. ويرث الجديد موضع القديم في الكشوف (مفتاح الترتيب)."""
+    from models import numbering
+    from services.accounting_engine import post_entry
+    if not str(description or "").strip():
+        raise ValueError("أدخل بيان القيد")
+    old = conn.execute("SELECT * FROM journal_entries WHERE id=?",
+                       (int(entry_id),)).fetchone()
+    if not old:
+        raise ValueError("القيد الأصلي غير موجود")
+    if old["source_table"] not in (None, "", "manual"):
+        raise ValueError("ليس قيداً يدوياً — يُعدَّل من شاشته")
+    no = old["doc_no"] or ""
+    void_for_edit(conn, old["id"], username)
+    if no and numbering.RETIRED not in no:
+        conn.execute("UPDATE journal_entries SET doc_no=? WHERE id=?",
+                     (numbering.retire_name(no, old["id"]), old["id"]))
+    else:
+        no = None
+    desc = str(description).strip()
+    eid = post_entry(conn, entry_date, desc, lines, source_table="manual",
+                     username=username, note=desc, doc_no=no)
+    try:
+        k = conn.execute("SELECT COALESCE(sort_key, id) k FROM journal_entries"
+                         " WHERE id=?", (old["id"],)).fetchone()["k"]
+        conn.execute("UPDATE journal_entries SET sort_key=? WHERE id=?",
+                     (k, eid))
+    except Exception:
+        pass
+    log_edit(conn, username, "manual", old["id"], eid, eid)
+    return eid
+
+
 def load_document(conn, source_table, source_id):
     """يجلب بيانات المستند لتعبئة شاشته عند التعديل."""
     # اسم الجدول يُركَّب في نص SQL ولا يمكن تمريره كوسيط، فلا يُقبل

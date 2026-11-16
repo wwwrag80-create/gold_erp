@@ -115,6 +115,52 @@ def set_ops_enabled(conn, on, username=None):
     _set(conn, K_OPS, "1" if on else "0", username or WEB_USER)
 
 
+# 5.7.0: رمزٌ خاص بلوحة «تسجيل العمليات» — يُطلب قبل التسجيل والتعديل
+# والحذف والدمج من الرابط (ولو فُتح الرابط نفسه). يُضبط من نافذة «🔗 رابط
+# المدير» في البرنامج، ويبقى مفتوحاً على الجهاز 12 ساعة بملف تعريفٍ موقَّع.
+K_OPS_PIN = "mw_ops_pin"
+OPS_COOKIE = "mwop"
+OPS_HOURS = 12
+
+
+def has_ops_pin(conn):
+    return bool(_get(conn, K_OPS_PIN, "").strip())
+
+
+def set_ops_pin(conn, pin, username=None):
+    """رمز لوحة تسجيل العمليات: 4 إلى 12 خانة — وفارغٌ يلغيه."""
+    pin = str(pin or "").strip()
+    if pin and not (4 <= len(pin) <= 12):
+        raise ValueError("رمز اللوحة من 4 إلى 12 خانة")
+    _set(conn, K_OPS_PIN, _mw()._hash_pin(pin) if pin else "",
+         username or WEB_USER)
+    _mw()._audit(conn, username, "تعيين رمز لوحة تسجيل العمليات" if pin
+                 else "إلغاء رمز لوحة تسجيل العمليات")
+
+
+def _ops_cookie_value(csrf, h):
+    import hashlib
+    return hmac.new(str(csrf).encode("utf-8"), f"ops|{h}".encode("utf-8"),
+                    hashlib.sha256).hexdigest()[:40]
+
+
+def ops_unlocked(conn, headers, csrf):
+    """اللوحة مفتوحة: لا رمز لها، أو معه ملف تعريفها الموقَّع."""
+    h = _get(conn, K_OPS_PIN, "").strip()
+    if not h:
+        return True
+    got = _mw()._cookies(headers).get(OPS_COOKIE, "")
+    return bool(got) and hmac.compare_digest(got, _ops_cookie_value(csrf, h))
+
+
+def _safe_next(base, nxt):
+    nxt = str(nxt or "")
+    if nxt.startswith(base + "/") and "//" not in nxt[len(base):] \
+            and "\\" not in nxt and "\n" not in nxt and "\r" not in nxt:
+        return nxt
+    return base + "/ops"
+
+
 def _norm(t):
     t = str(t or "").strip().lower()
     for a, b in (("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ة", "ه"), ("ى", "ي"),
@@ -530,8 +576,30 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
                           "حدّثها ثم أعد المحاولة"}, 403)
         if head == "boxes":
             return _json(boxes_action(data))
-        if head == "api" and len(rest) == 3 and rest[1] == "post":
-            return _json(post_op(rest[2], data))
+        if head == "ops" and rest[1:2] == ["unlock"]:
+            return _unlock(data, base, csrf)
+        if head == "ops" and rest[1:2] == ["lock"]:
+            ck = (f"{OPS_COOKIE}=; Path={base}; Max-Age=0; HttpOnly;"
+                  " SameSite=Strict")
+            return _resp(303, "", headers={"Location": base + "/ops",
+                                           "Set-Cookie": ck})
+        if head == "api" and len(rest) >= 2 and rest[1] in (
+                "post", "edit", "delete", "merge"):
+            # كل كتابةٍ من الرابط خلف رمز اللوحة (إن ضُبط)
+            with db(readonly=True) as conn:
+                if not ops_unlocked(conn, headers, csrf):
+                    return _json({"ok": False, "locked": True,
+                                  "unlock": base + "/ops/unlock",
+                                  "error": "لوحة تسجيل العمليات برمز — "
+                                           "أدخل رمزها أولاً"})
+            if rest[1] == "post" and len(rest) == 3:
+                return _json(post_op(rest[2], data))
+            if rest[1] == "edit" and len(rest) == 4 and rest[3].isdigit():
+                return _json(edit_op(rest[2], int(rest[3]), data))
+            if rest[1] == "delete" and len(rest) == 2:
+                return _json(delete_op(data))
+            if rest[1] == "merge" and len(rest) == 2:
+                return _json(merge_op(data))
         return _json({"ok": False, "error": "غير موجود"}, 404)
     if method != "GET":
         return _resp(405, "")
@@ -552,7 +620,17 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
         if head == "stmt":
             return _resp(200, stmt_page(conn, base, csrf, query))
         if head == "ops":
-            return _resp(200, ops_page(conn, base, csrf, rest[1:]))
+            if rest[1:2] == ["unlock"]:
+                return _resp(200, unlock_page(
+                    base, csrf, _safe_next(base, query.get("next"))))
+            if not ops_unlocked(conn, headers, csrf) and ops_enabled(conn):
+                nxt = base + "/" + "/".join(rest) + (
+                    f"?edit={query.get('edit')}"
+                    if str(query.get("edit") or "").isdigit() else "")
+                return _resp(200, unlock_page(base, csrf,
+                                              _safe_next(base, nxt)))
+            return _resp(200, ops_page(conn, base, csrf, rest[1:], query,
+                                       has_ops_pin(conn)))
     return _resp(404, _mw()._GONE)
 
 
@@ -615,7 +693,7 @@ def search_parties(conn, q, limit=14, types=None):
             for r in (starts + has)[:limit]]
 
 
-def wo_info(conn, no, mode, date=None):
+def wo_info(conn, no, mode, date=None, edit_inv=None):
     """بيانات رقم التشغيل لسطر الإدخال — كما يستدعيها البرنامج."""
     from models import inventory
     from models import invoices as inv
@@ -639,7 +717,23 @@ def wo_info(conn, no, mode, date=None):
     kind = wm.SALE if mode == "sale" else wm.RETURN
     bulk = bool(wo["is_bulk"])
     avail = 0.0 if bulk else float(wm.default_weight(conn, wo, kind))
-    if not bulk:
+    # 5.7.0: في تعديل فاتورة — الطقم الذي فيها متاحٌ بوزنه فيها (سطرُه
+    # حُذف من النموذج ثم أُعيد)
+    mine = 0.0
+    if edit_inv and not bulk:
+        r = conn.execute("SELECT COALESCE(SUM(it.registered_weight),0) w"
+                         " FROM invoice_items it JOIN invoices i"
+                         " ON i.id=it.invoice_id AND i.is_deleted=0"
+                         " WHERE it.invoice_id=? AND it.work_order_id=?",
+                         (int(edit_inv), wo["id"])).fetchone()
+        mine = float(r["w"] or 0)
+    if mine > 0:
+        # حصّته في هذه الفاتورة + ما بقي متاحاً منه (في الخزنة للبيع، أو
+        # عند الجهات للمرتجع) — لا الوزن الافتراضي الكامل
+        st = wm.state(conn, wo)
+        free = float(st["rem"] if kind == wm.SALE else st["out"])
+        avail = round(mine + max(0.0, free), 3)
+    elif not bulk:
         why = wm.refusal(conn, wo, kind, date or _today().isoformat(), avail)
         if why == "none-left":
             need = "في الخزنة" if kind == wm.SALE else "مباعاً"
@@ -685,8 +779,10 @@ def api(conn, rest, query):
     if what == "party":
         return search_parties(conn, q)
     if what == "wo":
+        inv = str(query.get("inv") or "")
         return wo_info(conn, query.get("no"), query.get("mode") or "sale",
-                       _date(query.get("d")))
+                       _date(query.get("d")), int(inv) if inv.isdigit()
+                       else None)
     if what == "models":
         from models.models_catalog import model_names
         n = _norm(q)
@@ -1381,6 +1477,137 @@ def _doc_links(base, src, sid, eid):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  أزرار التعديل والحذف لكل سطر (5.7.0) — في كشف الحساب وحركة المصنع
+# ══════════════════════════════════════════════════════════════════
+
+def _acts_ctx(conn, rows):
+    """{رقم القيد: {kind, vat, rec}} لأسطر الصفحة — باستعلاماتٍ مجمّعة،
+    فلا يُسأل عن كل سطرٍ وحده. الحكم النهائي عند الحفظ (`doc_delete`)."""
+    if not ops_enabled(conn):
+        return None
+    inv_ids = {int(r["sid"]) for r in rows if r.get("src") == "invoices"
+               and r.get("sid")}
+    v_ids = {int(r["sid"]) for r in rows if r.get("src") == "vouchers"
+             and r.get("sid")}
+    eids = {int(r["eid"]) for r in rows if str(r.get("eid") or "").isdigit()}
+
+    def grab(sql, ids):
+        if not ids:
+            return []
+        ids = sorted(ids)
+        return conn.execute(sql.format(",".join("?" * len(ids))),
+                            ids).fetchall()
+    invs = {r["id"]: r for r in grab(
+        "SELECT id, kind, COALESCE(vat_applied,0) vat FROM invoices"
+        " WHERE id IN ({})", inv_ids)}
+    vs = {r["id"]: r["kind"] for r in grab(
+        "SELECT id, kind FROM vouchers WHERE id IN ({})", v_ids)}
+    try:
+        reversed_ = {r[0] for r in grab(
+            "SELECT src_entry_id FROM doc_reversals WHERE src_entry_id"
+            " IN ({})", eids)}
+    except Exception:
+        reversed_ = set()
+    out = {}
+    for r in rows:
+        eid = r.get("eid")
+        if not str(eid or "").isdigit():
+            continue
+        eid = int(eid)
+        src, sid = r.get("src"), r.get("sid")
+        info = None
+        if src == "invoices" and sid in invs and invs[sid]["kind"] in (
+                "sale", "sale_return"):
+            info = {"kind": invs[sid]["kind"], "vat": bool(invs[sid]["vat"]),
+                    "rec": sid}
+        elif src == "vouchers" and sid in vs:
+            info = {"kind": vs[sid], "vat": False, "rec": sid}
+        elif src in (None, "", "manual"):
+            info = {"kind": "journal", "vat": False, "rec": eid}
+        elif src == "fixing_ops":
+            info = {"kind": "fixing", "vat": False, "rec": sid}
+        if info:
+            info["reversed"] = eid in reversed_
+            out[eid] = info
+    return out
+
+
+def _row_acts(base, ctx, eid, no=""):
+    """✎ تعديل و🗑 حذف (أو ↺ عكس للضريبية) لسطر مستند."""
+    if not ctx or not str(eid or "").isdigit():
+        return ""
+    info = ctx.get(int(eid))
+    if not info or info["reversed"]:
+        return ""
+    out = ""
+    if info["kind"] in EDIT_KINDS:
+        out += (f'<a class="btn sm gh" href="'
+                f'{_e(_link(base, "/ops/" + info["kind"], edit=eid))}" '
+                f'title="تعديل في مكانه برقمه">{icon("edit", 14)}'
+                f'<span class="lbl">تعديل</span></a> ')
+    if info["vat"]:
+        out += (f'<button class="btn sm red" data-delx="{_e(eid)}" '
+                f'data-rev="1" data-no="{_e(no)}" title="فاتورة ضريبية — '
+                f'تُعكس بمرتجع">↺<span class="lbl"> عكس</span></button>')
+    else:
+        out += (f'<button class="btn sm red" data-delx="{_e(eid)}" '
+                f'data-no="{_e(no)}" title="حذف وعكس القيد — ورقمه للمستند '
+                f'التالي">{icon("trash", 14)}<span class="lbl">حذف</span>'
+                f'</button>')
+    return out
+
+
+_ACTS_CSS = """
+.tbl input.mg{width:18px;height:18px;margin:0 0 0 6px;vertical-align:middle;
+accent-color:#A8822E}
+.tbl .acts .btn{margin:1px 0}
+@media (max-width:640px){.tbl .acts .lbl{display:none}
+.tbl .acts .btn{padding:5px 7px}}
+"""
+
+
+_ACTS_JS = r"""
+(function(){
+ function nn(){return Date.now().toString(36)+Math.random().toString(36).slice(2,10);}
+ function locked(r){if(r&&r.locked&&r.unlock){location.href=r.unlock+'?next='+
+  encodeURIComponent(location.pathname+location.search);return true;}return false;}
+ document.addEventListener('click',function(e){
+  var b=e.target.closest?e.target.closest('[data-delx]'):null;if(!b)return;
+  e.preventDefault();var rev=b.getAttribute('data-rev')==='1',
+   no=b.getAttribute('data-no')||'';
+  MW.confirm(rev?'عكس الفاتورة الضريبية':'حذف وعكس القيد',rev?
+   ('الفاتورة '+no+' ضريبية — لا تُحذف نظاماً.\nتُعكس بمرتجعٍ يشير إليها،'+
+    ' وتبقى هي برقمها.'):
+   ('حذف '+no+' نهائياً؟\nيُعكس قيده كاملاً (الأرصدة والأطقم وصندوق الكسر)'+
+    '، ويختفي من الكشوف، وأول مستندٍ جديد من نوعه يأخذ رقمه.'))
+  .then(function(y){if(!y)return;b.disabled=true;
+   MW.post('/api/delete',{eid:+b.getAttribute('data-delx'),reverse:rev,
+    nonce:nn()}).then(function(r){if(locked(r))return;
+    if(!r.ok){b.disabled=false;MW.toast(r.error||'تعذّر',false);return;}
+    MW.toast(r.msg,true);setTimeout(function(){location.reload();},1100);});});});
+ var mg=document.getElementById('mgbtn');if(!mg)return;
+ function sel(){return Array.prototype.slice.call(
+  document.querySelectorAll('input.mg:checked'));}
+ document.addEventListener('change',function(e){var t=e.target;
+  if(!t.classList||!t.classList.contains('mg'))return;var n=sel().length;
+  mg.style.display=n>=2?'':'none';mg.textContent='⧉ دمج المحدد ('+n+')';});
+ mg.onclick=function(){var s=sel(),ks={};
+  s.forEach(function(x){ks[x.getAttribute('data-k')]=1;});
+  if(Object.keys(ks).length>1){MW.toast('الدمج لفواتير من نوعٍ واحد: مبيعات '+
+   'مع مبيعات أو مرتجع مع مرتجع',false);return;}
+  var nos=s.map(function(x){return x.getAttribute('data-no');});
+  MW.confirm('دمج الفواتير','دمج '+nos.join('، ')+' في أقدمها؟\nتنتقل إليها '+
+   'الأطقم كلها بأوزانها وأجورها، وتُلغى الأخرى ويأخذ رقمَها أولُ فاتورةٍ'+
+   ' جديدة من نوعها.').then(function(y){if(!y)return;mg.disabled=true;
+   MW.post('/api/merge',{ids:s.map(function(x){return +x.getAttribute('data-id');}),
+    nonce:nn()}).then(function(r){if(locked(r))return;mg.disabled=false;
+    if(!r.ok){MW.toast(r.error||'تعذّر الدمج',false);return;}
+    MW.toast(r.msg,true);setTimeout(function(){location.reload();},1300);});});};
+})();
+"""
+
+
+# ══════════════════════════════════════════════════════════════════
 #  حركة المصنع — لوحاتٌ بالأنواع، ثم سجلّ النوع المختار
 # ══════════════════════════════════════════════════════════════════
 
@@ -1440,6 +1667,7 @@ def moves_page(conn, base, csrf, query):
         return frame(base, "moves", "حركة المصنع", head, csrf)
     u = _e(_unit())
     docs = data["docs"]
+    actx = _acts_ctx(conn, docs)
     title = dict(MOVE_KINDS)[g]
     tw = round(sum(float(d.get("weight") or 0) for d in docs), 3)
     rows = []
@@ -1465,6 +1693,7 @@ def moves_page(conn, base, csrf, query):
             f'</td><td class="n">{_w(w) + " " + u if w else "—"} {sets}</td>'
             f'<td>{_e(_amount_txt(d))}</td>'
             f'<td class="acts">{_doc_links(base, d.get("src"), d.get("sid"), d.get("eid"))}'
+            f' {_row_acts(base, actx, d.get("eid"), d.get("no"))}'
             f'</td></tr>')
     body = (f'<div class="panel"><h3>{icon(g, 20)}{_e(title)} — '
             f'{_e(_span(d1, d2))}<span class="pill">{len(docs)} عملية</span>'
@@ -1480,7 +1709,7 @@ def moves_page(conn, base, csrf, query):
                f'<div class="empty">لا {_e(title)} في {_e(_span(d1, d2))}'
                '</div>') + '</div>')
     return frame(base, "moves", f"حركة المصنع — {title}", head + body, csrf,
-                 js=_SEARCH_JS)
+                 css=_ACTS_CSS, js=_SEARCH_JS + _ACTS_JS)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1525,14 +1754,27 @@ def stmt_page(conn, base, csrf, query):
     rows = journal.statement(conn, ids if len(ids) > 1 else acc["id"],
                              d1, d2)
     u = _e(_unit())
+    actx = _acts_ctx(conn, [r for r in rows if r.get("op") != "رصيد سابق"])
+    n_mg = 0
     trs = []
     for r in rows:
         s = " ".join(str(x) for x in (r.get("doc_no"), r.get("op"),
                                       r.get("name"), r.get("desc")) if x)
         acts = ("" if r.get("op") == "رصيد سابق" else
-                _doc_links(base, r.get("src"), r.get("sid"), r.get("eid")))
+                _doc_links(base, r.get("src"), r.get("sid"), r.get("eid"))
+                + " " + _row_acts(base, actx, r.get("eid"), r.get("doc_no")))
+        # 5.7.0: فواتير البيع (أو المرتجع) غير الضريبية تُختار للدمج
+        info = (actx or {}).get(int(r["eid"])) if str(
+            r.get("eid") or "").isdigit() else None
+        mg = ""
+        if info and info["kind"] in ("sale", "sale_return") \
+                and not info["vat"] and not info["reversed"]:
+            n_mg += 1
+            mg = (f'<input type="checkbox" class="mg" data-id="'
+                  f'{_e(info["rec"])}" data-k="{_e(info["kind"])}" data-no="'
+                  f'{_e(r.get("doc_no") or "")}" title="اختر للدمج">')
         trs.append(
-            f'<tr data-s="{_e(s.lower())}"><td class="n">{_e(r["date"])}</td>'
+            f'<tr data-s="{_e(s.lower())}"><td class="n">{mg}{_e(r["date"])}</td>'
             f'<td>{_e(r.get("op") or "")}</td><td class="n">'
             f'{_e(r.get("doc_no") or "")}</td><td>{_e(r.get("name") or "")}'
             + (f'<br><small class="note">{_e(r["desc"])}</small>'
@@ -1554,9 +1796,11 @@ def stmt_page(conn, base, csrf, query):
           f'<div class="kpi"><div class="k">الحركات</div><div class="v">'
           f'{max(0, len(rows) - (1 if rows and rows[0].get("op") == "رصيد سابق" else 0))}'
           f'</div><div class="s">{_e(_span(d1, d2))}</div></div></div>')
+    mg_btn = ('<button class="btn sm gold" id="mgbtn" style="display:none">'
+              '⧉ دمج المحدد</button>' if n_mg >= 2 else "")
     table = (f'<div class="panel"><h3>{icon("stmt", 20)}{_e(acc["name"])}'
              f'<span class="pill">{_e(acc["code"])}</span><span class="sp">'
-             f'</span><input id="mq" placeholder="ابحث في الكشف…" '
+             f'</span>{mg_btn}<input id="mq" placeholder="ابحث في الكشف…" '
              f'style="min-width:220px"></h3><div class="scroll"><table '
              f'class="tbl"><tr><th>التاريخ</th><th>العملية</th><th>المستند'
              f'</th><th>الطرف / البيان</th><th class="n">مدين ذهب</th>'
@@ -1569,7 +1813,7 @@ def stmt_page(conn, base, csrf, query):
     inner = (head + _period_bar(base, "/stmt", key, d1, d2, keep) + kp
              + table)
     return frame(base, "stmt", f"كشف حساب — {acc['name']}", inner, csrf,
-                 js=_STMT_JS + _SEARCH_JS)
+                 css=_ACTS_CSS, js=_STMT_JS + _SEARCH_JS + _ACTS_JS)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1640,13 +1884,56 @@ def _lock_page(base, csrf, why):
         'بتسجيل العمليات من الرابط».</p></div>'), csrf)
 
 
-def ops_page(conn, base, csrf, rest):
+def unlock_page(base, csrf, nxt, error=""):
+    """رمز لوحة تسجيل العمليات — يُطلب مرةً ويبقى 12 ساعة على الجهاز."""
+    return frame(base, "ops", "رمز لوحة تسجيل العمليات", (
+        f'<div class="ptitle"><h2>{icon("lock", 22)}لوحة تسجيل العمليات'
+        f'</h2></div><div class="panel" style="max-width:460px;margin:20px '
+        f'auto"><p class="note" style="margin-top:0">التسجيل والتعديل والحذف '
+        f'والدمج من الرابط برمزٍ خاص ضبطه المدير في البرنامج. أدخله لفتح '
+        f'اللوحة على هذا الجهاز {OPS_HOURS} ساعة.</p>'
+        + (f'<div class="msg bad">{_e(error)}</div>' if error else "")
+        + f'<form method="post" action="{_e(base + "/ops/unlock")}" '
+        f'class="fl" style="margin:0"><input type="hidden" name="csrf" '
+        f'value="{_e(csrf)}"><input type="hidden" name="next" value="'
+        f'{_e(nxt)}"><label style="flex:1 1 200px">رمز اللوحة<input '
+        f'name="pin" type="password" inputmode="numeric" maxlength="12" '
+        f'autocomplete="off" autofocus required></label><button class="btn">'
+        f'{icon("lock", 16)}فتح اللوحة</button></form></div>'), csrf)
+
+
+def _unlock(data, base, csrf):
+    from database.database import db
+    m = _mw()
+    nxt = _safe_next(base, data.get("next"))
+    with db(readonly=True) as conn:
+        h = _get(conn, K_OPS_PIN, "").strip()
+    if not h:
+        return _resp(303, "", headers={"Location": nxt})
+    if m._locked():
+        return _resp(429, unlock_page(base, csrf, nxt, "محاولات كثيرة — "
+                                      "انتظر ربع ساعة ثم حاول ثانيةً"))
+    if not m._pin_ok(h, str(data.get("pin") or "").strip()):
+        m._fail()
+        return _resp(401, unlock_page(base, csrf, nxt, "الرمز غير صحيح"))
+    ck = (f"{OPS_COOKIE}={_ops_cookie_value(csrf, h)}; Path={base}; "
+          f"Max-Age={OPS_HOURS * 3600}; HttpOnly; SameSite=Strict")
+    return _resp(303, "", headers={"Location": nxt, "Set-Cookie": ck})
+
+
+def ops_page(conn, base, csrf, rest, query=None, has_pin=False):
     # 5.6.1: خيارٌ واحد يقرّره المدير — «يُسمح» أو «لا يُسمح» — بلا اشتراط
-    # رمز دخول (الرمز يبقى حمايةً اختيارية للرابط كله)
+    # رمز دخول (الرمز يبقى حمايةً اختيارية للرابط كله). 5.7.0: ورمزٌ خاص
+    # باللوحة (`has_ops_pin`) يُطلب قبلها في `route`
+    query = query or {}
     if not ops_enabled(conn):
         return _lock_page(base, csrf, "تسجيل العمليات من الرابط موقوفٌ من "
                                       "البرنامج.")
     kind = rest[0] if rest else ""
+    lock_btn = (f'<form method="post" action="{_e(base + "/ops/lock")}" '
+                f'style="margin:0"><input type="hidden" name="csrf" value="'
+                f'{_e(csrf)}"><button class="btn sm gh">{icon("lock", 15)}'
+                f'قفل اللوحة</button></form>' if has_pin else "")
     if kind not in dict((k, t) for k, t, _s in OPS):
         tiles = "".join(
             f'<a class="tile main" href="{_e(_link(base, f"/ops/{k}"))}">'
@@ -1656,10 +1943,21 @@ def ops_page(conn, base, csrf, rest):
         return frame(base, "ops", "تسجيل عمليات", (
             f'<div class="ptitle"><h2>{icon("ops", 22)}تسجيل عمليات</h2>'
             f'<span class="hint">تُرحَّل في جهاز المصنع كأنها أُدخلت منه — '
-            f'باسم «{WEB_USER}»</span></div><div class="tiles">{tiles}</div>'
+            f'باسم «{WEB_USER}»</span><span class="sp"></span>{lock_btn}'
+            f'</div><div class="tiles">{tiles}</div>'
             + recent), csrf)
-    return frame(base, "ops", dict((k, t) for k, t, _s in OPS)[kind],
-                 _op_form(conn, base, kind), csrf, js=_OPS_JS)
+    edit = None
+    eq = str(query.get("edit") or "")
+    if eq.isdigit():
+        try:
+            edit = edit_payload(conn, kind, int(eq))
+        except ValueError as e:
+            return frame(base, "ops", "تعديل", (
+                f'<div class="ptitle"><h2>{icon("edit", 22)}تعديل</h2></div>'
+                f'<div class="msg bad">{_e(str(e))}</div>'), csrf)
+    title = dict((k, t) for k, t, _s in OPS)[kind]
+    return frame(base, "ops", (f"تعديل {edit['no']}" if edit else title),
+                 _op_form(conn, base, kind, edit), csrf, js=_OPS_JS)
 
 
 def _recent_web(conn, base):
@@ -1687,7 +1985,7 @@ def _sel(name, opts, val=None, cls=""):
         f'{_e(t)}</option>' for k, t in opts) + '</select>')
 
 
-def _op_form(conn, base, kind):
+def _op_form(conn, base, kind, edit=None):
     from services import karat_view as kv
     import config
     k = int(kv.active())
@@ -1700,12 +1998,19 @@ def _op_form(conn, base, kind):
     data["gaccs"] = gaccs
     default_acc = next((a["id"] for a in gaccs if a["code"] == "1200"),
                        gaccs[0]["id"] if gaccs else "")
-    head = (f'<div class="ptitle"><h2>{icon(OP_ICON.get(kind, kind), 22)}'
+    if edit:
+        # 5.7.0: التعديل في مكانه — برقم المستند نفسه
+        data["edit"] = edit
+        title = f"تعديل {edit['label']} {edit['no']}"
+    head = (f'<div class="ptitle"><h2>{icon("edit" if edit else OP_ICON.get(kind, kind), 22)}'
             f'{_e(title)}</h2><a class="btn gh sm" href="'
             f'{_e(_link(base, "/ops"))}">← كل العمليات</a><span class="sp">'
-            f'</span><span class="hint">تُرحَّل باسم «{WEB_USER}» — '
-            f'وتظهر في البرنامج فوراً</span></div>'
-            f'<div id="okbox" class="msg ok" style="display:none"></div>')
+            f'</span><span class="hint">'
+            + (f'يُحفظ في مكانه برقمه {_e(edit["no"])} — وينعكس في البرنامج'
+               f' فوراً' if edit else
+               f'تُرحَّل باسم «{WEB_USER}» — وتظهر في البرنامج فوراً')
+            + '</span></div>'
+            '<div id="okbox" class="msg ok" style="display:none"></div>')
     date_f = (f'<label>التاريخ<input id="date" type="date" value="{today}" '
               f'max="{today}"></label>')
     notes_f = ('<label class="w2">البيان (اختياري)<input id="notes" '
@@ -1831,6 +2136,8 @@ def _op_form(conn, base, kind):
               ' style="margin:12px 0 0"></div></section>')
         data["disc"] = float(config.STONE_DISCOUNT_RATE)
         btn = "✔ ترحيل دفعة التوريد"
+    if edit:
+        btn = "✔ حفظ التعديل"
     return (head + h1 + h2 + h3
             + f'<div style="display:flex;gap:10px;align-items:center;'
               f'flex-wrap:wrap"><button class="btn big" id="post">{_e(btn)}'
@@ -1873,7 +2180,8 @@ _OPS_JS = r"""
   var cur=null,curK=D.k;
   function look(){var no=$('eno').value.trim();if(!no)return;
    if(cur&&cur.no===no)return;cur=null;$('einfo').textContent='…';
-   MW.get('/api/wo',{no:no,mode:K==='sale'?'sale':'return',d:$('date').value})
+   MW.get('/api/wo',{no:no,mode:K==='sale'?'sale':'return',d:$('date').value,
+    inv:(D.edit&&D.edit.inv)||''})
    .then(function(r){if(!r.ok){$('einfo').textContent='';MW.toast(r.error,false);
      $('eno').select();return;}
     cur=r;$('emodel').value=r.model||'—';$('ek').value=r.karat;curK=r.karat;
@@ -1933,6 +2241,12 @@ _OPS_JS = r"""
     '\nعدد الأطقم: '+n+'\nالتاريخ: '+$('date').value+
     ($('vat').checked?'\nفاتورة ضريبية':'');};
   reset=function(){lines=[];render();$('notes').value='';};
+  if(D.edit){var E=D.edit;party=E.party;if(party){$('party').value=party.label;
+    $('pinfo').textContent=party.sub||'';}
+   if(E.src)$('src').value=E.src;scrapToggle();
+   if(E.scrap_karat)$('scrapk').value=E.scrap_karat;
+   $('date').value=E.date;$('vat').checked=!!E.vat;$('notes').value=E.notes||'';
+   lines=E.lines.slice();}
   render();}
  // ═══ قبض · صرف ═══
  else if(K==='receipt'||K==='payment'){
@@ -1973,6 +2287,11 @@ _OPS_JS = r"""
     lines.length+'\n'+($('box').selectedOptions[0]||{}).text+'\nالتاريخ: '+
     $('date').value;};
   reset=function(){lines=[];render();$('notes').value='';};
+  if(D.edit){var E=D.edit;
+   if(E.party){party=E.party;$('party').value=party.label;$('tmode').value='party';}
+   else if(E.acc){acc=E.acc;$('acc').value=acc.label;$('tmode').value='account';}
+   mode();$('box').value=E.box||'1400';$('date').value=E.date;
+   $('notes').value=E.notes||'';lines=E.rows.slice();}
   render();}
  // ═══ قيد يومي ═══
  else if(K==='journal'){
@@ -2004,6 +2323,8 @@ _OPS_JS = r"""
   summary=function(){return 'البيان: '+$('notes').value+'\nالأسطر: '+lines.length+
    '\nالتاريخ: '+$('date').value;};
   reset=function(){lines=[];render();$('notes').value='';};
+  if(D.edit){$('date').value=D.edit.date;$('notes').value=D.edit.notes||'';
+   lines=D.edit.lines.slice();}
   render();}
  // ═══ توريد ═══
  else if(K==='supply'){
@@ -2046,19 +2367,26 @@ _OPS_JS = r"""
   render();}
  $('clear').onclick=function(){if(lines.length&&!confirm('تفريغ الأسطر؟'))return;
   reset();};
- var busy=false;
+ var busy=false,EDIT=D.edit||null,
+  PURL=EDIT?('/api/edit/'+K+'/'+EDIT.eid):('/api/post/'+K);
  $('post').onclick=function(){if(busy)return;var p=build();if(!p)return;
-  MW.confirm('تأكيد الترحيل',summary()+'\n\nتُرحَّل في دفاتر المصنع الآن.')
+  MW.confirm(EDIT?'تأكيد التعديل':'تأكيد الترحيل',summary()+(EDIT?
+   '\n\nيُحفظ في مكانه برقمه '+EDIT.no+' — وينعكس في دفاتر المصنع الآن.':
+   '\n\nتُرحَّل في دفاتر المصنع الآن.'))
   .then(function(y){if(!y)return;busy=true;var b=$('post');b.disabled=true;
-   var t=b.textContent;b.textContent='… جارٍ الترحيل';p.nonce=NONCE;
-   MW.post('/api/post/'+K,p).then(function(r){busy=false;b.disabled=false;
-    b.textContent=t;if(!r.ok){MW.toast(r.error||'تعذّر الترحيل',false);return;}
-    NONCE=nn();reset();var ok=$('okbox');ok.style.display='block';
+   var t=b.textContent;b.textContent=EDIT?'… جارٍ الحفظ':'… جارٍ الترحيل';
+   p.nonce=NONCE;
+   MW.post(PURL,p).then(function(r){busy=false;b.disabled=false;
+    b.textContent=t;if(!r.ok){if(r.locked&&r.unlock){location.href=r.unlock+
+     '?next='+encodeURIComponent(location.pathname+location.search);return;}
+     MW.toast(r.error||'تعذّر الترحيل',false);return;}
+    if(EDIT){lines=[];b.style.display='none';$('clear').style.display='none';}
+    NONCE=nn();if(!EDIT)reset();var ok=$('okbox');ok.style.display='block';
     ok.innerHTML='✔ '+MW.esc(r.msg)+(r.links||[]).map(function(l){
      return ' <a class="btn sm gh" target="_blank" rel="noopener" href="'+
      MW.esc(MW.base+l[1])+'">'+MW.esc(l[0])+'</a>';}).join('');
     ok.scrollIntoView({behavior:'smooth',block:'center'});
-    MW.toast('تم الترحيل: '+(r.no||''),true);});});};
+    MW.toast((EDIT?'تم حفظ التعديل: ':'تم الترحيل: ')+(r.no||''),true);});});};
  window.addEventListener('beforeunload',function(e){if(lines.length){
   e.preventDefault();e.returnValue='';}});
 })();
@@ -2140,10 +2468,14 @@ def _lines_of(data, key="lines"):
     return [r for r in rows if isinstance(r, dict)]
 
 
-def _post_invoice(conn, kind, data):
-    from models import inventory, invoices
+def _invoice_input(conn, kind, data, orig=None):
+    """(الطرف، الحساب، العيار، التاريخ، الضريبة، البيان، السلة) من خانات
+    النموذج — مُتحقَّقاً. `orig` في التعديل: {طقم: (الوزن المخزَّن، الأجر
+    المخزَّن)} فيبقى ما لم يُغيَّر كما هو بلا تقريبٍ ذهاباً وإياباً."""
+    from models import inventory
     from models import wo_moves as wm
     from services import karat_view as kv
+    orig = orig or {}
     pid = _id(data.get("party"), "الطرف")
     ent = _entity(conn, pid)
     internal = ent["entity_type"] == "internal"
@@ -2167,34 +2499,50 @@ def _post_invoice(conn, kind, data):
         if wv <= 0:
             raise ValueError(f"اكتب وزن الطقم {wo['work_order_no']}")
         w18 = kv.store(wv, k)
-        if not wo["is_bulk"]:
+        o = orig.get(wo["id"])
+        if o and abs(kv.g(o[0], k) - wv) <= 0.0051:
+            w18 = o[0]          # سطر الفاتورة المعدَّلة كما كان
+        elif not wo["is_bulk"]:
             # الوزن كما هو مخزَّن إن لم يُغيَّر — بلا تقريبٍ ذهاباً وإياباً
             avail = float(wm.default_weight(conn, wo, wk))
             if avail and abs(kv.g(avail, k) - wv) <= 0.0051:
                 w18 = avail
         rate = _f(li.get("wage"), "الأجر", 0.0, 1e6)
+        r18 = kv.rate_store(rate, k)
+        if o and o[1] is not None and abs(kv.rate(o[1], k) - rate) <= 0.0051:
+            r18 = o[1]
         cart.append({"work_order_id": wo["id"], "weight": w18, "karat": k,
                      "diamond": _f(li.get("diamond"), "الماس", 0.0, 1e5),
-                     "wage_override": (None if internal
-                                       else kv.rate_store(rate, k))})
-    fn = invoices.create_sale if kind == "sale" else invoices.create_sale_return
-    res = fn(conn, pid, cart, date, WEB_USER, vat, desc,
-             source_account_id=src, scrap_karat=karat)
-    docs = [res] + ([res["split"]] if res.get("split") else [])
+                     "wage_override": None if internal else r18})
+    return pid, ent, src, karat, date, vat, desc, cart
+
+
+def _inv_links(docs):
     links = []
     for d in docs:
         links.append((f"🖼 صور {d['invoice_no']}",
                       f"/doc/invoice_models/{d['id']}"))
         links.append((f"📄 الفاتورة {d['invoice_no']}",
                       f"/doc/invoices/{d['id']}"))
+    return links
+
+
+def _post_invoice(conn, kind, data):
+    from models import invoices
+    pid, ent, src, karat, date, vat, desc, cart = _invoice_input(conn, kind,
+                                                                 data)
+    fn = invoices.create_sale if kind == "sale" else invoices.create_sale_return
+    res = fn(conn, pid, cart, date, WEB_USER, vat, desc,
+             source_account_id=src, scrap_karat=karat)
+    docs = [res] + ([res["split"]] if res.get("split") else [])
+    links = _inv_links(docs)
     nos = " · ".join(d["invoice_no"] for d in docs)
     label = "فاتورة المبيعات" if kind == "sale" else "فاتورة المرتجع"
     return {"ok": True, "no": nos, "id": res["id"], "links": links,
             "msg": f"رُحّلت {label} {nos} — «{ent['name']}»"}
 
 
-def _post_voucher(conn, kind, data):
-    from models import vouchers
+def _voucher_input(conn, data):
     pid = data.get("party")
     aid = data.get("account")
     if pid:
@@ -2224,6 +2572,14 @@ def _post_voucher(conn, kind, data):
             rows.append({"kind": "cash",
                          "amount": _f(r.get("amount"), "المبلغ", 0.01, 1e10),
                          "notes": _txt(r.get("notes"), 120)})
+    if not rows:
+        raise ValueError("أضف سطراً واحداً على الأقل")
+    return pid, aid, target, box, rows
+
+
+def _post_voucher(conn, kind, data):
+    from models import vouchers
+    pid, aid, target, box, rows = _voucher_input(conn, data)
     res = vouchers.create_voucher(
         conn, kind, _post_date(data.get("date")), WEB_USER, entity_id=pid,
         account_id=aid, rows=rows, cash_account_code=box,
@@ -2235,8 +2591,7 @@ def _post_voucher(conn, kind, data):
             "msg": f"رُحّل {label} {res['voucher_no']} — {target}"}
 
 
-def _post_journal(conn, data):
-    from models import journal
+def _journal_input(conn, data):
     from services import karat_view as kv
     desc = _txt(data.get("notes"), 300)
     if not desc:
@@ -2255,6 +2610,12 @@ def _post_journal(conn, data):
             "cash_debit": round(_f(li.get("cd"), "مدين نقد", 0, 1e11), 2),
             "cash_credit": round(_f(li.get("cc"), "دائن نقد", 0, 1e11), 2),
             "line_desc": _txt(li.get("note"), 120)})
+    return desc, lines
+
+
+def _post_journal(conn, data):
+    from models import journal
+    desc, lines = _journal_input(conn, data)
     eid = journal.manual_entry(conn, _post_date(data.get("date")), desc,
                                lines, WEB_USER)
     no = conn.execute("SELECT doc_no FROM journal_entries WHERE id=?",
@@ -2301,17 +2662,16 @@ def _post_supply(conn, data):
             "msg": f"رُحّلت دفعة التوريد {no} — {len(rows)} طقم"}
 
 
-def post_op(kind, data):
-    """يرحّل عمليةً من الرابط — أو {"ok": False, "error"} بسببٍ مفهوم."""
+def _guarded(data, fn, kind, action="web_post", where="post_op"):
+    """كل كتابةٍ من الرابط: nonce واحد = ترحيلٌ واحد، وقفلٌ يُرتّبها،
+    ومعاملةٌ ذرّية، والتسجيل مسموحٌ من البرنامج — وإلا سببٌ مفهوم."""
     from database.database import db
-    if kind not in dict((k, t) for k, t, _s in OPS):
-        return {"ok": False, "error": "عمليةٌ غير معروفة"}
     nonce = _txt(data.get("nonce"), 40)
     if len(nonce) < 8:
         return {"ok": False, "error": "حدّث الصفحة ثم أعد المحاولة"}
     with _post_lock:
         if nonce in _nonces:
-            # الضغط مرتين أو إعادة الإرسال: الترحيل الأول نفسه — لا ثانٍ
+            # الضغط مرتين أو إعادة الإرسال: الأول نفسه — لا ثانٍ
             return dict(_nonces[nonce], again=True)
         try:
             with db(readonly=True) as conn:
@@ -2319,32 +2679,287 @@ def post_op(kind, data):
                     return {"ok": False, "error": "تسجيل العمليات من الرابط "
                                                   "موقوفٌ من البرنامج"}
             with db() as conn:
-                if kind in ("sale", "sale_return"):
-                    res = _post_invoice(conn, kind, data)
-                elif kind in ("receipt", "payment"):
-                    res = _post_voucher(conn, kind, data)
-                elif kind == "journal":
-                    res = _post_journal(conn, data)
-                else:
-                    res = _post_supply(conn, data)
-                _audit(conn, kind, res)
+                res = fn(conn)
+                _audit(conn, kind, res, action)
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         except Exception as e:                   # noqa: BLE001
             try:
                 from services.health import log_error
-                log_error("manager_web/post_op", e)
+                log_error(f"manager_web/{where}", e)
             except Exception:
                 pass
-            return {"ok": False, "error": "تعذّر الترحيل — خطأٌ في البرنامج "
+            return {"ok": False, "error": "تعذّر الحفظ — خطأٌ في البرنامج "
                                           f"على جهاز المصنع ({type(e).__name__})"}
         _nonces[nonce] = res
         while len(_nonces) > _NONCE_CAP:
             _nonces.popitem(last=False)
-        return res
+    if res.get("cancel_invoice"):
+        try:
+            from models import doc_delete
+            doc_delete._announce_cancel(res["cancel_invoice"])
+        except Exception:
+            pass
+    return res
 
 
-def _audit(conn, kind, res):
+def post_op(kind, data):
+    """يرحّل عمليةً من الرابط — أو {"ok": False, "error"} بسببٍ مفهوم."""
+    if kind not in dict((k, t) for k, t, _s in OPS):
+        return {"ok": False, "error": "عمليةٌ غير معروفة"}
+
+    def run(conn):
+        if kind in ("sale", "sale_return"):
+            return _post_invoice(conn, kind, data)
+        if kind in ("receipt", "payment"):
+            return _post_voucher(conn, kind, data)
+        if kind == "journal":
+            return _post_journal(conn, data)
+        return _post_supply(conn, data)
+    return _guarded(data, run, kind)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  التعديل والحذف والدمج من الرابط (5.7.0)
+# ------------------------------------------------------------------
+#  بدوالّ البرنامج نفسها: الفاتورة والسند يُعدَّلان **في مكانهما** برقمهما
+#  (`update_invoice` · `update_voucher`)، والقيد اليومي برقمه
+#  (`editing.repost_manual`). والحذف `models.doc_delete` (يعكس القيد
+#  ويُحرِّر الرقم للمستند التالي)، والدمج `operations.merge_invoices`.
+# ══════════════════════════════════════════════════════════════════
+
+EDIT_KINDS = ("sale", "sale_return", "receipt", "payment", "journal")
+
+
+def _doc_for_edit(conn, kind, eid):
+    from models import doc_delete
+    e, d = doc_delete._doc(conn, eid)
+    want = "manual" if kind == "journal" else kind
+    if d["deleted"] or d["kind"] != want:
+        raise ValueError("المستند غير موجود أو تغيّر — حدّث الصفحة")
+    from models import fiscal
+    fiscal.assert_open(conn, e["entry_date"])
+    return e, d
+
+
+def edit_payload(conn, kind, eid):
+    """خانات المستند لتعبئة نموذجه عند التعديل — كما هي في دفاتره."""
+    from services import karat_view as kv
+    if kind not in EDIT_KINDS:
+        raise ValueError("هذه العملية لا تُعدَّل من الرابط — عدّلها من البرنامج")
+    e, d = _doc_for_edit(conn, kind, eid)
+    k = int(kv.active())
+    out = {"eid": e["id"], "no": d["no"], "label": _KIND_LABEL.get(
+        d["kind"], ""), "date": e["entry_date"]}
+
+    def party(pid):
+        r = conn.execute("SELECT id, name, entity_type FROM entities WHERE"
+                         " id=?", (pid,)).fetchone()
+        return ({"id": r["id"], "label": r["name"],
+                 "sub": _TYPE_LABEL.get(r["entity_type"], "")} if r else None)
+    if kind in ("sale", "sale_return"):
+        inv = conn.execute("SELECT * FROM invoices WHERE id=?",
+                           (d["rec_id"],)).fetchone()
+        lines = []
+        for it in conn.execute(
+                "SELECT it.*, w.work_order_no no, w.model_no model,"
+                " COALESCE(w.is_bulk,0) bulk, COALESCE(w.is_service,0) svc"
+                " FROM invoice_items it JOIN work_orders w"
+                " ON w.id=it.work_order_id WHERE it.invoice_id=?"
+                " ORDER BY it.id", (inv["id"],)):
+            if it["svc"]:
+                lines.append({"wage_only": True,
+                              "amount": float(it["wages"] or 0),
+                              "note": it["line_note"] or ""})
+                continue
+            lk = int(it["karat"] or k) or k
+            r18 = float(it["wage_per_gram"] or 0)
+            lines.append({"no": it["no"], "id": it["work_order_id"],
+                          "model": (it["model"] or "").strip()
+                          or ("ايطالي" if it["bulk"] else ""),
+                          "weight": kv.g(float(it["registered_weight"] or 0),
+                                         lk),
+                          "karat": lk, "wage": kv.rate(r18, lk),
+                          "diamond": float(it["diamond"] or 0),
+                          "bulk": bool(it["bulk"])})
+        out.update(party=party(inv["customer_id"]),
+                   src=inv["source_account_id"],
+                   scrap_karat=int(inv["scrap_karat"] or 0) or None,
+                   date=inv["invoice_date"], vat=bool(inv["vat_applied"]),
+                   notes=inv["description"] or "", lines=lines,
+                   inv=inv["id"])
+    elif kind in ("receipt", "payment"):
+        v = conn.execute("SELECT * FROM vouchers WHERE id=?",
+                         (d["rec_id"],)).fetchone()
+        if abs(float(v["net_diff"] or 0)) > 1e-9 or abs(
+                float(v["disc_cash"] or 0)) > 1e-9 or abs(
+                float(v["disc_gold"] or 0)) > 1e-9:
+            raise ValueError("في هذا السند خصمٌ أو فرق — عدّله من البرنامج")
+        from models import vouchers
+        rows = []
+        for r in vouchers.voucher_lines(conn, v["id"]):
+            if r["line_kind"] == "gold":
+                rows.append({"kind": "gold", "weight": float(r["gold_weight"]),
+                             "karat": int(r["gold_karat"] or 18),
+                             "notes": r["line_notes"] or ""})
+            else:
+                rows.append({"kind": "cash",
+                             "amount": float(r["cash_amount"] or 0),
+                             "notes": r["line_notes"] or ""})
+        acc = None
+        if not v["customer_id"]:
+            a = conn.execute("SELECT id, code, name FROM accounts WHERE id=?",
+                             (v["target_account_id"],)).fetchone()
+            acc = ({"id": a["id"], "label": a["name"], "sub": a["code"]}
+                   if a else None)
+        out.update(party=party(v["customer_id"]) if v["customer_id"]
+                   else None, acc=acc,
+                   box=v["cash_account_code"] or "1400",
+                   date=v["voucher_date"], notes=v["notes"] or "", rows=rows)
+    else:
+        lines = []
+        for r in conn.execute(
+                "SELECT l.*, a.code, a.name FROM journal_lines l JOIN"
+                " accounts a ON a.id=l.account_id WHERE l.entry_id=?"
+                " ORDER BY l.id", (e["id"],)):
+            lines.append({"account": r["account_id"],
+                          "label": f"{r['name']} ({r['code']})",
+                          "gd": kv.g(float(r["gold_debit"] or 0)),
+                          "gc": kv.g(float(r["gold_credit"] or 0)),
+                          "cd": float(r["cash_debit"] or 0),
+                          "cc": float(r["cash_credit"] or 0),
+                          "note": r["line_desc"] or ""})
+        out.update(notes=(e["user_note"] or e["description"] or ""),
+                   lines=lines)
+    return out
+
+
+_KIND_LABEL = {"sale": "فاتورة المبيعات", "sale_return": "فاتورة المرتجع",
+               "receipt": "سند القبض", "payment": "سند الصرف",
+               "manual": "القيد اليومي", "fixing": "التسكير"}
+
+
+def _edit_invoice(conn, kind, eid, data):
+    from models import invoices
+    _e0, d = _doc_for_edit(conn, kind, eid)
+    orig = {r["work_order_id"]: (float(r["registered_weight"] or 0),
+                                 float(r["wage_per_gram"])
+                                 if r["wage_per_gram"] is not None else None)
+            for r in conn.execute(
+                "SELECT work_order_id, registered_weight, wage_per_gram"
+                " FROM invoice_items WHERE invoice_id=?", (d["rec_id"],))}
+    pid, ent, src, karat, date, vat, desc, cart = _invoice_input(
+        conn, kind, data, orig)
+    res = invoices.update_invoice(
+        conn, d["rec_id"], cart, WEB_USER, apply_vat=vat, description=desc,
+        invoice_date=date, source_account_id=src, scrap_karat=karat,
+        entity_id=pid)
+    label = _KIND_LABEL[kind]
+    return {"ok": True, "no": res["invoice_no"], "id": res["id"],
+            "links": _inv_links([res]), "edited": True,
+            "msg": f"عُدّلت {label} {res['invoice_no']} في مكانها — "
+                   f"«{ent['name']}»"}
+
+
+def _edit_voucher(conn, kind, eid, data):
+    from models import vouchers
+    _e0, d = _doc_for_edit(conn, kind, eid)
+    v = conn.execute("SELECT * FROM vouchers WHERE id=?",
+                     (d["rec_id"],)).fetchone()
+    if abs(float(v["net_diff"] or 0)) > 1e-9 or abs(
+            float(v["disc_cash"] or 0)) > 1e-9 or abs(
+            float(v["disc_gold"] or 0)) > 1e-9:
+        raise ValueError("في هذا السند خصمٌ أو فرق — عدّله من البرنامج")
+    pid, aid, target, box, rows = _voucher_input(conn, data)
+    res = vouchers.update_voucher(
+        conn, d["rec_id"], WEB_USER, kind=kind, entity_id=pid,
+        account_id=aid, rows=rows, cash_account_code=box,
+        notes=_txt(data.get("notes"), 300),
+        voucher_date=_post_date(data.get("date")))
+    label = _KIND_LABEL[kind]
+    return {"ok": True, "no": res["voucher_no"], "id": res["id"],
+            "edited": True,
+            "links": [(f"📄 {label} {res['voucher_no']}",
+                       f"/doc/vouchers/{res['id']}")],
+            "msg": f"عُدّل {label} {res['voucher_no']} في مكانه — {target}"}
+
+
+def _edit_journal(conn, eid, data):
+    from models import editing
+    e0, d = _doc_for_edit(conn, "journal", eid)
+    desc, lines = _journal_input(conn, data)
+    new = editing.repost_manual(conn, e0["id"], _post_date(data.get("date")),
+                                desc, lines, WEB_USER)
+    no = conn.execute("SELECT doc_no FROM journal_entries WHERE id=?",
+                      (new,)).fetchone()["doc_no"] or f"#{new}"
+    return {"ok": True, "no": no, "id": new, "edited": True,
+            "links": [(f"📄 القيد {no}", f"/doc/manual/{new}")],
+            "msg": f"عُدّل القيد {no} برقمه — {desc}"}
+
+
+def edit_op(kind, eid, data):
+    """يحفظ تعديل مستندٍ من الرابط — في مكانه وبرقمه."""
+    if kind not in EDIT_KINDS:
+        return {"ok": False, "error": "هذه العملية لا تُعدَّل من الرابط"}
+
+    def run(conn):
+        if kind in ("sale", "sale_return"):
+            return _edit_invoice(conn, kind, eid, data)
+        if kind in ("receipt", "payment"):
+            return _edit_voucher(conn, kind, eid, data)
+        return _edit_journal(conn, eid, data)
+    return _guarded(data, run, kind, "web_edit", "edit_op")
+
+
+def delete_op(data):
+    """حذف مستندٍ وعكس قيده من الرابط (وتحرير رقمه) — والفاتورة الضريبية
+    تُعكس بمرتجع بدل الحذف."""
+    from models import doc_delete
+    try:
+        eid = int(data.get("eid"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "مستندٌ غير معروف"}
+
+    def run(conn):
+        d = doc_delete.describe(conn, eid)
+        if d.get("can_delete"):
+            res = doc_delete.delete(conn, eid, WEB_USER, "من رابط المدير")
+            if res["src"] == "invoices":
+                res["cancel_invoice"] = res["sid"]
+            res["id"] = eid
+            return res
+        if d.get("can_reverse") and data.get("reverse"):
+            res = doc_delete.reverse_vat(conn, eid, WEB_USER)
+            res["id"] = eid
+            return res
+        raise ValueError(d.get("why") or "لا يُحذف هذا المستند")
+    return _guarded(data, run, "delete", "web_delete", "delete_op")
+
+
+def merge_op(data):
+    """دمج فواتير الجهة في الأولى منها — والأخرى تُلغى ويتحرّر رقمها."""
+    from models import operations
+    ids = data.get("ids")
+    if not isinstance(ids, list) or not 2 <= len(ids) <= 40:
+        return {"ok": False, "error": "اختر فاتورتين أو أكثر للدمج"}
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "فاتورةٌ غير معروفة"}
+
+    def run(conn):
+        r = operations.merge_invoices(conn, ids, WEB_USER,
+                                      notes="من رابط المدير")
+        return {"ok": True, "no": r["invoice_no"], "id": r["id"],
+                "links": _inv_links([{"id": r["id"],
+                                      "invoice_no": r["invoice_no"]}]),
+                "msg": f"دُمجت {'، '.join(r['merged'])} في الفاتورة "
+                       f"{r['invoice_no']} ({r['items']} بنداً) — وأرقام "
+                       "المدموجة حُرِّرت للفواتير التالية"}
+    return _guarded(data, run, "merge", "web_merge", "merge_op")
+
+
+def _audit(conn, kind, res, action="web_post"):
     try:
         from services.audit import log_action
     except Exception:
@@ -2353,7 +2968,7 @@ def _audit(conn, kind, res):
         except Exception:
             return
     try:
-        log_action(conn, WEB_USER, "web_post", kind, res.get("id"),
+        log_action(conn, WEB_USER, action, kind, res.get("id"),
                    f"من رابط المدير: {res.get('msg', '')}")
     except Exception:
         pass

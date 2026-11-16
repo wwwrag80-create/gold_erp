@@ -23,7 +23,8 @@ def balanced(conn):
     r = conn.execute("SELECT ROUND(SUM(gold_debit)-SUM(gold_credit),3), ROUND(SUM(cash_debit)-SUM(cash_credit),2) FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id WHERE e.is_deleted=0").fetchone()
     return abs(r[0] or 0) < .001 and abs(r[1] or 0) < .01
 def live(conn, no):
-    return conn.execute("SELECT is_deleted FROM invoices WHERE invoice_no=?", (no,)).fetchone()[0] == 0
+    r = conn.execute("SELECT is_deleted FROM invoices WHERE invoice_no=?", (no,)).fetchone()
+    return r is not None and r[0] == 0   # 5.7.0: المحذوف يُعاد تسميته فيتحرّر رقمه
 with db() as conn:
     A = add_entity(conn, "عميل أ", "customer", username="t"); B = add_entity(conn, "عميل ب", "customer", username="t")
     A = A if isinstance(A, int) else A["id"]; B = B if isinstance(B, int) else B["id"]
@@ -69,7 +70,8 @@ with db() as conn:
     a1 = bal(conn, A)
     n = conn.execute("SELECT COUNT(*) FROM invoice_items WHERE invoice_id=?", (m1["id"],)).fetchone()[0]
     check("دمج: الباقية برقمها وفيها بنداها", r["invoice_no"] == m1["invoice_no"] and n == 2, (r, n))
-    check("دمج: المدموجة باقية برقمها ولها مستند عكس", live(conn, m2["invoice_no"]) and r["reversals"] and live(conn, r["reversals"][0]), r)
+    # 5.7.0: المدموجة تُلغى ويتحرّر رقمها للفاتورة التالية (لا مستند عكس)
+    check("دمج: المدموجة أُلغيت ورقمها حُرِّر", not live(conn, m2["invoice_no"]) and r["freed"] == [m2["invoice_no"]] and not r["reversals"], r)
     check("دمج: ذمة أ لم تتغير", a0 == a1, (a0, a1))
     st = conn.execute("SELECT status FROM work_orders WHERE id=?", (W["X4"],)).fetchone()[0]
     check("دمج: X4 مباع وحركته منتظمة", st == "sold" and not wo_moves.bad_ids(conn, list(W.values())), st)

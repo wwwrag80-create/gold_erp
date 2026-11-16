@@ -9,7 +9,6 @@ from ui import kit
 from database.database import db
 from models import entities, journal, operations
 from models.accounts import list_postable
-from services.audit import soft_delete_entry
 
 from services import browser_print, gold_math, karat_view as kv
 from ui.widgets.table_fit import fit_columns
@@ -927,13 +926,14 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         if not row:
             err(self, "اختر سطر مستند من الكشف أولاً")
             return
-        if not ask(self, f"إلغاء المستند (القيد {row['eid']})؟\n\nالفاتورة "
-                         "والسند والقيد لا تُحذف: تُعكس بمستندٍ جديد برقمٍ "
-                         "جديد (مرتجعٌ للبيع، وصرفٌ للقبض، وقيدٌ عكسي)، "
-                         "ويبقى الأول برقمه في الكشف."):
-            return
+        # 5.7.0: البيع والمرتجع والقبض والصرف والقيد والتسكير تُحذف ويُعكس
+        # قيدها ويتحرّر رقمها للمستند التالي؛ والضريبية تُعكس بمرتجع
+        from models import doc_delete
         try:
-            info(self, soft_delete_entry(int(row["eid"]), self.user["username"]))
+            if not ask(self, doc_delete.confirm_text(int(row["eid"]))):
+                return
+            info(self, doc_delete.delete_document(int(row["eid"]),
+                                                  self.user["username"]))
             self.load()
         except Exception as e:
             err(self, e)

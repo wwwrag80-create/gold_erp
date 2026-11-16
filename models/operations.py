@@ -305,9 +305,14 @@ def merge_check(conn, invoice_ids):
         raise ValueError("الفواتير من حسابات مصدرٍ مختلفة (المشغول / صندوق"
                          " الكسر) — لا تُدمج")
     from services.fatoora import ledger as _fatoora
-    from models import fiscal
+    from models import fiscal, reversal
     for i in invs:
         _fatoora.guard_change(conn, "invoices", i["id"], "دمج")
+        # فاتورةٌ عُكست أو هي عكسٌ لغيرها لا تُدمج — فيبقى العكس دالّاً
+        if i["entry_id"] and (reversal.reversal_of(conn, i["entry_id"])
+                              or reversal.reverses(conn, i["entry_id"])):
+            raise ValueError(f"الفاتورة {i['invoice_no']} عُكست أو هي عكسٌ"
+                             " لغيرها — لا تُدمج")
         fiscal.assert_open(conn, i["invoice_date"])
         dep = conn.execute(
             "SELECT note_no FROM tax_debit_notes WHERE invoice_id=?"
@@ -341,9 +346,10 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
     افتراضاً، أو `keep_id`).
 
     البنود **تنتقل** إليها كما هي (أوزانها وأجورها وعيارها وحسابها)
-    وقيدها يُعاد بناؤه منها، والمدموجة **تبقى برقمها** ويُلغى أثرها بمستندٍ
-    مقابل (5.2.4 — لا حذف). فلا يتحرّك المخزون ولا رصيد الرقم التجميعي:
-    ما خرج خرج، وإنما يتوحّد مستنده.
+    وقيدها يُعاد بناؤه منها. و5.7.0: المدموجة **تُلغى** — قيدها وحركات
+    كسرها — ويتحرّر رقمها فتأخذه أول فاتورةٍ جديدة من نوعها، فلا يبقى في
+    الدفتر رقمٌ محذوف (كانت تبقى برقمها مع مستندٍ يعكسها). ولا يتحرّك
+    المخزون ولا رصيد الرقم التجميعي: ما خرج خرج، وإنما يتوحّد مستنده.
 
     **حركة الطقم**: البنود تنتقل إلى تاريخ الباقية — فإن جعل ذلك سلسلة
     طقمٍ غير منتظمة (بيعٌ يسبق مرتجعاً كان قبله) رُفض الدمج كله بأسماء
@@ -373,9 +379,9 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
         return out
     bad_before = _broken()
 
-    # 5.2.4: لا حذف — كل مدموجةٍ تبقى برقمها وبنودها، ويُلغى أثرها بمستندٍ
-    # مقابل بتاريخها، وتُنسخ بنودها كما هي (أوزانها وأجورها وعيارها) إلى
-    # الباقية التي يُعاد بناء قيدها منها
+    # 5.7.0: تُنسخ بنود كل مدموجةٍ كما هي (أوزانها وأجورها وعيارها) إلى
+    # الباقية التي يُعاد بناء قيدها منها، وتُلغى المدموجة ويتحرّر رقمها
+    from models import numbering
     icols = [r["name"] for r in conn.execute("PRAGMA table_info(invoice_items)")
              if r["name"] not in ("id", "invoice_id")]
     rev_nos = []
@@ -383,9 +389,7 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
     _relax.__enter__()
     try:
         for o in others:
-            rev_nos.append(_reverse_doc(
-                conn, o, username,
-                f"دمج الفاتورة {o['invoice_no']} في {keep['invoice_no']}"))
+            rev_nos.append(o["invoice_no"])
             conn.execute(
                 f"INSERT INTO invoice_items(invoice_id,{','.join(icols)})"
                 f" SELECT ?,{','.join(icols)} FROM invoice_items"
@@ -394,9 +398,22 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
                 "INSERT OR IGNORE INTO invoice_assets(invoice_id, sha)"
                 " SELECT ?, sha FROM invoice_assets WHERE invoice_id=?",
                 (keep["id"], o["id"]))
+            # تُلغى المدموجة: قيدها وحركات كسرها (وزنها صار في قيد
+            # الباقية وحركتها) — وبنودها تبقى معها للتتبع وحده
+            gone = numbering.retire_name(o["invoice_no"], o["id"])
+            conn.execute("UPDATE scrap_moves SET is_deleted=1 WHERE"
+                         " ref_table='invoices' AND ref_id=?", (o["id"],))
+            conn.execute("UPDATE invoices SET is_deleted=1, invoice_no=?"
+                         " WHERE id=?", (gone, o["id"]))
+            if o["entry_id"]:
+                conn.execute(
+                    "UPDATE journal_entries SET is_deleted=1, deleted_by=?,"
+                    " deleted_at=datetime('now','localtime'), doc_no=?"
+                    " WHERE id=?", (username, gone, o["entry_id"]))
+            numbering.release(conn, o["invoice_no"], username)
             log_action(conn, username, "merge", "invoices", o["id"],
                        f"{o['invoice_no']} دُمجت في {keep['invoice_no']}"
-                       f" | العكس {rev_nos[-1]}")
+                       " — أُلغيت وحُرِّر رقمها للفاتورة التالية")
     finally:
         _relax.__exit__(None, None, None)
 
@@ -454,7 +471,7 @@ def merge_invoices(conn, invoice_ids, username, keep_id=None, notes=""):
     return {"id": keep["id"], "invoice_no": keep["invoice_no"],
             "invoice_date": keep["invoice_date"],
             "merged": [o["invoice_no"] for o in others], "items": n,
-            "reversals": rev_nos,
+            "freed": rev_nos, "reversals": [],
             "total_weight": tw, "total_wages": tg, "vat": vat,
             "grand_total": grand}
 

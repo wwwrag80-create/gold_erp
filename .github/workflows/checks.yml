@@ -84,6 +84,11 @@ jobs:
           python tools/check_manager_web.py
           python tools/check_day_feed.py
 
+      - name: 4.7) حذف المستند وعكس قيده وتحرير رقمه · الدمج (5.7)
+        run: |
+          python tools/check_doc_delete.py
+          python tools/check_ops_reversal.py
+
       - name: 5) زمن الاستجابة على دفترٍ كبير — ui_stress
         # `verify_all` يثبت أن الشاشات تعمل ولا يقول شيئاً عن بطئها.
         # هذه الخطوة تبني دفتراً بحجم مصنعٍ يعمل منذ سنة، ثم تفتح كل

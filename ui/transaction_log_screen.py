@@ -15,7 +15,6 @@ from services import karat_view as kv
 from models import fixing, inventory, invoices, journal, melting, payroll
 from models import purchases, shrinkage, stocktake, tax_sales, vouchers
 from models import set_purchases
-from services.audit import soft_delete_entry
 from ui.widgets.common import ask, date_edit, dstr, err, info, title_label
 from ui.widgets.ledger_view import LedgerView
 from services import numfmt as _nf
@@ -244,13 +243,12 @@ class TransactionLogScreen(QtWidgets.QWidget):
         entry_id = str(vals[-1] if vals[-1] is not None else "").strip()
         if not entry_id or not entry_id.isdigit():
             return
-        if not ask(self, f"إلغاء العملية رقم {entry_id}؟\n\nالفاتورة والسند "
-                         "والقيد لا تُحذف: تُعكس بمستندٍ جديد برقمٍ جديد "
-                         "(مرتجعٌ للبيع، وصرفٌ للقبض، وقيدٌ عكسي)، ويبقى "
-                         "الأول برقمه."):
-            return
+        from models import doc_delete
         try:
-            msg = soft_delete_entry(int(entry_id), self.user["username"])
+            if not ask(self, doc_delete.confirm_text(int(entry_id))):
+                return
+            msg = doc_delete.delete_document(int(entry_id),
+                                             self.user["username"])
             info(self, msg)
             self.search()
         except Exception as e:

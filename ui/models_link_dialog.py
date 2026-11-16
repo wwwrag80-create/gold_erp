@@ -115,6 +115,24 @@ class ModelsLinkDialog(QtWidgets.QDialog):
                             "تُرحَّل في دفاتر هذا الجهاز باسم «رابط المدير»")
         self.ops.toggled.connect(self._ops_toggled)
         g.addWidget(self.ops, 2, 1, 1, 4)
+        # 5.7.0: رمزٌ خاص بلوحة «تسجيل العمليات» (والتعديل والحذف والدمج من
+        # الرابط) — فلا يسجّل فيها إلا من يعرفه، ولو فُتح الرابط نفسه
+        self.ops_pin = kit.LineEdit()
+        self.ops_pin.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.ops_pin.setPlaceholderText("4 إلى 12 خانة")
+        self.ops_pin.setMaxLength(12)
+        self.ops_pin.setMaximumWidth(200)
+        b_opin = kit.PushButton("حفظ الرمز")
+        b_opin.clicked.connect(self.save_ops_pin)
+        b_noopin = kit.PushButton("إلغاء الرمز")
+        b_noopin.setObjectName("ghost")
+        b_noopin.clicked.connect(lambda: self.save_ops_pin(clear=True))
+        self.ops_pin_state = QtWidgets.QLabel("")
+        g.addWidget(QtWidgets.QLabel("رمز لوحة تسجيل العمليات:"), 3, 0)
+        g.addWidget(self.ops_pin, 3, 1)
+        g.addWidget(b_opin, 3, 2)
+        g.addWidget(b_noopin, 3, 3)
+        g.addWidget(self.ops_pin_state, 3, 4)
         g.setColumnStretch(4, 1)
 
         acts = QtWidgets.QHBoxLayout()
@@ -165,6 +183,8 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             self.ops.blockSignals(True)
             self.ops.setChecked(on)
             self.ops.blockSignals(False)
+            with db(readonly=True) as conn:
+                self._ops_pin_label(manager_web.has_ops_pin(conn))
         except Exception:
             pass
         if st["enabled"]:
@@ -182,6 +202,28 @@ class ModelsLinkDialog(QtWidgets.QDialog):
                 manager_web.set_ops_enabled(conn, on, user)
         except Exception as e:
             err(self, e)
+
+    def save_ops_pin(self, clear=False):
+        try:
+            from database.database import db
+            from services import manager_web
+            with db() as conn:
+                manager_web.set_ops_pin(
+                    conn, "" if clear else self.ops_pin.text(),
+                    (getattr(self, "user", None) or {}).get("username"))
+            self.ops_pin.clear()
+            self._ops_pin_label(not clear)
+            info(self, "أُلغي رمز لوحة تسجيل العمليات." if clear else
+                 "حُفظ رمز لوحة تسجيل العمليات — يُطلب قبل التسجيل أو التعديل"
+                 " أو الحذف أو الدمج من الرابط، ويبقى مفتوحاً على الجهاز 12"
+                 " ساعة.")
+        except Exception as e:
+            err(self, e)
+
+    def _ops_pin_label(self, has):
+        self.ops_pin_state.setText(
+            "✔ اللوحة برمز" if has
+            else "⚠ بلا رمز — يسجّل فيها كل من معه الرابط")
 
     def _pin_label(self, has):
         self.pin_state.setText("✔ عليه رمز دخول" if has

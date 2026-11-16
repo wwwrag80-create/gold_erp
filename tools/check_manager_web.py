@@ -62,13 +62,22 @@ with db() as c:
     SECRET = mw._get(c, mw.K_SECRET)
 
 
+OPS_CK = {"on": True}       # ملف تعريف لوحة التسجيل (إن كان لها رمز)
+
+
 def call(method, path, query=None, body=None, cookie=True):
     with db(readonly=True) as c:
         pin = mw._get(c, mw.K_PIN).strip()
+        opin = mw._get(c, mweb.K_OPS_PIN).strip()
     headers = {}
+    cks = []
     if cookie and pin:
-        headers["Cookie"] = (f"{mw.COOKIE}="
-                             f"{mw._cookie_value(TOK, SECRET, pin)}")
+        cks.append(f"{mw.COOKIE}={mw._cookie_value(TOK, SECRET, pin)}")
+    if cookie and opin and OPS_CK["on"]:
+        cks.append(f"{mweb.OPS_COOKIE}="
+                   f"{mweb._ops_cookie_value(mw._csrf(TOK, SECRET), opin)}")
+    if cks:
+        headers["Cookie"] = "; ".join(cks)
     parts = [TOK] + [p for p in path.split("/") if p]
     raw = (json.dumps(body, ensure_ascii=False).encode("utf-8")
            if body is not None else None)
@@ -329,6 +338,173 @@ check("تاريخٌ بعد اليوم مرفوض", fut["ok"] is False)
 code, h = call("GET", "ops")
 check("«آخر ما سُجِّل من الرابط» في صفحة العمليات",
       "آخر ما سُجِّل من الرابط" in h and sale["no"] in h)
+
+print("── 7) التعديل والحذف والدمج من الرابط (5.7.0)")
+CS = mw._csrf(TOK, SECRET)
+
+
+def api(path, data):
+    _c, b = call("POST", path, body=dict(data, csrf=CS))
+    return json.loads(b)
+
+
+with db() as c:
+    s_a = invoices.create_sale(c, A, [{"work_order_id": W["704"]}], D0,
+                               "t", apply_vat=False)
+    s_b = invoices.create_sale(c, A, [{"work_order_id": W["705"]}], D0,
+                               "t", apply_vat=False)
+    e_a = c.execute("SELECT entry_id FROM invoices WHERE id=?",
+                    (s_a["id"],)).fetchone()[0]
+    e_b = c.execute("SELECT entry_id FROM invoices WHERE id=?",
+                    (s_b["id"],)).fetchone()[0]
+    a_code = c.execute("SELECT a.code FROM entities n JOIN accounts a ON"
+                       " a.id=n.account_id WHERE n.id=?", (A,)).fetchone()[0]
+code, h = call("GET", "stmt", {"code": a_code, "per": "all"})
+check("الكشف: أزرار تعديل وحذف لكل مستند، واختيار فواتير البيع للدمج",
+      f'data-delx="{e_a}"' in h and f"/ops/sale?edit={e_a}" in h
+      and 'class="mg"' in h and 'id="mgbtn"' in h)
+code, h = call("GET", "moves", {"g": "sale", "per": "all"})
+check("وحركة المصنع كذلك", f'data-delx="{e_a}"' in h
+      and f"/ops/sale?edit={e_a}" in h)
+code, h = call("GET", "ops/sale", {"edit": str(e_a)})
+check("نموذج التعديل مملوءٌ بالفاتورة ورقمها", code == 200
+      and f"تعديل فاتورة المبيعات {s_a['invoice_no']}" in h
+      and '"edit"' in h and '"no": "704"' in h)
+with db(readonly=True) as c:
+    pay = mweb.edit_payload(c, "sale", e_a)
+ln = dict(pay["lines"][0], wage=20)
+ed = api(f"api/edit/sale/{e_a}", {
+    "nonce": "n-edit-0001", "party": A, "src": pay["src"],
+    "date": pay["date"], "vat": False, "notes": "معدّلة",
+    "lines": [ln]})
+with db(readonly=True) as c:
+    iv = c.execute("SELECT invoice_no, total_wages, is_deleted, description"
+                   " FROM invoices WHERE id=?", (s_a["id"],)).fetchone()
+    it = c.execute("SELECT registered_weight FROM invoice_items WHERE"
+                   " invoice_id=?", (s_a["id"],)).fetchone()[0]
+    w0 = c.execute("SELECT registered_weight FROM work_orders WHERE id=?",
+                   (W["704"],)).fetchone()[0]
+check("تعديل الفاتورة في مكانها برقمها: الأجر الجديد والوزن كما هو بلا تقريب",
+      ed["ok"] and iv["invoice_no"] == s_a["invoice_no"]
+      and iv["is_deleted"] == 0 and iv["description"] == "معدّلة"
+      and abs(iv["total_wages"] - round(pay["lines"][0]["weight"] * 20, 2))
+      < 0.02 and abs(it - w0) < 1e-9, (ed, dict(iv), it, w0))
+# القيد اليومي: التعديل برقمه
+j0 = post("journal", {"nonce": "n-jv-ed-001", "date": D0, "notes": "قيد",
+                      "lines": [{"account": a1, "cd": 11},
+                                {"account": a2, "cc": 11}]})
+with db(readonly=True) as c:
+    jp = mweb.edit_payload(c, "journal", j0["id"])
+jl = [dict(jp["lines"][0], cd=13), dict(jp["lines"][1], cc=13)]
+je = api(f"api/edit/journal/{j0['id']}", {"nonce": "n-jv-ed-002",
+         "date": D0, "notes": "قيد معدّل", "lines": jl})
+check("تعديل القيد اليومي برقمه نفسه", je["ok"] and je["no"] == j0["no"]
+      and je["id"] != j0["id"], (j0, je))
+# سند قبض: التعديل في مكانه
+r0 = post("receipt", {"nonce": "n-rc-ed-001", "party": A, "box": "1400",
+                      "date": D0, "rows": [{"kind": "cash", "amount": 40}]})
+with db(readonly=True) as c:
+    re_ = c.execute("SELECT entry_id FROM vouchers WHERE id=?",
+                    (r0["id"],)).fetchone()[0]
+    vp = mweb.edit_payload(c, "receipt", re_)
+ve = api(f"api/edit/receipt/{re_}", {"nonce": "n-rc-ed-002",
+         "party": A, "box": "1400", "date": D0,
+         "rows": [dict(vp["rows"][0], amount=45)]})
+with db(readonly=True) as c:
+    vamt = c.execute("SELECT cash_amount, voucher_no FROM vouchers WHERE"
+                     " id=?", (r0["id"],)).fetchone()
+check("تعديل سند القبض في مكانه برقمه", ve["ok"] and vamt["voucher_no"]
+      == r0["no"] and abs(vamt["cash_amount"] - 45) < 0.01, (ve, dict(vamt)))
+# الحذف: الرقم يتحرّر للمستند التالي
+dl = api("api/delete", {"nonce": "n-del-0001", "eid": e_b})
+with db(readonly=True) as c:
+    st_b = c.execute("SELECT status FROM work_orders WHERE id=?",
+                     (W["705"],)).fetchone()[0]
+with db(readonly=True) as c:
+    i706 = mweb.wo_info(c, "706", "sale", D0)
+nx = post("sale", {"nonce": "n-sale-after-del", "party": B, "src": src,
+                   "date": D0, "vat": False, "lines": [{
+                       "no": "706", "weight": i706["avail"],
+                       "karat": i706["karat"], "wage": 1}]})
+check("حذف فاتورةٍ من الرابط: يعود طقمها، وأول فاتورةٍ بعدها تأخذ رقمها",
+      dl["ok"] and st_b == "in_stock" and nx["ok"]
+      and nx["no"] == s_b["invoice_no"], (dl, st_b, nx))
+dd = api("api/delete", {"nonce": "n-del-0001", "eid": e_b})
+check("وإعادة الطلب نفسه لا تحذف ثانيةً", dd.get("again") and dd["ok"], dd)
+# الفاتورة الضريبية: لا حذف — عكسٌ بمرتجع
+with db(readonly=True) as c:
+    e_vat = c.execute("SELECT entry_id FROM invoices WHERE invoice_no=?",
+                      (sale["no"],)).fetchone()[0]
+code, h = call("GET", "stmt", {"code": a_code, "per": "all"})
+dv = api("api/delete", {"nonce": "n-del-vat-1", "eid": e_vat})
+check("الفاتورة الضريبية لا تُحذف من الرابط", dv["ok"] is False
+      and "ضريبية" in dv["error"], dv)
+# الدمج
+with db() as c:
+    m1 = invoices.create_sale(c, A, [{"work_order_id": W["707"]}], D0,
+                              "t", apply_vat=False)
+    m2 = invoices.create_sale(c, A, [{"work_order_id": W["701"]}], D0,
+                              "t", apply_vat=False) \
+        if c.execute("SELECT status FROM work_orders WHERE id=?",
+                     (W["701"],)).fetchone()[0] == "in_stock" else None
+if m2 is None:
+    with db() as c:
+        inventory.create_work_orders_batch(c, [{"wo_no": "790", "gold": 5,
+            "small_stones": 0, "big_stones": 0, "wage_per_gram": 5}], D1, "t")
+        w790 = c.execute("SELECT id FROM work_orders WHERE work_order_no="
+                         "'790'").fetchone()[0]
+        m2 = invoices.create_sale(c, A, [{"work_order_id": w790}], D0, "t",
+                                  apply_vat=False)
+mg = api("api/merge", {"nonce": "n-merge-001", "ids": [m1["id"], m2["id"]]})
+with db(readonly=True) as c:
+    gone = c.execute("SELECT is_deleted FROM invoices WHERE id=?",
+                     (m2["id"],)).fetchone()[0]
+    n_items = c.execute("SELECT COUNT(*) FROM invoice_items WHERE"
+                        " invoice_id=?", (m1["id"],)).fetchone()[0]
+check("الدمج من الرابط: الأقدم تحمل البندين، والأخرى أُلغيت",
+      mg["ok"] and gone == 1 and n_items == 2, mg)
+# رمز لوحة التسجيل
+with db() as c:
+    mweb.set_ops_pin(c, "4321")
+OPS_CK["on"] = False
+code, h = call("GET", "ops")
+lk = api("api/delete", {"nonce": "n-del-lock-1", "eid": e_a})
+code2, h2 = call("GET", "ops/sale", {"edit": str(e_a)})
+check("برمز اللوحة: الصفحة تطلبه، والحذف والتعديل مقفلان بلا رمزها",
+      'name="pin"' in h and "لوحة تسجيل العمليات" in h
+      and lk.get("locked") and lk["ok"] is False and 'name="pin"' in h2
+      and "next" in h2, lk)
+with db(readonly=True) as c:
+    _lp = mw._get(c, mw.K_PIN).strip()
+LH = {"Cookie": f"{mw.COOKIE}={mw._cookie_value(TOK, SECRET, _lp)}"} \
+    if _lp else {}
+r_bad = mw.handle("POST", [TOK, "ops", "unlock"], {}, LH,
+                  json.dumps({"csrf": CS, "pin": "0000"}).encode())
+r_ok = mw.handle("POST", [TOK, "ops", "unlock"], {}, LH,
+                 json.dumps({"csrf": CS, "pin": "4321",
+                             "next": f"/m/{TOK}/ops/sale"}).encode())
+ck = r_ok["headers"].get("Set-Cookie", "")
+check("رمزٌ خاطئ يُرفض، والصحيح يفتح اللوحة 12 ساعة ويعود إلى الصفحة",
+      r_bad["code"] == 401 and r_ok["code"] == 303 and mweb.OPS_COOKIE in ck
+      and "Max-Age=43200" in ck and r_ok["headers"]["Location"].endswith(
+          "/ops/sale"), (r_bad["code"], r_ok["code"], ck))
+r_evil = mw.handle("POST", [TOK, "ops", "unlock"], {}, LH,
+                   json.dumps({"csrf": CS, "pin": "4321",
+                               "next": "https://evil.example/x"}).encode())
+check("ولا يُعاد التوجيه إلى موقعٍ آخر", r_evil["headers"]["Location"]
+      .endswith(f"/m/{TOK}/ops"), r_evil["headers"])
+OPS_CK["on"] = True
+code, h = call("GET", "ops")
+check("ومع ملف تعريف اللوحة: تفتح بزر «قفل اللوحة»",
+      h.count('class="tile main"') == 6 and "قفل اللوحة" in h)
+with db() as c:
+    mweb.set_ops_pin(c, "")
+    mweb.set_ops_enabled(c, False)
+code, h = call("GET", "stmt", {"code": a_code, "per": "all"})
+check("التسجيل موقوف ⇒ لا أزرار تعديل ولا حذف في الكشف",
+      'data-delx="' not in h and "/ops/sale?edit=" not in h)
+with db() as c:
+    mweb.set_ops_enabled(c, True)
 
 print("── 6) السلامة")
 with db(readonly=True) as c:

@@ -9,7 +9,6 @@ from services import karat_view as kv
 from models import editing, journal
 from models.accounts import list_postable
 from services.accounting_engine import validate_lines
-from services.audit import soft_delete_entry
 from ui.widgets.common import (confirm_post, posted, ask, big_label, cell, date_edit, dstr,
                                enter_chain, err, fill, info, make_table,
                                mspin, search_combo, title_label, wspin)
@@ -269,13 +268,10 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
                 return
             with db() as conn:
                 if self.is_editing:
-                    editing.void_for_edit(conn, self.editing_entry_id,
-                                          self.user["username"])
-                    eid = journal.manual_entry(conn, dstr(self.date),
-                                               self.desc.text(), lines,
-                                               self.user["username"])
-                    editing.log_edit(conn, self.user["username"], "manual",
-                                    self.editing_entry_id, eid, eid)
+                    # 5.7.0: القيد المعدَّل يبقى برقمه — لا رقم محذوف
+                    eid = editing.repost_manual(
+                        conn, self.editing_entry_id, dstr(self.date),
+                        self.desc.text(), lines, self.user["username"])
                 else:
                     eid = journal.manual_entry(conn, dstr(self.date),
                                                self.desc.text(), lines,
@@ -372,12 +368,12 @@ class JournalScreen(EditModeMixin, QtWidgets.QWidget):
         if r < 0:
             return
         eid = cell(self.entries, r, 0)
-        if not ask(self, f"إلغاء القيد رقم {eid}؟\n\nلا يُحذف: يُعكس بقيدٍ "
-                         "جديد برقمٍ جديد (أو بفاتورة/سندٍ مقابل إن كان "
-                         "مستنداً)، ويبقى الأول برقمه."):
-            return
+        from models import doc_delete
         try:
-            info(self, soft_delete_entry(int(eid), self.user["username"]))
+            if not ask(self, doc_delete.confirm_text(int(eid))):
+                return
+            info(self, doc_delete.delete_document(int(eid),
+                                                  self.user["username"]))
             self.refresh()
         except Exception as e:
             err(self, e)

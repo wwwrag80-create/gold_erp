@@ -21,7 +21,14 @@
 **القاعدة المتينة**: العدّاد يبدأ عند أول استعمال من **أعلى رقمٍ قائم**
 بحرفه — فقاعدةٌ قديمة تكمل من حيث انتهت ولا يتكرّر رقم، والمصنع الجديد
 يبدأ من 1. والحجز داخل معاملة الترحيل نفسها: إن أُلغيت لم يُستهلك الرقم.
+
+**5.7.0 — الرقم المحذوف لا يضيع**: حذفُ مستندٍ نهائياً (بيع · مرتجع · قبض ·
+صرف · قيد يومية · تسكير — `models.doc_delete`) أو دمجُ فاتورةٍ في أخرى
+يُحرِّر رقمه (`release`) ويُعاد تسمية المحذوف (`retire_name`) فلا يبقى
+الرقم مشغولاً به. وأول مستندٍ جديد من نوعه يأخذ **أصغر رقمٍ محرَّر** قبل أن
+يتقدّم العدّاد — فلا تبقى في الدفتر فجوة.
 """
+import re as _re
 
 # أين تُحفظ أرقام المستندات — للبحث عن أعلى رقمٍ قائم بحرفه ولمنع التكرار
 _SOURCES = (("invoices", "invoice_no"), ("vouchers", "voucher_no"),
@@ -37,6 +44,63 @@ def ensure_schema(conn):
     conn.execute(
         "CREATE TABLE IF NOT EXISTS doc_sequences("
         " prefix TEXT PRIMARY KEY, last INTEGER NOT NULL DEFAULT 0)")
+    # الأرقام المحرَّرة بالحذف أو الدمج — تُعطى لأول مستندٍ جديد من نوعها
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS doc_number_pool("
+        " prefix TEXT NOT NULL, n INTEGER NOT NULL, doc_no TEXT NOT NULL,"
+        " released_by TEXT, released_at TEXT DEFAULT"
+        " (datetime('now','localtime')), PRIMARY KEY(prefix, n))")
+
+
+_NO_RE = _re.compile(r"^([A-Z]{1,4})-(\d{1,9})$")
+RETIRED = "·محذوف·"     # علامة المستند المحذوف في رقمه — فيتحرّر الرقم
+
+
+def split_no(no):
+    """(الحرف، الرقم) لرقم مستندٍ مثل S-00005 — أو None."""
+    m = _NO_RE.match(str(no or "").strip())
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def retire_name(no, rec_id):
+    """الاسم الذي يحمله المستند المحذوف بدل رقمه: يبقى أثره في سجل
+    التتبع مقروءاً، ولا يشغل الرقم عن المستند الجديد."""
+    return f"{no}{RETIRED}{int(rec_id)}"
+
+
+def release(conn, no, username=None):
+    """يُحرِّر رقم مستندٍ حُذف أو دُمج — فيأخذه أول مستندٍ جديد من نوعه.
+    يعيد True إن كان الرقم من أرقام الدفاتر (حرف-رقم)."""
+    p = split_no(no)
+    if not p:
+        return False
+    ensure_schema(conn)
+    conn.execute("INSERT OR IGNORE INTO doc_number_pool(prefix,n,doc_no,"
+                 "released_by) VALUES(?,?,?,?)",
+                 (p[0], p[1], str(no).strip(), username))
+    return True
+
+
+def pooled(conn, prefix=None):
+    """الأرقام المحرَّرة التي تنتظر مستنداً جديداً (للعرض والفحص)."""
+    ensure_schema(conn)
+    if prefix:
+        return [r["doc_no"] for r in conn.execute(
+            "SELECT doc_no FROM doc_number_pool WHERE prefix=? ORDER BY n",
+            (prefix,))]
+    return [r["doc_no"] for r in conn.execute(
+        "SELECT doc_no FROM doc_number_pool ORDER BY prefix, n")]
+
+
+def _take_pooled(conn, prefix, srcs):
+    """أصغر رقمٍ محرَّر لهذا الحرف ما زال فارغاً — يُسحب من المخزن."""
+    for r in conn.execute("SELECT n, doc_no FROM doc_number_pool"
+                          " WHERE prefix=? ORDER BY n", (prefix,)).fetchall():
+        conn.execute("DELETE FROM doc_number_pool WHERE prefix=? AND n=?",
+                     (prefix, r["n"]))
+        if not _used(conn, r["doc_no"], srcs):
+            return r["doc_no"]
+    return None
 
 
 def migrate(conn):
@@ -85,8 +149,14 @@ def _used(conn, no, srcs):
 
 
 def next_no(conn, prefix, width=5):
-    """الرقم التالي لهذا الحرف — يُحجز في المعاملة الجارية."""
+    """الرقم التالي لهذا الحرف — يُحجز في المعاملة الجارية.
+
+    الرقم المحرَّر بحذفٍ أو دمج أولاً (أصغرها)، ثم العدّاد."""
     ensure_schema(conn)
+    srcs = _sources(conn)
+    reuse = _take_pooled(conn, prefix, srcs)
+    if reuse:
+        return reuse
     row = conn.execute("SELECT last FROM doc_sequences WHERE prefix=?",
                        (prefix,)).fetchone()
     if row is None:
@@ -95,7 +165,6 @@ def next_no(conn, prefix, width=5):
                      (prefix, last))
     else:
         last = int(row["last"] or 0)
-    srcs = _sources(conn)
     while True:
         last += 1
         no = f"{prefix}-{last:0{width}d}"
