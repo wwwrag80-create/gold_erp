@@ -500,6 +500,17 @@ min-width:0}
 .mw input:focus,.mw select:focus,.mw textarea:focus{outline:2px solid #e3cb8c;
 border-color:#c9a24a}
 .mw input.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
+.erow{display:flex;gap:14px;align-items:flex-start}
+.erow .eflds{flex:1 1 auto;min-width:0}
+.eph{flex:0 0 168px;height:168px;border:1px dashed #E2D3AE;border-radius:14px;
+background:#FFFDF7;display:flex;align-items:center;justify-content:center;
+overflow:hidden;text-align:center}
+.eph img{width:100%;height:100%;object-fit:contain;background:#fff;display:block}
+.eph a{display:block;width:100%;height:100%}
+.eph .none{color:var(--muted);font-size:12.5px;padding:10px;line-height:1.6}
+.eph.has{border-style:solid;border-color:#E9D59F}
+@media (max-width:640px){.erow{flex-direction:column-reverse}
+.eph{flex-basis:auto;width:100%;height:190px}}
 .fg input.hot{outline:2px solid #E7CF8E;background:#FFFBEF;
 transition:background .3s}
 .fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
@@ -2520,7 +2531,9 @@ def _op_form(conn, base, kind, edit=None):
               f'center;gap:8px;margin-top:22px"><input id="vat" type="checkbox"'
               f'> ضريبة {data["vat"] * 100:g}%</label>{notes_f}</div>'
               f'<div class="note" id="pinfo"></div></section>')
-        h2 = (f'<section class="panel"><h3>② إدخال الطقم</h3><div class="fg">'
+        # 5.7.7: خانة صورة الطقم (صورة موديله إن وُجدت) بجانب الإدخال
+        h2 = (f'<section class="panel"><h3>② إدخال الطقم</h3>'
+              f'<div class="erow"><div class="eflds"><div class="fg">'
               f'<label>رقم التشغيل<input id="eno" autocomplete="off" '
               f'placeholder="اكتب الرقم ثم Enter"></label>'
               f'<label>الموديل<input id="emodel" readonly placeholder="تلقائي">'
@@ -2531,7 +2544,9 @@ def _op_form(conn, base, kind, edit=None):
               f'<input id="edia" class="num" inputmode="decimal"></label>'
               f'<label style="justify-content:flex-end"><button class="btn gold"'
               f' id="eadd">{icon("plus", 16)}إضافة سطر</button></label></div>'
-              f'<div class="note" id="einfo"></div>'
+              f'<div class="note" id="einfo"></div></div>'
+              f'<div class="eph" id="eph"><span class="none">صورة الطقم تظهر '
+              f'هنا بعد رقم التشغيل</span></div></div>'
               f'<details style="margin-top:8px"><summary class="note">سطر «أجر '
               f'فقط» (بلا ذهب)</summary><div class="fg" style="margin-top:8px">'
               f'<label>المبلغ<input id="woamt" class="num" inputmode="decimal">'
@@ -2669,12 +2684,12 @@ _OPS_JS = r"""
  if(K==='sale'||K==='sale_return'){
   var cur=null,curK=D.k;
   function look(){var no=$('eno').value.trim();if(!no)return;
-   if(cur&&cur.no===no){goNext();return;}cur=null;$('einfo').textContent='…';
+   if(cur&&cur.no===no){goNext();return;}cur=null;photo(null);$('einfo').textContent='…';
    MW.get('/api/wo',{no:no,mode:K==='sale'?'sale':'return',d:$('date').value,
     inv:(D.edit&&D.edit.inv)||''})
    .then(function(r){if(!r.ok){$('einfo').textContent='';MW.toast(r.error,false);
      $('eno').select();return;}
-    cur=r;$('emodel').value=r.model||'—';$('ek').value=r.karat;curK=r.karat;
+    cur=r;photo(r);$('emodel').value=r.model||'—';$('ek').value=r.karat;curK=r.karat;
     $('ew').value=r.bulk?'':r.avail.toFixed(2);$('ewage').value=
      (r.wage||0).toFixed(2);$('edia').value=r.diamond?r.diamond:'';
     $('einfo').textContent=(r.bulk?'رقمٌ تجميعي — اكتب الوزن':
@@ -2684,6 +2699,17 @@ _OPS_JS = r"""
   // 5.7.6: بعد رقم التشغيل يظهر وزنه وينتقل المؤشر إلى خانة الأجر وقيمتها
   // محدّدة — يُكتب أجرٌ جديد فوقها مباشرةً أو تُترك، ثم Enter يضيف السطر.
   // (الرقم التجميعي: إلى الوزن أولاً، ثم Enter إلى الأجر)
+  // 5.7.7: صورة الطقم (موديله) — تُكبَّر بالنقر في صفحةٍ جديدة
+  function photo(r){var b=$('eph');if(!b)return;
+   if(!r){b.className='eph';b.innerHTML='<span class="none">صورة الطقم تظهر '+
+    'هنا بعد رقم التشغيل</span>';return;}
+   if(r.img&&r.model){var u=MW.base+'/img/'+encodeURIComponent(r.model),
+     v=r.ver?('v='+encodeURIComponent(r.ver)):'';
+    b.className='eph has';b.innerHTML='<a target="_blank" rel="noopener" href="'+
+     MW.esc(u+'?full=1'+(v?'&'+v:''))+'" title="تكبير الصورة"><img alt="'+
+     MW.esc(r.model)+'" src="'+MW.esc(u+(v?'?'+v:''))+'"></a>';}
+   else{b.className='eph';b.innerHTML='<span class="none">'+(r.model?
+    'لا توجد صورة للموديل '+MW.esc(r.model):'بلا موديل')+'</span>';}}
   function hot(el){el.focus();try{el.select();}catch(_){}
    el.classList.add('hot');setTimeout(function(){el.classList.remove('hot');},1400);}
   function goNext(){if(!cur)return;hot(cur.bulk&&!MW.num($('ew'))?$('ew'):$('ewage'));}
@@ -2702,7 +2728,7 @@ _OPS_JS = r"""
     MW.toast('الطقم مضافٌ من قبل',false);return;}
    lines.push({no:cur.no,id:cur.id,model:cur.model,weight:w,karat:k,wage:g,
     diamond:MW.num($('edia')),bulk:cur.bulk});
-   cur=null;['eno','emodel','ew','ewage','edia'].forEach(function(i){$(i).value='';});
+   cur=null;photo(null);['eno','emodel','ew','ewage','edia'].forEach(function(i){$(i).value='';});
    $('einfo').textContent='';render();$('eno').focus();}
   $('eadd').onclick=add;
   $('ew').addEventListener('keydown',function(e){if(e.key==='Enter'){

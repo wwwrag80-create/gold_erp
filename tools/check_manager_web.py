@@ -687,6 +687,20 @@ with db(readonly=True) as c:
                      " '%قفل التعديل والحذف%'").fetchone()[0]
 check("القفل والفتح مسجّلان في سجل التتبع", _aud >= 2, _aud)
 
+print("── 11) صورة الطقم في لوحة البيع (5.7.7)")
+code, h = call("GET", "ops/sale")
+check("لوحة البيع: خانة صورة الطقم بجانب الإدخال", 'id="eph"' in h
+      and "صورة الطقم تظهر هنا" in h)
+with db() as c:      # طقمٌ جديد في الخزنة بموديل (ما قبله بِيع في الفحص)
+    inventory.create_work_orders_batch(c, [{
+        "wo_no": "790", "model_no": "K7", "gold": 8, "small_stones": 0.1,
+        "big_stones": 0.2, "wage_per_gram": 11}], D1, "t")
+code, j = call("GET", "api/wo", {"no": "790", "mode": "sale"})
+_wj = json.loads(j)
+check("بحث رقم التشغيل يعيد موديله وحال صورته للخانة",
+      _wj.get("ok") and "img" in _wj and "ver" in _wj and _wj.get("model"),
+      {k: _wj.get(k) for k in ("ok", "model", "img")})
+
 print("── 6) السلامة")
 with db(readonly=True) as c:
     g = c.execute("SELECT ROUND(SUM(gold_debit-gold_credit),3),"
