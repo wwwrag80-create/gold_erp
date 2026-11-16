@@ -163,6 +163,10 @@ class AccountMovementDialog(QtWidgets.QDialog):
                     if opening or c == 2:
                         it.setFont(bold)
                     t.setItem(i, c, it)
+            # 5.7.5: أعمدة الرصيد مظلّلة تظليلاً هادئاً
+            from ui.widgets.common import shade_balance
+            shade_balance(t, [5 + j for j, (k, _g) in enumerate(keys)
+                              if k.endswith("bal")])
         finally:
             t.setUpdatesEnabled(True)
         try:

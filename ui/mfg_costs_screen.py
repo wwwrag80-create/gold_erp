@@ -891,6 +891,8 @@ class MfgCostsScreen(QtWidgets.QWidget):
                         QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
                         if j == 2 else QtCore.Qt.AlignCenter)
                     t.setItem(i, j, it)
+            from ui.widgets.common import shade_balance
+            shade_balance(t, (5,))       # 5.7.5: عمود الرصيد مظلّل
             bal = float(rows[-1].get("cbal") or 0) if rows else 0.0
             lbl = big_label(
                 f"الرصيد الآن: {_num(abs(bal))} ريال  "

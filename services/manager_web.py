@@ -206,6 +206,9 @@ _ICON = {
                  '<circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3'
                  '-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     "pnl": '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
+    "analytics": '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-'
+                 '8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/>'
+                 '<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
     "sale": '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/>'
             '<path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
     "sale_return": '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1'
@@ -268,6 +271,8 @@ def nav_items(base):
          "received"),
         ("customers", "العملاء", _link(base, tab="customers"),
          "customers"),
+        ("analytics", "تحليل المبيعات", _link(base, "/analytics"),
+         "analytics"),
         ("pnl", pnl, _link(base, tab="pnl"), "pnl"),
     ]
 
@@ -283,7 +288,7 @@ NAV_CSS = """
 .mnav{max-width:1500px;margin:auto;display:flex;gap:4px;overflow-x:auto;
 padding:0 16px 10px;scrollbar-width:none}
 .mnav::-webkit-scrollbar{display:none}
-.mnav a{display:flex;align-items:center;gap:7px;padding:8px 14px;
+.mnav a{display:flex;align-items:center;gap:6px;padding:8px 9px;
 border-radius:11px;color:#f3e7cf;text-decoration:none;font-size:14px;
 white-space:nowrap}
 .mnav a:hover{background:rgba(255,255,255,.10)}
@@ -311,7 +316,7 @@ border-radius:20px;padding:5px 12px;white-space:nowrap}
 .mnav{max-width:1400px;margin:auto;display:flex;gap:4px;overflow-x:auto;
 padding:0 16px 10px;scrollbar-width:none}
 .mnav::-webkit-scrollbar{display:none}
-.mnav a{display:flex;align-items:center;gap:7px;padding:8px 14px;
+.mnav a{display:flex;align-items:center;gap:6px;padding:8px 9px;
 border-radius:11px;color:#f3e7cf;text-decoration:none;font-size:14px;
 white-space:nowrap;transition:background .15s}
 .mnav a:hover{background:rgba(255,255,255,.10)}
@@ -366,6 +371,15 @@ font-variant-numeric:tabular-nums;white-space:nowrap}
 .tbl tr.tot td{background:#2f2519;color:#fff;font-weight:700}
 .tbl .neg{color:var(--bad)}
 .tbl .acts{white-space:nowrap;text-align:left}
+.tbl th.bal{background:#EDE2C6;color:#4a3519}
+.tbl td.bal,.tbl tr:nth-child(even) td.bal{background:#FAF3E1;color:#3f2f18;
+font-weight:600}
+.tbl tr:nth-child(even) td.bal{background:#F6EDD6}
+.tbl input.lwg{width:96px;padding:5px 8px;border:1px solid #E2D3AE;
+border-radius:8px;background:#FFFDF6;font:inherit;font-size:14px;
+text-align:left;direction:ltr;color:var(--ink)}
+.tbl input.lwg:focus{outline:2px solid #E7CF8E;border-color:#C9A24A;
+background:#fff}
 .scroll{overflow-x:auto}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;
 border-radius:10px;border:1px solid var(--brown);background:var(--brown);
@@ -543,7 +557,8 @@ def frame(base, active, title, inner, csrf="", css="", js="", sub=""):
 #  التوجيه
 # ══════════════════════════════════════════════════════════════════
 
-ROUTES = ("home", "sets", "boxes", "moves", "stmt", "ops", "doc", "api")
+ROUTES = ("home", "sets", "boxes", "moves", "stmt", "analytics", "ops",
+          "doc", "api")
 
 
 def handles(rest, query):
@@ -607,7 +622,7 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
         with db(readonly=True) as conn:
             return _json(api(conn, rest[1:], query))
     if head == "doc":
-        return doc_page(rest[1:], base)
+        return doc_page(rest[1:], base, query)
     with db(readonly=True) as conn:
         if head == "home":
             return _resp(200, home(conn, base, csrf))
@@ -619,6 +634,8 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
             return _resp(200, moves_page(conn, base, csrf, query))
         if head == "stmt":
             return _resp(200, stmt_page(conn, base, csrf, query))
+        if head == "analytics":
+            return _resp(200, analytics_page(conn, base, csrf, query))
         if head == "ops":
             if rest[1:2] == ["unlock"]:
                 return _resp(200, unlock_page(
@@ -778,6 +795,8 @@ def api(conn, rest, query):
         return search_accounts(conn, q, postable=query.get("p") == "1")
     if what == "party":
         return search_parties(conn, q)
+    if what == "cust":
+        return search_customers(conn, q)
     if what == "wo":
         inv = str(query.get("inv") or "")
         return wo_info(conn, query.get("no"), query.get("mode") or "sale",
@@ -827,6 +846,8 @@ def home(conn, base, csrf):
              _link(base, tab="received")),
         tile("customers", "العملاء — المبيعات والسداد",
              "من يسدّد ومن يتأخر", _link(base, tab="customers")),
+        tile("analytics", AN_TITLE, "المبيعات · المرتجعات · المباع الفعلي ·"
+             " التحصيل — لكل عميل كشاشة البرنامج", _link(base, "/analytics")),
         tile("pnl", pnl, "لوحة الأرباح كما في البرنامج",
              _link(base, tab="pnl"))))
     inner = (f'<div class="ptitle"><h2>{icon("home", 22)}الرئيسية</h2>'
@@ -1324,7 +1345,7 @@ def _scrap_section(conn, base, sel, query):
             + (f'<br><small class="note">{_e(r["desc"])}</small>'
                if r.get("desc") else "") + '</td>'
             f'<td class="n">{f2(r["inw"])}</td><td class="n">{f2(r["outw"])}'
-            f'</td><td class="n">{_m(r["bal"])}</td><td class="n">'
+            f'</td><td class="n bal">{_m(r["bal"])}</td><td class="n bal">'
             f'{_w(r["bal18"])}</td><td class="acts">{acts}</td></tr>')
     stmt = (f'<div class="panel"><h3>{icon("stmt", 20)}كشف صندوق الكسر — '
             f'عيار {k}<span class="pill">الأحدث أولاً</span>'
@@ -1336,7 +1357,7 @@ def _scrap_section(conn, base, sel, query):
             + (f'<div class="scroll"><table class="tbl"><tr><th>التاريخ</th>'
                f'<th>العملية</th><th>المستند</th><th>الجهة / البيان</th>'
                f'<th class="n">وارد (جم)</th><th class="n">صادر (جم)</th>'
-               f'<th class="n">الرصيد (عيار {k})</th><th class="n">بمكافئ '
+               f'<th class="n bal">الرصيد (عيار {k})</th><th class="n bal">بمكافئ '
                f'{u}</th><th></th></tr>{"".join(srows)}</table></div>'
                '<div id="mnone" class="empty" style="display:none">لا نتائج'
                '</div>' + _more_note(hidden) if srows else
@@ -1812,11 +1833,15 @@ def stmt_page(conn, base, csrf, query):
             f'{_e(r.get("doc_no") or "")}</td><td>{_e(r.get("name") or "")}'
             + (f'<br><small class="note">{_e(r["desc"])}</small>'
                if r.get("desc") else "") + '</td>'
+            # 5.7.5: عمودا الرصيد مظلّلان تظليلاً هادئاً — يُعرف بهما الرصيد
             + "".join(
-                f'<td class="n">{v}</td>' for v in (
-                    _w(r["gd"]) if r["gd"] else "", _w(r["gc"]) if r["gc"]
-                    else "", _w(r["gbal"]), _m(r["cd"]) if r["cd"] else "",
-                    _m(r["cc"]) if r["cc"] else "", _m(r["cbal"])))
+                f'<td class="n{c}">{v}</td>' for v, c in (
+                    (_w(r["gd"]) if r["gd"] else "", ""),
+                    (_w(r["gc"]) if r["gc"] else "", ""),
+                    (_w(r["gbal"]), " bal"),
+                    (_m(r["cd"]) if r["cd"] else "", ""),
+                    (_m(r["cc"]) if r["cc"] else "", ""),
+                    (_m(r["cbal"]), " bal")))
             + f'<td class="acts">{acts}</td></tr>')
     gb = rows[-1]["gbal"] if rows else 0.0
     cb = rows[-1]["cbal"] if rows else 0.0
@@ -1838,9 +1863,9 @@ def stmt_page(conn, base, csrf, query):
              f'style="min-width:220px"></h3><div class="scroll"><table '
              f'class="tbl"><tr><th>التاريخ</th><th>العملية</th><th>المستند'
              f'</th><th>الطرف / البيان</th><th class="n">مدين ذهب</th>'
-             f'<th class="n">دائن ذهب</th><th class="n">رصيد ذهب ({u})</th>'
+             f'<th class="n">دائن ذهب</th><th class="n bal">رصيد ذهب ({u})</th>'
              f'<th class="n">مدين نقد</th><th class="n">دائن نقد</th>'
-             f'<th class="n">رصيد نقد</th><th></th></tr>' + "".join(trs)
+             f'<th class="n bal">رصيد نقد</th><th></th></tr>' + "".join(trs)
              + '</table></div><div id="mnone" class="empty" style="display:'
                'none">لا نتائج</div>' + _more_note(hidden) + '</div>'
              if trs else
@@ -1852,24 +1877,304 @@ def stmt_page(conn, base, csrf, query):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  تحليل مبيعات العملاء (5.7.5) — شاشة البرنامج نفسها بكل ما فيها:
+#  العميل · من/إلى · العيار · «تحديث اللوحات» تفصيلي/تقرير · «فرز» ·
+#  أربع لوحات تحت كلٍّ جدولها (إخفاء/إظهار) · الرصيد المتبقي · الطباعة
+# ══════════════════════════════════════════════════════════════════
+
+AN_TITLE = "تحليل مبيعات العملاء"
+AN_PANELS = (("sales", "إجمالي المبيعات"), ("returns", "إجمالي المرتجعات"),
+             ("net_sold", "إجمالي المباع الفعلي"),
+             ("collection", "إجمالي التحصيل"))
+AN_MERGE_PREF = "sales_analytics_merged"     # اختيار «فرز» في البرنامج
+_NC = ' class="n"'
+
+_AN_CSS = """
+.anf{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.anf label{display:flex;flex-direction:column;gap:5px;font-size:13px;
+color:var(--muted)}
+.anf input,.anf select{padding:9px 10px;border:1px solid var(--line);
+border-radius:10px;font:inherit;font-size:14px;background:#fff;color:var(--ink)}
+.anf .cust{flex:1 1 260px}
+.anf .cust input{width:100%}
+.anf .msort{display:flex;gap:6px;flex-wrap:wrap;align-items:center;
+font-size:13px;color:var(--ink)}
+.anf .msort span{color:var(--muted)}
+.anf .msort label{flex-direction:row;align-items:center;gap:5px;
+background:#F8F3E8;border:1px solid var(--line);border-radius:9px;
+padding:6px 9px;color:var(--ink);cursor:pointer}
+.ancols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;
+align-items:start}
+.ancols.rep{grid-template-columns:repeat(3,minmax(0,1fr))}
+.ancol{background:var(--card);border:1px solid var(--line);border-radius:16px;
+padding:12px;box-shadow:0 1px 2px rgba(60,40,10,.04);min-width:0}
+.anbox{background:linear-gradient(180deg,#FFFDF7,#FFF6E2);
+border:1px solid #E9D59F;border-radius:13px;padding:12px 10px;text-align:center;
+min-height:84px;display:flex;flex-direction:column;justify-content:center;gap:6px}
+.anbox .t{font-size:14px;color:var(--brown);font-weight:700}
+.anbox .v{font-size:19px;font-weight:700;color:var(--ink);direction:ltr;
+font-variant-numeric:tabular-nums}
+.anbox .s{font-size:12px;color:var(--muted)}
+.antog{width:100%;justify-content:center;margin:8px 0}
+.ancol .tbl{font-size:13.5px}
+.ancol .tbl td,.ancol .tbl th{padding:7px 6px}
+.ancol tr.it td{font-weight:700}
+.ancol tr.op td{color:#8a6a1e;font-weight:600}
+.anrem{margin-top:14px;background:#2f2519;color:#fff;border-radius:14px;
+padding:14px 16px;font-size:16px;font-weight:700;text-align:center;
+line-height:1.7}
+.anrem small{color:#EAD9AE;font-weight:600}
+@media (max-width:1100px){.ancols,.ancols.rep{grid-template-columns:
+repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.ancols,.ancols.rep{grid-template-columns:1fr}
+.anf .cust{flex-basis:100%}}
+"""
+
+_AN_JS = r"""
+(function(){var i=document.getElementById('ancust');if(!i)return;
+ var h=document.getElementById('anc');
+ MW.ac(i,'/api/cust',function(r,typing){if(r){h.value=r.id;i.form.submit();}
+  else if(typing){h.value='';}});
+ document.querySelectorAll('.antog').forEach(function(b){
+  b.addEventListener('click',function(){var c=b.closest('.ancol'),
+   t=c.querySelector('.anbody'),vis=t.style.display==='none';
+   t.style.display=vis?'':'none';b.textContent=vis?'إخفاء الجدول':'إظهار الجدول';
+   c.setAttribute('data-exp',vis?'1':'0');});});
+ var pr=document.getElementById('anprint');
+ if(pr)pr.addEventListener('click',function(e){e.preventDefault();
+  var u=new URL(pr.href,location.href),exp=[];
+  document.querySelectorAll('.ancol[data-exp="1"]').forEach(function(c){
+   exp.push(c.getAttribute('data-k'));});
+  u.searchParams.set('exp',exp.join(','));location.href=u.toString();});
+})();
+"""
+
+
+def _an_default_from():
+    """من: قبل ستة أشهر — كما تفتح شاشة البرنامج."""
+    import calendar
+    from datetime import date
+    t = date.today()
+    y, m = t.year, t.month - 6
+    if m < 1:
+        y, m = y - 1, m + 12
+    return date(y, m, min(t.day, calendar.monthrange(y, m)[1])).isoformat()
+
+
+def search_customers(conn, q, limit=14):
+    """عملاء التحليل كقائمة البرنامج: العملاء الخارجيون وحدهم."""
+    out = search_parties(conn, q, limit=60, types=("customer",))
+    if not out:
+        return []
+    ids = [r["id"] for r in out]
+    internal = {r[0] for r in conn.execute(
+        "SELECT id FROM entities WHERE COALESCE(is_internal,0)=1 AND id IN"
+        f" ({','.join('?' * len(ids))})", ids)}
+    return [r for r in out if r["id"] not in internal][:limit]
+
+
+def analytics_page(conn, base, csrf, query):
+    from models import fiscal
+    from models import sales_analytics as sa
+    from services import gold_math
+    from services import karat_view as kv
+    cid = str(query.get("c") or "")
+    cust = conn.execute(
+        "SELECT id, name, account_id FROM entities WHERE id=? AND"
+        " is_deleted=0 AND entity_type='customer'",
+        (int(cid),)).fetchone() if cid.isdigit() else None
+    d1 = _date(query.get("from")) or _an_default_from()
+    d2 = _date(query.get("to")) or _today().isoformat()
+    if d2 < d1:
+        d1, d2 = d2, d1
+    try:
+        k = int(query.get("k") or 0)
+    except (TypeError, ValueError):
+        k = 0
+    if k not in KARATS:
+        k = int(kv.active() or 18)
+    mode = "report" if query.get("mode") == "report" else "detail"
+    report = mode == "report"
+    # «فرز»: من النموذج إن أُرسل، وإلا آخر اختيارٍ حُفظ في البرنامج
+    if query.get("mf"):
+        merged = {x for x in sa.MERGEABLE if query.get("m_" + x)}
+    else:
+        saved = str(fiscal.get_setting(conn, AN_MERGE_PREF, "") or "")
+        merged = {x for x in saved.split(",") if x in sa.MERGEABLE}
+    titles = dict(AN_PANELS)
+    sort = "".join(
+        f'<label><input type="checkbox" name="m_{x}" value="1"'
+        f'{" checked" if x in merged else ""}>{_e(titles[x])}</label>'
+        for x in sa.MERGEABLE)
+    kopts = "".join(f'<option value="{x}"{" selected" if x == k else ""}>'
+                    f'عيار {x}</option>' for x in KARATS)
+    form = (
+        f'<form class="panel anf" method="get" action="{_e(base)}/analytics">'
+        f'<input type="hidden" name="c" id="anc" value="'
+        f'{_e(cust["id"] if cust else "")}"><input type="hidden" name="mf"'
+        f' value="1"><label class="ac cust">العميل<input id="ancust" '
+        f'autocomplete="off" placeholder="اكتب اسم العميل…" value="'
+        f'{_e(cust["name"] if cust else "")}"></label>'
+        f'<label>من<input type="date" name="from" value="{_e(d1)}"></label>'
+        f'<label>إلى<input type="date" name="to" value="{_e(d2)}"></label>'
+        f'<label>العيارات<select name="k">{kopts}</select></label>'
+        f'<label>العرض<select name="mode"><option value="detail"'
+        f'{"" if report else " selected"}>تفصيلي — اللوحات وأرقام التشغيل '
+        f'والأوزان</option><option value="report"'
+        f'{" selected" if report else ""}>تقرير — المصروف والمرتجع والصافي '
+        f'بأرقامها فقط</option></select></label>'
+        f'<div class="msort"><span>فرز (بلا تكرار):</span>{sort}</div>'
+        f'<button class="btn">{icon("moves", 16)}تحديث اللوحات</button>'
+        f'</form>')
+    head = (f'<div class="ptitle"><h2>{icon("analytics", 22)}{AN_TITLE}'
+            f'</h2><span class="hint">رقابة إدارية — كشاشة البرنامج '
+            f'تماماً</span></div>')
+    if cust is None:
+        return frame(base, "analytics", AN_TITLE, head + form + (
+            '<div class="empty">اكتب اسم العميل أعلاه واختره — تظهر '
+            'لوحاته الأربع وجداولها</div>'), csrf, css=_AN_CSS, js=_AN_JS)
+
+    def g(v):
+        return gold_math.from_base_karat(float(v or 0), k)
+    p = sa.all_panels(conn, cust["id"], d1, d2)
+    details = {key: sa.panel_details(conn, key, cust["id"], d1, d2,
+                                     merged=key in merged)
+               for key, _t in AN_PANELS}
+    if report:
+        p["net_sold"] = sa.report_net(p)
+    coll = p["collection"]
+    vals = {"sales": f"{_m(g(p['sales']['weight']))} جم {k}",
+            "returns": f"{_m(g(p['returns']['weight']))} جم {k}",
+            "net_sold": f"{_m(g(p['net_sold']['weight']))} جم {k}",
+            "collection": f"ذهب {_m(g(coll['gold']))} · نقد "
+                          f"{_m(coll['cash'])}"}
+    subs = {"sales": f"{p['sales']['count']} فاتورة · أجور "
+                     f"{_m(p['sales']['wages'])}",
+            "returns": f"{p['returns']['count']} فاتورة · أجور "
+                       f"{_m(p['returns']['wages'])}",
+            "net_sold": ("المصروف − المرتجع" if report else
+                         f"{p['net_sold']['count']} رقم تشغيل"),
+            "collection": f"{coll['count']} سند قبض"}
+    if report:
+        titles.update({"sales": "المصروف (المبيعات)",
+                       "net_sold": "المباع الصافي"})
+    cols = []
+    for key, _t in AN_PANELS:
+        if report and key == "collection":
+            continue
+        if key == "collection":
+            heads = ["رقم السند", f"الذهب (جم {k})", "المبلغ (ريال)"]
+            rows = [(d["wo"], _m(g(d["weight"])), _m(d.get("cash", 0)))
+                    for d in details[key]]
+        else:
+            if key in merged:
+                heads = ["رقم التشغيل (بلا تكرار)",
+                         f"الوزن (جم {k})" if key == "net_sold"
+                         else f"الوزن المقيد (جم {k})"]
+            elif key == "net_sold":
+                heads = ["رقم التشغيل", f"الوزن (جم {k})"]
+            else:
+                heads = ["رقم التشغيل", f"الوزن المقيد (جم {k})"]
+            rows = [(d["wo"], _m(g(d["weight"]))) for d in details[key]]
+        trs = "".join(
+            f'<tr class="{"it" if r[0] == sa.ITALIAN_LABEL else "op" if r[0] == sa.OPENING_LABEL else ""}"'
+            + (' title="الرقمان التجميعيان 00010 و0010 معاً: ما صُرف منهما'
+               ' ناقص ما رجع منهما"' if r[0] == sa.ITALIAN_LABEL else "")
+            + '>' + "".join(f'<td{_NC if j else ""}>{_e(v)}</td>'
+                            for j, v in enumerate(r)) + '</tr>'
+            for r in rows)
+        table = (f'<div class="scroll"><table class="tbl"><tr>'
+                 + "".join(f'<th{_NC if j else ""}>{_e(h)}</th>'
+                           for j, h in enumerate(heads)) + f'</tr>{trs}'
+                 '</table></div>' if trs else
+                 '<div class="empty" style="padding:14px">لا شيء في الفترة'
+                 '</div>')
+        body = ("" if report else
+                f'<button type="button" class="btn sm gh antog">إخفاء الجدول'
+                f'</button><div class="anbody">{table}</div>')
+        cols.append(
+            f'<section class="ancol" data-k="{key}" data-exp="'
+            f'{"0" if report else "1"}"><div class="anbox"><div class="t">'
+            f'{_e(titles[key])}</div><div class="v">{_e(vals[key])}</div>'
+            f'<div class="s">{_e(subs[key])}</div></div>{body}</section>')
+    # الرصيد المتبقي = رصيد حساب العميل في الدليل (كالبرنامج)
+    gb = cb = 0.0
+    if cust["account_id"]:
+        r = conn.execute(
+            "SELECT COALESCE(SUM(l.gold_debit-l.gold_credit),0) g,"
+            " COALESCE(SUM(l.cash_debit-l.cash_credit),0) c FROM journal_lines"
+            " l JOIN journal_entries e ON e.id=l.entry_id WHERE"
+            " e.is_deleted=0 AND l.account_id=?",
+            (cust["account_id"],)).fetchone()
+        gb, cb = round(r["g"], 2), round(r["c"], 2)
+    side = "مدين/عليه" if (gb > 0 or cb > 0) else "دائن/له"
+    rem = (f'<div class="anrem">الرصيد المتبقي على العميل — ذهب: '
+           f'{_m(g(gb))} جم عيار {k} &nbsp;|&nbsp; نقد: {_m(cb)} ريال '
+           f'<small>({side})</small></div>')
+    visible = [key for key, _t in AN_PANELS
+               if not (report and key == "collection")]
+    plink = _link(base, f"/doc/customer_analytics/{cust['id']}", **{
+        "from": d1, "to": d2, "k": k, "mode": mode,
+        "m": ",".join(x for x in sa.MERGEABLE if x in merged),
+        "vis": ",".join(visible),
+        "exp": "" if report else ",".join(visible)})
+    bar = (f'<div class="ptitle" style="margin-top:4px"><h2 style="font-size:'
+           f'17px">{icon("customers", 20)}{_e(cust["name"])}</h2><span '
+           f'class="hint">{_e(d1)} ← {_e(d2)} · عيار {k} · '
+           f'{"تقرير" if report else "تفصيلي"}</span><span class="sp"></span>'
+           f'<a class="btn gold" id="anprint" href="{_e(plink)}">🖨 طباعة '
+           f'تقرير العميل</a><a class="btn gh" href="'
+           f'{_e(_link(base, "/stmt", acc=cust["account_id"]))}">'
+           f'{icon("stmt", 16)}كشف حسابه</a></div>')
+    inner = (head + form + bar
+             + f'<div class="ancols{" rep" if report else ""}">'
+             + "".join(cols) + '</div>' + rem)
+    return frame(base, "analytics", f"{AN_TITLE} — {cust['name']}", inner,
+                 csrf, css=_AN_CSS, js=_AN_JS)
+
+
+# ══════════════════════════════════════════════════════════════════
 #  المستند وصوره — بقوالب الطباعة نفسها
 # ══════════════════════════════════════════════════════════════════
 
 DOC_TYPES = ("invoices", "vouchers", "manual", "work_orders", "set_purchases",
              "purchases", "fixing_ops", "melting_ops", "invoice_models",
-             "set_purchase_models", "supply_models")
+             "set_purchase_models", "supply_models", "customer_analytics")
 _DOC_CSP = ("default-src 'none'; img-src 'self' data:; style-src "
             "'unsafe-inline'; font-src data:; script-src 'unsafe-inline';"
             " base-uri 'none'; form-action 'none'")
 
 
-def doc_page(rest, base):
+def _an_print_kw(query):
+    """خيارات طباعة تقرير العميل من الرابط — كما تمرّرها شاشة البرنامج."""
+    from models import sales_analytics as sa
+    keys = [k for k, _t in AN_PANELS]
+
+    def lst(name, allowed):
+        return [x for x in str(query.get(name) or "").split(",")
+                if x in allowed]
+    try:
+        k = int(query.get("k") or 0)
+    except (TypeError, ValueError):
+        k = 0
+    return {"date_from": _date(query.get("from")) or None,
+            "date_to": _date(query.get("to")) or None,
+            "visible": lst("vis", keys) or keys,
+            "expanded": lst("exp", keys),
+            "merged": lst("m", sa.MERGEABLE),
+            "karat": k if k in KARATS else None,
+            "mode": "report" if query.get("mode") == "report" else "detail"}
+
+
+def doc_page(rest, base, query=None):
     if len(rest) != 2 or rest[0] not in DOC_TYPES or not rest[1].isdigit():
         return _resp(404, _mw()._GONE)
     from services import browser_print
+    kw = (_an_print_kw(query or {}) if rest[0] == "customer_analytics"
+          else {})
     try:
         html = browser_print.build_page(rest[0], int(rest[1]),
-                                        auto_print=False, viewer=False)
+                                        auto_print=False, viewer=False, **kw)
     except Exception as e:                       # noqa: BLE001
         return _resp(404, frame(base, "", "المستند", f'<div class="msg bad">'
                                 f'تعذّر عرض المستند: {_e(e)}</div>'))
@@ -2250,24 +2555,44 @@ _OPS_JS = r"""
    MW.toast('اكتب مبلغ الأجر',false);return;}lines.push({wage_only:true,
    amount:a,note:$('wonote').value.trim()});$('woamt').value='';
    $('wonote').value='';render();};
-  render=function(){var tw=0,tg=0;tbl(lines.map(function(l,i){
-    if(l.wage_only){tg+=l.amount;return '<td>'+(i+1)+'</td><td colspan="5">'+
-     'أجر فقط'+(l.note?' — '+MW.esc(l.note):'')+'</td><td class="n">'+
-     MW.fmt(l.amount)+'</td><td></td><td class="acts">'+X+'</td>';}
-    var wg=l.weight*l.wage;tw+=w18(l.weight,l.karat);tg+=wg;
-    return '<td>'+(i+1)+'</td><td class="n">'+MW.esc(l.no)+'</td><td>'+
-     MW.esc(l.model||'—')+'</td><td class="n">'+MW.fmt(l.weight)+'</td><td>'+
-     l.karat+'</td><td class="n">'+MW.fmt(l.wage)+'</td><td class="n">'+
-     MW.fmt(wg)+'</td><td class="n">'+(l.diamond?MW.fmt(l.diamond):'')+
-     '</td><td class="acts">'+X+'</td>';}));
+  // 5.7.5: أجر كل سطرٍ مضاف يُعدَّل في مكانه — خانةٌ في الجدول تحدّث
+  // الإجمالي فوراً دون إعادة رسمه (فلا يضيع المؤشر من الخانة)
+  function wgIn(i,v,t){return '<input class="lwg num" inputmode="decimal" '+
+   'data-i="'+i+'" value="'+(+v||0).toFixed(2)+'" title="'+t+'">';}
+  function totals(){var tw=0,tg=0;lines.forEach(function(l){
+    if(l.wage_only){tg+=l.amount;return;}
+    tw+=w18(l.weight,l.karat);tg+=l.weight*l.wage;});
    var vat=$('vat').checked?tg*D.vat:0;
    kpis([['الأطقم',lines.filter(function(l){return !l.wage_only;}).length],
     ['الوزن ('+U+')',MW.fmt(wk(tw,D.k))],['الأجور',MW.fmt(tg)],
-    ['الضريبة',MW.fmt(vat)],['الإجمالي',MW.fmt(tg+vat),1]]);};
-  $('vat').onchange=function(){render();};
+    ['الضريبة',MW.fmt(vat)],['الإجمالي',MW.fmt(tg+vat),1]]);}
+  render=function(){tbl(lines.map(function(l,i){
+    if(l.wage_only)return '<td>'+(i+1)+'</td><td colspan="5">'+
+     'أجر فقط'+(l.note?' — '+MW.esc(l.note):'')+'</td><td class="n">'+
+     wgIn(i,l.amount,'عدّل مبلغ الأجر')+'</td><td></td><td class="acts">'+X+'</td>';
+    return '<td>'+(i+1)+'</td><td class="n">'+MW.esc(l.no)+'</td><td>'+
+     MW.esc(l.model||'—')+'</td><td class="n">'+MW.fmt(l.weight)+'</td><td>'+
+     l.karat+'</td><td class="n">'+wgIn(i,l.wage,'عدّل أجر الجرام')+
+     '</td><td class="n lwt">'+MW.fmt(l.weight*l.wage)+'</td><td class="n">'+
+     (l.diamond?MW.fmt(l.diamond):'')+'</td><td class="acts">'+X+'</td>';}));
+   document.querySelectorAll('#lines input.lwg').forEach(function(inp){
+    inp.addEventListener('input',function(){var l=lines[+inp.getAttribute('data-i')];
+     if(!l)return;var v=Math.max(0,MW.num(inp));
+     if(l.wage_only)l.amount=v;else{l.wage=v;var c=inp.closest('tr')
+      .querySelector('.lwt');if(c)c.textContent=MW.fmt(l.weight*v);}
+     totals();});
+    inp.addEventListener('focus',function(){inp.select();});
+    inp.addEventListener('keydown',function(e){if(e.key==='Enter'){
+     e.preventDefault();inp.blur();}});
+    inp.addEventListener('blur',function(){inp.value=(MW.num(inp)||0).toFixed(2);});});
+   totals();};
+  $('vat').onchange=function(){totals();};
   build=function(){if(!party){MW.toast('اختر الطرف من الاقتراحات',false);
     $('party').focus();return null;}
    if(!lines.length){MW.toast('أضف طقماً واحداً على الأقل',false);return null;}
+   if(lines.some(function(l){return l.wage_only&&!(l.amount>0);})){
+    MW.toast('سطر «أجر فقط» بلا مبلغ — اكتب المبلغ أو احذف السطر',false);
+    return null;}
    return {party:party.id,src:+$('src').value,scrap_karat:scrapK(),
     date:$('date').value,vat:$('vat').checked,notes:$('notes').value,
     lines:lines};};

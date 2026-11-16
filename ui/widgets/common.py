@@ -772,6 +772,30 @@ def ledger_rows(table, height=38, wrap_cols=(), max_lines=2):
     vh.setDefaultSectionSize(max(int(height), row_height(table, need)))
 
 
+def shade_balance(table, cols, skip_last=False):
+    """يظلّل عمودَي الرصيد في الكشف تظليلاً هادئاً (5.7.5): يُعرف بهما
+    الرصيد من النظرة الأولى دون أن يزعج العين. اللون من `theme` فيتبع
+    الفاتح والداكن. `skip_last`: صفُّ الإجمالي له لونه فلا يُمسّ."""
+    from ui import theme
+    pal = theme.palette(theme.current_theme())
+    # ألوان النظام نفسها (لا لون جديد): الذهبي الهادئ والحبر
+    bg = QtGui.QBrush(QtGui.QColor(pal.get("goldSoft2", "#F7EFD9")))
+    fg = QtGui.QBrush(QtGui.QColor(pal.get("ink", "#1C1A17")))
+    n = table.rowCount() - (1 if skip_last and table.rowCount() else 0)
+    for c in cols:
+        if c is None or c < 0 or c >= table.columnCount():
+            continue
+        for r in range(n):
+            it = table.item(r, c)
+            if it is None:
+                continue
+            it.setBackground(bg)
+            it.setForeground(fg)
+            f = it.font()
+            f.setBold(True)
+            it.setFont(f)
+
+
 def num_item(text, tip=None):
     """خلية رقم: محاذاةٌ لليمين فتصطفّ الآحاد تحت الآحاد.
 

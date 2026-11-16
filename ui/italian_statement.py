@@ -100,6 +100,9 @@ class ItalianStatementDialog(QtWidgets.QDialog):
                 hh.setSectionResizeMode(
                     c, QtWidgets.QHeaderView.Stretch if c == 4
                     else QtWidgets.QHeaderView.ResizeToContents)
+            # 5.7.5: عمود الرصيد مظلّل (صفّ الإجمالي له لونه)
+            from ui.widgets.common import shade_balance
+            shade_balance(self.table, (7,), skip_last=True)
             last = self.table.rowCount() - 1
             for c in range(self.table.columnCount()):
                 it = self.table.item(last, c)

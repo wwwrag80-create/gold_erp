@@ -577,6 +577,9 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
                         _ti.setToolTip("صافي الماس: المبيعات − المرتجع")
                         tot.insert(11, _ti)
                     self._sum_row(len(rows), tot)
+                # 5.7.5: عمودا رصيد الذهب (7) ورصيد النقد (10) مظلّلان
+                from ui.widgets.common import shade_balance
+                shade_balance(self.table, (7, 10), skip_last=bool(rows))
             finally:
                 self.table.setUpdatesEnabled(True)
             # الجهة (٣) والبيان (٤): يتّسعان لسطرين إن لزم،

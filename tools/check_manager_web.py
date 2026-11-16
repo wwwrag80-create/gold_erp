@@ -539,6 +539,79 @@ code, h = call("GET", "boxes", {"b": "scrap"})
 check("كشف صندوق الكسر على كل الحركة والأحدث أولاً",
       "كشف صندوق الكسر — عيار 18" in h and "الأحدث أولاً" in h)
 
+print("── 9) تحليل مبيعات العملاء · الأجر في السطر · تظليل الرصيد (5.7.5)")
+from models import sales_analytics as _sa  # noqa: E402
+from services import gold_math as _gm  # noqa: E402
+code, h = call("GET", "")
+_more = h[h.index("المزيد</div>"):]
+check("«تحليل مبيعات العملاء» في «المزيد» بعد «العملاء» مباشرة",
+      _more.index("<b>العملاء — المبيعات والسداد</b>")
+      < _more.index("<b>تحليل مبيعات العملاء</b>")
+      < _more.index("<b>الأرباح والخسائر</b>")
+      if "<b>تحليل مبيعات العملاء</b>" in _more else False)
+with db() as c:
+    _int = add_entity(c, "محل داخلي للتحليل", "customer", username="t")
+    c.execute("UPDATE entities SET is_internal=1 WHERE id=?", (_int,))
+code, j = call("GET", "api/cust", {"q": "محل"})
+_ids = [x["id"] for x in json.loads(j)]
+check("اقتراح العملاء كقائمة البرنامج: العملاء الخارجيون وحدهم",
+      A in _ids and B in _ids and _int not in _ids, _ids)
+code, h = call("GET", "analytics")
+check("الصفحة بلا عميل تطلب اختياره", code == 200 and 'id="ancust"' in h
+      and 'class="ancol"' not in h)
+_d1, _d2 = "2000-01-01", datetime.date.today().isoformat()
+code, h = call("GET", "analytics", {"c": A, "from": _d1, "to": _d2,
+                                    "k": "21", "mf": "1"})
+with db(readonly=True) as c:
+    _p = _sa.all_panels(c, A, _d1, _d2)
+    _ret = _sa.panel_details(c, "sales", A, _d1, _d2)
+
+
+def _g21(v):
+    return mweb._m(_gm.from_base_karat(float(v or 0), 21))
+
+
+check("اللوحات الأربع بأرقام البرنامج نفسها (بعيار 21)",
+      code == 200 and h.count('class="ancol"') == 4
+      and f"{_g21(_p['sales']['weight'])} جم 21" in h
+      and f"{_g21(_p['returns']['weight'])} جم 21" in h
+      and f"{_g21(_p['net_sold']['weight'])} جم 21" in h
+      and f"ذهب {_g21(_p['collection']['gold'])} · نقد "
+          f"{mweb._m(_p['collection']['cash'])}" in h)
+check("جدول المبيعات بأرقام تشغيله", bool(_ret) and all(
+    f"<td>{r['wo']}</td>" in h for r in _ret), [r["wo"] for r in _ret])
+check("الرصيد المتبقي على العميل أسفل اللوحات",
+      "الرصيد المتبقي على العميل" in h and "عيار 21" in h)
+code, h = call("GET", "analytics", {"c": A, "from": _d1, "to": _d2,
+                                    "mode": "report", "mf": "1"})
+check("«تقرير»: المصروف والمرتجع والصافي بلا جداول ولا تحصيل",
+      h.count('class="ancol"') == 3 and "المصروف (المبيعات)" in h
+      and "المباع الصافي" in h and "antog" not in h.split("<script>")[0]
+      .split("</style>")[-1] and 'data-k="collection"' not in h)
+code, h = call("GET", "analytics", {"c": A, "from": _d1, "to": _d2,
+                                    "mf": "1", "m_sales": "1"})
+check("«فرز»: أرقام التشغيل بلا تكرار في اللوحة المختارة",
+      "رقم التشغيل (بلا تكرار)" in h and 'name="m_sales" value="1" checked'
+      in h)
+code, h = call("GET", f"doc/customer_analytics/{A}",
+               {"from": _d1, "to": _d2, "k": "18", "mode": "detail",
+                "vis": "sales,returns,net_sold,collection", "exp": "sales"})
+check("طباعة تقرير العميل بقالب البرنامج", code == 200
+      and "تقرير المبيعات" in h)
+code, h = call("GET", "stmt", {"code": "1601"})
+check("كشف الحساب: عمودا رصيد الذهب والنقد مظلّلان",
+      h.count('<th class="n bal">') == 2 and 'class="n bal"' in h)
+with db() as c:      # حركةٌ في صندوق كسر 18 ليظهر كشفه بجدوله
+    vouchers.create_voucher(c, "receipt", D1, "t", entity_id=A, rows=[
+        {"kind": "gold", "weight": 2, "karat": 18}])
+code, h = call("GET", "boxes", {"b": "scrap", "k": "18"})
+check("كشف صندوق الكسر: عمودا الرصيد مظلّلان",
+      h.count('<th class="n bal">') == 2)
+code, h = call("GET", "ops/sale")
+check("لوحة البيع: أجر السطر المضاف خانةٌ تُعدَّل",
+      "input.lwg" in h and "class=\"lwg num\"" in h.replace("\\'", "'")
+      or "lwg num" in h)
+
 print("── 6) السلامة")
 with db(readonly=True) as c:
     g = c.execute("SELECT ROUND(SUM(gold_debit-gold_credit),3),"
