@@ -7,7 +7,7 @@
   ② **الصناديق** — أقسامٌ يسمّيها المدير ويضع فيها ما يشاء من الحسابات،
      ولكلّ قسمٍ جدول حساباته بأرصدتها (ذهب · نقد). إضافة الحساب باسمه:
      يكتب أول حرف فتظهر الأسماء المتقاربة.
-  ③ **حركة المصنع** — لوحاتٌ بالأنواع: الوارد · المبيعات · المرتجعات · القبض
+  ③ **فواتير / حركة المصنع** — لوحاتٌ بالأنواع: الوارد · المبيعات · المرتجعات · القبض
      · الصرف · القيود اليومية · التسكير. يُختار نوعٌ وفترةٌ فيظهر سجلّه: كل
      عمليةٍ بطرفها ووزن ما أخذ، ولها «عرض الصور» و«عرض الفاتورة».
   ④ **كشف حساب** — يُكتب الاسم فيظهر كشفه، ولكل حركةٍ الصور والفاتورة.
@@ -260,7 +260,7 @@ def nav_items(base):
         ("home", "الرئيسية", base, "home"),
         ("guide", "دليل الموديلات", _link(base, tab="guide"), "guide"),
         ("boxes", "الصناديق", _link(base, "/boxes"), "boxes"),
-        ("moves", "حركة المصنع", _link(base, "/moves"), "moves"),
+        ("moves", MOVES_TITLE, _link(base, "/moves"), "moves"),
         ("stmt", "كشف حساب", _link(base, "/stmt"), "stmt"),
         ("ops", "تسجيل عمليات", _link(base, "/ops"), "ops"),
         ("sets", "حركة الطقم", _link(base, "/sets"), "sets"),
@@ -809,7 +809,7 @@ def home(conn, base, csrf):
              _link(base, tab="guide"), True),
         tile("boxes", "الصناديق", "أقسامك وحساباتها وأرصدتها — ذهباً "
              "ونقداً", _link(base, "/boxes"), True),
-        tile("moves", "حركة المصنع", "الوارد · المبيعات · المرتجعات · القبض"
+        tile("moves", MOVES_TITLE, "الوارد · المبيعات · المرتجعات · القبض"
              " · الصرف · القيود · التسكير", _link(base, "/moves"), True),
         tile("stmt", "كشف حساب", "اكتب الاسم يظهر كشفه — مع الصور والفواتير",
              _link(base, "/stmt"), True),
@@ -1346,73 +1346,6 @@ def _scrap_section(conn, base, sel, query):
                               {"b": sel["id"], "k": k}) + stmt)
 
 
-BOX_LATEST = 40
-
-
-def _box_latest(conn, base, codes, limit=BOX_LATEST):
-    """آخر حركات حسابات القسم مجتمعةً — الأحدث أولاً (5.7.3): يدخل المدير
-    القسم فيرى آخر ما جرى عليه دون أن يفتح كشف كل حسابٍ وحده."""
-    from models import journal
-    from models.accounts import subtree_ids
-    codes = [str(c) for c in codes or []]
-    if not codes:
-        return ""
-    q = ",".join("?" * len(codes))
-    ids = set()
-    for a in conn.execute(f"SELECT id, is_postable FROM accounts WHERE code"
-                          f" IN ({q})", codes):
-        ids.update(subtree_ids(conn, a["id"]) if not a["is_postable"]
-                   else [a["id"]])
-    if not ids:
-        return ""
-    ids = sorted(ids)
-    q2 = ",".join("?" * len(ids))
-    rows = conn.execute(
-        "SELECT e.id eid, e.entry_date d, e.doc_no, e.source_table src,"
-        " e.source_id sid, e.user_note note, a.code acode, a.name aname,"
-        " ROUND(SUM(l.gold_debit-l.gold_credit),3) g,"
-        " ROUND(SUM(l.cash_debit-l.cash_credit),2) m"
-        " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-        " AND e.is_deleted=0 JOIN accounts a ON a.id=l.account_id"
-        f" WHERE l.account_id IN ({q2}) GROUP BY e.id, l.account_id"
-        " ORDER BY e.entry_date DESC, COALESCE(e.sort_key, e.id) DESC,"
-        " e.id DESC LIMIT ?", ids + [int(limit)]).fetchall()
-    if not rows:
-        return ('<div class="panel"><h3>' + icon("moves", 19) + 'آخر الحركات'
-                '</h3><div class="empty">لا حركة على حسابات هذا القسم بعد'
-                '</div></div>')
-    cache = {}
-    u = _e(_unit())
-
-    def sv(v, money=False):
-        if not v:
-            return "—"
-        t = _m(v) if money else _w(v)
-        return f'<span class="{"neg" if v < 0 else ""}">{t}</span>'
-    trs = []
-    for r in rows:
-        no, op = journal._doc_info(conn, r["src"], r["sid"], cache)
-        no = no or r["doc_no"] or ""
-        trs.append(
-            f'<tr><td class="n">{_e(r["d"])}</td><td>{_e(op or "")}</td>'
-            f'<td class="n">{_e(no)}</td><td><b>{_e(r["aname"])}</b>'
-            f'<small class="cdm">{_e(r["acode"])}</small>'
-            + (f'<br><small class="note">{_e(r["note"])}</small>'
-               if r["note"] else "") + '</td>'
-            f'<td class="n">{sv(r["g"])}</td><td class="n">{sv(r["m"], True)}'
-            f'</td><td class="acts">'
-            f'{_doc_links(base, r["src"], r["sid"], r["eid"])}</td></tr>')
-    return (f'<div class="panel"><h3>{icon("moves", 19)}آخر الحركات'
-            f'<span class="pill">الأحدث أولاً · آخر {len(rows)}</span></h3>'
-            f'<div class="scroll"><table class="tbl bx"><tr><th>التاريخ</th>'
-            f'<th>العملية</th><th class="n">المستند</th><th>الحساب</th>'
-            f'<th class="n">الذهب ({u})</th><th class="n">النقد</th><th></th>'
-            f'</tr>{"".join(trs)}</table></div><div class="note" style="'
-            f'margin-top:8px">الموجب داخلٌ إلى الحساب (مدين) والسالب خارجٌ '
-            f'منه (دائن) — و«كشف» أمام الحساب في الجدول أعلاه يفتح كشفه كاملاً.'
-            f'</div></div>')
-
-
 def boxes_page(conn, base, csrf, query=None):
     from models import dash_panels as dp
     query = query or {}
@@ -1478,7 +1411,6 @@ def boxes_page(conn, base, csrf, query=None):
             f'رقمه…" autocomplete="off"></label><button class="btn gold '
             f'accadd">{icon("plus", 16)}إضافة الحساب</button></div>'
             f'</section>')
-    body += _box_latest(conn, base, sel["codes"])
     return frame(base, "boxes", f"الصناديق — {sel['name']}", head + body,
                  csrf, css=_BOX_CSS, js=_BOX_JS)
 
@@ -1700,6 +1632,8 @@ _ACTS_JS = r"""
 #  حركة المصنع — لوحاتٌ بالأنواع، ثم سجلّ النوع المختار
 # ══════════════════════════════════════════════════════════════════
 
+MOVES_TITLE = "فواتير / حركة المصنع"    # 5.7.4: كان «حركة المصنع»
+
 MOVE_KINDS = (("supply", "الوارد"), ("sale", "المبيعات"),
               ("sale_return", "المرتجعات"), ("receipt", "القبض"),
               ("payment", "الصرف"), ("manual", "القيود اليومية"),
@@ -1749,14 +1683,14 @@ def moves_page(conn, base, csrf, query):
         if k in ("all", "supply", "sale", "sale_return", "receipt", "payment",
                  "manual", "fixing") or counts.get(k))
     keep = {"g": g}
-    head = (f'<div class="ptitle"><h2>{icon("moves", 22)}حركة المصنع</h2>'
+    head = (f'<div class="ptitle"><h2>{icon("moves", 22)}{MOVES_TITLE}</h2>'
             f'<span class="hint">{_e(_span(d1, d2))} — اختر نوعاً يظهر '
             f'سجلّه</span></div>'
             + _period_bar(base, "/moves", key, d1, d2, keep)
             + f'<div class="tiles" style="grid-template-columns:repeat('
               f'auto-fill,minmax(150px,1fr));margin-bottom:16px">{tiles}</div>')
     if not g:
-        return frame(base, "moves", "حركة المصنع", head, csrf)
+        return frame(base, "moves", MOVES_TITLE, head, csrf)
     u = _e(_unit())
     docs = data["docs"]
     actx = _acts_ctx(conn, docs)
@@ -1782,7 +1716,10 @@ def moves_page(conn, base, csrf, query):
             f'<td><span class="pill {_e(d["group"])}">{_e(d.get("op") or "")}'
             f'</span></td><td class="n">{_e(d["no"])}</td>'
             f'<td><b>{_e(d.get("party") or d.get("desc") or "—")}</b>{rev}'
-            f'</td><td class="n">{_w(w) + " " + u if w else "—"} {sets}</td>'
+            + (f'<br><small class="note">{_e(d["desc"])}</small>'
+               if d["group"] == "supply" and d.get("party")
+               and d.get("desc") else "")
+            + f'</td><td class="n">{_w(w) + " " + u if w else "—"} {sets}</td>'
             f'<td>{_e(_amount_txt(d))}</td>'
             f'<td class="acts">{_doc_links(base, d.get("src"), d.get("sid"), d.get("eid"))}'
             f' {_row_acts(base, actx, d.get("eid"), d.get("no"))}'
@@ -1803,7 +1740,7 @@ def moves_page(conn, base, csrf, query):
                    - len(docs))) if rows else
                f'<div class="empty">لا {_e(title)} في {_e(_span(d1, d2))}'
                '</div>') + '</div>')
-    return frame(base, "moves", f"حركة المصنع — {title}", head + body, csrf,
+    return frame(base, "moves", f"{MOVES_TITLE} — {title}", head + body, csrf,
                  css=_ACTS_CSS, js=_SEARCH_JS + _ACTS_JS)
 
 

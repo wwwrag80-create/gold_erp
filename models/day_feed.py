@@ -172,8 +172,20 @@ def _supply(conn, eid):
              "weight": round(float(r["rw"] or 0), 3)} for r in rows
             if r["bulk"]]
     return {"models": _models(items), "italian": bulk,
-            "n_sets": len(items),
+            "n_sets": len(items), "party": _supply_source(conn, eid),
             "weight": round(sum(i["weight"] for i in items + bulk), 3)}
+
+
+def _supply_source(conn, eid):
+    """الطرف في الوارد هو **مصدره** لا وجهته (5.7.4): البضاعة واردةٌ من
+    التصنيع، فيُكتب «خزينة التصنيع» — الحساب الدائن بالذهب في القيد —
+    لا الذهب المشغول الذي دخلته."""
+    from models.journal import short_name
+    r = conn.execute(
+        "SELECT a.code, a.name FROM journal_lines l JOIN accounts a"
+        " ON a.id=l.account_id WHERE l.entry_id=? AND l.gold_credit>0"
+        " ORDER BY l.gold_credit DESC, l.id LIMIT 1", (eid,)).fetchone()
+    return short_name(r["code"], r["name"]) if r else "خزينة التصنيع"
 
 
 def _lines(conn, eid):
