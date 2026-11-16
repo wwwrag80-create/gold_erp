@@ -506,6 +506,35 @@ check("التسجيل موقوف ⇒ لا أزرار تعديل ولا حذف ف
 with db() as c:
     mweb.set_ops_enabled(c, True)
 
+print("── 8) الكشوف من آخر الحركات (5.7.3)")
+import re as _re  # noqa: E402
+with db() as c:
+    s_old = invoices.create_sale(c, B, [{"work_order_id": W["703"]}], D1,
+                                 "t", apply_vat=False) \
+        if c.execute("SELECT status FROM work_orders WHERE id=?",
+                     (W["703"],)).fetchone()[0] == "in_stock" else None
+    b_code = c.execute("SELECT a.code FROM entities n JOIN accounts a ON"
+                       " a.id=n.account_id WHERE n.id=?", (B,)).fetchone()[0]
+code, h = call("GET", "stmt", {"code": b_code})
+dates = _re.findall(r'<tr data-s="[^"]*"><td class="n">(?:<input[^>]*>)?'
+                    r'(\d{4}-\d{2}-\d{2})', h)
+check("كشف الحساب يُفتح على كل الحركة والأحدث أعلاه",
+      "الأحدث أولاً" in h and 'class="chip on"' in h
+      and h.index('class="chip on"') > h.index("هذه السنة")
+      and dates and dates == sorted(dates, reverse=True), dates[:6])
+with db(readonly=True) as c:
+    bid2 = next(b["id"] for b in mweb.load_boxes(c) if b["codes"])
+code, h = call("GET", "boxes", {"b": bid2})
+check("القسم يُظهر آخر حركات حساباته — الأحدث أولاً",
+      "آخر الحركات" in h and "الأحدث أولاً" in h)
+code, h = call("GET", "sets", {"by": "no", "q": "702"})
+i_sup, i_sale = h.find(">توريد<"), h.find(">مبيعات<")
+check("سجل حركة الطقم: الأحدث أولاً (التوريد في آخره)",
+      i_sup > 0 and i_sale > 0 and i_sale < i_sup, (i_sup, i_sale))
+code, h = call("GET", "boxes", {"b": "scrap"})
+check("كشف صندوق الكسر على كل الحركة والأحدث أولاً",
+      "كشف صندوق الكسر — عيار 18" in h and "الأحدث أولاً" in h)
+
 print("── 6) السلامة")
 with db(readonly=True) as c:
     g = c.execute("SELECT ROUND(SUM(gold_debit-gold_credit),3),"

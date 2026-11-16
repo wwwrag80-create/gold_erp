@@ -969,7 +969,7 @@ def _set_detail(conn, base, no):
             + f'</div><div class="where {where_cls}">📍 {_e(where_txt)}</div>'
             f'<div class="wgrid">{cells}</div>{batch}</div></div></div>')
     trs = []
-    for r in rows:
+    for r in reversed(rows):        # الأحدث أولاً (5.7.3)
         acts = (_doc_links(base, "invoices", r["inv_id"], None)
                 if r.get("inv_id") else "")
         party = _e(r["party"]) + (f' <span class="pill">{_e(r["inv"])}</span>'
@@ -986,7 +986,8 @@ def _set_detail(conn, base, no):
             f'<td class="n">{_wv(r.get("left"))}</td>'
             f'<td class="acts">{acts}</td></tr>')
     table = (f'<div class="panel"><h3>{icon("moves", 19)}سجل حركة الطقم'
-             f'<span class="pill">{len(rows)} حركة</span></h3>'
+             f'<span class="pill">{len(rows)} حركة</span><span class="pill">'
+             f'الأحدث أولاً</span></h3>'
              f'<div class="scroll"><table class="tbl"><tr><th>نوع الحركة</th>'
              f'<th class="n">التاريخ</th><th>الجهة المقابلة</th>'
              f'<th class="n">الذهب</th><th class="n">الفصوص</th>'
@@ -1303,14 +1304,15 @@ def _scrap_section(conn, base, sel, query):
            f'<p class="note" style="margin:10px 0 0">الوزن الفعلي بعيار كل '
            f'صندوق، والمكافئ هو الرصيد المحاسبي — انقر «كشف» أمام العيار '
            f'يظهر كشفه تحته.</p></section>')
-    # كشف العيار المختار
-    d1, d2, key = _period(query, "year")
+    # كشف العيار المختار — الأحدث أولاً، وكل الحركة افتراضاً (5.7.3)
+    d1, d2, key = _period(query, "all")
     try:
         st = scrap_karat_statement(conn, k, d1, d2)
     except ValueError as e:
         return box + f'<div class="msg bad">{_e(str(e))}</div>'
     srows = []
-    for r in st["rows"]:
+    shown, hidden = _latest_first(st["rows"])
+    for r in shown:
         s = " ".join(str(x) for x in (r.get("doc_no"), r.get("op"),
                                       r.get("name"), r.get("desc")) if x)
         acts = ("" if r.get("op") in ("رصيد سابق", "تسوية") else
@@ -1325,7 +1327,8 @@ def _scrap_section(conn, base, sel, query):
             f'</td><td class="n">{_m(r["bal"])}</td><td class="n">'
             f'{_w(r["bal18"])}</td><td class="acts">{acts}</td></tr>')
     stmt = (f'<div class="panel"><h3>{icon("stmt", 20)}كشف صندوق الكسر — '
-            f'عيار {k}<span class="pill">الرصيد {_m(st["closing"])} جم</span>'
+            f'عيار {k}<span class="pill">الأحدث أولاً</span>'
+            f'<span class="pill">الرصيد {_m(st["closing"])} جم</span>'
             f'<span class="pill">وارد {_m(st["total_in"])}</span><span '
             f'class="pill">صادر {_m(st["total_out"])}</span><span class="sp">'
             f'</span><input id="mq" placeholder="ابحث في الكشف…" style="'
@@ -1336,11 +1339,78 @@ def _scrap_section(conn, base, sel, query):
                f'<th class="n">الرصيد (عيار {k})</th><th class="n">بمكافئ '
                f'{u}</th><th></th></tr>{"".join(srows)}</table></div>'
                '<div id="mnone" class="empty" style="display:none">لا نتائج'
-               '</div>' if srows else
+               '</div>' + _more_note(hidden) if srows else
                f'<div class="empty">لا حركة لعيار {k} في {_e(_span(d1, d2))}'
                '</div>') + '</div>')
     return (box + _period_bar(base, "/boxes", key, d1, d2,
                               {"b": sel["id"], "k": k}) + stmt)
+
+
+BOX_LATEST = 40
+
+
+def _box_latest(conn, base, codes, limit=BOX_LATEST):
+    """آخر حركات حسابات القسم مجتمعةً — الأحدث أولاً (5.7.3): يدخل المدير
+    القسم فيرى آخر ما جرى عليه دون أن يفتح كشف كل حسابٍ وحده."""
+    from models import journal
+    from models.accounts import subtree_ids
+    codes = [str(c) for c in codes or []]
+    if not codes:
+        return ""
+    q = ",".join("?" * len(codes))
+    ids = set()
+    for a in conn.execute(f"SELECT id, is_postable FROM accounts WHERE code"
+                          f" IN ({q})", codes):
+        ids.update(subtree_ids(conn, a["id"]) if not a["is_postable"]
+                   else [a["id"]])
+    if not ids:
+        return ""
+    ids = sorted(ids)
+    q2 = ",".join("?" * len(ids))
+    rows = conn.execute(
+        "SELECT e.id eid, e.entry_date d, e.doc_no, e.source_table src,"
+        " e.source_id sid, e.user_note note, a.code acode, a.name aname,"
+        " ROUND(SUM(l.gold_debit-l.gold_credit),3) g,"
+        " ROUND(SUM(l.cash_debit-l.cash_credit),2) m"
+        " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+        " AND e.is_deleted=0 JOIN accounts a ON a.id=l.account_id"
+        f" WHERE l.account_id IN ({q2}) GROUP BY e.id, l.account_id"
+        " ORDER BY e.entry_date DESC, COALESCE(e.sort_key, e.id) DESC,"
+        " e.id DESC LIMIT ?", ids + [int(limit)]).fetchall()
+    if not rows:
+        return ('<div class="panel"><h3>' + icon("moves", 19) + 'آخر الحركات'
+                '</h3><div class="empty">لا حركة على حسابات هذا القسم بعد'
+                '</div></div>')
+    cache = {}
+    u = _e(_unit())
+
+    def sv(v, money=False):
+        if not v:
+            return "—"
+        t = _m(v) if money else _w(v)
+        return f'<span class="{"neg" if v < 0 else ""}">{t}</span>'
+    trs = []
+    for r in rows:
+        no, op = journal._doc_info(conn, r["src"], r["sid"], cache)
+        no = no or r["doc_no"] or ""
+        trs.append(
+            f'<tr><td class="n">{_e(r["d"])}</td><td>{_e(op or "")}</td>'
+            f'<td class="n">{_e(no)}</td><td><b>{_e(r["aname"])}</b>'
+            f'<small class="cdm">{_e(r["acode"])}</small>'
+            + (f'<br><small class="note">{_e(r["note"])}</small>'
+               if r["note"] else "") + '</td>'
+            f'<td class="n">{sv(r["g"])}</td><td class="n">{sv(r["m"], True)}'
+            f'</td><td class="acts">'
+            f'{_doc_links(base, r["src"], r["sid"], r["eid"])}</td></tr>')
+    return (f'<div class="panel"><h3>{icon("moves", 19)}آخر الحركات'
+            f'<span class="pill">الأحدث أولاً · آخر {len(rows)}</span></h3>'
+            f'<div class="scroll"><table class="tbl bx"><tr><th>التاريخ</th>'
+            f'<th>العملية</th><th class="n">المستند</th><th>الحساب</th>'
+            f'<th class="n">الذهب ({u})</th><th class="n">النقد</th><th></th>'
+            f'</tr>{"".join(trs)}</table></div><div class="note" style="'
+            f'margin-top:8px">الموجب داخلٌ إلى الحساب (مدين) والسالب خارجٌ '
+            f'منه (دائن) — و«كشف» أمام الحساب في الجدول أعلاه يفتح كشفه كاملاً.'
+            f'</div></div>')
 
 
 def boxes_page(conn, base, csrf, query=None):
@@ -1408,6 +1478,7 @@ def boxes_page(conn, base, csrf, query=None):
             f'رقمه…" autocomplete="off"></label><button class="btn gold '
             f'accadd">{icon("plus", 16)}إضافة الحساب</button></div>'
             f'</section>')
+    body += _box_latest(conn, base, sel["codes"])
     return frame(base, "boxes", f"الصناديق — {sel['name']}", head + body,
                  csrf, css=_BOX_CSS, js=_BOX_JS)
 
@@ -1474,6 +1545,24 @@ def _doc_links(base, src, sid, eid):
         return out
     return out + (f'<a class="btn sm gh" target="_blank" rel="noopener" '
                   f'href="{_e(href)}">{icon("doc", 15)}{label}</a>')
+
+
+# 5.7.3: الكشوف كلها تُفتح على **آخر الحركات** — الأحدث أعلاها — وعلى «كل
+# الحركة» افتراضاً (فيظهر آخر ما للحساب ولو قبل سنة)؛ والعرض يقف عند آخر
+# LATEST_ROWS سطراً، وما قبلها باختيار فترة.
+LATEST_ROWS = 400
+
+
+def _latest_first(rows, limit=LATEST_ROWS):
+    """(الأسطر الأحدث أولاً، كم سطراً حُجب) — والأرصدة كما حُسبت تصاعدياً."""
+    out = list(reversed(rows))
+    return out[:limit], max(0, len(out) - limit)
+
+
+def _more_note(hidden):
+    return (f'<div class="note" style="margin-top:8px">تظهر آخر {LATEST_ROWS}'
+            f' حركة — وقبلها {hidden} حركة: اختر فترةً من الأعلى لعرضها.'
+            '</div>' if hidden else "")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1644,8 +1733,11 @@ def _amount_txt(d):
 def moves_page(conn, base, csrf, query):
     from models import day_feed
     g = query.get("g") if query.get("g") in dict(MOVE_KINDS) else ""
-    d1, d2, key = _period(query, "month")
-    data = day_feed.period(conn, d1, d2, g or "all", limit=1500 if g else 1)
+    # 5.7.3: كل الحركة افتراضاً — الأحدث أولاً، وآخر LATEST_ROWS مستنداً
+    d1, d2, key = _period(query, "all")
+    data = day_feed.period(conn, d1, d2, g or "all",
+                           limit=(LATEST_ROWS if key == "all" else 1500)
+                           if g else 1)
     counts = data["counts"]
     total = sum(counts.values())
     tiles = "".join(
@@ -1705,7 +1797,10 @@ def moves_page(conn, base, csrf, query):
                '<th class="n">الوزن</th><th>الأجور / النقد</th><th></th></tr>'
                + "".join(rows) + '</table></div>'
                '<div id="mnone" class="empty" style="display:none">لا نتائج'
-               '</div>' if rows else
+               '</div>' + _more_note(max(0, int(
+                   (data.get("count") if g == "all"
+                    else (data.get("counts") or {}).get(g)) or 0)
+                   - len(docs))) if rows else
                f'<div class="empty">لا {_e(title)} في {_e(_span(d1, d2))}'
                '</div>') + '</div>')
     return frame(base, "moves", f"حركة المصنع — {title}", head + body, csrf,
@@ -1736,7 +1831,7 @@ def stmt_page(conn, base, csrf, query):
     elif c:
         acc = conn.execute("SELECT * FROM accounts WHERE code=?",
                            (c,)).fetchone()
-    d1, d2, key = _period(query, "year")
+    d1, d2, key = _period(query, "all")
     keep = {"acc": acc["id"]} if acc else {}
     head = (f'<div class="ptitle"><h2>{icon("stmt", 22)}كشف حساب</h2>'
             f'<span class="hint">اكتب أول حروف الاسم واختره من القائمة</span>'
@@ -1754,10 +1849,11 @@ def stmt_page(conn, base, csrf, query):
     rows = journal.statement(conn, ids if len(ids) > 1 else acc["id"],
                              d1, d2)
     u = _e(_unit())
-    actx = _acts_ctx(conn, [r for r in rows if r.get("op") != "رصيد سابق"])
+    shown, hidden = _latest_first(rows)
+    actx = _acts_ctx(conn, [r for r in shown if r.get("op") != "رصيد سابق"])
     n_mg = 0
     trs = []
-    for r in rows:
+    for r in shown:
         s = " ".join(str(x) for x in (r.get("doc_no"), r.get("op"),
                                       r.get("name"), r.get("desc")) if x)
         acts = ("" if r.get("op") == "رصيد سابق" else
@@ -1799,7 +1895,8 @@ def stmt_page(conn, base, csrf, query):
     mg_btn = ('<button class="btn sm gold" id="mgbtn" style="display:none">'
               '⧉ دمج المحدد</button>' if n_mg >= 2 else "")
     table = (f'<div class="panel"><h3>{icon("stmt", 20)}{_e(acc["name"])}'
-             f'<span class="pill">{_e(acc["code"])}</span><span class="sp">'
+             f'<span class="pill">{_e(acc["code"])}</span><span class="pill">'
+             f'الأحدث أولاً</span><span class="sp">'
              f'</span>{mg_btn}<input id="mq" placeholder="ابحث في الكشف…" '
              f'style="min-width:220px"></h3><div class="scroll"><table '
              f'class="tbl"><tr><th>التاريخ</th><th>العملية</th><th>المستند'
@@ -1808,7 +1905,8 @@ def stmt_page(conn, base, csrf, query):
              f'<th class="n">مدين نقد</th><th class="n">دائن نقد</th>'
              f'<th class="n">رصيد نقد</th><th></th></tr>' + "".join(trs)
              + '</table></div><div id="mnone" class="empty" style="display:'
-               'none">لا نتائج</div></div>' if trs else
+               'none">لا نتائج</div>' + _more_note(hidden) + '</div>'
+             if trs else
              '<div class="empty">لا حركة في الفترة</div>')
     inner = (head + _period_bar(base, "/stmt", key, d1, d2, keep) + kp
              + table)
