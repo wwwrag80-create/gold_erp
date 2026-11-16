@@ -133,6 +133,32 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         g.addWidget(b_opin, 3, 2)
         g.addWidget(b_noopin, 3, 3)
         g.addWidget(self.ops_pin_state, 3, 4)
+        # 5.7.6: رمز «قفل التعديل والحذف» — زرٌّ في أعلى صفحات الرابط يقفل
+        # التعديل والحذف والعكس والدمج كلها أو يفتحها بهذا الرمز
+        self.edit_pin = kit.LineEdit()
+        self.edit_pin.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.edit_pin.setPlaceholderText("4 إلى 12 خانة")
+        self.edit_pin.setMaxLength(12)
+        self.edit_pin.setMaximumWidth(200)
+        b_epin = kit.PushButton("حفظ الرمز")
+        b_epin.clicked.connect(self.save_edit_pin)
+        b_noepin = kit.PushButton("إلغاء الرمز")
+        b_noepin.setObjectName("ghost")
+        b_noepin.setToolTip("يلغي الرمز ويفتح القفل إن كان مقفلاً")
+        b_noepin.clicked.connect(lambda: self.save_edit_pin(clear=True))
+        self.edit_pin_state = QtWidgets.QLabel("")
+        g.addWidget(QtWidgets.QLabel("رمز قفل التعديل والحذف:"), 4, 0)
+        g.addWidget(self.edit_pin, 4, 1)
+        g.addWidget(b_epin, 4, 2)
+        g.addWidget(b_noepin, 4, 3)
+        g.addWidget(self.edit_pin_state, 4, 4)
+        self.edit_lock = kit.CheckBox(
+            "التعديل والحذف في الرابط مقفلان الآن")
+        self.edit_lock.setToolTip(
+            "يُقفل ويُفتح من زر «🔒» في أعلى صفحات الرابط برمز القفل — "
+            "أو من هنا مباشرةً")
+        self.edit_lock.toggled.connect(self._edit_lock_toggled)
+        g.addWidget(self.edit_lock, 5, 1, 1, 4)
         g.setColumnStretch(4, 1)
 
         acts = QtWidgets.QHBoxLayout()
@@ -157,7 +183,7 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         bottom.addWidget(self.qr, 0, QtCore.Qt.AlignTop)
         bottom.addWidget(steps, 1)
         lay.addLayout(bottom)
-        self.resize(760, 600)
+        self.resize(760, 640)
 
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(150)
@@ -185,6 +211,8 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             self.ops.blockSignals(False)
             with db(readonly=True) as conn:
                 self._ops_pin_label(manager_web.has_ops_pin(conn))
+                self._edit_lock_label(manager_web.has_edit_pin(conn),
+                                      manager_web.edits_locked(conn))
         except Exception:
             pass
         if st["enabled"]:
@@ -219,6 +247,55 @@ class ModelsLinkDialog(QtWidgets.QDialog):
                  " ساعة.")
         except Exception as e:
             err(self, e)
+
+    def save_edit_pin(self, clear=False):
+        try:
+            from database.database import db
+            from services import manager_web
+            with db() as conn:
+                manager_web.set_edit_pin(
+                    conn, "" if clear else self.edit_pin.text(),
+                    (getattr(self, "user", None) or {}).get("username"))
+                has = manager_web.has_edit_pin(conn)
+                locked = manager_web.edits_locked(conn)
+            self.edit_pin.clear()
+            self._edit_lock_label(has, locked)
+            info(self, "أُلغي رمز قفل التعديل والحذف، وفُتح القفل." if clear
+                 else "حُفظ رمز قفل التعديل والحذف — زرّ «🔒» في أعلى صفحات "
+                 "الرابط يقفل التعديل والحذف والعكس والدمج أو يفتحها بهذا "
+                 "الرمز.")
+        except Exception as e:
+            err(self, e)
+
+    def _edit_lock_toggled(self, on):
+        try:
+            from database.database import db
+            from services import manager_web
+            user = (getattr(self, "user", None) or {}).get("username")
+            with db() as conn:
+                if not manager_web.has_edit_pin(conn):
+                    raise ValueError("اضبط رمز القفل أولاً")
+                manager_web.set_edits_locked(conn, on, user)
+                self._edit_lock_label(True, manager_web.edits_locked(conn))
+        except Exception as e:
+            try:                       # يُعاد الحال كما هو في الدفاتر
+                from database.database import db
+                from services import manager_web
+                with db(readonly=True) as conn:
+                    self._edit_lock_label(manager_web.has_edit_pin(conn),
+                                          manager_web.edits_locked(conn))
+            except Exception:
+                pass
+            err(self, e)
+
+    def _edit_lock_label(self, has, locked):
+        self.edit_pin_state.setText(
+            ("🔒 مقفل الآن" if locked else "✔ برمز — مفتوح الآن") if has
+            else "بلا رمز — زرّ القفل في الرابط لا يعمل")
+        self.edit_lock.blockSignals(True)
+        self.edit_lock.setChecked(bool(locked))
+        self.edit_lock.setEnabled(bool(has))
+        self.edit_lock.blockSignals(False)
 
     def _ops_pin_label(self, has):
         self.ops_pin_state.setText(

@@ -153,6 +153,82 @@ def ops_unlocked(conn, headers, csrf):
     return bool(got) and hmac.compare_digest(got, _ops_cookie_value(csrf, h))
 
 
+# 5.7.6: «قفل التعديل والحذف» — زرٌّ في أعلى كل صفحة من الرابط يقفل
+# التعديل والحذف والعكس والدمج (في الكشوف وحركة المصنع ولوحة التسجيل
+# وأقسام الصناديق) أو يفتحها، برمزٍ يُضبط من نافذة «🔗 رابط المدير» في
+# البرنامج. القفل حالٌ واحدة في دفاتر المصنع تسري على كل من يفتح الرابط،
+# والتحقّق منه عند الحفظ نفسه لا في الصفحة وحدها.
+K_EDIT_PIN = "mw_edit_pin"
+K_EDIT_LOCK = "mw_edit_locked"
+EDIT_LOCKED_MSG = ("التعديل والحذف مقفلان في الرابط — افتح القفل من زر "
+                   "«🔒» في أعلى الصفحة برمزه")
+
+
+def has_edit_pin(conn):
+    return bool(_get(conn, K_EDIT_PIN, "").strip())
+
+
+def edits_locked(conn):
+    """القفل يسري ما دام له رمز وحاله «مقفل»."""
+    return has_edit_pin(conn) and _get(conn, K_EDIT_LOCK, "0") == "1"
+
+
+def set_edits_locked(conn, on, username=None):
+    _set(conn, K_EDIT_LOCK, "1" if on else "0", username or WEB_USER)
+    _mw()._audit(conn, username or WEB_USER,
+                 "قفل التعديل والحذف في رابط المدير" if on
+                 else "فتح التعديل والحذف في رابط المدير")
+
+
+def set_edit_pin(conn, pin, username=None):
+    """رمز قفل التعديل والحذف: 4 إلى 12 خانة — وفارغٌ يلغيه ويفتح القفل
+    (فلا يبقى الرابط مقفلاً بلا رمزٍ يفتحه)."""
+    pin = str(pin or "").strip()
+    if pin and not (4 <= len(pin) <= 12):
+        raise ValueError("رمز القفل من 4 إلى 12 خانة")
+    _set(conn, K_EDIT_PIN, _mw()._hash_pin(pin) if pin else "",
+         username or WEB_USER)
+    if not pin:
+        _set(conn, K_EDIT_LOCK, "0", username or WEB_USER)
+    _mw()._audit(conn, username, "تعيين رمز قفل التعديل والحذف في الرابط"
+                 if pin else "إلغاء رمز قفل التعديل والحذف في الرابط")
+
+
+def _edit_lock_state():
+    """(له رمز؟، مقفل؟) — لرأس كل صفحة."""
+    try:
+        from database.database import db
+        with db(readonly=True) as conn:
+            return has_edit_pin(conn), edits_locked(conn)
+    except Exception:
+        return False, False
+
+
+def edit_lock_action(data):
+    """زرّ القفل في الرابط: يقفل أو يفتح بالرمز — والمحاولات الخاطئة
+    تُحصى كرمز الدخول (ربع ساعة بعد تكرارها)."""
+    from database.database import db
+    m = _mw()
+    want = bool(data.get("lock"))
+    with _post_lock:
+        with db(readonly=True) as conn:
+            h = _get(conn, K_EDIT_PIN, "").strip()
+        if not h:
+            return {"ok": False, "error": "لا رمز للقفل بعد — اضبطه من "
+                    "البرنامج: «🔗 رابط المدير» ← «رمز قفل التعديل والحذف»"}
+        if m._locked():
+            return {"ok": False, "error": "محاولات كثيرة — انتظر ربع ساعة ثم"
+                                          " حاول ثانيةً"}
+        if not m._pin_ok(h, str(data.get("pin") or "").strip()):
+            m._fail()
+            return {"ok": False, "error": "الرمز غير صحيح"}
+        with db() as conn:
+            set_edits_locked(conn, want)
+    return {"ok": True, "locked": want,
+            "msg": "قُفل التعديل والحذف في الرابط" if want
+            else "فُتح التعديل والحذف في الرابط"}
+
+
 def _safe_next(base, nxt):
     nxt = str(nxt or "")
     if nxt.startswith(base + "/") and "//" not in nxt[len(base):] \
@@ -313,6 +389,18 @@ align-items:center;gap:14px;flex-wrap:wrap}
 .mhead .sp{flex:1 1 auto}
 .mhead .live{font-size:12.5px;background:rgba(255,255,255,.12);
 border-radius:20px;padding:5px 12px;white-space:nowrap}
+.elockb{font:inherit;font-size:12.5px;font-weight:700;border-radius:20px;
+padding:5px 13px;white-space:nowrap;cursor:pointer;color:#f7ecd3;
+background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.35)}
+.elockb:hover{background:rgba(255,255,255,.16)}
+.elockb.on{background:#F5E3B3;color:#4E3618;border-color:#F5E3B3}
+#lkdlg input{width:100%;padding:11px;font-size:18px;text-align:center;
+letter-spacing:5px;border:1px solid var(--line);border-radius:10px;
+margin:6px 0 10px;box-sizing:border-box}
+#lkdlg .note{margin:0 0 6px;white-space:normal}
+/* القفل مفعّل: أدوات تعديل أقسام الصناديق تختفي (والحفظ يرفضها أيضاً) */
+.elock .newbox,.elock .addacc,.elock [data-del],.elock .ren,.elock .delbox,
+.elock .bx .up,.elock .bx .down,.elock h3 .up,.elock h3 .down{display:none!important}
 .mnav{max-width:1400px;margin:auto;display:flex;gap:4px;overflow-x:auto;
 padding:0 16px 10px;scrollbar-width:none}
 .mnav::-webkit-scrollbar{display:none}
@@ -412,6 +500,8 @@ min-width:0}
 .mw input:focus,.mw select:focus,.mw textarea:focus{outline:2px solid #e3cb8c;
 border-color:#c9a24a}
 .mw input.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
+.fg input.hot{outline:2px solid #E7CF8E;background:#FFFBEF;
+transition:background .3s}
 .fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
 gap:10px 12px}
 .fg .w2{grid-column:span 2}
@@ -532,17 +622,32 @@ def frame(base, active, title, inner, csrf="", css="", js="", sub=""):
     from datetime import datetime
     co = _mw()._company().strip()
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    _has_pin, _locked_now = _edit_lock_state()
+
+    def _lock_btn():
+        """زرّ قفل التعديل والحذف بجانب «مباشر» (5.7.6)."""
+        if not csrf:
+            return ""
+        if _locked_now:
+            return ('<button type="button" id="elockb" class="elockb on" '
+                    'data-locked="1" data-pin="1" title="التعديل والحذف '
+                    'مقفلان في الرابط — اضغط لفتحهما بالرمز">🔒 التعديل '
+                    'والحذف مقفل</button>')
+        return (f'<button type="button" id="elockb" class="elockb" '
+                f'data-locked="0" data-pin="{"1" if _has_pin else "0"}" '
+                f'title="اضغط لقفل التعديل والحذف في الرابط كله بالرمز">'
+                f'🔓 قفل التعديل والحذف</button>')
     return f"""<!DOCTYPE html>
 <html dir="rtl" lang="ar" data-base="{_e(base)}" data-csrf="{_e(csrf)}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">{_mw()._install_head(base)}
 <title>{_e(title)}{(" — " + _e(co)) if co else ""}</title>
-<style>{MCSS}{css}</style></head><body class="mw">
+<style>{MCSS}{css}</style></head><body class="mw{" elock" if _locked_now else ""}">
 <header class="mhead"><div class="in"><div><h1>{_e(co or "رابط المدير")}</h1>
 <div class="sub">{_e(sub or "مباشرةً من جهاز المصنع")}</div></div>
 <span class="sp"></span><span class="live">● مباشر · {now} · الأوزان
- {_e(_unit())}</span></div>{nav_html(base, active)}</header>
+ {_e(_unit())}</span>{_lock_btn()}</div>{nav_html(base, active)}</header>
 <main class="mmain">{inner}</main>
 <div class="mfoot"><a href="{_e(base)}">الرئيسية</a> · إصدار
  {_e(_mw()._version())} · <a href="{_e(base)}/logout">خروج</a></div>
@@ -550,7 +655,43 @@ def frame(base, active, title, inner, csrf="", css="", js="", sub=""):
 <div id="dlg" class="dlg"><div class="box"><h4></h4><pre></pre>
 <div class="row"><button class="btn yes">✔ تأكيد</button>
 <button class="btn gh no">إلغاء</button></div></div></div>
-<script>{_BASE_JS}{js}</script></body></html>"""
+<div id="lkdlg" class="dlg"><div class="box"><h4></h4><p class="note"></p>
+<input id="lkpin" type="password" inputmode="numeric" maxlength="12"
+ autocomplete="off" placeholder="رمز القفل">
+<div id="lkerr" class="msg bad" style="display:none"></div>
+<div class="row"><button class="btn yes">✔ تأكيد</button>
+<button class="btn gh no">إلغاء</button></div></div></div>
+<script>{_BASE_JS}{_LOCK_JS}{js}</script></body></html>"""
+
+
+_LOCK_JS = r"""
+(function(){var b=document.getElementById('elockb'),d=document.getElementById('lkdlg');
+ if(!b||!d)return;var inp=document.getElementById('lkpin'),
+  er=document.getElementById('lkerr');
+ function close(){d.classList.remove('on');d.style.display='none';}
+ b.addEventListener('click',function(){var lk=b.getAttribute('data-locked')==='1';
+  if(b.getAttribute('data-pin')!=='1'){MW.toast('اضبط رمز القفل أولاً من '+
+   'البرنامج: «🔗 رابط المدير» ← «رمز قفل التعديل والحذف»',false);return;}
+  d.querySelector('h4').textContent=lk?'🔓 فتح التعديل والحذف':
+   '🔒 قفل التعديل والحذف';
+  d.querySelector('.note').textContent=lk?'يعود التعديل والحذف والدمج في '+
+   'الرابط كله بعد إدخال الرمز.':'تختفي أزرار التعديل والحذف والعكس والدمج '+
+   'من الرابط كله، ويُرفض أي تعديل أو حذف حتى يُفتح القفل بالرمز.';
+  inp.value='';er.style.display='none';d.style.display='flex';
+  d.classList.add('on');setTimeout(function(){inp.focus();},30);});
+ function go(){var lk=b.getAttribute('data-locked')==='1',p=inp.value.trim();
+  if(!p){inp.focus();return;}
+  MW.post('/api/editlock',{pin:p,lock:!lk}).then(function(r){
+   if(r&&r.ok){close();MW.toast(r.msg,true);setTimeout(function(){
+    location.reload();},400);}
+   else{er.textContent=(r&&r.error)||'تعذّر';er.style.display='block';
+    inp.select();}});}
+ d.querySelector('.yes').addEventListener('click',go);
+ d.querySelector('.no').addEventListener('click',close);
+ inp.addEventListener('keydown',function(e){if(e.key==='Enter'){
+  e.preventDefault();go();}else if(e.key==='Escape')close();});
+})();
+"""
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -589,7 +730,12 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
                 str(data.get("csrf") or ""), csrf):
             return _json({"ok": False, "error": "انتهت صلاحية الصفحة — "
                           "حدّثها ثم أعد المحاولة"}, 403)
+        if head == "api" and rest[1:2] == ["editlock"]:
+            return _json(edit_lock_action(data))
         if head == "boxes":
+            with db(readonly=True) as conn:
+                if edits_locked(conn):
+                    return _json({"ok": False, "error": EDIT_LOCKED_MSG})
             return _json(boxes_action(data))
         if head == "ops" and rest[1:2] == ["unlock"]:
             return _unlock(data, base, csrf)
@@ -1525,7 +1671,7 @@ def _more_note(hidden):
 def _acts_ctx(conn, rows):
     """{رقم القيد: {kind, vat, rec}} لأسطر الصفحة — باستعلاماتٍ مجمّعة،
     فلا يُسأل عن كل سطرٍ وحده. الحكم النهائي عند الحفظ (`doc_delete`)."""
-    if not ops_enabled(conn):
+    if not ops_enabled(conn) or edits_locked(conn):
         return None
     inv_ids = {int(r["sid"]) for r in rows if r.get("src") == "invoices"
                and r.get("sid")}
@@ -2288,6 +2434,10 @@ def ops_page(conn, base, csrf, rest, query=None, has_pin=False):
             + recent), csrf)
     edit = None
     eq = str(query.get("edit") or "")
+    if eq.isdigit() and edits_locked(conn):
+        return frame(base, "ops", "تعديل", (
+            f'<div class="ptitle"><h2>{icon("lock", 22)}تعديل</h2></div>'
+            f'<div class="msg info">{_e(EDIT_LOCKED_MSG)}</div>'), csrf)
     if eq.isdigit():
         try:
             edit = edit_payload(conn, kind, int(eq))
@@ -2519,7 +2669,7 @@ _OPS_JS = r"""
  if(K==='sale'||K==='sale_return'){
   var cur=null,curK=D.k;
   function look(){var no=$('eno').value.trim();if(!no)return;
-   if(cur&&cur.no===no)return;cur=null;$('einfo').textContent='…';
+   if(cur&&cur.no===no){goNext();return;}cur=null;$('einfo').textContent='…';
    MW.get('/api/wo',{no:no,mode:K==='sale'?'sale':'return',d:$('date').value,
     inv:(D.edit&&D.edit.inv)||''})
    .then(function(r){if(!r.ok){$('einfo').textContent='';MW.toast(r.error,false);
@@ -2530,7 +2680,13 @@ _OPS_JS = r"""
     $('einfo').textContent=(r.bulk?'رقمٌ تجميعي — اكتب الوزن':
      (K==='sale'?'الباقي في الخزنة ':'الخارج عند الجهات ')+r.avail.toFixed(2)+
      ' عيار '+r.karat)+(r.acc?' · من '+r.acc:'');
-    (r.bulk?$('ew'):$('ewage')).focus();});}
+    goNext();});}
+  // 5.7.6: بعد رقم التشغيل يظهر وزنه وينتقل المؤشر إلى خانة الأجر وقيمتها
+  // محدّدة — يُكتب أجرٌ جديد فوقها مباشرةً أو تُترك، ثم Enter يضيف السطر.
+  // (الرقم التجميعي: إلى الوزن أولاً، ثم Enter إلى الأجر)
+  function hot(el){el.focus();try{el.select();}catch(_){}
+   el.classList.add('hot');setTimeout(function(){el.classList.remove('hot');},1400);}
+  function goNext(){if(!cur)return;hot(cur.bulk&&!MW.num($('ew'))?$('ew'):$('ewage'));}
   $('eno').addEventListener('keydown',function(e){if(e.key==='Enter'){
    e.preventDefault();look();}});
   $('eno').addEventListener('change',look);
@@ -2549,8 +2705,11 @@ _OPS_JS = r"""
    cur=null;['eno','emodel','ew','ewage','edia'].forEach(function(i){$(i).value='';});
    $('einfo').textContent='';render();$('eno').focus();}
   $('eadd').onclick=add;
-  ['ew','ewage','edia'].forEach(function(i){$(i).addEventListener('keydown',
+  $('ew').addEventListener('keydown',function(e){if(e.key==='Enter'){
+   e.preventDefault();if(MW.num($('ew'))>0)hot($('ewage'));else add();}});
+  ['ewage','edia'].forEach(function(i){$(i).addEventListener('keydown',
    function(e){if(e.key==='Enter'){e.preventDefault();add();}});});
+  $('ewage').addEventListener('focus',function(){try{$('ewage').select();}catch(_){}});
   $('woadd').onclick=function(){var a=MW.num($('woamt'));if(a<=0){
    MW.toast('اكتب مبلغ الأجر',false);return;}lines.push({wage_only:true,
    amount:a,note:$('wonote').value.trim()});$('woamt').value='';
@@ -3039,6 +3198,8 @@ def _guarded(data, fn, kind, action="web_post", where="post_op"):
                     return {"ok": False, "error": "تسجيل العمليات من الرابط "
                                                   "موقوفٌ من البرنامج"}
             with db() as conn:
+                if action != "web_post" and edits_locked(conn):
+                    raise ValueError(EDIT_LOCKED_MSG)
                 res = fn(conn)
                 _audit(conn, kind, res, action)
         except ValueError as e:

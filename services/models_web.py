@@ -1583,6 +1583,17 @@ def page_html(conn, query, base):
     # 5.6.0: شريط التنقل الموحّد (الرئيسية واللوحات) في رأس كل صفحة
     from services import manager_web as _mweb
     nav = _mweb.nav_html(base, tab)
+    # 5.7.6: حال «قفل التعديل والحذف» — زرّه في الرئيسية وبقية الصفحات
+    _hp, _lk = _mweb._edit_lock_state()
+    lock_chip = (
+        f'<a href="{_e(base)}" title="يُقفل ويُفتح من زر القفل في أعلى '
+        f'الرئيسية برمزه" style="font-size:12.5px;font-weight:700;'
+        f'border-radius:20px;padding:5px 12px;white-space:nowrap;'
+        f'text-decoration:none;'
+        + ("background:#F5E3B3;color:#4E3618\">🔒 التعديل والحذف مقفل"
+           if _lk else "border:1px solid rgba(255,255,255,.35);color:"
+           "#f7ecd3\">🔓 التعديل والحذف مفتوح")
+        + '</a>') if _hp else ""
     board = tab in ("customers", "pnl")
     title = ((pnl_title if tab == "pnl" else
               "العملاء — المبيعات والسداد" if board else "دليل الموديلات")
@@ -1615,7 +1626,7 @@ def page_html(conn, query, base):
 <style>{_CSS}{_BOARD_CSS}{_PNL_CSS}{_mweb.NAV_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
-<div class="bar"><button type="button" id="inst" class="inst"
+<div class="bar">{lock_chip}<button type="button" id="inst" class="inst"
  title="يضع الرابط على سطح مكتب هذا الجهاز أيقونةً تفتحه بنقرة">📌 تثبيت
  على سطح المكتب</button><input id="q" type="search"
  placeholder="{hint}"></div>

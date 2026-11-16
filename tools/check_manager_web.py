@@ -612,6 +612,81 @@ check("لوحة البيع: أجر السطر المضاف خانةٌ تُعدَ
       "input.lwg" in h and "class=\"lwg num\"" in h.replace("\\'", "'")
       or "lwg num" in h)
 
+print("── 10) قفل التعديل والحذف من أعلى الرابط برمز البرنامج (5.7.6)")
+code, h = call("GET", "")
+check("بلا رمز: الزر ظاهر في الأعلى ويطلب ضبط الرمز من البرنامج",
+      'id="elockb"' in h and 'data-pin="0"' in h and "🔓 قفل التعديل والحذف"
+      in h)
+r = api("api/editlock", {"pin": "1234", "lock": True})
+check("بلا رمز: القفل يُرفض بسببٍ مفهوم", not r["ok"]
+      and "اضبطه من البرنامج" in r["error"], r)
+with db() as c:
+    mweb.set_edit_pin(c, "2468", "t")
+    try:
+        mweb.set_edit_pin(c, "12", "t")
+        _short = False
+    except ValueError:
+        _short = True
+check("رمز القفل من 4 إلى 12 خانة", _short)
+r = api("api/editlock", {"pin": "9999", "lock": True})
+check("رمزٌ خاطئ لا يقفل", not r["ok"] and r["error"] == "الرمز غير صحيح", r)
+r = api("api/editlock", {"pin": "2468", "lock": True})
+with db(readonly=True) as c:
+    _lk = mweb.edits_locked(c)
+check("الرمز الصحيح يقفل التعديل والحذف", r["ok"] and r["locked"] and _lk, r)
+with db(readonly=True) as c:
+    _ent = c.execute("SELECT i.entry_id FROM invoices i WHERE i.is_deleted=0"
+                     " AND i.kind='sale' AND COALESCE(i.vat_applied,0)=0"
+                     " AND i.customer_id=? ORDER BY i.id DESC LIMIT 1",
+                     (A,)).fetchone()[0]
+code, h = call("GET", "stmt", {"code": a_code, "per": "all"})
+check("مقفل: الكشف بلا أزرار تعديل وحذف ودمج، والزر «🔒» في الأعلى",
+      'data-delx="' not in h and "?edit=" not in h and 'class="mg"' not in h
+      and "🔒 التعديل والحذف مقفل" in h and 'class="mw elock"' in h)
+code, h = call("GET", "moves", {"g": "all", "per": "all"})
+check("مقفل: حركة المصنع بلا أزرار تعديل وحذف", 'data-delx="' not in h
+      and "?edit=" not in h)
+r = api("api/delete", {"nonce": "n-lock-del1", "eid": _ent})
+with db(readonly=True) as c:
+    _alive = c.execute("SELECT is_deleted FROM journal_entries WHERE id=?",
+                       (_ent,)).fetchone()[0] == 0
+check("مقفل: الحذف يُرفض عند الحفظ نفسه", not r["ok"]
+      and "مقفلان" in r["error"] and _alive, r)
+with db(readonly=True) as c:
+    _pay = mweb.edit_payload(c, "sale", _ent)
+r = api(f"api/edit/sale/{_ent}", {"nonce": "n-lock-ed01", "party": A,
+        "src": _pay["src"], "date": _pay["date"], "vat": False,
+        "notes": "x", "lines": _pay["lines"]})
+check("مقفل: التعديل يُرفض", not r["ok"] and "مقفلان" in r["error"], r)
+r = api("api/merge", {"nonce": "n-lock-mg01", "ids": [1, 2]})
+check("مقفل: الدمج يُرفض", not r["ok"] and "مقفلان" in r["error"], r)
+code, h = call("GET", "ops/sale", {"edit": str(_ent)})
+check("مقفل: صفحة التعديل لا تُفتح", "مقفلان" in h and '"edit"' not in h)
+r = post("receipt", {"nonce": "n-lock-rc01", "party": A, "box": "1400",
+                     "date": D0, "rows": [{"kind": "cash", "amount": 5}]})
+check("مقفل: تسجيل عملية جديدة يبقى مسموحاً", r["ok"], r)
+r = api("boxes", {"act": "add_box", "name": "قسم وقت القفل"})
+check("مقفل: أقسام الصناديق لا تُعدَّل", not r["ok"]
+      and "مقفلان" in r["error"], r)
+code, h = call("GET", "", {"tab": "guide"})
+check("صفحات الدليل تُظهر حال القفل في أعلاها", "🔒 التعديل والحذف مقفل"
+      in h)
+r = api("api/editlock", {"pin": "2468", "lock": False})
+code, h = call("GET", "stmt", {"code": a_code, "per": "all"})
+check("الرمز يفتح القفل فتعود الأزرار", r["ok"] and not r["locked"]
+      and 'data-delx="' in h and "🔓 قفل التعديل والحذف" in h, r)
+with db() as c:
+    mweb.set_edits_locked(c, True, "t")
+    mweb.set_edit_pin(c, "", "t")
+    _after = (mweb.edits_locked(c), mweb.has_edit_pin(c))
+check("إلغاء الرمز من البرنامج يفتح القفل", _after == (False, False),
+      _after)
+with db(readonly=True) as c:
+    _aud = c.execute("SELECT COUNT(*) FROM audit_log WHERE action LIKE"
+                     " '%قفل التعديل والحذف%' OR details LIKE"
+                     " '%قفل التعديل والحذف%'").fetchone()[0]
+check("القفل والفتح مسجّلان في سجل التتبع", _aud >= 2, _aud)
+
 print("── 6) السلامة")
 with db(readonly=True) as c:
     g = c.execute("SELECT ROUND(SUM(gold_debit-gold_credit),3),"
