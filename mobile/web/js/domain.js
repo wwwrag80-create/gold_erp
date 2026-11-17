@@ -308,9 +308,8 @@
   function saveVoucher(st, draft) {
     const party = shopById(st, draft.shopId);
     if (!["receipt", "payment"].includes(draft.kind)) throw new Error(T("نوع سند غير صحيح"));
-    // التحصيل من العملاء، والدفع للمصانع (ودفعٌ قديم لعميلٍ يبقى كما رُحّل)
-    if (draft.kind === "receipt" && (!party || isFactory(party))) throw new Error(T("اختر العميل"));
-    if (draft.kind === "payment" && !party) throw new Error(T("اختر المصنع"));
+    // التحصيل (القبض) والسداد (الدفع) مع العملاء والمصانع كليهما
+    if (!party) throw new Error(T("اختر العميل أو المصنع"));
     const rows = voucherRows(draft.rows);
     const discCash = R(Number(draft.discCash || 0), 2);
     const discGold18 = R(Number(draft.discGold18 || 0), 3);
@@ -440,8 +439,9 @@
   // وعمودُ الرصيد فيه مجموعُه الجاري (لا رصيد الحساب)
   const ST_FILTERS = ["sales", "returns", "collect"];
   function filterKinds(fac, filter) {
-    const m = fac ? { sales: ["purchase"], returns: ["purchase_return"], collect: ["payment"] }
-      : { sales: ["sale"], returns: ["sale_return"], collect: ["receipt"] };
+    // «التحصيل/السداد»: السندات كلها — قبضاً كانت أو دفعاً
+    const m = fac ? { sales: ["purchase"], returns: ["purchase_return"], collect: ["payment", "receipt"] }
+      : { sales: ["sale"], returns: ["sale_return"], collect: ["receipt", "payment"] };
     return m[filter] || null;
   }
   function statementView(st, shopId, from, to, filter) {

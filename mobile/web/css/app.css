@@ -57,6 +57,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #bar h1 { flex: 1; margin: 0; font-size: 18px; font-weight: 700; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 #bar .sub { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+/* سعر الذهب تحت الشعار والاسم: الأونصة ثم جرام كل عيار — خمس خاناتٍ متساوية */
+#bar.has-below { flex-wrap: wrap; row-gap: 6px; padding-bottom: 8px; }
+.gp-strip {
+  flex: 1 0 100%; display: flex; align-items: stretch; gap: 0; margin: 0; padding: 0;
+  border: 1px solid var(--goldRing); border-radius: 10px; background: var(--goldSoft2);
+  overflow: hidden; cursor: pointer; min-height: 42px; text-align: center;
+}
+.gp-strip:active { background: var(--goldSoft); }
+.gp-cell {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center;
+  padding: 4px 2px; border-inline-start: 1px solid var(--goldRing);
+}
+.gp-cell:first-child { border-inline-start: 0; }
+.gp-cell.oz { flex-grow: 1.25; background: var(--goldSoft); }
+.gp-l { font-size: 10.5px; line-height: 1.25; color: var(--goldDim); white-space: nowrap; }
+.gp-v { font-size: 13.5px; line-height: 1.3; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.gp-strip.stale .gp-v { color: var(--muted); }
+.gp-strip.loading .gp-v { opacity: .65; }
+.gp-msg { flex: 1; align-self: center; font-size: 12.5px; color: var(--goldDim); padding: 6px 8px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+@media (max-width: 360px) { .gp-v { font-size: 12.5px; } .gp-l { font-size: 10px; } }
+.gp-oz { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 10px 12px;
+  border-radius: 10px; background: var(--goldSoft2); border: 1px solid var(--goldRing); margin-bottom: 6px; }
+.gp-oz b { font-size: 20px; }
+.gp-row { padding: 9px 2px; border-bottom: 1px solid var(--line); }
+.gp-row b { font-size: 17px; }
+.gp-row.strong b { color: var(--goldDim); }
 .icon-btn {
   min-width: 40px; height: 40px; border-radius: var(--r-ctl); border: 1px solid var(--line2);
   background: var(--surface); display: inline-flex; align-items: center; justify-content: center;

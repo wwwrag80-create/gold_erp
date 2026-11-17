@@ -264,6 +264,41 @@ public class MainActivity extends Activity {
                 + JSONObject.quote(event) + "," + data.toString() + ")", null));
     }
 
+    /** مصادر سعر الذهب المسموحة — كشريط البرنامج (`ui/widgets/gold_price.py`). */
+    static boolean goldSourceAllowed(String url) {
+        return url.startsWith("https://api.gold-api.com/")
+                || url.startsWith("https://api.metalpriceapi.com/")
+                || url.startsWith("https://data-asg.goldprice.org/");
+    }
+
+    static double fetchGold(String url, JSONArray path) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(6000);
+        c.setReadTimeout(6000);
+        c.setRequestProperty("User-Agent", "Mozilla/5.0");
+        c.setRequestProperty("Accept", "application/json");
+        try {
+            int code = c.getResponseCode();
+            if (code != 200) throw new Exception("HTTP " + code);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (java.io.InputStream in = c.getInputStream()) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0 && out.size() < 262144) out.write(buf, 0, n);
+            }
+            Object cur = new org.json.JSONTokener(out.toString("UTF-8")).nextValue();
+            for (int i = 0; i < path.length(); i++) {
+                Object k = path.get(i);
+                if (k instanceof Number) cur = ((JSONArray) cur).get(((Number) k).intValue());
+                else cur = ((JSONObject) cur).get(String.valueOf(k));
+            }
+            double v = cur instanceof Number ? ((Number) cur).doubleValue() : Double.parseDouble(String.valueOf(cur));
+            return (v > 0 && !Double.isNaN(v) && !Double.isInfinite(v)) ? v : 0;
+        } finally {
+            c.disconnect();
+        }
+    }
+
     static JSONObject obj(Object... kv) {
         JSONObject o = new JSONObject();
         try {
@@ -627,6 +662,29 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String appVersion() {
             return BuildConfig.VERSION_NAME;
+        }
+
+        /** سعر الأونصة لرأس الرئيسية: يجلبه التطبيق نفسه (فلا تمنعه قيود المتصفح)
+         *  من مصادر الصفحة بالترتيب — وهي مصادر البرنامج نفسها، ولا يُقبل غيرها —
+         *  ثم يعيد الحدث «gold» بالسعر بالدولار أو بالخطأ. لا يُرسَل معه شيءٌ من بيانات المستخدم. */
+        @JavascriptInterface
+        public void goldPrice(String sourcesJson) {
+            new Thread(() -> {
+                String err = "no price";
+                try {
+                    JSONArray src = new JSONArray(sourcesJson);
+                    for (int i = 0; i < src.length(); i++) {
+                        JSONArray it = src.getJSONArray(i);
+                        String url = it.getString(0);
+                        if (!goldSourceAllowed(url)) continue;
+                        try {
+                            double v = fetchGold(url, it.getJSONArray(1));
+                            if (v > 0) { emit("gold", obj("usd", v)); return; }
+                        } catch (Exception e) { err = String.valueOf(e.getMessage()); }
+                    }
+                } catch (Exception e) { err = String.valueOf(e.getMessage()); }
+                emit("gold", obj("error", err));
+            }).start();
         }
 
         /** الصفحة عند كل شاشة: هل تناسبها الإعلانات؟ (التصفّح نعم، الإدخال لا) */

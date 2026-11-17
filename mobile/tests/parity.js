@@ -16,6 +16,14 @@ const fn = {
   wageStore: Gold.wageStore,
   lineWages: (a, wage, k) => Gold.totalWages(Gold.wageStore(wage, k), Num.pyRound(Gold.store(a, k), 3)),
   voucherEquiv: (a, k) => Gold.voucherGold(a, k).equiv,
+  ouncePrices: (usd) => {
+    const p = Gold.ouncePrices(usd);
+    return [p.ounceUsd, p.ounceSar, p[24], p[22], p[21], p[18]];
+  },
+  ouncePricesF2: (usd) => {
+    const p = Gold.ouncePrices(usd);
+    return [p.ounceUsd, p.ounceSar, p[24], p[22], p[21], p[18]].map((x) => Num.f2(x));
+  },
   boardSide: (d, dec) => {
     const x = Domain.boardSide(d, dec);
     return [x.net, x.remaining, x.retPct, x.paidPct, x.grade];

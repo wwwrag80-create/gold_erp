@@ -1,6 +1,6 @@
 # سياسة الخصوصية — تطبيق ÀUR
 
-آخر تحديث: 2 نوفمبر 2026
+آخر تحديث: 17 نوفمبر 2026
 
 **ÀUR** تطبيقٌ لحسابات الذهب للمندوب: البيع للعملاء، والبضاعة من المصانع، والتحصيل والسداد،
 وكشوف الحساب. التطبيق مجاني، ويُعرض فيه إعلانٌ صغير من Google AdMob.
@@ -13,6 +13,11 @@
 - **المشاركة والطباعة**: لا تُرسَل فاتورةٌ أو كشف حساب إلا حين تختار أنت «مشاركة» أو «طباعة»، وإلى
   التطبيق الذي تختاره (واتساب مثلاً).
 - **الكاميرا والصور**: تُستخدم فقط حين تضيف صورة طقم، وتبقى الصورة في جوالك (ومجلد الحفظ إن اخترته).
+
+## سعر الذهب
+لعرض سعر الأونصة وأسعار الأعيرة أعلى الرئيسية، يطلب التطبيق السعر العامّ من خدمات أسعارٍ مجانية (gold-api.com، ثم
+metalpriceapi.com أو goldprice.org إن تعذّر الأول) كل بضع دقائق وهو مفتوح. لا يُرسَل مع الطلب شيءٌ من بياناتك، وكأي
+اتصالٍ بالإنترنت يرى ذلك الخادم عنوان IP لجهازك.
 
 ## الإعلانات (Google AdMob)
 يعرض التطبيق شريطاً إعلانياً صغيراً من Google. لتقديم الإعلانات وقياسها ومنع الاحتيال قد تجمع مكتبة
@@ -37,7 +42,7 @@ Google Mobile Ads: معرّفات الجهاز (مثل المعرّف الإعل
 
 # Privacy Policy — ÀUR
 
-Last updated: 2 November 2026
+Last updated: 17 November 2026
 
 **ÀUR** is a free gold-accounting app for sales agents (sales to shops, goods from factories,
 collections, payments and statements). It shows a small Google AdMob banner.
@@ -49,6 +54,9 @@ collections, payments and statements). It shows a small Google AdMob banner.
   your data is written there after each change. We have no access to it.
 - **Sharing and printing** happen only when you choose them, to the app you choose.
 - **Camera and photos** are used only when you attach a set photo; photos stay on your device.
+- **Gold price**: to show the ounce and per-karat prices on the home screen, the app requests the public
+  price from free price services (gold-api.com, then metalpriceapi.com or goldprice.org) every few minutes
+  while open. None of your data is sent; like any internet request, that server sees your IP address.
 - **Advertising (Google AdMob)**: to serve and measure ads and prevent fraud, the Google Mobile Ads SDK
   may collect device identifiers (such as the advertising ID), IP address (and approximate location
   derived from it), ad interactions, and diagnostics/performance data, all encrypted in transit. None

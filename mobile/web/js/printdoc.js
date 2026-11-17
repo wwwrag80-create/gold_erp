@@ -195,7 +195,7 @@
     const shop = D.shopById(st, v.shopId) || { name: "—" };
     // عيار حساب العميل/المصنع
     const k = pK(st, v.shopId);
-    const title = v.kind === "receipt" ? T("سند تحصيل") : D.isFactory(shop) ? T("سند سداد للمصنع") : T("سند صرف");
+    const title = v.kind === "receipt" ? T("سند تحصيل (قبض)") : T("سند سداد (دفع)");
     let rows = "", n = 0;
     for (const r of v.rows) {
       n++;

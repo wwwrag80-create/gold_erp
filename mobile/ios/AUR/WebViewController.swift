@@ -101,6 +101,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             syncPhotos: function (j) { post("syncPhotos", [j]); },
             restorePhotos: function () { post("restorePhotos"); },
             autoBackup: function (j) { post("autoBackup", [j]); },
+            // سعر الأونصة يجلبه التطبيق نفسه (كأندرويد) — فلا تمنعه قيود المتصفح
+            goldPrice: function (j) { post("goldPrice", [j]); },
             // التحديث من App Store وحده — فلا زرّ ولا قناة في التطبيق
             updateState: function () { return JSON.stringify({ unsupported: true, store: "appstore", version: window.__iosState.version }); },
             checkUpdate: function () {}, installUpdate: function () {}, requestNotifications: function () {}
@@ -170,9 +172,50 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case "syncPhotos": syncPhotos(s(0))
         case "restorePhotos": restorePhotos()
         case "autoBackup": autoBackup(s(0))
+        case "goldPrice": goldPrice(s(0))
         case "log": NSLog("AUR-JS %@", s(0))
         default: break
         }
+    }
+
+    // ══ سعر الذهب: من مصادر الصفحة بالترتيب (مصادر البرنامج نفسها، ولا يُقبل غيرها)،
+    //    ويُعاد الحدث «gold» بالسعر بالدولار أو بالخطأ. لا يُرسَل معه شيءٌ من بيانات المستخدم ══
+    static let goldHosts = ["https://api.gold-api.com/", "https://api.metalpriceapi.com/",
+                            "https://data-asg.goldprice.org/"]
+
+    func goldPrice(_ sourcesJson: String) {
+        guard let raw = sourcesJson.data(using: .utf8),
+              let src = (try? JSONSerialization.jsonObject(with: raw)) as? [[Any]] else {
+            emit("gold", ["error": "bad sources"]); return
+        }
+        let items: [(URL, [Any])] = src.compactMap { it in
+            guard it.count == 2, let u = it[0] as? String,
+                  WebViewController.goldHosts.contains(where: { u.hasPrefix($0) }),
+                  let url = URL(string: u), let path = it[1] as? [Any] else { return nil }
+            return (url, path)
+        }
+        tryGold(items, 0)
+    }
+
+    func tryGold(_ items: [(URL, [Any])], _ i: Int) {
+        if i >= items.count { emit("gold", ["error": "no price"]); return }
+        var req = URLRequest(url: items[i].0, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
+        req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            var cur: Any? = nil
+            if (resp as? HTTPURLResponse)?.statusCode == 200, let d = data {
+                cur = try? JSONSerialization.jsonObject(with: d)
+            }
+            for k in items[i].1 {
+                if let key = k as? String, let o = cur as? [String: Any] { cur = o[key] }
+                else if let n = k as? NSNumber, let arr = cur as? [Any], n.intValue >= 0, n.intValue < arr.count { cur = arr[n.intValue] }
+                else { cur = nil }
+            }
+            var v = 0.0
+            if let n = cur as? NSNumber { v = n.doubleValue } else if let t = cur as? String { v = Double(t) ?? 0 }
+            if v > 0 && v.isFinite { self.emit("gold", ["usd": v]) } else { self.tryGold(items, i + 1) }
+        }.resume()
     }
 
     // ══ الروابط: صفحات التطبيق داخله، وما سواها (اتصال، واتساب) في تطبيقه ══

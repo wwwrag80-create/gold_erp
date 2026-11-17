@@ -116,8 +116,11 @@ check("ثم البيع فوقه", sb.gold18 === 7 && sb.cash === 340, [sb.gold18
   check("فرز المبيعات: البيع وحده، ومجموعه = أوزان فواتير البيع", sales.filter === "sales" && sales.rows.length > 0 &&
     sales.rows.every((r) => r.kind === "sale") && sales.totals.gd === saleW && sales.totals.gc === 0 && sales.totals.gbal === saleW, sales.totals);
   const col = D.statementView(st, a.id, null, null, "collect");
-  check("فرز التحصيل: سندات التحصيل وحدها في «له»", col.rows.every((r) => r.kind === "receipt") && col.rows.length ===
-    st.vouchers.filter((v) => v.shopId === a.id && v.kind === "receipt").length && col.totals.gd === 0);
+  // 1.14: «التحصيل/السداد» = سندات الحساب كلها (قبضاً أو دفعاً)
+  check("فرز التحصيل: سندات الحساب وحدها (قبض أو دفع)", col.rows.every((r) => r.kind === "receipt" || r.kind === "payment") &&
+    col.rows.length === st.vouchers.filter((v) => v.shopId === a.id).length &&
+    Num.pyRound(col.totals.gd - col.totals.gc, 3) === Num.pyRound(st.vouchers.filter((v) => v.shopId === a.id)
+      .reduce((x, v) => x + (v.kind === "payment" ? v.gold18 : -v.gold18 - v.discGold18), 0), 3), col.totals);
   check("وفرزٌ غير معروف = الكل", D.statementView(st, a.id, null, null, "x").rows.length === all.rows.length && D.statementView(st, a.id, null, null, "x").filter === "");
   const ob = D.statementView(st, b.id);
   check("الرصيد الافتتاحي (له 5) في خانة «له»، والبيع في «عليه»: 12 − 5 = 7", ob.rows[0].gc === 5 && ob.rows[0].gd === 0 &&
@@ -229,8 +232,21 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   // التحصيل من المحل يملأ صناديقي، والدفع للمصنع يُنقصها
   const rv = D.saveVoucher(t, { kind: "receipt", shopId: shopA.id, date: "2026-02-05",
     rows: [{ kind: "gold", weight: 10, karat: 21 }, { kind: "gold", weight: 3, karat: 18 }, { kind: "cash", amount: 200 }] });
-  check("التحصيل رقمه RV-00001 ولا يكون من مصنع", rv.no === "RV-00001" &&
-    throws(() => D.saveVoucher(t, { kind: "receipt", shopId: fac.id, rows: [{ kind: "cash", amount: 1 }] }), /اختر العميل/));
+  // 1.14: التحصيل (قبض) والسداد (دفع) مع العملاء والمصانع — وبلا حسابٍ يُرفض
+  check("التحصيل رقمه RV-00001، وبلا حسابٍ يُرفض", rv.no === "RV-00001" &&
+    throws(() => D.saveVoucher(t, { kind: "receipt", shopId: "", rows: [{ kind: "cash", amount: 1 }] }), /اختر العميل أو المصنع/));
+  {
+    // قبضٌ من مصنعٍ ودفعٌ لعميل على نسخةٍ منفصلة: الأثر على الرصيد والصناديق صحيح
+    const t2 = JSON.parse(JSON.stringify(t));
+    const fb0 = D.balance(t2, fac.id), sb0 = D.balance(t2, shopA.id), cash0 = D.holdings(t2).cash.amount;
+    const r2 = D.saveVoucher(t2, { kind: "receipt", shopId: fac.id, date: "2026-02-05", rows: [{ kind: "cash", amount: 100 }] });
+    const p2 = D.saveVoucher(t2, { kind: "payment", shopId: shopA.id, date: "2026-02-05", rows: [{ kind: "cash", amount: 40 }] });
+    const fb1 = D.balance(t2, fac.id), sb1 = D.balance(t2, shopA.id);
+    check("قبضٌ من مصنع: يزيد ما عليّ له 100 ريال، ويدخل صندوق النقد", r2.no === "RV-00002" &&
+      Num.pyRound(fb1.cash - fb0.cash, 2) === -100 && fb1.gold18 === fb0.gold18, [fb0, fb1]);
+    check("دفعٌ لعميل: يزيد ما عليه 40 ريالاً، ويخرج من صندوق النقد", p2.no === "PV-00001" &&
+      Num.pyRound(sb1.cash - sb0.cash, 2) === 40 && Num.pyRound(D.holdings(t2).cash.amount - cash0, 2) === 60);
+  }
   hd = D.holdings(t);
   const b21 = hd.boxes.find((b) => b.karat === 21), b18 = hd.boxes.find((b) => b.karat === 18);
   check("صندوق 21: 10 جم من «محل السلام» بتاريخه", b21 && b21.weight === 10 && b21.moves[0].party.id === shopA.id && b21.moves[0].date === "2026-02-05");

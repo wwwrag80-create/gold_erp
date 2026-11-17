@@ -78,4 +78,14 @@ for _ in range(4000):
     cases.append(["boardSide", [d, 3 if side == "gold" else 2],
                   [x["net"], x["remaining"], x["ret_pct"], x["paid_pct"], g]])
 
+# سعر الذهب: الأونصة ← جرام كل عيار (شريط البرنامج ← رأس الجوال)، والعرض بمنزلتين
+for usd in [2650.4, 1999.99, 3333.33, 4012.75, 2400.0, 0.0] + \
+        [round(rnd.uniform(1200, 6000), rnd.choice((0, 1, 2))) for _ in range(3000)]:
+    p = gm.ounce_prices(usd)
+    cases.append(["ouncePrices", [usd],
+                  [p["ounce_usd"], p["ounce_sar"], p[24], p[22], p[21], p[18]]])
+    cases.append(["ouncePricesF2", [usd],
+                  [nf.f2(p["ounce_usd"]), nf.f2(p["ounce_sar"])]
+                  + [nf.f2(p[k]) for k in (24, 22, 21, 18)]])
+
 json.dump(cases, sys.stdout)

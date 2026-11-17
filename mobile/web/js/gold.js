@@ -94,11 +94,23 @@
     return { weight: wt, karat: kt, equiv: toBase(wt, kt) };
   }
 
+  // ── سعر الذهب (`gold_math.ounce_prices`): الأونصة بالدولار ← جرام كل عيار
+  // بالريال — بترتيب عمليات البرنامج نفسه، وعيار 18 بمعادلته الخاصة ──
+  const OUNCE_GRAMS = 31.1034768, USD_TO_SAR = 3.75;
+  const K18_FACTOR = 121.0, K18_DIVISOR = 1333.33;
+  function ouncePrices(usd, usdToSar) {
+    const x = usdToSar === undefined ? USD_TO_SAR : usdToSar;
+    const sar = usd * x;
+    const g24 = sar / OUNCE_GRAMS;
+    return { ounceUsd: usd, ounceSar: sar, 24: g24, 22: g24 * 22 / 24, 21: g24 * 21 / 24,
+      18: usd * K18_FACTOR / K18_DIVISOR };
+  }
+
   const api = {
-    BASE, KARATS, VAT_RATE, STONE_DISCOUNT_RATE,
+    BASE, KARATS, VAT_RATE, STONE_DISCOUNT_RATE, OUNCE_GRAMS, USD_TO_SAR,
     toBase, fromBase, stonesAfter, registered, standing, totalWages, wagesVat,
     g, store, rate, rateStore, wageStore, wageView, entryDerive, rateFromAfter,
-    voucherGold,
+    voucherGold, ouncePrices,
   };
   root.Gold = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

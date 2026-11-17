@@ -90,7 +90,9 @@ function check(name, cond, detail) {
   check("English: <html lang=en dir=ltr>", await page.evaluate(() => document.documentElement.lang === "en" && document.documentElement.dir === "ltr"));
   check("Tabs in English", (await page.locator("#tabs").innerText()).includes("Holdings") && (await page.locator("#tabs").innerText()).includes("Accounts"));
   check("Home tiles in English", (await page.locator(".op-tile .op-t").allInnerTexts()).join(",") ===
-    "Sale to customer,Customer return,Goods from factory,Return to factory,Collect from customer,Pay factory");
+    "Sale to customer,Customer return,Goods from factory,Return to factory,Collect (receive),Pay (payment)");
+  check("Gold price strip under the logo (or a connect hint offline)", (await page.locator("#gp-strip").count()) === 1 &&
+    /Ounce \$|Gold price|Fetching/.test(await page.locator("#gp-strip").innerText()), await page.locator("#gp-strip").innerText());
   check("“Sets I have” is a home tile", (await page.locator(".wide-tile.sets .op-t").innerText()).includes("Sets I have (0)"));
   const chev = await page.evaluate(() => { const s = document.querySelector(".ic-chevron svg"); return s ? getComputedStyle(s).transform : ""; });
   check("Chevrons point right (flipped)", /matrix\(-1/.test(chev), chev);

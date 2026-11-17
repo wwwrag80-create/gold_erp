@@ -195,6 +195,8 @@
     bar.appendChild(h("h1", null, title,
       sub ? (sub instanceof Node ? sub : h("span", { class: "sub", text: sub })) : null));
     for (const a of o.actions || []) bar.appendChild(a);
+    bar.classList.toggle("has-below", !!o.below);
+    if (o.below) bar.appendChild(o.below);
     document.body.classList.toggle("no-tabs", !!o.noTabs);
     document.title = title;
   }
@@ -396,11 +398,78 @@
     return n;
   }
 
+  // ══ سعر الذهب في رأس الرئيسية: الأونصة بالدولار، وجرام عيار 24 و22 و21 و18 بالريال —
+  //    بمعادلات البرنامج المكتبي نفسها (`Gold.ouncePrices`)، ويتجدّد كل 5 دقائق ══
+  const GP = root.GoldPrice;
+  const GP_KARATS = [24, 22, 21, 18];
+  function gpTime(at) {
+    const d = new Date(at);
+    const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return ymd === D.today() ? hm : `${dmy(ymd)} ${hm}`;
+  }
+  function goldStrip() {
+    const el = h("button", { type: "button", class: "gp-strip", id: "gp-strip", "aria-label": T("سعر الذهب"),
+      onclick: goldSheet });
+    paintGoldStrip(el, GP.state());
+    GP.refresh(false);
+    return el;
+  }
+  function paintGoldStrip(el, gs) {
+    el.innerHTML = "";
+    el.classList.toggle("stale", !!(gs.ok && gs.stale));
+    el.classList.toggle("loading", !!gs.loading);
+    if (!gs.ok) {
+      el.append(h("span", { class: "gp-msg" }, ico("coins", 16),
+        gs.loading ? T(" جارِ جلب سعر الذهب…") : T(" سعر الذهب: اتصل بالإنترنت ثم اضغط هنا")));
+      return;
+    }
+    const cell = (lbl, val, cls) => h("span", { class: "gp-cell" + (cls ? " " + cls : "") },
+      h("span", { class: "gp-l" }, lbl), h("b", { class: "gp-v num" }, val));
+    el.append(cell(T("الأونصة $"), f2(gs.prices.ounceUsd), "oz"),
+      ...GP_KARATS.map((k) => cell(T("عيار {0}", k), f2(gs.prices[k]))));
+  }
+  GP.subscribe((gs) => {
+    const el = document.getElementById("gp-strip");
+    if (el) paintGoldStrip(el, gs);
+  });
+  async function goldSheet() {
+    GP.refresh(true);
+    await sheet((box) => {
+      const body = h("div");
+      const paint = (gs) => {
+        body.innerHTML = "";
+        if (!gs.ok) {
+          body.append(h("div", { class: "empty" }, gs.loading ? T("جارِ جلب سعر الذهب…")
+            : T("تعذّر جلب السعر — تأكّد من الاتصال بالإنترنت ثم اضغط «تحديث الآن».")));
+          return;
+        }
+        const p = gs.prices;
+        const row = (a, b, strong) => h("div", { class: "spread gp-row" + (strong ? " strong" : "") },
+          h("span", null, a), h("b", { class: "num" }, b));
+        body.append(
+          h("div", { class: "gp-oz" }, h("span", null, T("الأونصة العالمية")),
+            h("b", { class: "num" }, f2(p.ounceUsd) + " $"), h("span", { class: "muted small" }, T("= {0} ريال", f2(p.ounceSar)))),
+          h("div", { class: "sec-title" }, T("سعر الجرام بالريال")),
+          ...GP_KARATS.map((k) => row(T("عيار {0}", k), f2(p[k]), k === 21 || k === 18)),
+          h("div", { class: "muted small", style: { marginTop: "10px" } },
+            (gs.loading ? T("جارِ التحديث…") : T("آخر تحديث: {0}", gpTime(gs.at))) +
+            (gs.failed ? T(" — تعذّر التحديث الآن، والمعروض آخر سعرٍ معروف") : "")),
+          h("div", { class: "muted small" }, T("للاسترشاد — محسوبةٌ من سعر الأونصة العالمي بمعادلات البرنامج المكتبي نفسها.")));
+      };
+      const off = GP.subscribe((gs) => { if (!body.isConnected && off) { off(); return; } paint(gs); });
+      paint(GP.state());
+      box.append(h("h3", null, ico("coins", 18), T(" سعر الذهب الآن")), body,
+        h("div", { class: "row", style: { marginTop: "12px" } },
+          h("button", { class: "btn grow", onclick: () => GP.refresh(true) }, ico("refresh", 18), T(" تحديث الآن"))));
+    });
+  }
+
   // ══ الرئيسية: ستّ لوحاتٍ للعمليات، ثم كشف الحساب، ثم عمليات اليوم ══
   function home() {
     const s = st();
-    setBar(s.settings.name || APP_NAME, T("حساباتي مع العملاء والمصانع"), { back: false,
-      actions: [updateButton()], logo: true });
+    setBar(s.settings.name || APP_NAME, null, { back: false,
+      actions: [updateButton()], logo: true, below: goldStrip() });
     setTab("home");
     const v = view();
     const t = D.today();
@@ -441,8 +510,8 @@
       tile("return", T("مرتجع للعميل"), T("يرجع إلى يدك"), "invoice/new?kind=sale_return"),
       tile("package", T("بضاعة من مصنع"), T("تدخل يدك"), "invoice/new?kind=purchase", true),
       tile("return", T("إرجاع للمصنع"), T("يخرج من يدك"), "invoice/new?kind=purchase_return", true),
-      tile("in", T("تحصيل من العميل"), T("ذهب ونقد"), "voucher/new?kind=receipt"),
-      tile("out", T("سداد للمصنع"), T("من صناديقك"), "voucher/new?kind=payment", true)));
+      tile("in", T("تحصيل (قبض)"), T("قبض واستلام من العملاء والمصانع"), "voucher/new?kind=receipt"),
+      tile("out", T("سداد (دفع)"), T("سداد للعملاء والمصانع"), "voucher/new?kind=payment", true)));
     // كشف حساب
     v.append(h("button", { class: "wide-tile", onclick: pickPartyThen(null, (id) => go(`statement/${id}`)) },
       h("span", { class: "op-ic" }, ico("book", 24)),
@@ -579,7 +648,7 @@
       .sort((a, b) => (D.isFactory(a) - D.isFactory(b)) || a.name.localeCompare(b.name, "ar"))
       .map((x) => {
         const fac = D.isFactory(x), k = pk(x);
-        return { id: x.id, title: x.name,
+        return { id: x.id, title: x.name, fac: fac ? 1 : 0,
           sub: (type ? "" : fac ? T("مصنع · ") : T("عميل · ")) +
             T("ذهب {0} · نقد {1}", balText(G.g(bals[x.id].gold18, k), T("جم عيار {0}", k), fac), balText(bals[x.id].cash, T("ريال"), fac)) };
       });
@@ -706,14 +775,14 @@
     const contact = shop.phone ? quickBtn("phone", T("اتصال"), () => B.dial(shop.phone))
       : quickBtn("edit", fac ? T("تعديل المصنع") : T("تعديل العميل"), () => go(`shop-form/${id}`));
     v.append(h("div", { class: "quick" }, ...(fac ? [
-      quickBtn("out", T("سداد للمصنع"), () => go(`voucher/new?kind=payment&shop=${id}`)),
+      quickBtn("out", T("سداد (دفع)"), () => go(`voucher/new?kind=payment&shop=${id}`)),
       quickBtn("package", T("بضاعة من المصنع"), () => go(`invoice/new?kind=purchase&shop=${id}`)),
       quickBtn("return", T("إرجاع للمصنع"), () => go(`invoice/new?kind=purchase_return&shop=${id}`)),
       quickBtn("book", T("كشف الحساب"), () => go(`statement/${id}`)), contact,
     ] : [
       quickBtn("receipt", T("فاتورة بيع"), () => go(`invoice/new?kind=sale&shop=${id}`)),
       quickBtn("return", T("مرتجع"), () => go(`invoice/new?kind=sale_return&shop=${id}`)),
-      quickBtn("in", T("تحصيل"), () => go(`voucher/new?kind=receipt&shop=${id}`)),
+      quickBtn("in", T("تحصيل (قبض)"), () => go(`voucher/new?kind=receipt&shop=${id}`)),
       quickBtn("book", T("كشف الحساب"), () => go(`statement/${id}`)), contact,
     ])));
     if (shop.notes) v.append(h("div", { class: "card small" }, shop.notes));
@@ -1376,11 +1445,10 @@
     // عيار الحساب ومكافئه: منه يبدأ سطر الذهب، وبه المكافئ والخصم وزناً والرصيد قبل وبعد
     let k = pk(p0);
     if (!editing) vo.rows.forEach((r) => { if (r.kind === "gold") r.karat = k; });
-    // دفعٌ قديم لعميل (من الإصدارات الأولى) يبقى قابلاً للتعديل كما هو
-    const legacy = isPay && p0 && !D.isFactory(p0);
-    const forFactory = isPay && !legacy;
-    const word = forFactory ? T("المصنع") : T("العميل");
-    const label = isPay ? (legacy ? T("صرف لعميل") : T("سداد للمصنع")) : T("تحصيل من العميل");
+    // التحصيل (القبض) والسداد (الدفع) مع العملاء والمصانع كليهما — والأثر على الرصيد واحد:
+    // التحصيل يُنقص ما على الحساب (أو يزيد ما له)، والسداد عكسه
+    const word = T("العميل أو المصنع");
+    const label = isPay ? T("سداد (دفع)") : T("تحصيل (قبض)");
     const header = () => {
       const sh = D.shopById(s, vo.shopId);
       docHeader(label + (editing ? ` ${vo.no}` : ""), sh ? sh.name : "", T("اختر {0}", word), vo.date, pickParty,
@@ -1392,10 +1460,13 @@
     const boxOf = (karat) => (hd.boxes.find((b) => b.karat === karat) || { weight: 0 }).weight;
 
     async function pickParty() {
-      const it = await pickSheet(T("اختر {0}", word), partyItems(forFactory ? "factory" : "shop"),
-        { addLabel: forFactory ? T("+ مصنع جديد") : T("+ عميل جديد"), empty: forFactory ? T("لا مصانع بعد") : T("لا عملاء بعد") });
+      // السداد: المصانع أولاً، والتحصيل: العملاء أولاً
+      const items = partyItems(null);
+      if (isPay) items.sort((a, b) => (b.fac - a.fac));
+      const it = await pickSheet(T("اختر {0}", word), items,
+        { addLabel: isPay ? T("+ مصنع جديد") : T("+ عميل جديد"), empty: T("لا حسابات بعد") });
       if (!it) return;
-      if (it.add) { go(forFactory ? "shop-form?type=factory" : "shop-form"); return; }
+      if (it.add) { go(isPay ? "shop-form?type=factory" : "shop-form"); return; }
       vo.shopId = it.id; header();
       const nk = pk(D.shopById(s, it.id));
       if (nk !== k) {
@@ -2179,8 +2250,8 @@
       big("fac", "package", T("عليّ للمصانع"), gw(ex.facGold18, k), T(" جم عيار {0}", k),
         T("ونقد {0} ريال · {1} مصنع — اضغط لترى كل مصنع بعياره", f2(ex.facCash), facN), () => factoriesSheet(ex)));
     v.append(h("div", { class: "quick" },
-      quickBtn("in", T("تحصيل من العميل"), () => go("voucher/new?kind=receipt")),
-      quickBtn("out", T("سداد للمصنع"), () => go("voucher/new?kind=payment")),
+      quickBtn("in", T("تحصيل (قبض)"), () => go("voucher/new?kind=receipt")),
+      quickBtn("out", T("سداد (دفع)"), () => go("voucher/new?kind=payment")),
       quickBtn("coins", T("الرصيد الافتتاحي"), () => go("opening"))));
   }
 
@@ -2626,10 +2697,10 @@
         h("div", { class: "quick" },
           quickBtn("receipt", T("فاتورة بيع"), () => close("invoice/new?kind=sale")),
           quickBtn("return", T("مرتجع"), () => close("invoice/new?kind=sale_return")),
-          quickBtn("in", T("تحصيل"), () => close("voucher/new?kind=receipt"))),
+          quickBtn("in", T("تحصيل (قبض)"), () => close("voucher/new?kind=receipt"))),
         h("div", { class: "sec-title" }, T("مع المصانع")),
         h("div", { class: "quick" },
-          quickBtn("out", T("سداد للمصنع"), () => close("voucher/new?kind=payment")),
+          quickBtn("out", T("سداد (دفع)"), () => close("voucher/new?kind=payment")),
           quickBtn("package", T("بضاعة من مصنع"), () => close("invoice/new?kind=purchase")),
           quickBtn("return", T("إرجاع للمصنع"), () => close("invoice/new?kind=purchase_return"))),
         h("div", { class: "sec-title" }, T("حساب جديد")),

@@ -62,15 +62,37 @@ function check(name, cond, detail) {
       whatsapp: "966501234567", link: "javascript:alert(1)", until: "2099-01-01" },
     { id: "ad-old", title: "إعلانٌ منتهٍ", until: "2000-01-01" }] };
   await page.route("https://raw.githubusercontent.com/**/promo.json*", (r) => r.fulfill({ json: PROMO }));
+  // 1.14: سعر الذهب (الأونصة 2650.40$) — المصدر الأول كما في البرنامج
+  await page.route("https://api.gold-api.com/**", (r) => r.fulfill({ json: { price: 2650.4 },
+    headers: { "access-control-allow-origin": "*" } }));
   await page.goto(url);
   await page.waitForSelector("#tabs");
   const tiles = await page.locator(".op-tile .op-t").allInnerTexts();
   check("الرئيسية: ستّ لوحاتٍ بالترتيب", tiles.join("،") ===
-    "بيع للعميل،مرتجع للعميل،بضاعة من مصنع،إرجاع للمصنع،تحصيل من العميل،سداد للمصنع", tiles.join("،"));
+    "بيع للعميل،مرتجع للعميل،بضاعة من مصنع،إرجاع للمصنع،تحصيل (قبض)،سداد (دفع)", tiles.join("،"));
+  const hints = await page.locator(".op-tile .op-h").allInnerTexts();
+  check("وتحت التحصيل والسداد توضيحهما", hints[4] === "قبض واستلام من العملاء والمصانع" && hints[5] === "سداد للعملاء والمصانع", hints.join("،"));
   check("ثم «كشف حساب» ثم «بحث عن طقم» ثم «الأطقم التي معي» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
     "كشف حساب،بحث عن طقم،الأطقم التي معي (0)،عمليات اليوم (0)" && (await page.locator(".kpis").count()) === 0);
   check("الاسم: ÀUR، والشعار في الشريط", (await text("#bar h1")).includes("ÀUR") &&
     (await page.locator("#bar img.bar-logo").count()) === 1);
+  // سعر الأونصة والأعيرة تحت الشعار والاسم — بمعادلات البرنامج (2650.40$)
+  await page.waitForSelector("#gp-strip .gp-cell", { timeout: 5000 }).catch(() => {});
+  const gp = await page.locator("#gp-strip .gp-cell").allInnerTexts();
+  check("سعر الذهب في الرأس: الأونصة ثم عيار 24·22·21·18 بمعادلات البرنامج",
+    gp.map((x) => x.replace(/\s+/g, " ").trim()).join(" | ") ===
+    "الأونصة $ 2,650.40 | عيار 24 319.55 | عيار 22 292.92 | عيار 21 279.60 | عيار 18 240.52", gp.join(" | "));
+  check("ولا «حساباتي مع العملاء والمصانع» في الرأس", !(await text("#bar")).includes("حساباتي مع العملاء والمصانع"));
+  await shot("home_gold");
+  await tap("#gp-strip");
+  await page.waitForSelector(".sheet");
+  await page.waitForTimeout(500);
+  const gs = await text(".sheet");
+  check("لمس السعر: نافذة بالأونصة ووقت آخر تحديث", gs.includes("2,650.40 $") && gs.includes("= 9,939.00 ريال") &&
+    gs.includes("آخر تحديث") && gs.includes("تحديث الآن"), gs);
+  await shot("gold_sheet");
+  await page.goBack();
+  await page.waitForTimeout(150);
   check("خمسة أزرار سفلية بأيقونات: الحسابات والممتلكات", (await page.locator("#tabs button .i svg").count()) === 5 &&
     (await text("#tabs")).includes("الحسابات") && (await text("#tabs")).includes("الممتلكات") && !(await text("#tabs")).includes("لوحة التحكم"));
   check("زر التحديث مخفيٌّ في المتصفح (يعمل في أندرويد)", !(await page.locator("#upd-btn").isVisible()));
@@ -256,7 +278,7 @@ function check(name, cond, detail) {
   await page.waitForSelector(".sheet");
   await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
   await page.waitForTimeout(100);
-  check("شاشة التحصيل بلا «قبض» ولا «صرف»", (await text("#bar h1")).includes("تحصيل من العميل") &&
+  check("شاشة التحصيل: «تحصيل (قبض)» بلا «سند قبض» ولا «سند صرف»", (await text("#bar h1")).includes("تحصيل (قبض)") &&
     !(await page.content()).includes("سند قبض") && !(await page.content()).includes("سند صرف"));
   await fill("الوزن (جم)", "6");
   await page.locator("label.f", { hasText: "العيار" }).locator("select").selectOption("21");
@@ -584,7 +606,7 @@ function check(name, cond, detail) {
   await page.waitForSelector(".sheet");
   const ns = await text(".sheet");
   check("«+» بلا قبض ولا صرف: مع العملاء · مع المصانع", ns.includes("مع العملاء") && ns.includes("مع المصانع") &&
-    ns.includes("تحصيل") && ns.includes("سداد للمصنع") && !ns.includes("سند قبض") && !ns.includes("سند صرف"));
+    ns.includes("تحصيل (قبض)") && ns.includes("سداد (دفع)") && !ns.includes("سند قبض") && !ns.includes("سند صرف"));
   await page.goBack();
 
   // السجل
