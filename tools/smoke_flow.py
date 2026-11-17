@@ -10863,8 +10863,9 @@ def main():
     try:
         from ui.tax_sets_sales import SetsInvoiceTab as _SI134
         from ui.tax_purchases_screen import PurchaseInvoiceTab as _PI134
-        _o134 = ["رقم التشغيل", "العدد", "الوزن", "العيار"]
-        check("أعمدة الفاتورتين: رقم التشغيل ← العدد ← الوزن ← العيار"
+        # 5.8.1: «رقم الباركود/الصنف» اسم العمود (كان «رقم التشغيل»)
+        _o134 = ["رقم الباركود/الصنف", "العدد", "الوزن", "العيار"]
+        check("أعمدة الفاتورتين: رقم الباركود/الصنف ← العدد ← الوزن ← العيار"
               " (بلا وزنٍ قائم)", "الوزن القائم" not in _SI134.COLS
               and "الوزن القائم" not in _PI134.COLS and
               [c for c in _SI134.COLS if c in _o134] == _o134
