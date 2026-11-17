@@ -16,7 +16,7 @@
 
 ## سعر الذهب
 لعرض سعر الأونصة وأسعار الأعيرة أعلى الرئيسية، يطلب التطبيق السعر العامّ من خدمات أسعارٍ مجانية (gold-api.com، ثم
-metalpriceapi.com أو goldprice.org إن تعذّر الأول) كل بضع دقائق وهو مفتوح. لا يُرسَل مع الطلب شيءٌ من بياناتك، وكأي
+metalpriceapi.com أو goldprice.org إن تعذّر الأول) كل بضع ثوانٍ وهو مفتوح. لا يُرسَل مع الطلب شيءٌ من بياناتك، وكأي
 اتصالٍ بالإنترنت يرى ذلك الخادم عنوان IP لجهازك.
 
 ## الإعلانات (Google AdMob)
@@ -55,7 +55,7 @@ collections, payments and statements). It shows a small Google AdMob banner.
 - **Sharing and printing** happen only when you choose them, to the app you choose.
 - **Camera and photos** are used only when you attach a set photo; photos stay on your device.
 - **Gold price**: to show the ounce and per-karat prices on the home screen, the app requests the public
-  price from free price services (gold-api.com, then metalpriceapi.com or goldprice.org) every few minutes
+  price from free price services (gold-api.com, then metalpriceapi.com or goldprice.org) every few seconds
   while open. None of your data is sent; like any internet request, that server sees your IP address.
 - **Advertising (Google AdMob)**: to serve and measure ads and prevent fraud, the Google Mobile Ads SDK
   may collect device identifiers (such as the advertising ID), IP address (and approximate location

@@ -399,12 +399,12 @@
   }
 
   // ══ سعر الذهب في رأس الرئيسية: الأونصة بالدولار، وجرام عيار 24 و22 و21 و18 بالريال —
-  //    بمعادلات البرنامج المكتبي نفسها (`Gold.ouncePrices`)، ويتجدّد كل 5 دقائق ══
+  //    بمعادلات البرنامج المكتبي نفسها (`Gold.ouncePrices`)، ويتحدّث تلقائياً كل 5 ثوانٍ ══
   const GP = root.GoldPrice;
   const GP_KARATS = [24, 22, 21, 18];
   function gpTime(at) {
     const d = new Date(at);
-    const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
     const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     return ymd === D.today() ? hm : `${dmy(ymd)} ${hm}`;
   }
@@ -418,7 +418,7 @@
   function paintGoldStrip(el, gs) {
     el.innerHTML = "";
     el.classList.toggle("stale", !!(gs.ok && gs.stale));
-    el.classList.toggle("loading", !!gs.loading);
+    el.classList.toggle("loading", !!gs.loading && !gs.ok);
     if (!gs.ok) {
       el.append(h("span", { class: "gp-msg" }, ico("coins", 16),
         gs.loading ? T(" جارِ جلب سعر الذهب…") : T(" سعر الذهب: اتصل بالإنترنت ثم اضغط هنا")));
@@ -453,9 +453,9 @@
           h("div", { class: "sec-title" }, T("سعر الجرام بالريال")),
           ...GP_KARATS.map((k) => row(T("عيار {0}", k), f2(p[k]), k === 21 || k === 18)),
           h("div", { class: "muted small", style: { marginTop: "10px" } },
-            (gs.loading ? T("جارِ التحديث…") : T("آخر تحديث: {0}", gpTime(gs.at))) +
+            T("آخر تحديث: {0}", gpTime(gs.at)) +
             (gs.failed ? T(" — تعذّر التحديث الآن، والمعروض آخر سعرٍ معروف") : "")),
-          h("div", { class: "muted small" }, T("للاسترشاد — محسوبةٌ من سعر الأونصة العالمي بمعادلات البرنامج المكتبي نفسها.")));
+          h("div", { class: "muted small" }, T("يتحدّث تلقائياً كل 5 ثوانٍ مع الاتصال بالإنترنت — للاسترشاد، ومحسوبٌ من سعر الأونصة العالمي بمعادلات البرنامج المكتبي نفسها.")));
       };
       const off = GP.subscribe((gs) => { if (!body.isConnected && off) { off(); return; } paint(gs); });
       paint(GP.state());

@@ -63,7 +63,8 @@ function check(name, cond, detail) {
     { id: "ad-old", title: "إعلانٌ منتهٍ", until: "2000-01-01" }] };
   await page.route("https://raw.githubusercontent.com/**/promo.json*", (r) => r.fulfill({ json: PROMO }));
   // 1.14: سعر الذهب (الأونصة 2650.40$) — المصدر الأول كما في البرنامج
-  await page.route("https://api.gold-api.com/**", (r) => r.fulfill({ json: { price: 2650.4 },
+  let goldUsd = 2650.4;
+  await page.route("https://api.gold-api.com/**", (r) => r.fulfill({ json: { price: goldUsd },
     headers: { "access-control-allow-origin": "*" } }));
   await page.goto(url);
   await page.waitForSelector("#tabs");
@@ -93,6 +94,12 @@ function check(name, cond, detail) {
   await shot("gold_sheet");
   await page.goBack();
   await page.waitForTimeout(150);
+  // يتحدّث وحده كل 5 ثوانٍ: سعرٌ جديد يظهر بلا لمس
+  goldUsd = 2700;
+  await page.waitForTimeout(6500);
+  const gp2 = (await page.locator("#gp-strip .gp-cell").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim());
+  check("السعر يتحدّث تلقائياً كل 5 ثوانٍ (2,700.00 بلا لمس)", gp2[0] === "الأونصة $ 2,700.00", gp2.join(" | "));
+  goldUsd = 2650.4;
   check("خمسة أزرار سفلية بأيقونات: الحسابات والممتلكات", (await page.locator("#tabs button .i svg").count()) === 5 &&
     (await text("#tabs")).includes("الحسابات") && (await text("#tabs")).includes("الممتلكات") && !(await text("#tabs")).includes("لوحة التحكم"));
   check("زر التحديث مخفيٌّ في المتصفح (يعمل في أندرويد)", !(await page.locator("#upd-btn").isVisible()));

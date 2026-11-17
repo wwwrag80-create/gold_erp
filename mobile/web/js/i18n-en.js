@@ -693,7 +693,7 @@ window.I18N_EN = {
 "جارِ التحديث…": "Updating…",
 "آخر تحديث: {0}": "Last updated: {0}",
 " — تعذّر التحديث الآن، والمعروض آخر سعرٍ معروف": " — couldn't update now; showing the last known price",
-"للاسترشاد — محسوبةٌ من سعر الأونصة العالمي بمعادلات البرنامج المكتبي نفسها.": "For guidance — calculated from the world ounce price with the desktop system's own formulas.",
+"يتحدّث تلقائياً كل 5 ثوانٍ مع الاتصال بالإنترنت — للاسترشاد، ومحسوبٌ من سعر الأونصة العالمي بمعادلات البرنامج المكتبي نفسها.": "Updates automatically every 5 seconds while online — for guidance, calculated from the world ounce price with the desktop system's own formulas.",
 " سعر الذهب الآن": " Gold price now",
 " تحديث الآن": " Refresh now",
 "تحصيل (قبض)": "Collect (receive)",

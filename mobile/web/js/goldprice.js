@@ -2,7 +2,9 @@
  *
  * كشريط «سعر الذهب العالمي» في البرنامج: المصادر نفسها بالترتيب نفسه
  * (`ui/widgets/gold_price.py`)، والمعادلات نفسها (`Gold.ouncePrices` ←
- * `gold_math.ounce_prices`، ويقارنهما فحص التطابق)، والتحديث كل 5 دقائق.
+ * `gold_math.ounce_prices`، ويقارنهما فحص التطابق).
+ * - يتحدّث تلقائياً كل 5 ثوانٍ ما دام التطبيق ظاهراً والجوال متصلاً بالإنترنت
+ *   (طلبٌ واحد في كل لحظة — لا تتراكم الطلبات إن أبطأت الشبكة).
  *
  * - في تطبيق أندرويد يجلبه التطبيق نفسه (`AndroidBridge.goldPrice`) فلا تمنعه
  *   قيود المتصفح؛ وفي الآيفون ونسخة الويب يُجلب من الصفحة.
@@ -12,7 +14,7 @@
 (function (root) {
   "use strict";
   const KEY = "gold_price";
-  const EVERY = 5 * 60 * 1000;            // كالبرنامج: كل 5 دقائق
+  const EVERY = 5 * 1000;                 // كل 5 ثوانٍ (طلب المالك)
   const TIMEOUT = 6000;
   // مصادر مجانية بلا مفتاح — تُجرَّب بالترتيب حتى ينجح أحدها (كالبرنامج)
   const SOURCES = [
@@ -65,13 +67,14 @@
 
   const native = () => !!(root.AndroidBridge && root.AndroidBridge.goldPrice && root.Bridge);
 
-  // يجلب السعر (جلبٌ واحد في كل لحظة). force: ولو لم تمضِ 5 دقائق
+  // يجلب السعر (جلبٌ واحد في كل لحظة). force: ولو لم تمضِ 5 ثوانٍ
   function refresh(force) {
     if (busy) return busy;
     const now = Date.now();
-    if (!force && last && now - last.at < EVERY) return Promise.resolve(false);
-    if (!force && !last && now - failedAt < 30000) return Promise.resolve(false);
-    notify({ loading: true });
+    if (!force && typeof navigator !== "undefined" && navigator.onLine === false) return Promise.resolve(false);
+    if (!force && last && now - last.at < EVERY - 500) return Promise.resolve(false);
+    if (!force && now - failedAt < EVERY - 500) return Promise.resolve(false);
+    if (!last) notify({ loading: true });     // بعد أول سعر: التحديث صامت بلا وميض
     busy = (async () => {
       let ok = false;
       try {
@@ -99,7 +102,7 @@
     if (!last) return Object.assign(st, { ok: false });
     const p = root.Gold.ouncePrices(last.usd);
     return Object.assign(st, { ok: true, usd: last.usd, at: last.at, prices: p,
-      stale: Date.now() - last.at > 30 * 60 * 1000 });
+      stale: Date.now() - last.at > 60 * 1000 });   // أقدم من دقيقة = بلا اتصال
   }
   function notify(extra) {
     const s = state(extra);
@@ -110,9 +113,10 @@
     return () => { const i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); };
   }
 
-  // يتجدّد وحده ما دام التطبيق ظاهراً
-  setInterval(() => { if (!document.hidden) refresh(false); }, 60 * 1000);
+  // يتجدّد وحده كل 5 ثوانٍ ما دام التطبيق ظاهراً، وفور عودة الاتصال أو فتح التطبيق
+  setInterval(() => { if (!document.hidden) refresh(false); }, EVERY);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });
+  if (typeof window !== "undefined") window.addEventListener("online", () => refresh(true));
 
   root.GoldPrice = { refresh, state, subscribe, SOURCES };
 })(window);
