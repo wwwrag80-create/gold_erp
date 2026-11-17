@@ -75,7 +75,9 @@ final class AURUITests: XCTestCase {
             button("تخط").tap()
         }
         XCTAssertTrue(button("بيع للعميل").waitForExistence(timeout: 15), "لوحة «بيع للعميل»")
-        XCTAssertTrue(button("تحصيل من العميل").exists)
+        XCTAssertTrue(button("تحصيل (قبض)").exists, "لوحة «تحصيل (قبض)»")
+        XCTAssertTrue(button("سداد (دفع)").exists, "لوحة «سداد (دفع)»")
+        XCTAssertTrue(button("سعر الذهب").exists, "شريط سعر الذهب تحت الشعار والاسم")
         XCTAssertTrue(button("كشف حساب").exists)
         XCTAssertTrue(button("بحث عن طقم").exists)
         snap("02_home")
