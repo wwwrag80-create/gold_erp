@@ -434,25 +434,58 @@ def new_pay_account(parent, username="", name=""):
 CREDIT = "credit"
 
 
+def pay_rows_recent(conn):
+    """الصناديق والبنوك — آخرها إضافةً أولاً (5.8.3: النقر على الخانة
+    يُظهر آخر الحسابات المضافة)."""
+    from models.accounts import pay_accounts
+    return sorted(pay_accounts(conn), key=lambda r: -int(r["id"]))
+
+
+def pay_row_label(r):
+    from models.accounts import pay_kind
+    word = "صندوق" if pay_kind(r["code"]) == "cash" else "بنك"
+    return f"{r['name']} ({word})"
+
+
+def pick_combo(tip=""):
+    """قائمةٌ للاختيار فقط (5.8.3) — لا كتابة فيها: النقر عليها يفتحها."""
+    cb = kit.ComboBox()          # بسهمها وقائمتها المنبثقة كبقية القوائم
+    cb.setEditable(False)
+    cb.setMaxVisibleItems(16)
+    cb.setCursor(QtCore.Qt.PointingHandCursor)
+    cb.setMinimumWidth(170)
+    if tip:
+        cb.setToolTip(tip)
+    return cb
+
+
+def add_button(tip="صندوق أو بنك جديد — تكتب اسمه فقط، ويُحفظ ويُختار"):
+    b = QtWidgets.QToolButton()
+    b.setText("+ إضافة")
+    b.setObjectName("payAdd")
+    b.setCursor(QtCore.Qt.PointingHandCursor)
+    b.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
+    b.setToolTip(tip)
+    return b
+
+
 class PayCombo(QtWidgets.QWidget):
-    """طريقة الدفع (5.8.2): «آجل» ثم الصناديق ثم البنوك — يُختار منها
-    أو يُضاف حسابٌ جديد باسمه بزر «+». **تُسجَّل على الفاتورة وتُطبع
-    فقط** — لا سند قبضٍ ولا صرفٍ تلقائي؛ السداد من «سندات قبض/صرف»."""
+    """طريقة الدفع (5.8.2): «آجل» ثم الصناديق والبنوك — **اختيارٌ فقط**
+    (5.8.3: لا كتابة في الخانة؛ النقر عليها يُظهر الحسابات، آخرها إضافةً
+    أولاً)، و«+ إضافة» يُنشئ حساباً جديداً باسمه ويحفظه ويختاره.
+    **تُسجَّل على الفاتورة وتُطبع فقط** — لا سند قبضٍ ولا صرفٍ تلقائي؛
+    السداد من «سندات قبض/صرف»."""
     changed = QtCore.pyqtSignal()
 
     def __init__(self, credit_text="آجل — على الحساب", parent=None,
                  username=""):
         super().__init__(parent)
-        from ui.widgets.common import search_combo
         self.credit_text = credit_text
         self.username = username
         self._allow_credit = True
-        self.cb = search_combo("اختر الصندوق أو البنك…")
-        self.cb.setToolTip("آجل أو الصندوق/البنك — تُكتب على الفاتورة وتُطبع."
-                           "\nالسداد نفسه بسندٍ يدوي من «سندات قبض/صرف».")
-        self.b_add = QtWidgets.QToolButton()
-        self.b_add.setText("+")
-        self.b_add.setToolTip("صندوق أو بنك جديد — تكتب اسمه فقط")
+        self.cb = pick_combo("اختر: آجل أو الصندوق/البنك — تُكتب على الفاتورة"
+                             " وتُطبع.\nالسداد نفسه بسندٍ يدوي من «سندات قبض/صرف».")
+        self.b_add = add_button()
         self.b_add.clicked.connect(self.add_account)
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -462,27 +495,21 @@ class PayCombo(QtWidgets.QWidget):
         self.cb.currentIndexChanged.connect(lambda *_: self.changed.emit())
 
     def reload(self, conn, keep=None):
-        from models.accounts import pay_accounts, pay_kind
         cur = keep if keep is not None else self.cb.currentData()
         self.cb.blockSignals(True)
         self.cb.clear()
         if self._allow_credit:
             self.cb.addItem(self.credit_text, CREDIT)
-        rows = list(pay_accounts(conn))
-        # الصناديق أولاً ثم البنوك
-        rows.sort(key=lambda r: (pay_kind(r["code"]) != "cash", r["code"]))
-        for r in rows:
-            word = "صندوق" if pay_kind(r["code"]) == "cash" else "بنك"
-            self.cb.addItem(f"{r['name']} ({word})", int(r["id"]))
+        # آخر الحسابات إضافةً أولاً
+        for r in pay_rows_recent(conn):
+            self.cb.addItem(pay_row_label(r), int(r["id"]))
         i = self.cb.findData(cur) if cur is not None else -1
         self.cb.setCurrentIndex(i if i >= 0 else 0)
         self.cb.blockSignals(False)
 
     def add_account(self):
         from database.database import db
-        typed = self.cb.lineEdit().text().strip() \
-            if self.cb.currentIndex() < 0 else ""
-        aid = new_pay_account(self, self.username, typed)
+        aid = new_pay_account(self, self.username, "")
         if aid:
             with db(readonly=True) as conn:
                 self.reload(conn, keep=int(aid))
@@ -530,11 +557,12 @@ QUARTERS = ("الربع الأول", "الربع الثاني", "الربع ال
 
 
 class PeriodBar(QtWidgets.QWidget):
-    """فترة السجل بزرٍّ واحد: شهري · ربع سنوي · سنوي · فترة محددة — والسهمان
-    ينقلان للفترة السابقة أو التالية. `changed` عند كل تغيير."""
+    """فترة السجل بزرٍّ واحد: شهري · ربع سنوي · سنوي · فترة محددة · كل
+    الفترات (5.8.3) — والسهمان ينقلان للفترة السابقة أو التالية. `changed`
+    عند كل تغيير."""
     changed = QtCore.pyqtSignal()
     MODES = (("month", "شهري"), ("quarter", "ربع سنوي"), ("year", "سنوي"),
-             ("custom", "من تاريخ إلى تاريخ"))
+             ("custom", "من تاريخ إلى تاريخ"), ("all", "كل الفترات"))
 
     def __init__(self, pref_key="", parent=None):
         super().__init__(parent)
@@ -594,7 +622,7 @@ class PeriodBar(QtWidgets.QWidget):
         for wd in (self.l_from, self.d1, self.l_to, self.d2):
             wd.setVisible(custom)
         for wd in (self.b_prev, self.lbl, self.b_next):
-            wd.setVisible(not custom)
+            wd.setVisible(mode not in ("custom", "all"))
         if self.pref_key:
             try:
                 save_pref(self.pref_key, mode)
@@ -623,11 +651,15 @@ class PeriodBar(QtWidgets.QWidget):
             self.lbl.setText(f"{QUARTERS[(mo - 1) // 3]} {y}")
         elif self.mode == "year":
             self.lbl.setText(f"سنة {y}")
+        elif self.mode == "all":
+            self.lbl.setText("كل الفترات")
 
     def range(self):
         """(من، إلى) نصّاً بصيغة yyyy-MM-dd."""
         fmt = "yyyy-MM-dd"
         y, mo = self.anchor.year(), self.anchor.month()
+        if self.mode == "all":
+            return "0000-01-01", "9999-12-31"
         if self.mode == "custom":
             a, b = self.d1.date(), self.d2.date()
             if a > b:
@@ -648,6 +680,17 @@ class PeriodBar(QtWidgets.QWidget):
         a, b = self.range()
         return (self.lbl.text() if self.mode != "custom"
                 else f"من {a} إلى {b}")
+
+
+def search_button(tip="يعرض كل السندات في كل الفترات حسب الاختيارات"
+                  " (النوع وما تكتبه في البحث)"):
+    """زرّ «بحث» في السجل (5.8.3)."""
+    b = kit.PushButton("🔍  بحث")
+    b.setObjectName("primary")
+    b.setCursor(QtCore.Qt.PointingHandCursor)
+    b.setToolTip(tip)
+    b.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
+    return b
 
 
 def view_buttons(table, col, count, on_view, text="عرض"):

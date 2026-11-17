@@ -106,18 +106,16 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
 
         # تسديد النقد
         self.c_amount = mspin()
-        # 5.8.1: الصندوق أو البنك يُبحث عنه باسمه — كل صندوقٍ أو بنكٍ يُفتح
-        # في شجرة الحسابات (النقدية وشبه النقدية) يظهر هنا
-        self.c_target = search_combo("ابحث عن صندوق أو بنك…")
-        self.c_target.setToolTip("الصندوق أو البنك الذي يُقبض فيه النقد أو "
-                                 "يُصرف منه")
-        self.c_target.addItem("الصندوق الرئيسي — 1400", "1400")
-        self.c_target.addItem("البنك — 1500", "1500")
+        # 5.8.3: الصندوق أو البنك **اختيارٌ فقط** — لا كتابة في الخانة؛ النقر
+        # عليها يُظهر الصناديق والبنوك (آخرها إضافةً أولاً)، و«+ إضافة» يُنشئ
+        # حساباً جديداً باسمه ويحفظه ويختاره
+        from ui.tax_trade_kit import add_button, pick_combo
+        self.c_target = pick_combo("الصندوق أو البنك الذي يُقبض فيه النقد أو "
+                                   "يُصرف منه — اختر من القائمة")
+        self.c_target.addItem("الصندوق الرئيسي (صندوق)", "1400")
+        self.c_target.addItem("البنك (بنك)", "1500")
         self.c_target.setCurrentIndex(0)
-        # 5.8.2: صندوقٌ أو بنكٌ جديد باسمه من هنا مباشرةً
-        self.c_add = QtWidgets.QToolButton()
-        self.c_add.setText("+")
-        self.c_add.setToolTip("صندوق أو بنك جديد — تكتب اسمه فقط")
+        self.c_add = add_button()
         self.c_add.clicked.connect(self._new_cash_target)
         self.c_target_box = QtWidgets.QWidget()
         _ct = QtWidgets.QHBoxLayout(self.c_target_box)
@@ -797,9 +795,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
 
     def _new_cash_target(self):
         from ui.tax_trade_kit import new_pay_account
-        typed = (self.c_target.lineEdit().text().strip()
-                 if self.c_target.currentIndex() < 0 else "")
-        aid = new_pay_account(self, self.user.get("username", ""), typed)
+        aid = new_pay_account(self, self.user.get("username", ""), "")
         if aid:
             with db(readonly=True) as conn:
                 r = conn.execute("SELECT code FROM accounts WHERE id=?",
@@ -808,15 +804,13 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                                           else None)
 
     def _reload_cash_targets(self, conn, keep=None):
-        from models.accounts import pay_accounts, pay_kind
+        from ui.tax_trade_kit import pay_row_label, pay_rows_recent
         keep = keep or self.c_target.currentData() or "1400"
         self.c_target.blockSignals(True)
         self.c_target.clear()
-        rows = sorted(pay_accounts(conn),
-                      key=lambda r: (pay_kind(r["code"]) != "cash", r["code"]))
-        for r in rows:
-            word = "صندوق" if pay_kind(r["code"]) == "cash" else "بنك"
-            self.c_target.addItem(f"{r['name']} ({word})", r["code"])
+        # آخر الحسابات إضافةً أولاً
+        for r in pay_rows_recent(conn):
+            self.c_target.addItem(pay_row_label(r), r["code"])
         i = self.c_target.findData(keep)
         self.c_target.setCurrentIndex(i if i >= 0 else 0)
         self.c_target.blockSignals(False)

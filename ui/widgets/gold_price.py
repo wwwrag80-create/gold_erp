@@ -10,15 +10,13 @@ import urllib.request
 
 from PyQt5 import QtCore, QtWidgets
 from services import numfmt as _nf
+# المعادلات في `gold_math` — وتطبيق الجوال ينقلها حرفياً
+from services.gold_math import (K18_DIVISOR, K18_FACTOR,  # noqa: F401
+                                OUNCE_GRAMS, ounce_prices)
 
-OUNCE_GRAMS = 31.1034768          # الأونصة الترويّة بالجرام
 REFRESH_MS = 300_000              # التحديث كل 5 دقائق
 # دقيقة واحدة كانت تُنشئ 60 طلب شبكة في الساعة بلا داعٍ —
 # سعر الذهب لا يتغيّر بما يستدعي ذلك، والتخفيف يريح النظام.
-
-# معادلة عيار 18 المعتمدة: (سعر الذهب العالمي × 121) ÷ 1333.33
-K18_FACTOR = 121.0
-K18_DIVISOR = 1333.33
 
 # مصادر مجانية بلا مفتاح — تُجرَّب بالترتيب حتى ينجح أحدها
 SOURCES = [
@@ -163,17 +161,9 @@ class GoldPriceBar(QtWidgets.QFrame):
 
     def _ok(self, usd):
         self._last = usd
-        sar = usd * self.usd_to_sar
-        g24 = sar / OUNCE_GRAMS
+        prices = ounce_prices(usd, self.usd_to_sar)
+        sar = prices["ounce_sar"]
         self.ounce.setText(f"الأونصة {_nf.f2(usd)} $ · {_nf.f2(sar)} ر.س")
-        prices = {
-            24: g24,
-            22: g24 * 22 / 24,
-            21: g24 * 21 / 24,
-            # معادلة عيار 18 الخاصة المعتمدة:
-            # (سعر الذهب العالمي × 121) ÷ 1333.33
-            18: usd * K18_FACTOR / K18_DIVISOR,
-        }
         for k, lbl in self.karat_labels.items():
             lbl.setText(f"ع{k}  {_nf.f2(prices[k])}")
         self.stamp.setText(

@@ -1011,6 +1011,10 @@ class SetsRegisterTab(QtWidgets.QWidget):
         self.q.setPlaceholderText("بحث في كل الفترات: رقم الفاتورة · العميل ·"
                                   " الجوال · رقم الباركود/الصنف…")
         live_search(self.q, self.reload)
+        # 5.8.3: «بحث» يعرض كل السندات في كل الفترات حسب الاختيارات
+        self.b_search = tk.search_button()
+        self.b_search.clicked.connect(self.search_all)
+        self.q.returnPressed.connect(self.search_all)
         self.kind = kit.ComboBox()
         for k, lbl in tx.REG_KINDS:
             self.kind.addItem(lbl, k or None)
@@ -1037,11 +1041,18 @@ class SetsRegisterTab(QtWidgets.QWidget):
         lay.setContentsMargins(4, 0, 4, 4)
         lay.setSpacing(6)
         lay.addLayout(tk.hbox(self.period, self.q, self.kind, self.sub,
-                              stretch=[0, 3, 1, 1]))
+                              self.b_search, stretch=[0, 3, 1, 1, 0]))
         lay.addLayout(tk.cards(self.c_n, self.c_base, self.c_vat,
                                self.c_total))
         lay.addWidget(self.empty)
         lay.addWidget(self.tbl, 1)
+
+    def search_all(self):
+        """كل السندات في كل الفترات — بالنوع المختار وما كُتب في البحث."""
+        if self.period.mode != "all":
+            self.period.set_mode("all")          # يعيد التحميل
+        else:
+            self.reload()
 
     def reload(self, *_):
         q = self.q.text().strip()
@@ -1098,8 +1109,10 @@ class SetsRegisterTab(QtWidgets.QWidget):
         self.c_total.set_value(tk.m(tot["t"]))
         self.empty.setText("" if rows else (
             f"لا نتائج لـ«{q}»." if q else
+            "لا مستندات بهذه الاختيارات في كل الفترات." if
+            self.period.mode == "all" else
             f"لا مستندات في {self.period.title()} — اختر «سنوي» أو فترةً "
-            "أخرى بالسهمين، أو ابحث (البحث في كل الفترات)."))
+            "أخرى بالسهمين، أو اضغط «🔍 بحث» لكل السندات في كل الفترات."))
         self.empty.setVisible(not rows)
 
     def _preview(self, r):

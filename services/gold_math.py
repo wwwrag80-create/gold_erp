@@ -83,3 +83,30 @@ def melting_shrinkage(expected_24k: float, actual_24k: float
     loss = round(expected_24k - actual_24k, WEIGHT_DECIMALS)
     ratio = (loss / expected_24k) if expected_24k else 0.0
     return loss, round(ratio, 4), ratio > MELTING_LOSS_LIMIT
+
+
+# ══ سعر الذهب: من الأونصة العالمية إلى جرام كل عيار ══
+# شريط «سعر الذهب العالمي» في البرنامج، وتطبيق الجوال ينقلها حرفياً
+# (`mobile/web/js/gold.js` ← `ouncePrices`) ويقارنها فحص التطابق.
+OUNCE_GRAMS = 31.1034768          # الأونصة الترويّة بالجرام
+USD_TO_SAR = 3.75
+# معادلة عيار 18 المعتمدة: (سعر الذهب العالمي × 121) ÷ 1333.33
+K18_FACTOR = 121.0
+K18_DIVISOR = 1333.33
+
+
+def ounce_prices(usd: float, usd_to_sar: float = USD_TO_SAR) -> dict:
+    """الأونصة بالدولار ← الأونصة بالريال وجرام عيار 24 و22 و21 و18 بالريال.
+
+    بترتيب العمليات نفسه الذي كان في الشريط — فلا يتغيّر رقمٌ واحد."""
+    sar = usd * usd_to_sar
+    g24 = sar / OUNCE_GRAMS
+    return {
+        "ounce_usd": usd,
+        "ounce_sar": sar,
+        24: g24,
+        22: g24 * 22 / 24,
+        21: g24 * 21 / 24,
+        # معادلة عيار 18 الخاصة المعتمدة
+        18: usd * K18_FACTOR / K18_DIVISOR,
+    }
