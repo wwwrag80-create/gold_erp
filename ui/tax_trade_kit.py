@@ -369,23 +369,96 @@ def section(title, dense=True):
 CREDIT = "credit"
 
 
+class NewPayAccountDialog(QtWidgets.QDialog):
+    """5.8.2: صندوقٌ أو بنكٌ جديد **باسمه** من خانة الدفع نفسها."""
+
+    def __init__(self, parent=None, username="", name=""):
+        super().__init__(parent)
+        self.setWindowTitle("حساب دفع جديد")
+        self.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.username = username
+        self.account_id = None
+        self.name = kit.LineEdit()
+        self.name.setPlaceholderText("مثال: بنك الراجحي · صندوق المعرض")
+        self.name.setText(name or "")
+        self.b_cash = kit.RadioButton("صندوق نقدي")
+        self.b_bank = kit.RadioButton("بنك / شبكة")
+        g = QtWidgets.QButtonGroup(self)
+        g.addButton(self.b_cash)
+        g.addButton(self.b_bank)
+        (self.b_bank if "بنك" in (name or "") else self.b_cash).setChecked(
+            True)
+        ok = kit.PushButton("✔ إضافة")
+        ok.clicked.connect(self._save)
+        cancel = kit.PushButton("إلغاء")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(self.reject)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(field("اسم الحساب", self.name))
+        lay.addWidget(field("نوعه", hbox(self.b_cash, self.b_bank,
+                                          stretch=[0, 1])))
+        note = QtWidgets.QLabel("يُضاف تحت «النقدية وشبه النقدية» في دليل "
+                                "الحسابات، ويظهر في كل خانات الدفع وفي "
+                                "سندات القبض والصرف.")
+        note.setObjectName("cardSub")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        lay.addLayout(hbox(ok, cancel, stretch=[1, 0]))
+        self.resize(420, 220)
+        self.name.setFocus()
+
+    def _save(self):
+        from database.database import db
+        from models.accounts import create_pay_account
+        from ui.widgets.common import err
+        try:
+            with db() as conn:
+                self.account_id = create_pay_account(
+                    conn, self.name.text(),
+                    "cash" if self.b_cash.isChecked() else "bank",
+                    self.username)
+        except Exception as e:                       # noqa: BLE001
+            err(self, e)
+            return
+        self.accept()
+
+
+def new_pay_account(parent, username="", name=""):
+    """يفتح نافذة الحساب الجديد — ويعيد معرّفه (أو None)."""
+    dlg = NewPayAccountDialog(parent, username, name)
+    if dlg.exec_() == QtWidgets.QDialog.Accepted:
+        return dlg.account_id
+    return None
+
+
+CREDIT = "credit"
+
+
 class PayCombo(QtWidgets.QWidget):
-    """طريقة الدفع: «آجل» أو صندوقٌ أو بنكٌ يُبحث عنه باسمه — من شجرة
-    الحسابات (النقدية وشبه النقدية)، فالبنك الجديد يظهر فور فتحه."""
+    """طريقة الدفع (5.8.2): «آجل» ثم الصناديق ثم البنوك — يُختار منها
+    أو يُضاف حسابٌ جديد باسمه بزر «+». **تُسجَّل على الفاتورة وتُطبع
+    فقط** — لا سند قبضٍ ولا صرفٍ تلقائي؛ السداد من «سندات قبض/صرف»."""
     changed = QtCore.pyqtSignal()
 
-    def __init__(self, credit_text="آجل — على الحساب", parent=None):
+    def __init__(self, credit_text="آجل — على الحساب", parent=None,
+                 username=""):
         super().__init__(parent)
         from ui.widgets.common import search_combo
         self.credit_text = credit_text
+        self.username = username
         self._allow_credit = True
-        self.cb = search_combo("آجل · أو ابحث عن صندوقٍ أو بنك…")
-        self.cb.setToolTip("آجل: يبقى على الحساب.\nصندوقٌ أو بنك: يُسدَّد "
-                           "الإجمالي بسندٍ تلقائي منه أو إليه — وكل بنكٍ "
-                           "يُفتح في شجرة الحسابات يظهر هنا.")
+        self.cb = search_combo("اختر الصندوق أو البنك…")
+        self.cb.setToolTip("آجل أو الصندوق/البنك — تُكتب على الفاتورة وتُطبع."
+                           "\nالسداد نفسه بسندٍ يدوي من «سندات قبض/صرف».")
+        self.b_add = QtWidgets.QToolButton()
+        self.b_add.setText("+")
+        self.b_add.setToolTip("صندوق أو بنك جديد — تكتب اسمه فقط")
+        self.b_add.clicked.connect(self.add_account)
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(self.cb)
+        lay.setSpacing(4)
+        lay.addWidget(self.cb, 1)
+        lay.addWidget(self.b_add)
         self.cb.currentIndexChanged.connect(lambda *_: self.changed.emit())
 
     def reload(self, conn, keep=None):
@@ -395,13 +468,25 @@ class PayCombo(QtWidgets.QWidget):
         self.cb.clear()
         if self._allow_credit:
             self.cb.addItem(self.credit_text, CREDIT)
-        for r in pay_accounts(conn):
-            word = "نقداً" if pay_kind(r["code"]) == "cash" else "بنكي"
-            self.cb.addItem(f"{r['name']} — {r['code']} ({word})",
-                            int(r["id"]))
+        rows = list(pay_accounts(conn))
+        # الصناديق أولاً ثم البنوك
+        rows.sort(key=lambda r: (pay_kind(r["code"]) != "cash", r["code"]))
+        for r in rows:
+            word = "صندوق" if pay_kind(r["code"]) == "cash" else "بنك"
+            self.cb.addItem(f"{r['name']} ({word})", int(r["id"]))
         i = self.cb.findData(cur) if cur is not None else -1
         self.cb.setCurrentIndex(i if i >= 0 else 0)
         self.cb.blockSignals(False)
+
+    def add_account(self):
+        from database.database import db
+        typed = self.cb.lineEdit().text().strip() \
+            if self.cb.currentIndex() < 0 else ""
+        aid = new_pay_account(self, self.username, typed)
+        if aid:
+            with db(readonly=True) as conn:
+                self.reload(conn, keep=int(aid))
+            self.changed.emit()
 
     def set_allow_credit(self, ok):
         """العميل النقدي يدفع في الحال — لا «آجل» له."""

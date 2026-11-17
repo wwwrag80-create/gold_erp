@@ -11,10 +11,11 @@
 السطر: به يُكتب الوزن والأجر ويُعرضان. والمحاسبة في `models.tax_invoices`:
 
 * الفاتورة فاتورة بيعٍ حقيقية: الأطقم تخرج من خزنتها، وتظهر في كشف العميل
-  وحركة الطقم والإقرار الضريبي. والنقد والشبكة يُسدَّدان بسند قبضٍ تلقائي.
+  وحركة الطقم والإقرار الضريبي. وطريقة الدفع تُكتب على الفاتورة فقط —
+  والسداد بسند قبضٍ يدوي من «سندات قبض/صرف» (5.8.2).
 * **الإشعار الدائن = مرتجع مبيعات**: يُختار من فاتورةٍ ضريبية سابقة،
   فتعود أطقمه للخزنة ويظهر في كشف الحساب «مرتجع مبيعات» بسعر الأصل،
-  ويُردّ المبلغ بطريقة دفع الفاتورة نفسها.
+  ويُخصم من حساب العميل (والردّ النقدي بسند صرفٍ يدوي).
 * الفاتورة الضريبية لا تُعدَّل بعد إصدارها — التصحيح بالإشعار وحده.
 """
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -162,7 +163,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         wl.addWidget(self.w_phone, 1)
         self.pricing = tk.PricingBox(with_price=False)
         # 5.8.1: الدفع «آجل» أو صندوقٌ/بنكٌ يُبحث عنه من شجرة الحسابات
-        self.pay = tk.PayCombo("آجل — على حساب المشتري")
+        self.pay = tk.PayCombo("آجل — على حساب المشتري",
+                               username=(self.user or {}).get("username", ""))
         self.notes = kit.LineEdit()
         self.notes.setPlaceholderText("اختياري")
         # 5.8.0: مصدر الأصناف — يدوي حر (افتراضي) أو من أطقم الخزنة
@@ -660,8 +662,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                     + (f" (بعد خصم {tk.m(disc)})" if disc else "")
                     + f" + الضريبة {T.text(T.c_vat)} = {T.text(T.c_total)}"
                     f" ريال\n{where}"
-                    + ("\nويُسدَّد الإجمالي بسند قبضٍ تلقائي."
-                       if pay != "credit" else ""), self.date):
+                    + ("\nالفاتورة على حساب المشتري — وسجّل القبض من «سندات"
+                       " قبض/صرف»." if pay != "credit" else ""), self.date):
                 return
             v = self.pricing.values()
             if self.pricing.is_riyal():
@@ -711,9 +713,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             if res.get("split"):
                 msg += (f"\nوالإيطالي بفاتورةٍ مستقلة {res['split']['invoice_no']}"
                         f" — {tk.m(res['split']['grand_total'])} ريال")
-            if res.get("voucher_no"):
-                msg += (f"\nسُدِّد {tk.m(res['paid'])} ريال بسند القبض "
-                        f"{res['voucher_no']} ({pay_txt})")
+            if pay != "credit":
+                msg += (f"\nالدفع: {pay_txt} — سجّل القبض من «سندات قبض/صرف»")
             posted(self, msg, "invoice", res["id"])
         except Exception as e:
             err(self, e)
@@ -830,8 +831,9 @@ class SetsCreditTab(QtWidgets.QWidget):
                     + (f" · خصم الأصل {tk.m(disc)} — يُردّ منه بنسبة المرتجع"
                        if disc else "")
                     + "\nيُردّ بسعر الفاتورة نفسها — "
-                    + ("ويُخصم من حساب المشتري." if pm == "credit"
-                       else f"ويُردّ المبلغ من «{ptxt}» بسند صرفٍ تلقائي."))
+                    + "ويُخصم من حساب المشتري"
+                    + ("." if pm == "credit" else
+                       " — والردّ النقدي بسند صرفٍ يدوي."))
         self.info.setText(info)
         t = self.tbl
         t.blockSignals(True)
@@ -969,9 +971,9 @@ class SetsCreditTab(QtWidgets.QWidget):
                           f"{_buyer_label(self._orig)}\n{len(rets)} طقم — "
                           f"الإجمالي {T.text(T.c_total)} ريال — السبب: "
                           f"{reason}\n"
-                          + ("يُردّ المبلغ بسند صرفٍ من حساب الدفع."
-                             if pm != "credit"
-                             else "يُخصم من حساب المشتري."), self.date):
+                          + "يُخصم من حساب المشتري"
+                          + ("." if pm == "credit" else
+                             " — والردّ النقدي بسند صرفٍ يدوي."), self.date):
                 return
             with db() as conn:
                 res = tx.create_credit_note(conn, iid, dstr(self.date), rets,
@@ -982,37 +984,35 @@ class SetsCreditTab(QtWidgets.QWidget):
             self.reload()
             msg = (f"تم ترحيل مرتجع المبيعات {res['invoice_no']} على {ref}"
                    f" — الإجمالي {tk.m(res['grand_total'])} ريال")
-            if res.get("voucher_no"):
-                msg += (f"\nرُدَّ {tk.m(res['paid'])} ريال بسند الصرف "
-                        f"{res['voucher_no']}")
             posted(self, msg, "invoice", res["id"])
         except Exception as e:
             err(self, e)
 
 
 class SetsRegisterTab(QtWidgets.QWidget):
-    """سجل المبيعات الضريبية (5.8.1): فترةٌ بزر (شهري · ربع سنوي · سنوي ·
-    من تاريخ إلى تاريخ) — رقم الفاتورة · التاريخ · النوع · العميل · الوزن ·
-    الأجور · الخصم · الضريبة · الإجمالي · وبجانبه «عرض»."""
+    """سجل المبيعات الضريبية (5.8.2): كل ما يدخل الإقرار — فواتير هذه الشاشة
+    ومرتجعاتها وفواتير البيع الضريبية من شاشة المبيعات وفواتير المندوب.
+    فترةٌ بزر (شهري · ربع سنوي · سنوي · من تاريخ إلى تاريخ)، **والبحث في كل
+    الفترات** — رقم الفاتورة · التاريخ · النوع · العميل · الوزن · الأجور ·
+    الخصم · الضريبة · الإجمالي · «عرض»."""
 
     COLS = ["رقم الفاتورة", "التاريخ", "النوع", "العميل", "الوزن", "الأجور",
             "قيمة الذهب", "الخصم", "الضريبة", "الإجمالي", ""]
     C_GV, C_VIEW = 6, 10
-    KINDS = (("", "كل المستندات"), ("sale", "المبيعات الضريبية"),
-             ("sale_return", "مرتجعات المبيعات"))
 
     def __init__(self, user):
         super().__init__()
+        from ui.widgets.common import live_search
         self.user = user
         self._rows = []
         self.period = tk.PeriodBar("tax_sales_reg_period")
         self.period.changed.connect(self.reload)
         self.q = kit.LineEdit()
-        self.q.setPlaceholderText("بحث: رقم الفاتورة · العميل · الجوال · "
-                                  "رقم الباركود/الصنف…")
-        self.q.returnPressed.connect(self.reload)
+        self.q.setPlaceholderText("بحث في كل الفترات: رقم الفاتورة · العميل ·"
+                                  " الجوال · رقم الباركود/الصنف…")
+        live_search(self.q, self.reload)
         self.kind = kit.ComboBox()
-        for k, lbl in self.KINDS:
+        for k, lbl in tx.REG_KINDS:
             self.kind.addItem(lbl, k or None)
         self.kind.currentIndexChanged.connect(lambda *_: self.reload())
         self.sub = kit.ComboBox()
@@ -1020,67 +1020,62 @@ class SetsRegisterTab(QtWidgets.QWidget):
         for k, lbl in SUB_SHORT.items():
             self.sub.addItem(lbl, k)
         self.sub.currentIndexChanged.connect(lambda *_: self.reload())
-        b = kit.PushButton("بحث")
-        b.setObjectName("ghost")
-        b.clicked.connect(self.reload)
         from ui.widgets.common import StatChip as Card
         self.c_n = Card("المستندات", "")
         self.c_base = Card("صافي المبيعات الخاضعة", "بعد المرتجعات والخصم")
         self.c_vat = Card("صافي ضريبة المخرجات", "تنتقل للإقرار الضريبي")
         self.c_total = Card("الإجمالي شامل الضريبة", "", summary=True)
+        self.empty = QtWidgets.QLabel("")
+        self.empty.setObjectName("cardSub")
         self.tbl = make_table()
         self.tbl.setColumnCount(len(self.COLS))
         self.tbl.setHorizontalHeaderLabels(self.COLS)
-        fit_columns(self.tbl, [9, 8, 11, 15, 7, 8, 8, 7, 8, 9, 6])
+        fit_columns(self.tbl, [9, 8, 13, 15, 7, 8, 8, 7, 8, 9, 6])
         self.tbl.doubleClicked.connect(guard_click(
             lambda ix: self._preview(ix.row())))
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(4, 0, 4, 4)
         lay.setSpacing(6)
-        lay.addLayout(tk.hbox(self.period, self.q, self.kind, self.sub, b,
-                              stretch=[0, 3, 1, 1, 0]))
+        lay.addLayout(tk.hbox(self.period, self.q, self.kind, self.sub,
+                              stretch=[0, 3, 1, 1]))
         lay.addLayout(tk.cards(self.c_n, self.c_base, self.c_vat,
                                self.c_total))
+        lay.addWidget(self.empty)
         lay.addWidget(self.tbl, 1)
 
-    def reload(self):
-        a, b = self.period.range()
+    def reload(self, *_):
+        q = self.q.text().strip()
+        a, b = (("0000-01-01", "9999-12-31") if q else self.period.range())
         with db(readonly=True) as conn:
-            rows = tx.search(conn, self.q.text().strip(), a, b,
-                             self.kind.currentData(),
-                             subtype=self.sub.currentData(), limit=100000)
-        rows.sort(key=lambda r: (r["invoice_date"], r["id"]))
+            rows = tx.sales_register(conn, a, b, q, self.kind.currentData(),
+                                     self.sub.currentData())
         self._rows = rows
         t = self.tbl
         t.setRowCount(0)
         t.setRowCount(len(rows) + (1 if rows else 0))
         red = QtGui.QBrush(QtGui.QColor("#a4262c"))
-        tot = {"w": 0.0, "wg": 0.0, "gv": 0.0, "d": 0.0, "v": 0.0, "t": 0.0}
+        tot = {"w": 0.0, "wg": 0.0, "gv": 0.0, "d": 0.0, "v": 0.0, "t": 0.0,
+               "base": 0.0}
         any_gv = False
         for r, s in enumerate(rows):
-            ret = s["kind"] == "sale_return"
+            ret = s["ret"]
             sg = -1 if ret else 1
-            wg = float(s["total_wages"] or 0)
-            gv = float(s["gold_value"] or 0)
-            dd = float(s.get("discount") or 0)
-            any_gv = any_gv or gv > 0
-            for k, v in (("w", float(s["total_weight"] or 0)), ("wg", wg),
-                         ("gv", gv), ("d", dd),
-                         ("v", float(s["vat_amount"] or 0)),
-                         ("t", float(s["grand_total"] or 0))):
-                tot[k] += sg * v
-            kind = ("مرتجع مبيعات ضريبي" if ret else "مبيعات ضريبية") + (
-                " مبسطة" if (s.get("tax_subtype") or "") == "simplified"
-                else "")
-            vals = [s["invoice_no"], s["invoice_date"], kind, _buyer_label(s),
-                    tk.w(s["total_weight"]), tk.m(wg),
-                    tk.m(gv) if gv else "—", tk.m(dd) if dd else "—",
-                    tk.m(s["vat_amount"]), tk.m(s["grand_total"])]
+            any_gv = any_gv or s["gold_value"] > 0
+            for k, key in (("w", "weight"), ("wg", "wages"),
+                           ("gv", "gold_value"), ("d", "discount"),
+                           ("v", "vat"), ("t", "total"), ("base", "base")):
+                tot[k] += sg * float(s.get(key) or 0)
+            vals = [s["no"], s["date"], s["kind_label"], s["party"],
+                    tk.w(s["weight"]) if s["weight"] is not None else "—",
+                    tk.m(s["wages"]),
+                    tk.m(s["gold_value"]) if s["gold_value"] else "—",
+                    tk.m(s["discount"]) if s["discount"] else "—",
+                    tk.m(s["vat"]), tk.m(s["total"])]
             for c, v in enumerate(vals):
                 it = num_item(v) if c >= 4 else text_item(v)
                 if ret and (c >= 4 or c == 2):
                     it.setForeground(red)
-                if ret and c == 0 and s.get("ref_no"):
+                if c in (0, 2) and s.get("ref_no"):
                     it.setToolTip(f"على الفاتورة {s['ref_no']}")
                 t.setItem(r, c, it)
         tk.view_buttons(t, self.C_VIEW, len(rows), self._preview)
@@ -1095,18 +1090,24 @@ class SetsRegisterTab(QtWidgets.QWidget):
             style_total_row(t, n)
         t.setColumnHidden(self.C_GV, not any_gv)
         tk.fix_rows(t, 4)
-        self.c_n.set_value(str(len(rows)), self.period.title())
-        base = round(tot["wg"] + tot["gv"] - tot["d"], 2)
-        self.c_base.set_value(tk.m(base))
+        title = (f"نتائج البحث «{q}» في كل الفترات" if q
+                 else self.period.title())
+        self.c_n.set_value(str(len(rows)), title)
+        self.c_base.set_value(tk.m(tot["base"]))
         self.c_vat.set_value(tk.m(tot["v"]))
         self.c_total.set_value(tk.m(tot["t"]))
+        self.empty.setText("" if rows else (
+            f"لا نتائج لـ«{q}»." if q else
+            f"لا مستندات في {self.period.title()} — اختر «سنوي» أو فترةً "
+            "أخرى بالسهمين، أو ابحث (البحث في كل الفترات)."))
+        self.empty.setVisible(not rows)
 
     def _preview(self, r):
         if not (0 <= r < len(self._rows)):
             return
         try:
             from services import print_manager
-            print_manager.preview_document(self, "invoice",
-                                           self._rows[r]["id"])
+            row = self._rows[r]
+            print_manager.preview_document(self, row["doc"], row["id"])
         except Exception as e:
             err(self, e)

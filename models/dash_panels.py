@@ -21,7 +21,7 @@ DEFAULTS = [
     {"key": "loss", "title": "الذهب الفاقد",
      "accounts": ["5110"]},
     {"key": "sales", "title": "المبيعات",
-     "accounts": ["4110", "4120", "1600"], "unit": "gold"},
+     "accounts": ["4110", "4120", "4130", "1600"], "unit": "gold"},
     {"key": "scrap", "title": "صندوق الكسر",
      "accounts": ["1310"], "kind": "scrap"},
     {"key": "stock_wos", "title": "أرقام التشغيل المتاحة",
@@ -36,6 +36,8 @@ SEEDED = ["stock_wos"]
 # وصفوفٌ تُزرع مرةً واحدة في لوحةٍ قائمة (5.1.9): «ايطالي / نواعم» في لوحة
 # الصناديق — وإن حذفه المستخدم لم يُزرع ثانية
 SEEDED_ROWS = {"italian_row": ITALIAN}
+# 5.8.2: «المبيعات الضريبية» 4130 صفٌّ في لوحة المبيعات — مرةً واحدة
+SEEDED_PANEL_ROWS = {"tax_sales_row": ("sales", "4130")}
 
 
 def _cfg_path():
@@ -66,6 +68,14 @@ def _seed_new(panels):
         box = _boxes_panel(panels)
         if box is not None and code not in box["accounts"]:
             box["accounts"].append(code)
+            added = True
+        done.append(key)
+    for key, (pkey, code) in SEEDED_PANEL_ROWS.items():
+        if key in done:
+            continue
+        panel = next((x for x in panels if x.get("key") == pkey), None)
+        if panel is not None and code not in (panel.get("accounts") or []):
+            panel.setdefault("accounts", []).append(code)
             added = True
         done.append(key)
     for key in SEEDED:

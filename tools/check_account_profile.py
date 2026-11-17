@@ -119,6 +119,7 @@ nav = [
                    "text": "فواتير الضريبة"}]},
     {"idx": -1, "key": "::group::المشتريات·1", "text": "المشتريات كلها",
      "children": [{"idx": 3, "key": "المشتريات الضريبية", "text": "شراء أطقم"},
+                  # 5.8.2: «المشتريات» صارت قسماً — مفتاحها القديم يُتجاهل
                   {"idx": 4, "key": "المشتريات", "text": "المشتريات"}]},
     {"idx": 5, "key": "كشف حساب", "text": "كشف حساب"},
 ]
@@ -184,7 +185,7 @@ check("شاشةٌ داخل شاشة", any(k.data(0, NAV_KEY_ROLE) == "المبي
 _grp = top[txt.index("المشتريات كلها")] if "المشتريات كلها" in txt else None
 check("المجموعة الجديدة بشاشاتها", _grp is not None and
       [_grp.child(i).text(0) for i in range(_grp.childCount())]
-      == ["شراء أطقم", "المشتريات"])
+      == ["شراء أطقم"])
 names = {it.data(0, NAV_KEY_ROLE) for it, _ in win._iter_nav()}
 check("لا شاشة تضيع: ما لم يرتّبه المدير يُلحق آخر القائمة",
       set(plan.ALL_SCREENS) <= names, set(plan.ALL_SCREENS) - names)
@@ -269,7 +270,7 @@ ed.ungroup()
 keys_top = [ed.tree.topLevelItem(i).data(0, 0x0101)
             for i in range(ed.tree.topLevelItemCount())]
 check("فكّ المجموعة يبقي شاشاتها في مكانها",
-      keys_top[1:3] == ["المشتريات الضريبية", "المشتريات"], keys_top[:4])
+      keys_top[1:3] == ["المشتريات الضريبية", "كشف حساب"], keys_top[:4])
 ed.tree.setCurrentItem(ed.tree.topLevelItem(1))
 ed.original_name()
 check("الاسم الأصلي يعود", ed.tree.topLevelItem(1).text(0) == "المشتريات الضريبية")

@@ -271,12 +271,7 @@ def create_sale(conn, customer_id, lines, doc_date, username, pricing,
     acc = check_stock(conn, account_id)
     res = _save(conn, "sale", ent, prep, doc_date, username, tx, acc,
                 discount, description)
-    v = _tx.settle_docs(conn, "receipt", customer_id, [res], pay_mode,
-                        pay_acc, doc_date, username,
-                        f"سداد الفاتورة {res['invoice_no']}")
-    if v:
-        res["voucher_no"] = v["voucher_no"]
-        res["paid"] = v["paid"]
+    _tx.record_pay(conn, [res], pay_acc)      # 5.8.2: بلا سندٍ تلقائي
     return res
 
 
@@ -303,7 +298,7 @@ def _save(conn, kind, ent, prep, doc_date, username, tx, acc, discount,
     riyal = tx["pricing"] in _tx.RIYAL
     _d, lines = inv._entry_lines(conn, kind, False, ent, [(acc, total_w)],
                                  wages, vat, grand, True, gold_value=gv,
-                                 riyal=riyal)
+                                 riyal=riyal, tax_rev=True)
     if disc:
         lines.append({"account_id": acc_id(conn, DISC_ALLOWED),
                       ("cash_debit" if kind == "sale" else "cash_credit"):

@@ -246,39 +246,12 @@ def check_buyer(conn, customer_id, subtype):
                 " التعامل»، أو اختر «فاتورة مبسطة» إن كان فرداً.")
 
 
-def _settle(conn, kind, entity_id, amount, mode, doc_date, username, note,
-            account_id=None):
-    """سند قبضٍ (بيع) أو صرفٍ (إشعار دائن) تلقائي للنقد والشبكة — في
-    الصندوق أو البنك المختار (5.8.1)، وبلا اختيارٍ الصندوق أو البنك."""
-    from models import vouchers
-    if mode not in PAY_BOX or amount <= 0:
-        return None
-    code = PAY_BOX[mode]
-    if account_id:
-        r = conn.execute("SELECT code FROM accounts WHERE id=?",
-                         (int(account_id),)).fetchone()
-        code = r["code"] if r else code
-    return vouchers.create_voucher(
-        conn, kind, doc_date, username, entity_id=entity_id,
-        cash_amount=round(amount, 2), cash_account_code=code,
-        notes=note, expense_account_id=0)
-
-
-def settle_docs(conn, kind, entity_id, docs, mode, account_id, doc_date,
-                username, note):
-    """يسدّد مستندات الفاتورة (أو يردّ قيمة الإشعار) بسندٍ واحد ويربطها به."""
-    if mode not in PAY_BOX:
-        return None
-    total = round(sum(float(d["grand_total"]) for d in docs), 2)
-    v = _settle(conn, kind, entity_id, total, mode, doc_date, username, note,
-                account_id)
-    if v:
-        for d in docs:
-            conn.execute("UPDATE invoices SET pay_voucher_id=?,"
-                         " pay_account_id=? WHERE id=?",
-                         (v["id"], account_id, d["id"]))
-        v = dict(v, paid=total)
-    return v
+def record_pay(conn, docs, account_id):
+    """5.8.2: طريقة الدفع تُسجَّل على الفاتورة وتُطبع فقط — **لا سند قبضٍ
+    ولا صرفٍ تلقائي**: السداد يُسجَّل يدوياً من شاشة «سندات قبض/صرف»."""
+    for d in docs:
+        conn.execute("UPDATE invoices SET pay_account_id=? WHERE id=?",
+                     (account_id, d["id"]))
 
 
 def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
@@ -291,8 +264,9 @@ def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
                wage_override (18), piece_price, pieces, karat, note}]
     `subtype`: standard (محل/شركة برقمها الضريبي) · simplified (فرد).
     `customer_id` فارغٌ مع المبسطة = «عميل نقدي» (اسمه وجواله على الفاتورة).
-    `pay_mode`: credit (على حسابه) · cash · bank — والأخيران يُسدَّدان
-    بسند قبضٍ تلقائي بإجمالي الفاتورة.
+    `pay_mode`: credit (على حسابه) · cash · bank — وحساب الدفع
+    `pay_account_id` (صندوق/بنك): يُسجَّلان ويُطبعان فقط، والفاتورة على
+    حساب المشتري دائماً؛ السداد بسند قبضٍ يدوي (5.8.2).
     """
     from models import invoices as inv
     from models.accounts import resolve_pay
@@ -331,12 +305,7 @@ def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
                           apply_vat=True, description=description,
                           tax=tax)
     docs = [res] + ([res["split"]] if res.get("split") else [])
-    v = settle_docs(conn, "receipt", customer_id, docs, pay_mode, pay_acc,
-                    doc_date, username, "سداد " + " · ".join(
-                        f"الفاتورة {d['invoice_no']}" for d in docs))
-    if v:
-        res["voucher_no"] = v["voucher_no"]
-        res["paid"] = v["paid"]
+    record_pay(conn, docs, pay_acc)
     return res
 
 
@@ -384,8 +353,9 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
     """إشعار دائن (مرتجع مبيعات) من فاتورةٍ ضريبية: `returns` =
     [{item_id, weight (18 — فارغ = الباقي كله)}].
 
-    يعود كل طقمٍ إلى خزنته كمرتجع البيع تماماً، ويُردّ للعميل بسعر
-    الفاتورة نفسها وطريقتها — والمرتجع لا يتجاوز الباقي من كل سطر.
+    يعود كل طقمٍ إلى خزنته كمرتجع البيع تماماً، ويُخصم من حساب العميل
+    بسعر الفاتورة نفسها — والمرتجع لا يتجاوز الباقي من كل سطر. وردّ
+    المبلغ (إن دُفع) يدويٌّ بسند صرف (5.8.2).
     """
     ensure_schema(conn)
     o = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0"
@@ -404,18 +374,9 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
                                      username)
     else:
         res = _vault_credit_note(conn, o, doc_date, returns, reason, username)
-    od = dict(o)
-    mode = od.get("pay_mode") or ""
-    # دُفعت الفاتورة نقداً أو بالشبكة: يُردّ المرتجع بالطريقة نفسها ومن
-    # الصندوق أو البنك نفسه (5.8.1 — والإدخال اليدوي كان لا يُردّ)
+    # 5.8.2: الإشعار يرث طريقة دفع فاتورته للطباعة — والردّ يدوياً بسند
     docs = [res] + ([res["split"]] if res.get("split") else [])
-    v = settle_docs(conn, "payment", o["customer_id"], docs, mode,
-                    od.get("pay_account_id"), doc_date, username,
-                    f"ردّ قيمة الإشعار {res['invoice_no']} على الفاتورة "
-                    f"{o['invoice_no']}")
-    if v:
-        res["voucher_no"] = v["voucher_no"]
-        res["paid"] = v["paid"]
+    record_pay(conn, docs, dict(o).get("pay_account_id"))
     return res
 
 
@@ -541,3 +502,100 @@ def totals(conn, date_from, date_to):
         (date_from, date_to)).fetchone()
     return {"base": round(r["base"], 2), "vat": round(r["vat"], 2),
             "n": r["n"]}
+
+
+
+# ══════════════════════════ 5.8.2: السجل الموحّد ══════════════════════════
+REG_KINDS = (("", "كل المستندات"), ("sale", "المبيعات الضريبية"),
+             ("sale_return", "مرتجعات المبيعات الضريبية"),
+             ("other", "فواتير ضريبية أخرى (شاشة المبيعات · المندوب)"))
+
+
+def sales_register(conn, date_from, date_to, q="", kind=None, subtype=None):
+    """سجل المبيعات الضريبية كما يدخل الإقرار: فواتير شاشة المبيعات
+    الضريبية ومرتجعاتها **و**فواتير البيع الضريبية من شاشة المبيعات
+    **و**فواتير المندوب وإشعاراتها — صفاً موحّداً لكلٍّ:
+
+    {src, doc, id, no, date, kind, kind_label, party, subtype, weight,
+     wages, gold_value, discount, base, vat, total, ret, ref_no}"""
+    from models import tax_free as _tf
+    ensure_schema(conn)
+    _tf.ensure_schema(conn)
+    out = []
+    want_tax = kind in (None, "", "sale", "sale_return")
+    want_other = kind in (None, "", "other")
+    if want_tax or want_other:
+        sql = ("SELECT i.*, e.name customer_name, o.invoice_no ref_no"
+               " FROM invoices i JOIN entities e ON e.id=i.customer_id"
+               " LEFT JOIN invoices o ON o.id=i.ref_invoice_id"
+               " WHERE i.is_deleted=0 AND i.vat_applied=1"
+               " AND i.invoice_date BETWEEN ? AND ?")
+        args = [date_from, date_to]
+        if kind in ("sale", "sale_return"):
+            sql += " AND i.kind=? AND COALESCE(i.pricing,'')<>''"
+            args.append(kind)
+        elif kind == "other":
+            sql += " AND COALESCE(i.pricing,'')=''"
+        if subtype:
+            sql += " AND COALESCE(i.tax_subtype,'')=?"
+            args.append(subtype)
+        if q:
+            sql += (" AND (i.invoice_no LIKE ? OR e.name LIKE ?"
+                    " OR i.buyer_name LIKE ? OR i.buyer_phone LIKE ?"
+                    " OR EXISTS (SELECT 1 FROM invoice_items it JOIN"
+                    " work_orders w ON w.id=it.work_order_id WHERE"
+                    " it.invoice_id=i.id AND w.work_order_no LIKE ?)"
+                    " OR EXISTS (SELECT 1 FROM tax_free_lines f WHERE"
+                    " f.invoice_id=i.id AND f.wo_no LIKE ?))")
+            args += [f"%{q}%"] * 6
+        for r in conn.execute(sql, args):
+            r = dict(r)
+            ret = r["kind"] == "sale_return"
+            tax = bool(r.get("pricing") or "")
+            simple = (r.get("tax_subtype") or "") == "simplified"
+            if tax:
+                lbl = ("مرتجع مبيعات ضريبي" if ret else "مبيعات ضريبية")
+                lbl += " مبسطة" if simple else ""
+            else:
+                lbl = ("مرتجع بيع ضريبي (شاشة المبيعات)" if ret
+                       else "فاتورة بيع ضريبية (شاشة المبيعات)")
+            wg = float(r["total_wages"] or 0)
+            gv = float(r.get("gold_value") or 0)
+            dd = float(r.get("discount") or 0)
+            name = (r.get("buyer_name") or "").strip() or r["customer_name"]
+            out.append({
+                "src": "invoices", "doc": "invoice", "id": r["id"],
+                "no": r["invoice_no"], "date": r["invoice_date"],
+                "kind": r["kind"] if tax else "other", "kind_label": lbl,
+                "party": name, "subtype": r.get("tax_subtype") or "",
+                "weight": float(r["total_weight"] or 0), "wages": wg,
+                "gold_value": gv, "discount": dd,
+                "base": round(wg + gv - dd, 2),
+                "vat": float(r["vat_amount"] or 0),
+                "total": float(r["grand_total"] or 0), "ret": ret,
+                "ref_no": r.get("ref_no") or ""})
+    if want_other and not subtype:
+        try:
+            from models import tax_sales as _ts
+            rows = _ts.search(conn, q or "", date_from, date_to,
+                              limit=100000)
+        except Exception:                            # noqa: BLE001
+            rows = []
+        labels = {"invoice": "فاتورة المندوب الضريبية",
+                  "credit": "إشعار دائن (المندوب)",
+                  "debit": "إشعار مدين (المندوب)"}
+        for r in rows:
+            r = dict(r)
+            ret = r["kind"] == "credit"
+            out.append({
+                "src": "tax_sales", "doc": "tax_sale", "id": r["id"],
+                "no": r["doc_no"], "date": r["doc_date"], "kind": "other",
+                "kind_label": labels.get(r["kind"], r["kind"]),
+                "party": r["customer_name"], "subtype": "",
+                "weight": None, "wages": float(r["net"] or 0),
+                "gold_value": 0.0, "discount": 0.0,
+                "base": float(r["net"] or 0), "vat": float(r["vat"] or 0),
+                "total": float(r["total"] or 0), "ret": ret,
+                "ref_no": r.get("ref_no") or ""})
+    out.sort(key=lambda x: (str(x["date"]), x["src"], x["id"]))
+    return out

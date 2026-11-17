@@ -192,3 +192,38 @@ def pay_label(conn, pay_mode, account_id=None):
                          (int(account_id),)).fetchone()
     word = "نقداً" if pay_mode == "cash" else "بنكي / شبكة"
     return f"{word} — {r['name']}" if r else word
+
+
+def create_pay_account(conn, name, kind="cash", username=None):
+    """5.8.2: صندوقٌ أو بنكٌ جديد يُضاف **باسمه** من خانة الدفع نفسها —
+    تحت «النقدية وشبه النقدية» (1010): الصندوق برقمٍ 14xx والبنك 15xx.
+    يعيد معرّف الحساب الجديد."""
+    name = " ".join(str(name or "").split())
+    if len(name) < 2:
+        raise ValueError("اكتب اسم الحساب (صندوقاً أو بنكاً)")
+    for r in pay_accounts(conn):
+        if r["name"].strip() == name:
+            raise ValueError(f"«{name}» موجودٌ من قبل ({r['code']}) — "
+                             "اختره من القائمة")
+    parent = conn.execute("SELECT id, account_level FROM accounts WHERE"
+                          " code=?", (CASH_GROUP,)).fetchone()
+    if not parent:
+        raise ValueError("مجموعة «النقدية وشبه النقدية» غير موجودة في الدليل")
+    base = 1400 if kind == "cash" else 1500
+    used = {r["code"] for r in conn.execute("SELECT code FROM accounts")}
+    code = next((str(c) for c in range(base + 1, base + 100)
+                 if str(c) not in used), None)
+    if code is None:
+        raise ValueError("لا رقم متاح لحسابٍ جديد في هذه المجموعة")
+    cur = conn.execute(
+        "INSERT INTO accounts(code,name,type,parent_id,is_postable,nature,"
+        "balance_type,account_level,is_active)"
+        " VALUES(?,?,'asset',?,1,'debit','cash',?,1)",
+        (code, name, parent["id"], int(parent["account_level"] or 1) + 1))
+    try:
+        from services.audit import log_action
+        log_action(conn, username or "", "create", "accounts", cur.lastrowid,
+                   f"حساب دفع جديد {code} — {name}")
+    except Exception:                                # noqa: BLE001
+        pass
+    return cur.lastrowid

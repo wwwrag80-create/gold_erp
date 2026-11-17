@@ -286,13 +286,15 @@ with db() as c:
     row = c.execute("SELECT tax_subtype, buyer_name, buyer_phone, pay_mode,"
                     " pay_voucher_id FROM invoices WHERE id=?",
                     (w9["id"],)).fetchone()
+    # 5.8.2: الدفع يُكتب على الفاتورة فقط — لا سند قبضٍ تلقائي
     check("المبسطة لعميلٍ نقدي: النوع والاسم والجوال والدفع على الفاتورة",
           tuple(row)[:4] == ("simplified", "محمد", "0555", "cash")
-          and row[4], tuple(row))
+          and not row[4], tuple(row))
     wk = ti.walkin_customer(c, False)
-    check("سند قبضٍ تلقائي: الصندوق +2645 وحساب العميل النقدي صفر",
-          round(bal(c, "1400")[1] - box0, 2) == 2645.0
-          and ent_bal(c, wk) == (0.0, 0.0), (bal(c, "1400"), ent_bal(c, wk)))
+    check("لا سند قبضٍ تلقائي: الصندوق كما هو والعميل النقدي مدين 2645",
+          round(bal(c, "1400")[1] - box0, 2) == 0.0
+          and ent_bal(c, wk) == (0.0, 2645.0),
+          (bal(c, "1400"), ent_bal(c, wk)))
     from services.fatoora import ledger as _fl
     doc = _fl.build_doc(c, w9["id"])
     check("المستند الإلكتروني: مبسطة باسم المشتري المكتوب",
@@ -302,19 +304,21 @@ with db() as c:
         c, w9["id"])[0]["item_id"]}], "مرتجع", "t")
     rr9 = c.execute("SELECT tax_subtype, buyer_name, pay_mode FROM invoices"
                     " WHERE id=?", (cn9["id"],)).fetchone()
-    check("الإشعار يرث النوع والمشتري ويُردّ نقداً بسند صرف",
+    check("الإشعار يرث النوع والمشتري — بلا سند صرفٍ تلقائي",
           tuple(rr9) == ("simplified", "محمد", "cash")
-          and cn9.get("voucher_no") and round(bal(c, "1400")[1] - box0, 2)
-          == 0.0 and ent_bal(c, wk) == (0.0, 0.0),
+          and not cn9.get("voucher_no")
+          and round(bal(c, "1400")[1] - box0, 2) == 0.0
+          and ent_bal(c, wk) == (0.0, 0.0),
           (tuple(rr9), bal(c, "1400"), ent_bal(c, wk)))
     s9 = ti.create_invoice(c, ind, [{"work_order_id": ids9["T902"],
                                      "wage_override": 15, "pieces": 1}],
                            D, "t", "wage", subtype="simplified",
                            pay_mode="bank")
     bank = bal(c, "1500")[1]
-    check("مبسطة لفردٍ من الدليل بالشبكة: الأجور + الضريبة للبنك، والذهب "
-          "على حسابه وزناً", ent_bal(c, ind) == (4.0, 0.0)
-          and round(bank, 2) == round(4 * 15 * 1.15, 2),
+    # 5.8.2: «بالشبكة» يُكتب على الفاتورة — والقبض بسندٍ يدوي
+    check("مبسطة لفردٍ من الدليل «بالشبكة»: على حسابه ذهباً وأجوراً — البنك"
+          " كما هو حتى يُقبض بسند", ent_bal(c, ind)
+          == (4.0, round(4 * 15 * 1.15, 2)) and round(bank, 2) == 0.0,
           (ent_bal(c, ind), bank))
     check("الدفتر متوازن", ledger_ok(c)[0], ledger_ok(c))
     ok, p = guard_clean(c)

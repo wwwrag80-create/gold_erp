@@ -298,8 +298,14 @@ def _scrap_karat(conn, lines_info, given):
     return 0
 
 
+# 5.8.2: الفاتورة الضريبية بالأطقم (شاشة المبيعات الضريبية) تُقيَّد في
+# حسابين يُتابَع كشفهما: «المبيعات الضريبية» ومرتجعها «مردودات المبيعات
+# الضريبية» — الوزن ذهباً والأجور ريالاً في سطرٍ واحد مقابل العميل
+TAX_SALES, TAX_SALES_RETURNS = "4130", "4930"
+
+
 def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
-                 apply_vat, gold_value=0.0, riyal=False):
+                 apply_vat, gold_value=0.0, riyal=False, tax_rev=False):
     """أسطر قيد الفاتورة — المرجع الواحد للإنشاء والتعديل.
 
     الذهب يخرج من **حساب كل طقم** (أو يعود إليه)، فقد تحمل الفاتورة
@@ -339,28 +345,36 @@ def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
         # العميل؛ الذهب يُسلَّم وزناً إلى مركز التسكير 6100 وقيمته بالريال
         # تقابله فيه — بيعٌ وتسكيرٌ فوري في قيدٍ واحد.
         if riyal:
+            party_desc = "قيمة ذهب + أجور + ضريبة (بالريال)"
             lines = [
                 {"account_id": ent_acc, "cash_debit": grand,
-                 "line_desc": "قيمة ذهب + أجور + ضريبة (بالريال)"},
+                 "line_desc": party_desc},
                 {"account_id": acc_id(conn, "6100"), "gold_debit": total_w,
                  "line_desc": "ذهبٌ بيع بالريال — تسكيرٌ فوري (الوزن)"},
                 {"account_id": acc_id(conn, "6100"), "cash_credit": gold_value,
                  "line_desc": "ذهبٌ بيع بالريال — تسكيرٌ فوري (القيمة)"},
             ]
         else:
+            party_desc = ("مديونية ذهب + أجور"
+                          + (" وضريبة" if apply_vat else ""))
             lines = [
                 {"account_id": ent_acc, "gold_debit": total_w,
-                 "cash_debit": grand,
-                 "line_desc": "مديونية ذهب + أجور"
-                              + (" وضريبة" if apply_vat else "")}]
-        lines += [
-            {"account_id": acc_id(conn, "4110"), "gold_credit": total_w,
-             "line_desc": "إيراد مبيعات ذهب (وزناً)"},
-            {"account_id": acc_id(conn, "4120"), "cash_credit": wages,
-             "line_desc": "إيراد مبيعات أجور"},
-            {"account_id": acc_id(conn, "4950"), "gold_debit": total_w,
-             "line_desc": "الذهب المسلَّم من المخزون"},
-        ]
+                 "cash_debit": grand, "line_desc": party_desc}]
+        if tax_rev:
+            # سطرٌ واحد بالوزن والأجور وبيانه بيانُ سطر العميل — فيظهر في
+            # كشف «المبيعات الضريبية» صفاً لكل فاتورة مقابل اسم العميل
+            lines.append({"account_id": acc_id(conn, TAX_SALES),
+                          "gold_credit": total_w, "cash_credit": wages,
+                          "line_desc": party_desc})
+        else:
+            lines += [
+                {"account_id": acc_id(conn, "4110"), "gold_credit": total_w,
+                 "line_desc": "إيراد مبيعات ذهب (وزناً)"},
+                {"account_id": acc_id(conn, "4120"), "cash_credit": wages,
+                 "line_desc": "إيراد مبيعات أجور"}]
+        lines.append({"account_id": acc_id(conn, "4950"),
+                      "gold_debit": total_w,
+                      "line_desc": "الذهب المسلَّم من المخزون"})
         lines += [{"account_id": a, "gold_credit": w,
                    "line_desc": f"خروج الذهب من {_nm(a)}"}
                   for a, w in acc_weights]
@@ -372,12 +386,20 @@ def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
                 + f" — {ent['name']}")
         # المرتجع: عكس البيع — مردودات الذهب وزناً 4910 والأجور 4920،
         # ويعود كل طقمٍ إلى حسابه فيُعكس «الذهب المسلَّم» 4950
-        lines = [
-            {"account_id": acc_id(conn, "4910"), "gold_debit": total_w,
-             "line_desc": "مردودات مبيعات ذهب (وزناً)"},
-            {"account_id": acc_id(conn, "4920"), "cash_debit": wages,
-             "line_desc": "مردودات مبيعات أجور"},
-        ]
+        party_desc = ("ردّ قيمة الذهب والأجور والضريبة" if riyal
+                      else "عكس مديونية الذهب والأجور")
+        if tax_rev:
+            # 5.8.2: «مردودات المبيعات الضريبية» سطرٌ واحد مقابل العميل
+            lines = [{"account_id": acc_id(conn, TAX_SALES_RETURNS),
+                      "gold_debit": total_w, "cash_debit": wages,
+                      "line_desc": party_desc}]
+        else:
+            lines = [
+                {"account_id": acc_id(conn, "4910"), "gold_debit": total_w,
+                 "line_desc": "مردودات مبيعات ذهب (وزناً)"},
+                {"account_id": acc_id(conn, "4920"), "cash_debit": wages,
+                 "line_desc": "مردودات مبيعات أجور"},
+            ]
         lines += [{"account_id": a, "gold_debit": w,
                    "line_desc": f"عودة الذهب إلى {_nm(a)}"}
                   for a, w in acc_weights]
@@ -397,11 +419,11 @@ def _entry_lines(conn, kind, internal, ent, acc_weights, wages, vat, grand,
                           "cash_debit": gold_value,
                           "line_desc": "ذهبٌ عاد بالريال — عكس التسكير (القيمة)"})
             lines.append({"account_id": ent_acc, "cash_credit": grand,
-                          "line_desc": "ردّ قيمة الذهب والأجور والضريبة"})
+                          "line_desc": party_desc})
         else:
             lines.append({"account_id": ent_acc, "gold_credit": total_w,
                           "cash_credit": grand,
-                          "line_desc": "عكس مديونية الذهب والأجور"})
+                          "line_desc": party_desc})
     keys = ("gold_debit", "gold_credit", "cash_debit", "cash_credit")
     lines = [l for l in lines
              if any(abs(float(l.get(k) or 0)) > 1e-9 for k in keys)]
@@ -592,7 +614,8 @@ def _save(conn, kind, entity_id, cart, invoice_date, username, apply_vat,
     riyal = bool(tx and tx["pricing"] in _tx.RIYAL)
     desc, lines = _entry_lines(conn, kind, internal, ent, acc_weights,
                                wages, vat, grand, apply_vat,
-                               gold_value=gold_value, riyal=riyal)
+                               gold_value=gold_value, riyal=riyal,
+                               tax_rev=bool(tx) and not internal)
     if tx and disc:
         lines.append({"account_id": acc_id(conn, _tf.DISC_ALLOWED),
                       ("cash_debit" if kind == "sale" else "cash_credit"):

@@ -141,7 +141,12 @@ with db() as c:
         {"wo_no": "7", "weight": 20, "karat": 21, "gold_price": 260,
          "wage": 8}], D, "t", "gram", gold_price=260, price_karat=21,
         subtype="standard", pay_mode="cash")
-    check("بيع نقدي بسعر الجرام يُصدر سند قبض", bool(s2.get("voucher_no")),
+    # 5.8.2: طريقة الدفع تُكتب على الفاتورة فقط — لا سند قبضٍ تلقائي
+    check("بيعٌ «نقداً»: الدفع على الفاتورة بلا سندٍ تلقائي",
+          not s2.get("voucher_no") and c.execute(
+              "SELECT pay_mode FROM invoices WHERE id=?",
+              (s2["id"],)).fetchone()[0] == "cash"
+          and c.execute("SELECT COUNT(*) FROM vouchers").fetchone()[0] == 0,
           s2)
     check("البحث في السجل برقم التشغيل اليدوي",
           any(r["id"] == s1["id"] for r in tx.search(c, "1")))
@@ -281,50 +286,89 @@ with db() as c:
           bs["balanced_cash"] and bs["balanced_gold"],
           (bs["diff_cash"], bs["diff_gold"]))
 
-print("— 5.8.1: الدفع من صندوقٍ أو بنكٍ يُختار من الشجرة")
+print("— 5.8.2: الدفع يُكتب على الفاتورة · حسابٌ جديد باسمه · بلا سندات")
 with db() as c:
-    from models.accounts import pay_accounts, resolve_pay
-    p10 = c.execute("SELECT id FROM accounts WHERE code='1010'").fetchone()[0]
-    c.execute("INSERT INTO accounts(code,name,type,parent_id,is_postable,"
-              "nature,balance_type) VALUES('1520','بنك الراجحي','asset',?,1,"
-              "'debit','cash')", (p10,))
-    bank = acc_id(c, "1520")
-    check("البنك الجديد يظهر في حسابات الدفع ويُقرأ «بنكي»",
-          any(r["id"] == bank for r in pay_accounts(c))
-          and resolve_pay(c, "cash", bank) == ("bank", bank))
+    from models.accounts import (create_pay_account, pay_accounts,
+                                 resolve_pay)
+    bank = create_pay_account(c, "بنك الراجحي", "bank", "t")
+    box2 = create_pay_account(c, "صندوق المعرض", "cash", "t")
+    codes = {r["id"]: r["code"] for r in pay_accounts(c)}
+    check("حسابٌ جديد باسمه: البنك 15xx والصندوق 14xx تحت النقدية",
+          codes.get(bank, "").startswith("15")
+          and codes.get(box2, "").startswith("14"), codes)
+    check("الاسم المكرّر مرفوض", raises(lambda: create_pay_account(
+        c, "بنك الراجحي", "bank", "t"), "موجود"))
+    check("البنك الجديد يُقرأ «بنكي» والصندوق «نقداً»",
+          resolve_pay(c, "cash", bank) == ("bank", bank)
+          and resolve_pay(c, "cash", box2) == ("cash", box2))
     check("حسابٌ ليس صندوقاً ولا بنكاً مرفوض للدفع",
           raises(lambda: resolve_pay(c, "cash", acc_id(c, "1230")),
                  "صندوقاً"))
-    b0 = bal(c, "1520")[1]
+    nv0 = c.execute("SELECT COUNT(*) FROM vouchers").fetchone()[0]
+    sup_b0 = ent_bal(c, sup)
     p3 = sp.create_purchase(c, sup, D, "INV-90", [
         {"wo_no": "X1", "registered": 5, "karat": 18, "wage": 10}], "t",
         pricing="wage", mode="free", pay_mode="cash", pay_account_id=bank)
-    check("شراءٌ مدفوعٌ من البنك: سند صرف تلقائي بالإجمالي (57.50)",
-          bool(p3["voucher_no"]) and round(bal(c, "1520")[1] - b0, 2)
-          == -57.5, (p3.get("voucher_no"), bal(c, "1520")))
+    check("شراءٌ «من البنك»: على حساب المورد ولا سند صرفٍ ولا حركة بنك",
+          bal(c, codes[bank])[1] == 0.0 and round(ent_bal(c, sup)[1]
+                                             - sup_b0[1], 2) == -57.5
+          and c.execute("SELECT COUNT(*) FROM vouchers").fetchone()[0]
+          == nv0, (bal(c, codes[bank]), ent_bal(c, sup)))
+    check("والفاتورة تحفظ البنك للطباعة", c.execute(
+        "SELECT pay_mode, pay_account_id FROM set_purchases WHERE id=?",
+        (p3["id"],)).fetchone()[:] == ("bank", bank))
     rr3 = sp.returnable(c, p3["id"])
-    pr3 = sp.create_return(c, p3["id"], D, [
+    sp.create_return(c, p3["id"], D, [
         {"line_id": rr3[0]["line_id"], "weight": 2}], "عيب", "t")
-    check("مرتجعه يُستردّ إلى البنك نفسه بسند قبض (23.00)",
-          bool(pr3["voucher_no"]) and round(bal(c, "1520")[1] - b0, 2)
-          == -34.5, (pr3.get("voucher_no"), bal(c, "1520")))
+    check("مرتجعه بلا سند قبضٍ تلقائي", c.execute(
+        "SELECT COUNT(*) FROM vouchers").fetchone()[0] == nv0)
     s3 = tf.create_sale(c, com, [
         {"wo_no": "Z9", "weight": 4, "karat": 18, "wage": 20}], D, "t",
-        "wage", subtype="standard", pay_mode="cash", pay_account_id=bank)
-    check("بيعٌ مقبوضٌ في البنك: سند قبض إليه",
-          bool(s3.get("voucher_no")) and round(bal(c, "1520")[1] - b0, 2)
-          == round(-34.5 + s3["grand_total"], 2), bal(c, "1520"))
+        "wage", subtype="standard", pay_mode="cash", pay_account_id=box2)
     rl3 = tx.returnable(c, s3["id"])
     cn3 = tx.create_credit_note(c, s3["id"], D, [
         {"item_id": rl3[0]["item_id"]}], "إرجاع", "t")
-    check("إشعاره الدائن (إدخال يدوي) يُردّ من البنك نفسه بسند صرف",
-          bool(cn3.get("voucher_no")) and round(bal(c, "1520")[1] - b0, 2)
-          == -34.5, (cn3.get("voucher_no"), bal(c, "1520")))
+    check("بيعٌ «في الصندوق» وإشعاره: لا سند قبضٍ ولا صرفٍ تلقائي",
+          not s3.get("voucher_no") and not cn3.get("voucher_no")
+          and bal(c, codes[box2])[1] == 0.0 and c.execute(
+              "SELECT COUNT(*) FROM vouchers").fetchone()[0] == nv0)
+    check("الإشعار يرث صندوق فاتورته للطباعة", c.execute(
+        "SELECT pay_account_id FROM invoices WHERE id=?",
+        (cn3["id"],)).fetchone()[0] == box2)
     hs = __import__("services.print_manager",
                     fromlist=["x"]).build_html("invoice", s3["id"])
-    check("قالب البيع يذكر البنك في «الدفع»", "بنك الراجحي" in hs)
+    check("قالب البيع يذكر الصندوق في «الدفع»", "صندوق المعرض" in hs)
 
-print("— 5.8.1: المصروفات الضريبية (كهرباء) والسجل الموحّد")
+print("— 5.8.2: المبيعات الضريبية ومردوداتها في الدليل")
+with db() as c:
+    st = [r for r in journal.statement(c, acc_id(c, "4130")) if r["doc_no"]]
+    check("كشف «المبيعات الضريبية» 4130: صفٌّ لكل فاتورة باسم العميل",
+          len(st) == 3 and all(r["name"] == "شركة الريان" for r in st)
+          and all(r["op"] == "مبيعات ضريبية" for r in st),
+          [(r["doc_no"], r["name"], r["op"]) for r in st])
+    check("4130 دائن بالوزن المباع كله 74 جم (50 + 20 + 4)",
+          bal(c, "4130")[0] == -74.0, bal(c, "4130"))
+    st2 = [r for r in journal.statement(c, acc_id(c, "4930"))
+           if r["doc_no"]]
+    check("كشف «مردودات المبيعات الضريبية» 4930: الإشعاران باسم العميل",
+          len(st2) == 2 and all(r["name"] == "شركة الريان" for r in st2),
+          [(r["doc_no"], r["name"]) for r in st2])
+    check("لا شيء من الفواتير الضريبية في 4110/4120 بعد اليوم",
+          bal(c, "4110") == (0.0, 0.0) and bal(c, "4120") == (0.0, 0.0),
+          (bal(c, "4110"), bal(c, "4120")))
+    bs = __import__("models.reports", fromlist=["x"]).balance_sheet(c)
+    check("الميزانية متوازنة", bs["balanced_cash"] and bs["balanced_gold"])
+    reg = tx.sales_register(c, "0000-01-01", "9999-12-31", "Z9")
+    check("سجل المبيعات: البحث برقم الصنف في كل الفترات (الفاتورة ومرتجعها)",
+          [r["no"] for r in reg] == [s3["invoice_no"], cn3["invoice_no"]],
+          [r["no"] for r in reg])
+    allr = tx.sales_register(c, D, D)
+    base = round(sum((-1 if r["ret"] else 1) * r["base"] for r in allr), 2)
+    v = __import__("models.reports", fromlist=["x"]).vat_return(c, D, D)
+    check("وعاء سجل المبيعات = وعاء الإقرار",
+          abs(base - v["sales_base"]) < 0.02, (base, v["sales_base"]))
+
+print("— 5.8.2: مشتريات عامة (كهرباء) والسجل الموحّد")
 with db() as c:
     from models import purchases as pu
     el = add_entity(c, "شركة الكهرباء", "supplier",
@@ -339,8 +383,8 @@ with db() as c:
           and bal(c, "5820")[1] == 1000.0, (net, vat, e1))
     reg = sp.tax_register(c, D, D)
     kinds = [r["kind_label"] for r in reg]
-    check("السجل الموحّد: ذهب ومرتجعه ومصروفات",
-          "مصروفات ضريبية" in kinds and "مشتريات ذهب ضريبية" in kinds
+    check("السجل الموحّد: ذهب ومرتجعه والمشتريات العامة",
+          "مشتريات عامة (مصروف)" in kinds and "مشتريات ذهب ضريبية" in kinds
           and "مرتجع مشتريات ضريبي" in kinds, kinds)
     claim = round(sum((-1 if r["ret"] else 1) * r["claim"] for r in reg), 2)
     v = __import__("models.reports", fromlist=["x"]).vat_return(c, D, D)

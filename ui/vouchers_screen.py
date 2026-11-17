@@ -114,6 +114,17 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         self.c_target.addItem("الصندوق الرئيسي — 1400", "1400")
         self.c_target.addItem("البنك — 1500", "1500")
         self.c_target.setCurrentIndex(0)
+        # 5.8.2: صندوقٌ أو بنكٌ جديد باسمه من هنا مباشرةً
+        self.c_add = QtWidgets.QToolButton()
+        self.c_add.setText("+")
+        self.c_add.setToolTip("صندوق أو بنك جديد — تكتب اسمه فقط")
+        self.c_add.clicked.connect(self._new_cash_target)
+        self.c_target_box = QtWidgets.QWidget()
+        _ct = QtWidgets.QHBoxLayout(self.c_target_box)
+        _ct.setContentsMargins(0, 0, 0, 0)
+        _ct.setSpacing(4)
+        _ct.addWidget(self.c_target, 1)
+        _ct.addWidget(self.c_add)
         self.c_note = kit.LineEdit()
         self.c_note.setPlaceholderText("بيان السطر (اختياري)")
         btn_add_cash = kit.PushButton("➕ إضافة سطر نقد")
@@ -124,7 +135,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         cg.addWidget(_sub("الصندوق / البنك"), 0, 1)
         cg.addWidget(_sub("البيان"), 0, 2)
         cg.addWidget(self.c_amount, 1, 0)
-        cg.addWidget(self.c_target, 1, 1)
+        cg.addWidget(self.c_target_box, 1, 1)
         cg.addWidget(self.c_note, 1, 2)
         cg.addWidget(btn_add_cash, 2, 2)
         cg.setColumnStretch(0, 2)
@@ -784,13 +795,28 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
             raise ValueError("اختر الصندوق أو البنك في لوحة النقد")
         return code or "1400"
 
-    def _reload_cash_targets(self, conn):
-        from models.accounts import pay_accounts
-        keep = self.c_target.currentData() or "1400"
+    def _new_cash_target(self):
+        from ui.tax_trade_kit import new_pay_account
+        typed = (self.c_target.lineEdit().text().strip()
+                 if self.c_target.currentIndex() < 0 else "")
+        aid = new_pay_account(self, self.user.get("username", ""), typed)
+        if aid:
+            with db(readonly=True) as conn:
+                r = conn.execute("SELECT code FROM accounts WHERE id=?",
+                                 (aid,)).fetchone()
+                self._reload_cash_targets(conn, keep=r["code"] if r
+                                          else None)
+
+    def _reload_cash_targets(self, conn, keep=None):
+        from models.accounts import pay_accounts, pay_kind
+        keep = keep or self.c_target.currentData() or "1400"
         self.c_target.blockSignals(True)
         self.c_target.clear()
-        for r in pay_accounts(conn):
-            self.c_target.addItem(f"{r['name']} — {r['code']}", r["code"])
+        rows = sorted(pay_accounts(conn),
+                      key=lambda r: (pay_kind(r["code"]) != "cash", r["code"]))
+        for r in rows:
+            word = "صندوق" if pay_kind(r["code"]) == "cash" else "بنك"
+            self.c_target.addItem(f"{r['name']} ({word})", r["code"])
         i = self.c_target.findData(keep)
         self.c_target.setCurrentIndex(i if i >= 0 else 0)
         self.c_target.blockSignals(False)

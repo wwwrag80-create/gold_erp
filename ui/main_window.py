@@ -31,7 +31,6 @@ from ui.operations_screen import OperationsScreen
 from ui.super_admin_screen import SuperAdminScreen
 from ui.opening_stock_screen import OpeningStockScreen
 from ui.production_screen import ProductionScreen
-from ui.purchases_screen import PurchasesScreen
 from ui.reports.financial_statements_screen import FinancialStatementsScreen
 from ui.reports.factory_reports_screen import FactoryReportsScreen
 from ui.reports.khazina_report_screen import KhazinaReportScreen
@@ -138,7 +137,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.vouchers_screen = Lazy(lambda: VouchersScreen(user), "vouchers_screen")
             self.stocktake_screen = Lazy(lambda: StocktakeScreen(user), "stocktake_screen")
             self.fixing_screen = Lazy(lambda: FixingScreen(user), "fixing_screen")
-            self.purchases_screen = Lazy(lambda: PurchasesScreen(user), "purchases_screen")
             self.tax_sales_screen = Lazy(lambda: TaxSalesScreen(user),
                                          "tax_sales_screen")
             self.tax_purchases_screen = Lazy(
@@ -192,7 +190,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             on_drill_account=self.open_ledger_by_account),
                         "مجموعات العملاء")),
                     ("التسكيرات", self.fixing_screen),
-                    ("المشتريات", self.purchases_screen),
+                    # 5.8.2: «المشتريات» قسمٌ داخل «المشتريات الضريبية»
                     ("القيود اليومية", self.journal_screen),
                     ("تقارير مبيعات وإنتاج المصنع", Lazy(lambda: FactoryReportsScreen(user), "تقارير مبيعات وإنتاج المصنع")),
                     # ══ التحليل والدراسات في القائمة الرئيسية (4.46) ══
@@ -261,7 +259,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 "mfg_costs": (self.mfg_screen, "refresh"),
                 "fixing_ops": (self.fixing_screen, "load_document"),
                 "work_orders": (self.production_screen, "load_document"),
-                "purchases": (self.purchases_screen, "load_document"),
+                # 5.8.2: المشتريات العامة قسمٌ في «المشتريات الضريبية»
+                "purchases": (self.tax_purchases_screen, "load_document"),
                 "manual": (self.journal_screen, "load_document"),
             }
         else:  # مبيعات فقط

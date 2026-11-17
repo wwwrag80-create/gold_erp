@@ -282,8 +282,9 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
     «مخزون الذهب الضريبي» أو الحساب المختار — بلا بطاقات). و`discount`
     خصمٌ نقدي على الفاتورة يُطرح من الوعاء قبل الضريبة.
 
-    5.8.1 — `pay_mode`/`pay_account_id`: آجل (على حساب المورد) أو مدفوعة
-    من صندوقٍ أو بنكٍ يُختار من الشجرة — فيُصرف إجماليها بسند صرفٍ تلقائي.
+    5.8.1 — `pay_mode`/`pay_account_id`: طريقة الدفع (آجل · صندوق · بنك)
+    تُسجَّل وتُطبع فقط (5.8.2) — الفاتورة على حساب المورد، والسداد بسند
+    صرفٍ يدوي من شاشة «سندات قبض/صرف».
 
     `lines` = [{wo_no, model_no, pieces, registered (18), standing (18),
                 karat, wage (18) | piece_price, notes}]
@@ -387,9 +388,6 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
              p["std"], p["karat"], p["wage"], p["piece_price"], p["wages"],
              p["gv"], p["net"], p["gold_price"]))
     _ = italian_account
-    v = _pay(conn, "payment", sup, pid, total, pay_mode, pay_acc, doc_date,
-             username, f"سداد فاتورة المشتريات {doc_no} (فاتورة المورد "
-             f"{inv_no})")
     log_action(conn, username, "create", "set_purchases", pid,
                f"{doc_no} total={total}")
     return {"id": pid, "doc_no": doc_no, "entry_id": entry_id,
@@ -398,26 +396,8 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
             "discount": disc, "free": free, "dest_account_id": dest,
             "weight": round(set_w + bulk_w, 3), "n": len(prep),
             "pay_mode": pay_mode, "pay_account_id": pay_acc,
-            "voucher_no": v["voucher_no"] if v else "",
             "vat_number_set": _vat_ok(conn)}
 
-
-def _pay(conn, kind, sup, doc_id, amount, pay_mode, pay_acc, doc_date,
-         username, note):
-    """سند صرفٍ تلقائي (فاتورة مدفوعة) أو قبضٍ (مرتجعُ مدفوعةٍ يُستردّ) من
-    الصندوق أو البنك المختار — ويُربط بالمستند."""
-    from models import vouchers
-    if pay_mode == "credit" or not pay_acc or amount <= 0:
-        return None
-    code = conn.execute("SELECT code FROM accounts WHERE id=?",
-                        (int(pay_acc),)).fetchone()["code"]
-    v = vouchers.create_voucher(
-        conn, kind, doc_date, username, entity_id=sup["id"],
-        cash_amount=round(amount, 2), cash_account_code=code, notes=note,
-        expense_account_id=0)
-    conn.execute("UPDATE set_purchases SET pay_voucher_id=? WHERE id=?",
-                 (v["id"], doc_id))
-    return v
 
 
 # ══════════════════════════ المرتجع ══════════════════════════
@@ -589,15 +569,11 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
                          " WHERE id=?", (doc_no, p["work_order_id"]))
             log_action(conn, username, "update", "work_orders",
                        p["work_order_id"], f"أُرجع للمورد بالمرتجع {doc_no}")
-    # 5.8.1: فاتورةٌ دُفعت من صندوقٍ أو بنك ⇒ يُستردّ المرتجع إليه بسند قبض
-    v = _pay(conn, "receipt", sup, rid, total, r_mode, r_acc, doc_date,
-             username, f"استرداد مرتجع المشتريات {doc_no} على {o['doc_no']}")
     log_action(conn, username, "create", "set_purchases", rid,
                f"{doc_no} ← {o['doc_no']} total={total}")
     return {"id": rid, "doc_no": doc_no, "entry_id": entry_id,
             "supplier_name": sup["name"], "net": net, "vat": vat,
             "total": total, "discount": disc, "free": free,
-            "voucher_no": v["voucher_no"] if v else "",
             "weight": round(set_w + bulk_w, 3), "n": len(prep)}
 
 
@@ -677,14 +653,15 @@ def _today():
 # ══════════════════════════ 5.8.1: السجل الموحّد ══════════════════════════
 REG_KINDS = (("", "كل المستندات"), ("purchase", "مشتريات ذهب ضريبية"),
              ("purchase_return", "مرتجع مشتريات ضريبي"),
-             ("expense", "مصروفات ضريبية"),
-             ("expense_return", "مرتجع مصروفات (إشعار مورد)"))
+             ("general", "المشتريات العامة (مصروفات وأصول)"),
+             ("general_return", "مرتجع المشتريات العامة"))
 REG_LABEL = dict(REG_KINDS)
 
 
 def tax_register(conn, date_from, date_to, q="", kind=None):
-    """سجل المشتريات الضريبية للفترة: فواتير الذهب ومرتجعاتها **و**فواتير
-    المصروفات الضريبية ومرتجعاتها — صفاً موحّداً لكلٍّ:
+    """سجل المشتريات الضريبية للفترة كما يدخل الإقرار: فواتير الذهب
+    ومرتجعاتها **و**المشتريات العامة كلها (مصروفات وأصول) ومرتجعاتها —
+    صفاً موحّداً لكلٍّ:
 
     {src, id, no, date, kind, kind_label, party, sup_inv, weight (18 أو
     None), wages (الأجور — وللمصروف مبلغه قبل الخصم), gold_value, discount,
@@ -711,15 +688,15 @@ def tax_register(conn, date_from, date_to, q="", kind=None):
                 "discount": disc, "base": base, "vat": float(r["vat"] or 0),
                 "claim": float(r["vat"] or 0), "total": float(r["total"] or 0),
                 "ret": ret, "ref_no": r.get("ref_no") or ""})
-    if kind in (None, "", "expense", "expense_return"):
+    if kind in (None, "", "general", "general_return"):
         sql = ("SELECT p.*, COALESCE(e.name, p.supplier) supplier_name"
                " FROM purchases p LEFT JOIN entities e ON e.id=p.supplier_id"
-               " WHERE p.is_deleted=0 AND p.kind='expense'"
+               " WHERE p.is_deleted=0"
                " AND p.purchase_date BETWEEN ? AND ?")
         args = [date_from, date_to]
-        if kind == "expense":
+        if kind == "general":
             sql += " AND COALESCE(p.is_return,0)=0"
-        elif kind == "expense_return":
+        elif kind == "general_return":
             sql += " AND COALESCE(p.is_return,0)=1"
         if q:
             sql += (" AND (p.purchase_no LIKE ? OR p.supplier_invoice_no"
@@ -732,12 +709,14 @@ def tax_register(conn, date_from, date_to, q="", kind=None):
             disc = float(r.get("discount") or 0)
             base = float(r["amount"] or 0)
             vat = float(r["vat_amount"] or 0)
+            asset = (r.get("kind") or "") == "asset"
             out.append({
                 "src": "purchases", "id": r["id"], "no": r["purchase_no"],
                 "date": r["purchase_date"],
-                "kind": "expense_return" if ret else "expense",
-                "kind_label": REG_LABEL["expense_return" if ret
-                                        else "expense"],
+                "kind": "general_return" if ret else "general",
+                "kind_label": ("مرتجع مشتريات عامة" if ret else
+                               "شراء أصل ثابت" if asset else
+                               "مشتريات عامة (مصروف)"),
                 "party": r["supplier_name"] or "",
                 "sup_inv": r.get("supplier_invoice_no") or "",
                 "weight": None, "wages": round(base + disc, 2),
