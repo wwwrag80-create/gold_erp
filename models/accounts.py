@@ -130,3 +130,65 @@ def resolve_gold_account(conn, account_id=None, default_code=FINISHED_GOLD,
     return int(account_id)
 
 
+
+
+# ══════════════════════════════════════════════════════════════════
+#  5.8.1: حسابات الدفع — الصناديق والبنوك من الشجرة لا من قائمةٍ ثابتة
+# ------------------------------------------------------------------
+#  «الدفع» في الفواتير والسندات كان «نقداً» (1400) أو «بنك» (1500) فقط —
+#  فالبنك الجديد الذي يُفتح في الشجرة لا يُختار. الآن كل حسابٍ قابلٍ
+#  للترحيل تحت «النقدية وشبه النقدية» (1010) حسابُ دفع: يُبحث عنه باسمه
+#  ويُختار، والصندوق (14xx) «نقداً» وما سواه «بنكي/شبكة».
+# ══════════════════════════════════════════════════════════════════
+CASH_GROUP = "1010"
+PAY_DEFAULT = {"cash": "1400", "bank": "1500"}
+
+
+def pay_accounts(conn):
+    """الصناديق والبنوك القابلة للدفع منها والقبض إليها — بالترتيب."""
+    ids = subtree_ids_by_code(conn, CASH_GROUP)
+    if not ids:
+        return []
+    qs = ",".join("?" * len(ids))
+    return conn.execute(
+        f"SELECT id, code, name FROM accounts WHERE id IN ({qs})"
+        f" AND is_postable=1 AND COALESCE(is_active,1)=1 ORDER BY code",
+        ids).fetchall()
+
+
+def pay_kind(code):
+    """«cash» للصندوق (14xx) و«bank» لما سواه (البنوك والشبكة)."""
+    return "cash" if str(code or "").startswith("14") else "bank"
+
+
+def resolve_pay(conn, pay_mode="credit", account_id=None):
+    """(طريقة الدفع، حساب الدفع) متحقَّقين.
+
+    حسابٌ مختار ⇒ طريقته من كوده (صندوق = نقداً، وإلا بنكي). وبلا حساب:
+    «credit» آجل بلا حساب، و«cash»/«bank» الصندوق الرئيسي أو البنك."""
+    if account_id:
+        r = conn.execute("SELECT id, code, name FROM accounts WHERE id=?",
+                         (int(account_id),)).fetchone()
+        ok = {int(x["id"]) for x in pay_accounts(conn)}
+        if not r or int(r["id"]) not in ok:
+            raise ValueError("حساب الدفع يكون صندوقاً أو بنكاً من «النقدية"
+                             " وشبه النقدية» في شجرة الحسابات")
+        return pay_kind(r["code"]), int(r["id"])
+    mode = pay_mode or "credit"
+    if mode == "credit":
+        return "credit", None
+    if mode not in PAY_DEFAULT:
+        raise ValueError("طريقة الدفع غير معروفة")
+    return mode, acc_id(conn, PAY_DEFAULT[mode])
+
+
+def pay_label(conn, pay_mode, account_id=None):
+    """نصّ الدفع للطباعة والعرض: «آجل» · «نقداً — 1400 الصندوق الرئيسي»."""
+    if (pay_mode or "credit") == "credit" and not account_id:
+        return "آجل — على الحساب"
+    r = None
+    if account_id:
+        r = conn.execute("SELECT code, name FROM accounts WHERE id=?",
+                         (int(account_id),)).fetchone()
+    word = "نقداً" if pay_mode == "cash" else "بنكي / شبكة"
+    return f"{word} — {r['name']}" if r else word

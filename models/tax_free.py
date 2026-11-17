@@ -38,6 +38,12 @@ _ACCOUNTS = (
      "debit"),
     (DISC_EARNED, "خصم مكتسب من الموردين", "revenue", "4000", "cash",
      "credit"),
+    # 5.8.1: المشتريات الضريبية ومردوداتها ومقابل وزنها
+    ("5540", "المشتريات الضريبية", "expense", "5050", "both", "debit"),
+    ("5545", "مردودات المشتريات الضريبية", "expense", "5050", "both",
+     "credit"),
+    ("5549", "الذهب المستلم للمخزون (مقابل المشتريات وزناً)", "expense",
+     "5050", "gold", "credit"),
 )
 
 
@@ -225,15 +231,19 @@ def spread(amounts, discount):
 def create_sale(conn, customer_id, lines, doc_date, username, pricing,
                 gold_price=0.0, price_karat=0, description="",
                 subtype="standard", buyer_name="", buyer_phone="",
-                pay_mode="credit", account_id=None, discount=0.0):
+                pay_mode="credit", account_id=None, discount=0.0,
+                pay_account_id=None):
     """فاتورة مبيعات ضريبية بالإدخال اليدوي: `lines` = [{wo_no, model_no,
-    pieces, weight (18), karat, wage (18) | piece_price, gold_price}]."""
+    pieces, weight (18), karat, wage (18) | piece_price, gold_price}].
+    `pay_account_id` (5.8.1) الصندوق أو البنك الذي يُقبض فيه."""
     from models import tax_invoices as _tx
+    from models.accounts import resolve_pay
     from models.entities import get_entity
     ensure_schema(conn)
     pay_mode = pay_mode or "credit"
     if pay_mode not in _tx.PAY_LABEL:
         raise ValueError("طريقة الدفع غير معروفة")
+    pay_mode, pay_acc = resolve_pay(conn, pay_mode, pay_account_id)
     if not customer_id:
         if subtype != "simplified":
             raise ValueError("اختر المحل أو الشركة (المشتري)")
@@ -261,15 +271,12 @@ def create_sale(conn, customer_id, lines, doc_date, username, pricing,
     acc = check_stock(conn, account_id)
     res = _save(conn, "sale", ent, prep, doc_date, username, tx, acc,
                 discount, description)
-    if pay_mode in _tx.PAY_BOX:
-        v = _tx._settle(conn, "receipt", customer_id, res["grand_total"],
-                        pay_mode, doc_date, username,
+    v = _tx.settle_docs(conn, "receipt", customer_id, [res], pay_mode,
+                        pay_acc, doc_date, username,
                         f"سداد الفاتورة {res['invoice_no']}")
-        if v:
-            conn.execute("UPDATE invoices SET pay_voucher_id=? WHERE id=?",
-                         (v["id"], res["id"]))
-            res["voucher_no"] = v["voucher_no"]
-            res["paid"] = res["grand_total"]
+    if v:
+        res["voucher_no"] = v["voucher_no"]
+        res["paid"] = v["paid"]
     return res
 
 

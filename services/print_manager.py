@@ -913,15 +913,11 @@ def _tpl_tax_invoice(conn, inv, items, cust):
         t_gv += gv
         t_wg += wg
         n_pcs += pcs
-        mn = ((wo["model_no"] if wo else "") or "—")
-        pic = _model_thumb(mn, 36) if mn != "—" else ""
         from services import karat_view as _kv
         rate = (_w(it.get("piece_price") or 0, 2) if piece
                 else _w(_kv.rate(it["wage_per_gram"], k), 2))
         body_rows += "<tr>" + cells(
             tdw(en(i)),
-            (f'<td align="center" style="padding:1px 2px;">{pic}</td>'
-             if pic else tdw(en(mn))),
             tdw(en(wo["work_order_no"] if wo else "—")),
             tdw(en(pcs) if pcs else "—"), tdw(_w(_kv.g(reg, k), 2)),
             tdw(en(k)),
@@ -932,15 +928,16 @@ def _tpl_tax_invoice(conn, inv, items, cust):
 
     def _th(label, pct):
         return f'<th width="{pct}%" style="width:{pct}%;">{label}</th>'
+    # 5.8.1: «رقم الباركود/الصنف» ولا عمود موديل
     head = cells(
-        _th("م", 4), _th("الموديل", 10), _th("رقم التشغيل", 13),
+        _th("م", 4), _th("رقم الباركود/الصنف", 20),
         _th("العدد", 7), _th("وزن المرتجع" if credit else "الوزن", 10),
         _th("العيار", 7),
         *([_th("سعر الجرام", 11)] if riyal else []),
         _th("سعر الطقم" if piece else "الأجر/جم", 11),
         *([_th("قيمة الذهب", 12)] if riyal else []),
         _th("الصافي", 14))
-    tot = cells(thw(""), thw(""), thw("الإجمالي"), thw(en(n_pcs or "—")),
+    tot = cells(thw(""), thw("الإجمالي"), thw(en(n_pcs or "—")),
                 thw(_gw(t_w) + f"<br/><small>{u}</small>"), thw(""),
                 *([thw("")] if riyal else []), thw(""),
                 *([thw(_w(t_gv, 2))] if riyal else []),
@@ -965,13 +962,6 @@ def _tpl_tax_invoice(conn, inv, items, cust):
     pairs.append(("الرقم الضريبي للبائع",
                   en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")))
     pairs.append(("نوع التسعير", price_txt))
-    # 5.8.0: الحساب الذي خرج منه الوزن (أو عاد إليه) ومصدر الأسطر
-    _src = conn.execute("SELECT code, name FROM accounts WHERE id=?",
-                        (inv.get("source_account_id"),)).fetchone()
-    if _src:
-        pairs.append(("إلى حساب" if credit else "من حساب",
-                      f"{en(_src['code'])} — {_src['name']}"))
-    pairs.append(("الأسطر", "إدخال يدوي" if free else "من أطقم الخزنة"))
     if credit:
         ref = conn.execute("SELECT invoice_no, invoice_date FROM invoices"
                            " WHERE id=?", (inv.get("ref_invoice_id"),)
@@ -981,7 +971,10 @@ def _tpl_tax_invoice(conn, inv, items, cust):
         pairs.append(("سبب الإشعار", inv.get("tax_reason")
                       or inv.get("description") or "—"))
     if pay:
-        pairs.append(("الدفع", _ti.PAY_LABEL.get(pay, pay).split(" — ")[0]))
+        # 5.8.1: الدفع بالصندوق أو البنك الذي قُبض فيه
+        from models.accounts import pay_label
+        pairs.append(("الدفع", pay_label(conn, pay,
+                                         inv.get("pay_account_id"))))
     qr = ""
     if edoc is None and (inv.get("qr_base64") or ""):
         uri = photo_qr.qr_png_data_uri(inv["qr_base64"], box_size=3,
@@ -1038,20 +1031,20 @@ def _tpl_set_purchase(conn, doc_id):
             tdw(en(li["line_no"])), tdw(en(li["wo_no"])),
             tdw(en(li["pieces"] or "—")),
             tdw(_w(_kv.g(li["registered_weight"], k), 2)), tdw(en(k)),
-            tdw(en(li["model_no"] or "—")),
             *([tdw(_w(_line_gram_price(li, d, k), 2))] if riyal else []),
             tdw(rate),
             *([tdw(_w(li["gold_value"], 2))] if riyal else []),
             tdw(_w(li["net"], 2))) + "</tr>"
-    head = cells(thw("م"), thw("رقم التشغيل"), thw("العدد"),
+    # 5.8.1: «رقم الباركود/الصنف» ولا عمود موديل
+    head = cells(thw("م"), thw("رقم الباركود/الصنف"), thw("العدد"),
                  thw("وزن المرتجع" if ret else "الوزن"),
-                 thw("العيار"), thw("الموديل"),
+                 thw("العيار"),
                  *([thw("سعر الجرام")] if riyal else []),
                  thw("سعر الطقم" if piece else "الأجر/جم"),
                  *([thw("قيمة الذهب")] if riyal else []),
                  thw("الصافي"))
     tot = cells(thw(""), thw("الإجمالي"), thw(en(n_pcs or "—")),
-                thw(_gw(t_w) + f"<br/><small>{u}</small>"), thw(""), thw(""),
+                thw(_gw(t_w) + f"<br/><small>{u}</small>"), thw(""),
                 *([thw("")] if riyal else []), thw(""),
                 *([thw(_w(d["gold_value"], 2))] if riyal else []),
                 thw(_w(d["net"], 2)))
@@ -1065,20 +1058,10 @@ def _tpl_set_purchase(conn, doc_id):
              ("الرقم الضريبي للمنشأة",
               en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")),
              ("نوع التسعير", price_txt)]
-    # 5.8.0: الحساب على الفاتورة ومرتجعها (المرتجع يخرج من حساب أصله)
-    _dest = d.get("dest_account_id")
-    if not _dest and ret and d.get("ref_id"):
-        _r = conn.execute("SELECT dest_account_id FROM set_purchases WHERE"
-                          " id=?", (d["ref_id"],)).fetchone()
-        _dest = _r[0] if _r else None
-    if _dest:
-        acc = conn.execute("SELECT code, name FROM accounts WHERE id=?",
-                           (_dest,)).fetchone()
-        if acc:
-            pairs.append(("من حساب" if ret else "إلى حساب",
-                          f"{en(acc['code'])} — {acc['name']}"))
-    pairs.append(("الأسطر", "إدخال يدوي" if d.get("free_lines")
-                  else "أطقم الخزنة"))
+    # 5.8.1: طريقة الدفع (آجل · الصندوق · البنك) — لا «من/إلى حساب»
+    from models.accounts import pay_label
+    pairs.append(("الدفع", pay_label(conn, d.get("pay_mode") or "credit",
+                                     d.get("pay_account_id"))))
     if ret:
         pairs += [("على الفاتورة", en(d.get("ref_no") or "—")),
                   ("سبب المرتجع", d.get("reason") or "—")]
@@ -1468,9 +1451,7 @@ def _tpl_purchase(conn, pid):
             ("نوع فاتورة المورد", dict(_pu.INVOICE_TYPES).get(
                 (p["invoice_type"] if "invoice_type" in keys else "")
                 or "standard")),
-            ("طريقة الدفع", dict(_pu.PAY_MODES).get(
-                (p["pay_mode"] if "pay_mode" in keys else "")
-                or "credit", "")),
+            ("طريقة الدفع", _purchase_pay(conn, p, keys, _pu)),
             ("المعالجة الضريبية", dict(_pu.TAX_TREATMENTS).get(tr, tr)),
             ("يُحمَّل على حساب", acc)]
     trs = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in info)
@@ -1510,8 +1491,23 @@ def _tpl_purchase(conn, pid):
     """
     kind = ("مرتجع مشتريات" if _ret else
             "فاتورة مشتريات (أصل ثابت)" if p["asset_id"] else "فاتورة مشتريات")
+    if not p["asset_id"] and (p["kind"] if "kind" in keys else "") == \
+            "expense" and float(p["vat_amount"] or 0) > 0:
+        # 5.8.1: فاتورة مصروفٍ بضريبة مدخلات — باسمها في السجل الضريبي
+        kind = ("إشعار مورد دائن — مرتجع مصروف" if _ret
+                else "فاتورة مصروفات ضريبية")
     return (_header(kind, p["purchase_no"] or f"#{pid}", p["purchase_date"])
             + body + _footer(""))
+
+
+def _purchase_pay(conn, p, keys, _pu):
+    """طريقة الدفع بالصندوق أو البنك الذي دُفع منه (5.8.1)."""
+    mode = (p["pay_mode"] if "pay_mode" in keys else "") or "credit"
+    acc = p["pay_account_id"] if "pay_account_id" in keys else None
+    if mode == "credit" and not acc:
+        return dict(_pu.PAY_MODES).get("credit", "آجل")
+    from models.accounts import pay_label
+    return pay_label(conn, mode, acc)
 
 
 def _tpl_tax_sale(conn, sid):

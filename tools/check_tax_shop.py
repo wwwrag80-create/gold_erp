@@ -85,7 +85,11 @@ with db() as c:
     check("الخزنة +15 جم بالأطقم", bal(c, "1200")[0] == round(w0[0] + 15, 3), bal(c, "1200"))
     check("المورد دائن 15 جم ذهب و402.50 ريال", ent_bal(c, sup) == (-15.0, -402.5), ent_bal(c, sup))
     check("ضريبة المدخلات 1900 مدينة 52.50", bal(c, "1900")[1] == 52.5, bal(c, "1900"))
-    check("مصنعية المشتريات 5530 مدينة 350", bal(c, "5530")[1] == 350.0, bal(c, "5530"))
+    # 5.8.1: «المشتريات الضريبية» 5540 تحمل الوزن (15) والمصنعية (350)،
+    # ومقابل الوزن 5549 يعيده للمخزون
+    check("المشتريات الضريبية 5540: 15 جم و350 ريال · المقابل 5549 −15",
+          bal(c, "5540") == (15.0, 350.0) and bal(c, "5549") == (-15.0, 0.0),
+          (bal(c, "5540"), bal(c, "5549")))
     wo = c.execute("SELECT * FROM work_orders WHERE work_order_no='T501'").fetchone()
     check("بطاقة الطقم: مقيد 10 · قائم 11 · عدد 3 · في الخزنة",
           (wo["registered_weight"], wo["standing_gold"], wo["pieces"], wo["status"]) == (10, 11, 3, "in_stock"),
@@ -402,9 +406,10 @@ with db() as c:
     h = pm.build_html("invoice", s13["id"])
     hp = pm.build_html("set_purchase", r13["id"])
     hm = pm.build_html("invoice_models", s13["id"])
-    check("الطباعة: لا «المصنعية»، و«سعر الجرام» لكل سطر، و«إلى حساب»",
+    check("الطباعة: لا «المصنعية»، و«سعر الجرام» لكل سطر، ولا «إلى حساب»",
           "المصنعية" not in h and "سعر الجرام" in h and "340.00" in h
-          and "المصنعية" not in hp and "290.00" in hp and "الألماس" in hp)
+          and "المصنعية" not in hp and "290.00" in hp
+          and "إلى حساب" not in hp and "الدفع" in hp)
     check("صور موديلات الفاتورة بقالب المجمّعة: أرقام التشغيل داخل الإطار",
           'class="gwos"' in hm and "T131" in hm and "T132" in hm)
 

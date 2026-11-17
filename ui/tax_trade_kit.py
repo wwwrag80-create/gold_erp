@@ -213,7 +213,7 @@ class TotalsRow(QtWidgets.QWidget):
     def __init__(self, vat_title="الضريبة", vat_sub=""):
         super().__init__()
         # العدد والوزن في لوحةٍ واحدة — ست لوحاتٍ تتّسع لشاشة 1366
-        self.c_n = Card("الأطقم", "")
+        self.c_n = Card("الأصناف", "")
         self.c_w = self.c_n
         self.c_gv = Card("قيمة الذهب", "بالريال")
         # 5.5.2: لا لوحة «مصنعية» — الصافي يغني عنها
@@ -261,7 +261,7 @@ class ModeBox(QtWidgets.QWidget):
         super().__init__(parent)
         self.b_free = kit.RadioButton("إدخال يدوي حر")
         self.b_free.setToolTip(
-            "أي رقم تشغيل — ولو تكرّر أو لم يكن عندك — تكتب وزنه وعياره بيدك،"
+            "أي رقم باركود/صنف — ولو تكرّر أو لم يكن عندك — تكتب وزنه وعياره بيدك،"
             "\nويتحرك الوزن في «مخزون الذهب الضريبي» (ويقبل السالب)")
         self.b_vault = kit.RadioButton(vault_text)
         self.b_vault.setToolTip("الطقم الحقيقي في خزنتك برقمه — كما كان")
@@ -316,3 +316,266 @@ def balance_text(conn, account_id):
         return ""
     t = f"رصيده الآن: {w(b)} {kv.unit()}"
     return t + (" — سالب (بيعٌ قبل شراء: مسموح)" if b < -0.0005 else "")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  5.8.1: تنسيقٌ واحد للشاشتين — خانةٌ بعنوانٍ فوقها · الدفع من الشجرة ·
+#  فترة السجل (شهري · ربع سنوي · سنوي · فترة محددة) · زر «عرض»
+# ══════════════════════════════════════════════════════════════════
+ITEM_NO = "رقم الباركود/الصنف"          # كان «رقم التشغيل»
+
+
+def field(caption, widget):
+    """خانةٌ بعنوانها الصغير فوقها — كخانات سطر الإدخال تماماً، فيتّسق
+    الرأس والسطر ويقصر ارتفاع الشاشة (لا عمود عناوين بجانب الخانات)."""
+    w = QtWidgets.QWidget()
+    v = QtWidgets.QVBoxLayout(w)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(2)
+    lbl = QtWidgets.QLabel(caption)
+    lbl.setObjectName("cardSub")
+    v.addWidget(lbl)
+    if isinstance(widget, QtWidgets.QLayout):
+        v.addLayout(widget)
+    else:
+        v.addWidget(widget)
+    v.addStretch(1)                  # الخانات تصطفّ من أعلاها في الصف
+    w.caption = lbl
+    return w
+
+
+def hbox(*items, stretch=None):
+    """صفٌّ أفقي بلا هوامش: عناصرُ وأوزانُ تمدّدها (افتراضاً الأول يتمدّد)."""
+    lay = QtWidgets.QHBoxLayout()
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(6)
+    for i, it in enumerate(items):
+        st = (stretch[i] if stretch else (1 if i == 0 else 0))
+        if isinstance(it, QtWidgets.QLayout):
+            lay.addLayout(it, st)
+        else:
+            lay.addWidget(it, st)
+    return lay
+
+
+def section(title, dense=True):
+    """حاويةٌ بعنوانٍ ذهبي — مدمجة الحشو (الإطار واللون كما هما)."""
+    box = QtWidgets.QGroupBox(title)
+    if dense:
+        box.setProperty("dense", True)
+    return box
+
+
+CREDIT = "credit"
+
+
+class PayCombo(QtWidgets.QWidget):
+    """طريقة الدفع: «آجل» أو صندوقٌ أو بنكٌ يُبحث عنه باسمه — من شجرة
+    الحسابات (النقدية وشبه النقدية)، فالبنك الجديد يظهر فور فتحه."""
+    changed = QtCore.pyqtSignal()
+
+    def __init__(self, credit_text="آجل — على الحساب", parent=None):
+        super().__init__(parent)
+        from ui.widgets.common import search_combo
+        self.credit_text = credit_text
+        self._allow_credit = True
+        self.cb = search_combo("آجل · أو ابحث عن صندوقٍ أو بنك…")
+        self.cb.setToolTip("آجل: يبقى على الحساب.\nصندوقٌ أو بنك: يُسدَّد "
+                           "الإجمالي بسندٍ تلقائي منه أو إليه — وكل بنكٍ "
+                           "يُفتح في شجرة الحسابات يظهر هنا.")
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.cb)
+        self.cb.currentIndexChanged.connect(lambda *_: self.changed.emit())
+
+    def reload(self, conn, keep=None):
+        from models.accounts import pay_accounts, pay_kind
+        cur = keep if keep is not None else self.cb.currentData()
+        self.cb.blockSignals(True)
+        self.cb.clear()
+        if self._allow_credit:
+            self.cb.addItem(self.credit_text, CREDIT)
+        for r in pay_accounts(conn):
+            word = "نقداً" if pay_kind(r["code"]) == "cash" else "بنكي"
+            self.cb.addItem(f"{r['name']} — {r['code']} ({word})",
+                            int(r["id"]))
+        i = self.cb.findData(cur) if cur is not None else -1
+        self.cb.setCurrentIndex(i if i >= 0 else 0)
+        self.cb.blockSignals(False)
+
+    def set_allow_credit(self, ok):
+        """العميل النقدي يدفع في الحال — لا «آجل» له."""
+        ok = bool(ok)
+        if ok == self._allow_credit:
+            return
+        self._allow_credit = ok
+        self.cb.blockSignals(True)
+        if ok:
+            self.cb.insertItem(0, self.credit_text, CREDIT)
+        else:
+            i = self.cb.findData(CREDIT)
+            if i >= 0:
+                self.cb.removeItem(i)
+            if self.cb.currentIndex() < 0 and self.cb.count():
+                self.cb.setCurrentIndex(0)
+        self.cb.blockSignals(False)
+        self.changed.emit()
+
+    def is_credit(self):
+        return self.cb.currentData() in (None, CREDIT)
+
+    def pay(self):
+        """(الطريقة، حساب الدفع) كما يُرسل للدفتر — والطريقة يحدّدها
+        الدفتر من كود الحساب (صندوق = نقداً · غيره = بنكي)."""
+        d = self.cb.currentData()
+        if d in (None, CREDIT):
+            return CREDIT, None
+        return "cash", int(d)
+
+    def text(self):
+        return self.cb.currentText() or self.credit_text
+
+    def setFocus(self):
+        self.cb.setFocus()
+
+
+MONTHS = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو",
+          "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر")
+QUARTERS = ("الربع الأول", "الربع الثاني", "الربع الثالث", "الربع الرابع")
+
+
+class PeriodBar(QtWidgets.QWidget):
+    """فترة السجل بزرٍّ واحد: شهري · ربع سنوي · سنوي · فترة محددة — والسهمان
+    ينقلان للفترة السابقة أو التالية. `changed` عند كل تغيير."""
+    changed = QtCore.pyqtSignal()
+    MODES = (("month", "شهري"), ("quarter", "ربع سنوي"), ("year", "سنوي"),
+             ("custom", "من تاريخ إلى تاريخ"))
+
+    def __init__(self, pref_key="", parent=None):
+        super().__init__(parent)
+        from ui.widgets.common import date_edit, load_pref
+        self.pref_key = pref_key
+        self.anchor = QtCore.QDate.currentDate()
+        self.btns = {}
+        grp = QtWidgets.QButtonGroup(self)
+        grp.setExclusive(True)
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        for key, label in self.MODES:
+            b = kit.PushButton(label)
+            b.setObjectName("dashPanel")
+            b.setCheckable(True)
+            b.setSizePolicy(QtWidgets.QSizePolicy.Maximum,
+                            QtWidgets.QSizePolicy.Fixed)
+            b.clicked.connect(lambda _c=False, k=key: self.set_mode(k))
+            grp.addButton(b)
+            self.btns[key] = b
+            lay.addWidget(b)
+        lay.addSpacing(10)
+        self.b_next = QtWidgets.QToolButton()
+        self.b_next.setText("‹")
+        self.b_next.setToolTip("الفترة التالية")
+        self.b_prev = QtWidgets.QToolButton()
+        self.b_prev.setText("›")
+        self.b_prev.setToolTip("الفترة السابقة")
+        self.b_prev.clicked.connect(lambda: self._shift(-1))
+        self.b_next.clicked.connect(lambda: self._shift(1))
+        self.lbl = QtWidgets.QLabel("")
+        self.lbl.setObjectName("chipTitle")
+        self.lbl.setMinimumWidth(150)
+        self.lbl.setAlignment(QtCore.Qt.AlignCenter)
+        self.d1 = date_edit()
+        self.d2 = date_edit()
+        self.d1.setDate(QtCore.QDate(self.anchor.year(), self.anchor.month(),
+                                     1))
+        self.l_from = QtWidgets.QLabel("من:")
+        self.l_to = QtWidgets.QLabel("إلى:")
+        for wd in (self.b_prev, self.lbl, self.b_next, self.l_from, self.d1,
+                   self.l_to, self.d2):
+            lay.addWidget(wd)
+        self.d1.dateChanged.connect(lambda *_: self._custom_changed())
+        self.d2.dateChanged.connect(lambda *_: self._custom_changed())
+        mode = str(load_pref(pref_key, "month") or "month") if pref_key \
+            else "month"
+        self.mode = mode if mode in dict(self.MODES) else "month"
+        self.set_mode(self.mode, emit=False)
+
+    def set_mode(self, mode, emit=True):
+        from ui.widgets.common import save_pref
+        self.mode = mode
+        self.btns[mode].setChecked(True)
+        custom = mode == "custom"
+        for wd in (self.l_from, self.d1, self.l_to, self.d2):
+            wd.setVisible(custom)
+        for wd in (self.b_prev, self.lbl, self.b_next):
+            wd.setVisible(not custom)
+        if self.pref_key:
+            try:
+                save_pref(self.pref_key, mode)
+            except Exception:                        # noqa: BLE001
+                pass
+        self._refresh()
+        if emit:
+            self.changed.emit()
+
+    def _shift(self, step):
+        n = {"month": 1, "quarter": 3, "year": 12}.get(self.mode, 0)
+        if n:
+            self.anchor = self.anchor.addMonths(step * n)
+            self._refresh()
+            self.changed.emit()
+
+    def _custom_changed(self):
+        if self.mode == "custom":
+            self.changed.emit()
+
+    def _refresh(self):
+        y, mo = self.anchor.year(), self.anchor.month()
+        if self.mode == "month":
+            self.lbl.setText(f"{MONTHS[mo - 1]} {y}")
+        elif self.mode == "quarter":
+            self.lbl.setText(f"{QUARTERS[(mo - 1) // 3]} {y}")
+        elif self.mode == "year":
+            self.lbl.setText(f"سنة {y}")
+
+    def range(self):
+        """(من، إلى) نصّاً بصيغة yyyy-MM-dd."""
+        fmt = "yyyy-MM-dd"
+        y, mo = self.anchor.year(), self.anchor.month()
+        if self.mode == "custom":
+            a, b = self.d1.date(), self.d2.date()
+            if a > b:
+                a, b = b, a
+            return a.toString(fmt), b.toString(fmt)
+        if self.mode == "month":
+            a = QtCore.QDate(y, mo, 1)
+            b = a.addMonths(1).addDays(-1)
+        elif self.mode == "quarter":
+            a = QtCore.QDate(y, (mo - 1) // 3 * 3 + 1, 1)
+            b = a.addMonths(3).addDays(-1)
+        else:
+            a = QtCore.QDate(y, 1, 1)
+            b = QtCore.QDate(y, 12, 31)
+        return a.toString(fmt), b.toString(fmt)
+
+    def title(self):
+        a, b = self.range()
+        return (self.lbl.text() if self.mode != "custom"
+                else f"من {a} إلى {b}")
+
+
+def view_buttons(table, col, count, on_view, text="عرض"):
+    """زرّ «عرض» في عمودٍ بجانب كل صفٍّ من السجل."""
+    for r in range(count):
+        b = QtWidgets.QToolButton()
+        b.setObjectName("rowAct")
+        b.setText(text)
+        b.setToolTip("معاينة المستند وطباعته")
+        b.setCursor(QtCore.Qt.PointingHandCursor)
+        b.clicked.connect(lambda _c=False, i=r: on_view(i))
+        box = QtWidgets.QWidget()
+        bl = QtWidgets.QHBoxLayout(box)
+        bl.setContentsMargins(4, 2, 4, 2)
+        bl.addWidget(b)
+        table.setCellWidget(r, col, box)

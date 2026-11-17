@@ -41,7 +41,9 @@ VAT_IN = "1900"
 DEFAULT_ACCOUNT = {"expense": "5500", "asset": "1710"}
 # مصروفاتٌ لا تُشترى من مورد: الإهلاك قيدٌ آلي، والرواتب من شاشتها،
 # والخصومات والفروقات تسويات — فلا تظهر في قائمة حساب المصروف.
-_NOT_PURCHASABLE = ("5860", "5700", "5710", "5200", "5250", "5300", "5600")
+_NOT_PURCHASABLE = ("5860", "5700", "5710", "5200", "5250", "5300", "5600",
+                    # 5.8.1: حسابات شراء الذهب (من شاشة المشتريات الضريبية)
+                    "5530", "5540", "5545")
 
 
 def split_amount(value, price_mode="net", treatment="standard", rate=None,
@@ -93,6 +95,11 @@ def ensure_schema(conn):
         " asset_id INTEGER REFERENCES fixed_assets(id))")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_lines"
                  " ON purchase_lines(purchase_id)")
+    # 5.8.1: الصندوق أو البنك الذي دُفعت منه (من الشجرة)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(purchases)")}
+    if have and "pay_account_id" not in have:
+        conn.execute("ALTER TABLE purchases ADD COLUMN pay_account_id"
+                     " INTEGER")
 
 
 def lines_of(conn, purchase_id):
@@ -158,7 +165,7 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
                     tax_treatment="standard", account_code=None,
                     price_mode="net", life_months=0, discount=0.0,
                     pay_mode="credit", invoice_type="standard", lines=None,
-                    is_return=False):
+                    is_return=False, pay_account_id=None):
     """فاتورة مورد آجلة — `amount` الصافي الخاضع (بعد الخصم وقبل الضريبة)
     و`vat_amount` ضريبته، و`discount` خصم المورد قبل الضريبة (للبيان).
 
@@ -194,6 +201,11 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
         price_mode = "net"
     if pay_mode not in dict(PAY_MODES):
         raise ValueError("طريقة الدفع غير معروفة")
+    # 5.8.1: صندوقٌ أو بنكٌ بعينه من الشجرة — والطريقة من كوده
+    pay_acc = None
+    if pay_account_id:
+        from models.accounts import resolve_pay
+        pay_mode, pay_acc = resolve_pay(conn, pay_mode, pay_account_id)
     if invoice_type not in dict(INVOICE_TYPES):
         invoice_type = "standard"
     sup = get_entity(conn, supplier_id)
@@ -311,7 +323,8 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
     else:
         # نقداً/بنكاً: الدفع من الصندوق أو البنك مباشرةً — والمورد لا
         # يبقى له رصيد
-        lines.append({"account_id": acc_id(conn, PAY_ACCOUNTS[pay_mode]),
+        pay_acc = pay_acc or acc_id(conn, PAY_ACCOUNTS[pay_mode])
+        lines.append({"account_id": pay_acc,
                       "cash_credit": total,
                       "line_desc": f"مشتريات {'نقداً' if pay_mode == 'cash' else 'بتحويل بنكي'}"
                                    f" — {sup['name']}" + ref})
@@ -344,6 +357,9 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
          tax_treatment, acc["id"], price_mode, discount, pay_mode,
          invoice_type, int(is_return)))
     p_id = cur.lastrowid
+    if pay_acc:
+        conn.execute("UPDATE purchases SET pay_account_id=? WHERE id=?",
+                     (pay_acc, p_id))
     for r in rows:
         conn.execute(
             "INSERT INTO purchase_lines(purchase_id,line_no,account_id,"

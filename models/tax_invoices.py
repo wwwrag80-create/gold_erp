@@ -79,7 +79,9 @@ def ensure_schema(conn):
                       ("buyer_name", "TEXT NOT NULL DEFAULT ''"),
                       ("buyer_phone", "TEXT NOT NULL DEFAULT ''"),
                       ("pay_mode", "TEXT NOT NULL DEFAULT ''"),
-                      ("pay_voucher_id", "INTEGER")))
+                      ("pay_voucher_id", "INTEGER"),
+                      # 5.8.1: الصندوق أو البنك الذي قُبض فيه (من الشجرة)
+                      ("pay_account_id", "INTEGER")))
     _add("invoice_items", (("gold_value", "REAL NOT NULL DEFAULT 0"),
                            ("pieces", "INTEGER NOT NULL DEFAULT 0"),
                            ("piece_price", "REAL NOT NULL DEFAULT 0"),
@@ -244,21 +246,45 @@ def check_buyer(conn, customer_id, subtype):
                 " التعامل»، أو اختر «فاتورة مبسطة» إن كان فرداً.")
 
 
-def _settle(conn, kind, entity_id, amount, mode, doc_date, username, note):
-    """سند قبضٍ (بيع) أو صرفٍ (إشعار دائن) تلقائي للنقد والشبكة."""
+def _settle(conn, kind, entity_id, amount, mode, doc_date, username, note,
+            account_id=None):
+    """سند قبضٍ (بيع) أو صرفٍ (إشعار دائن) تلقائي للنقد والشبكة — في
+    الصندوق أو البنك المختار (5.8.1)، وبلا اختيارٍ الصندوق أو البنك."""
     from models import vouchers
     if mode not in PAY_BOX or amount <= 0:
         return None
+    code = PAY_BOX[mode]
+    if account_id:
+        r = conn.execute("SELECT code FROM accounts WHERE id=?",
+                         (int(account_id),)).fetchone()
+        code = r["code"] if r else code
     return vouchers.create_voucher(
         conn, kind, doc_date, username, entity_id=entity_id,
-        cash_amount=round(amount, 2), cash_account_code=PAY_BOX[mode],
+        cash_amount=round(amount, 2), cash_account_code=code,
         notes=note, expense_account_id=0)
+
+
+def settle_docs(conn, kind, entity_id, docs, mode, account_id, doc_date,
+                username, note):
+    """يسدّد مستندات الفاتورة (أو يردّ قيمة الإشعار) بسندٍ واحد ويربطها به."""
+    if mode not in PAY_BOX:
+        return None
+    total = round(sum(float(d["grand_total"]) for d in docs), 2)
+    v = _settle(conn, kind, entity_id, total, mode, doc_date, username, note,
+                account_id)
+    if v:
+        for d in docs:
+            conn.execute("UPDATE invoices SET pay_voucher_id=?,"
+                         " pay_account_id=? WHERE id=?",
+                         (v["id"], account_id, d["id"]))
+        v = dict(v, paid=total)
+    return v
 
 
 def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
                    gold_price=0.0, price_karat=0, description="",
                    subtype="standard", buyer_name="", buyer_phone="",
-                   pay_mode="credit", discount=0.0):
+                   pay_mode="credit", discount=0.0, pay_account_id=None):
     """فاتورة ضريبية بالأطقم: تخرج من الخزنة كفاتورة البيع تماماً.
 
     `cart` = [{work_order_id, weight (18 — فارغ = الباقي كله),
@@ -269,11 +295,14 @@ def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
     بسند قبضٍ تلقائي بإجمالي الفاتورة.
     """
     from models import invoices as inv
+    from models.accounts import resolve_pay
     from models.entities import get_entity
     ensure_schema(conn)
     pay_mode = pay_mode or "credit"
     if pay_mode not in PAY_LABEL:
         raise ValueError("طريقة الدفع غير معروفة")
+    # 5.8.1: الصندوق أو البنك المختار يحدّد الطريقة (نقداً / بنكي)
+    pay_mode, pay_acc = resolve_pay(conn, pay_mode, pay_account_id)
     if not customer_id:
         if subtype != "simplified":
             raise ValueError("اختر المحل أو الشركة (المشتري)")
@@ -302,17 +331,12 @@ def create_invoice(conn, customer_id, cart, doc_date, username, pricing,
                           apply_vat=True, description=description,
                           tax=tax)
     docs = [res] + ([res["split"]] if res.get("split") else [])
-    if pay_mode in PAY_BOX:
-        total = round(sum(float(d["grand_total"]) for d in docs), 2)
-        v = _settle(conn, "receipt", customer_id, total, pay_mode, doc_date,
-                    username, "سداد " + " · ".join(
+    v = settle_docs(conn, "receipt", customer_id, docs, pay_mode, pay_acc,
+                    doc_date, username, "سداد " + " · ".join(
                         f"الفاتورة {d['invoice_no']}" for d in docs))
-        if v:
-            for d in docs:
-                conn.execute("UPDATE invoices SET pay_voucher_id=? WHERE id=?",
-                             (v["id"], d["id"]))
-            res["voucher_no"] = v["voucher_no"]
-            res["paid"] = total
+    if v:
+        res["voucher_no"] = v["voucher_no"]
+        res["paid"] = v["paid"]
     return res
 
 
@@ -363,7 +387,6 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
     يعود كل طقمٍ إلى خزنته كمرتجع البيع تماماً، ويُردّ للعميل بسعر
     الفاتورة نفسها وطريقتها — والمرتجع لا يتجاوز الباقي من كل سطر.
     """
-    from models import invoices as inv
     ensure_schema(conn)
     o = conn.execute("SELECT * FROM invoices WHERE id=? AND is_deleted=0"
                      " AND kind='sale'", (int(original_id),)).fetchone()
@@ -377,8 +400,30 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
         raise ValueError("تاريخ الإشعار يسبق تاريخ الفاتورة الأصلية")
     from models import tax_free as _tf
     if _tf.is_free(conn, original_id):
-        return _tf.create_credit_note(conn, o, doc_date, returns, reason,
-                                      username)
+        res = _tf.create_credit_note(conn, o, doc_date, returns, reason,
+                                     username)
+    else:
+        res = _vault_credit_note(conn, o, doc_date, returns, reason, username)
+    od = dict(o)
+    mode = od.get("pay_mode") or ""
+    # دُفعت الفاتورة نقداً أو بالشبكة: يُردّ المرتجع بالطريقة نفسها ومن
+    # الصندوق أو البنك نفسه (5.8.1 — والإدخال اليدوي كان لا يُردّ)
+    docs = [res] + ([res["split"]] if res.get("split") else [])
+    v = settle_docs(conn, "payment", o["customer_id"], docs, mode,
+                    od.get("pay_account_id"), doc_date, username,
+                    f"ردّ قيمة الإشعار {res['invoice_no']} على الفاتورة "
+                    f"{o['invoice_no']}")
+    if v:
+        res["voucher_no"] = v["voucher_no"]
+        res["paid"] = v["paid"]
+    return res
+
+
+def _vault_credit_note(conn, o, doc_date, returns, reason, username):
+    """الإشعار الدائن لفاتورة أطقم الخزنة — بلا سداد (يسدّده المُستدعي)."""
+    from models import invoices as inv
+    from models import tax_free as _tf
+    original_id = o["id"]
     left = {r["item_id"]: r for r in returnable(conn, original_id)}
     cart = []
     for x in returns or []:
@@ -428,24 +473,9 @@ def create_credit_note(conn, original_id, doc_date, returns, reason,
            "pay_mode": od.get("pay_mode") or "",
            "buyer_name": od.get("buyer_name") or "",
            "buyer_phone": od.get("buyer_phone") or ""}
-    res = inv.create_sale_return(conn, o["customer_id"], cart, doc_date,
-                                 username, apply_vat=True,
-                                 description=str(reason).strip(), tax=tax)
-    mode = od.get("pay_mode") or ""
-    if mode in PAY_BOX:
-        # دُفعت الفاتورة نقداً أو بالشبكة: يُردّ المرتجع بالطريقة نفسها
-        docs = [res] + ([res["split"]] if res.get("split") else [])
-        total = round(sum(float(d["grand_total"]) for d in docs), 2)
-        v = _settle(conn, "payment", o["customer_id"], total, mode, doc_date,
-                    username, f"ردّ قيمة الإشعار {res['invoice_no']} على "
-                    f"الفاتورة {o['invoice_no']}")
-        if v:
-            for d in docs:
-                conn.execute("UPDATE invoices SET pay_voucher_id=? WHERE id=?",
-                             (v["id"], d["id"]))
-            res["voucher_no"] = v["voucher_no"]
-            res["paid"] = total
-    return res
+    return inv.create_sale_return(conn, o["customer_id"], cart, doc_date,
+                                  username, apply_vat=True,
+                                  description=str(reason).strip(), tax=tax)
 
 
 def search(conn, q="", date_from=None, date_to=None, kind=None, limit=500,

@@ -106,9 +106,14 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
 
         # تسديد النقد
         self.c_amount = mspin()
-        self.c_target = kit.ComboBox()
-        self.c_target.addItem("الصندوق", "1400")
-        self.c_target.addItem("البنك", "1500")
+        # 5.8.1: الصندوق أو البنك يُبحث عنه باسمه — كل صندوقٍ أو بنكٍ يُفتح
+        # في شجرة الحسابات (النقدية وشبه النقدية) يظهر هنا
+        self.c_target = search_combo("ابحث عن صندوق أو بنك…")
+        self.c_target.setToolTip("الصندوق أو البنك الذي يُقبض فيه النقد أو "
+                                 "يُصرف منه")
+        self.c_target.addItem("الصندوق الرئيسي — 1400", "1400")
+        self.c_target.addItem("البنك — 1500", "1500")
+        self.c_target.setCurrentIndex(0)
         self.c_note = kit.LineEdit()
         self.c_note.setPlaceholderText("بيان السطر (اختياري)")
         btn_add_cash = kit.PushButton("➕ إضافة سطر نقد")
@@ -116,7 +121,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         cash_box = QtWidgets.QGroupBox("💵 النقد")
         cg = QtWidgets.QGridLayout(cash_box)
         cg.addWidget(_sub("المبلغ (ريال)"), 0, 0)
-        cg.addWidget(_sub("من / إلى"), 0, 1)
+        cg.addWidget(_sub("الصندوق / البنك"), 0, 1)
         cg.addWidget(_sub("البيان"), 0, 2)
         cg.addWidget(self.c_amount, 1, 0)
         cg.addWidget(self.c_target, 1, 1)
@@ -563,7 +568,7 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
                     entity_id=val if mode == "entity" else None,
                     account_id=val if mode == "account" else None,
                     rows=rows or None,
-                    cash_account_code=self.c_target.currentData(),
+                    cash_account_code=self._cash_code(tc),
                     net_diff=nd, disc_cash=dc, disc_gold=dg,
                     notes=self.notes.text(),
                     # مصروفٌ على الحساب المختار، أو 0 = سدادٌ/سلفة صراحةً
@@ -772,8 +777,27 @@ class VouchersScreen(EditModeMixin, QtWidgets.QWidget):
         except Exception:
             pass
 
+    def _cash_code(self, cash_total):
+        """كود الصندوق أو البنك المختار — ولا نقد في السند بلا اختيار."""
+        code = self.c_target.currentData()
+        if not code and cash_total:
+            raise ValueError("اختر الصندوق أو البنك في لوحة النقد")
+        return code or "1400"
+
+    def _reload_cash_targets(self, conn):
+        from models.accounts import pay_accounts
+        keep = self.c_target.currentData() or "1400"
+        self.c_target.blockSignals(True)
+        self.c_target.clear()
+        for r in pay_accounts(conn):
+            self.c_target.addItem(f"{r['name']} — {r['code']}", r["code"])
+        i = self.c_target.findData(keep)
+        self.c_target.setCurrentIndex(i if i >= 0 else 0)
+        self.c_target.blockSignals(False)
+
     def refresh(self):
         with db() as conn:
+            self._reload_cash_targets(conn)
             reload_combo(self.entity_combo, entities.list_entities(conn),
                         lambda r: (("🏭 " if r["is_internal"] else
                                    f"[{entities.TYPE_LABELS[r['entity_type']]}] ")

@@ -38,8 +38,13 @@ from services.audit import log_action
 PREFIX = {"purchase": "PS", "purchase_return": "PSR"}
 KIND_LABEL = {"purchase": "فاتورة مشتريات ضريبية",
               "purchase_return": "مرتجع مشتريات ضريبي"}
-COST = "5530"          # تكلفة مصنعية الأطقم المشتراة
+COST = "5530"          # تكلفة مصنعية الأطقم المشتراة (حتى 5.8.0)
 VAT_IN = "1900"        # ضريبة القيمة المضافة — المدخلات
+# 5.8.1: حسابان يُتابَع كشفهما — المشتريات الضريبية ومردوداتها (الوزن
+# ذهباً والمصنعية ريالاً)، والمقابل الوزني يعيد الوزن للمخزون
+PURCHASES = "5540"
+PURCHASE_RETURNS = "5545"
+WEIGHT_OFFSET = "5549"
 
 
 def ensure_schema(conn):
@@ -85,7 +90,12 @@ def ensure_schema(conn):
     # 5.5.2: حساب الوجهة (الذهب المشغول · الماس · أي مخزن) وسعر جرام السطر
     for table, col, ddl in (("set_purchases", "dest_account_id", "INTEGER"),
                             ("set_purchase_lines", "gold_price",
-                             "REAL NOT NULL DEFAULT 0")):
+                             "REAL NOT NULL DEFAULT 0"),
+                            # 5.8.1: الدفع (آجل · صندوق · بنك) وسنده
+                            ("set_purchases", "pay_mode",
+                             "TEXT NOT NULL DEFAULT 'credit'"),
+                            ("set_purchases", "pay_account_id", "INTEGER"),
+                            ("set_purchases", "pay_voucher_id", "INTEGER")):
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if have and col not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
@@ -194,9 +204,23 @@ def _post(conn, kind, sup, doc_no, doc_date, tx, set_by_acc, bulk_w, wages,
         party = {c_out: total}
     else:
         party = {g_out: total_w, c_out: total}
+    # 5.8.1: «المشتريات الضريبية» (ومرتجعها «مردودات المشتريات الضريبية»)
+    # تحمل وزن الفاتورة ذهباً ومصنعيتها ريالاً — فيُتابَع كشفها فاتورةً
+    # فاتورة. والوزن يعود للمخزون بالمقابل 5549 فلا يُحسب فاقداً ولا ربحاً
+    # سطرٌ واحد بالوزن والمصنعية معاً، وبيانه بيانُ سطر المورد نفسه —
+    # فيظهر في كشف الحساب صفاً واحداً لكل فاتورة مقابل اسم المورد
+    pl = {"account_id": acc_id(conn, PURCHASES if buy else PURCHASE_RETURNS),
+          "line_desc": f"{KIND_LABEL[kind]} {doc_no}"}
+    if total_w > 0:
+        pl[g_in] = total_w
+        lines.append({"account_id": acc_id(conn, WEIGHT_OFFSET),
+                      g_out: total_w,
+                      "line_desc": ("الوزن إلى المخزون" if buy
+                                    else "الوزن من المخزون للمورد")})
     if wages:
-        lines.append({"account_id": acc_id(conn, COST), c_in: wages,
-                      "line_desc": "مصنعية الأطقم المشتراة"})
+        pl[c_in] = wages
+    if total_w > 0 or wages:
+        lines.append(pl)
     if vat:
         lines.append({"account_id": acc_id(conn, VAT_IN), c_in: vat,
                       "line_desc": f"ضريبة مدخلات {doc_no}"})
@@ -250,7 +274,7 @@ def check_dest(conn, account_id=None):
 def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
                     username, pricing="wage", gold_price=0.0, price_karat=0,
                     notes="", dest_account_id=None, mode="vault",
-                    discount=0.0):
+                    discount=0.0, pay_mode="credit", pay_account_id=None):
     """فاتورة مشتريات ضريبية بالأطقم — تُدخل الأطقم الخزنة.
 
     5.8.0 — `mode`: ``vault`` (كما كان: لكل طقمٍ بطاقته في الخزنة برقمٍ
@@ -258,9 +282,13 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
     «مخزون الذهب الضريبي» أو الحساب المختار — بلا بطاقات). و`discount`
     خصمٌ نقدي على الفاتورة يُطرح من الوعاء قبل الضريبة.
 
+    5.8.1 — `pay_mode`/`pay_account_id`: آجل (على حساب المورد) أو مدفوعة
+    من صندوقٍ أو بنكٍ يُختار من الشجرة — فيُصرف إجماليها بسند صرفٍ تلقائي.
+
     `lines` = [{wo_no, model_no, pieces, registered (18), standing (18),
                 karat, wage (18) | piece_price, notes}]
     """
+    from models.accounts import resolve_pay
     from models.inventory import (adjust_bulk_wo, classify_item,
                                   generate_work_order_barcode)
     from models.stock_home import italian_account
@@ -270,6 +298,7 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
     _tf.ensure_schema(conn)
     free = mode == "free"
     sup = _supplier(conn, supplier_id)
+    pay_mode, pay_acc = resolve_pay(conn, pay_mode, pay_account_id)
     # الحساب الذي تدخله الأطقم (وبلا اختيارٍ الذهب المشغول) — وتخرج منه
     # عند بيعها، فهو بيتها (`stock_home`). والإدخال الحر: مخزون الذهب
     # الضريبي أو حسابٌ مثله (لا الذهب المشغول ولا الإيطالي)
@@ -312,8 +341,9 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
          tx["price_karat"], float(config.VAT_RATE), round(set_w + bulk_w, 3),
          wages, gv, net, vat, total, (notes or "").strip(), username, dest))
     pid = cur.lastrowid
-    conn.execute("UPDATE set_purchases SET free_lines=?, discount=? WHERE"
-                 " id=?", (int(free), disc, pid))
+    conn.execute("UPDATE set_purchases SET free_lines=?, discount=?,"
+                 " pay_mode=?, pay_account_id=? WHERE id=?",
+                 (int(free), disc, pay_mode, pay_acc, pid))
     doc_no = _numbering.next_no(conn, PREFIX["purchase"])
     entry_id = _post(conn, "purchase", sup, doc_no, doc_date, tx,
                      {dest: set_w}, bulk_w, wages, gv, vat, total, username,
@@ -357,6 +387,9 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
              p["std"], p["karat"], p["wage"], p["piece_price"], p["wages"],
              p["gv"], p["net"], p["gold_price"]))
     _ = italian_account
+    v = _pay(conn, "payment", sup, pid, total, pay_mode, pay_acc, doc_date,
+             username, f"سداد فاتورة المشتريات {doc_no} (فاتورة المورد "
+             f"{inv_no})")
     log_action(conn, username, "create", "set_purchases", pid,
                f"{doc_no} total={total}")
     return {"id": pid, "doc_no": doc_no, "entry_id": entry_id,
@@ -364,7 +397,27 @@ def create_purchase(conn, supplier_id, doc_date, supplier_inv_no, lines,
             "total": total, "wages": wages, "gold_value": gv,
             "discount": disc, "free": free, "dest_account_id": dest,
             "weight": round(set_w + bulk_w, 3), "n": len(prep),
+            "pay_mode": pay_mode, "pay_account_id": pay_acc,
+            "voucher_no": v["voucher_no"] if v else "",
             "vat_number_set": _vat_ok(conn)}
+
+
+def _pay(conn, kind, sup, doc_id, amount, pay_mode, pay_acc, doc_date,
+         username, note):
+    """سند صرفٍ تلقائي (فاتورة مدفوعة) أو قبضٍ (مرتجعُ مدفوعةٍ يُستردّ) من
+    الصندوق أو البنك المختار — ويُربط بالمستند."""
+    from models import vouchers
+    if pay_mode == "credit" or not pay_acc or amount <= 0:
+        return None
+    code = conn.execute("SELECT code FROM accounts WHERE id=?",
+                        (int(pay_acc),)).fetchone()["code"]
+    v = vouchers.create_voucher(
+        conn, kind, doc_date, username, entity_id=sup["id"],
+        cash_amount=round(amount, 2), cash_account_code=code, notes=note,
+        expense_account_id=0)
+    conn.execute("UPDATE set_purchases SET pay_voucher_id=? WHERE id=?",
+                 (v["id"], doc_id))
+    return v
 
 
 # ══════════════════════════ المرتجع ══════════════════════════
@@ -500,9 +553,13 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
          round(set_w + bulk_w, 3), wages, gv, net, vat, total, o["id"],
          str(reason).strip(), username))
     rid = cur.lastrowid
+    od = dict(o)
+    r_mode = od.get("pay_mode") or "credit"
+    r_acc = od.get("pay_account_id")
     conn.execute("UPDATE set_purchases SET free_lines=?, discount=?,"
-                 " dest_account_id=? WHERE id=?",
-                 (int(free), disc, o["dest_account_id"], rid))
+                 " dest_account_id=?, pay_mode=?, pay_account_id=?"
+                 " WHERE id=?",
+                 (int(free), disc, o["dest_account_id"], r_mode, r_acc, rid))
     doc_no = _numbering.next_no(conn, PREFIX["purchase_return"])
     entry_id = _post(conn, "purchase_return", sup, doc_no, doc_date, tx,
                      by_acc, bulk_w, wages, gv, vat, total, username,
@@ -532,11 +589,15 @@ def create_return(conn, purchase_id, doc_date, returns, reason, username):
                          " WHERE id=?", (doc_no, p["work_order_id"]))
             log_action(conn, username, "update", "work_orders",
                        p["work_order_id"], f"أُرجع للمورد بالمرتجع {doc_no}")
+    # 5.8.1: فاتورةٌ دُفعت من صندوقٍ أو بنك ⇒ يُستردّ المرتجع إليه بسند قبض
+    v = _pay(conn, "receipt", sup, rid, total, r_mode, r_acc, doc_date,
+             username, f"استرداد مرتجع المشتريات {doc_no} على {o['doc_no']}")
     log_action(conn, username, "create", "set_purchases", rid,
                f"{doc_no} ← {o['doc_no']} total={total}")
     return {"id": rid, "doc_no": doc_no, "entry_id": entry_id,
             "supplier_name": sup["name"], "net": net, "vat": vat,
             "total": total, "discount": disc, "free": free,
+            "voucher_no": v["voucher_no"] if v else "",
             "weight": round(set_w + bulk_w, 3), "n": len(prep)}
 
 
@@ -611,3 +672,80 @@ def register_rows(conn, date_from, date_to):
 
 def _today():
     return _dt.date.today().isoformat()
+
+
+# ══════════════════════════ 5.8.1: السجل الموحّد ══════════════════════════
+REG_KINDS = (("", "كل المستندات"), ("purchase", "مشتريات ذهب ضريبية"),
+             ("purchase_return", "مرتجع مشتريات ضريبي"),
+             ("expense", "مصروفات ضريبية"),
+             ("expense_return", "مرتجع مصروفات (إشعار مورد)"))
+REG_LABEL = dict(REG_KINDS)
+
+
+def tax_register(conn, date_from, date_to, q="", kind=None):
+    """سجل المشتريات الضريبية للفترة: فواتير الذهب ومرتجعاتها **و**فواتير
+    المصروفات الضريبية ومرتجعاتها — صفاً موحّداً لكلٍّ:
+
+    {src, id, no, date, kind, kind_label, party, sup_inv, weight (18 أو
+    None), wages (الأجور — وللمصروف مبلغه قبل الخصم), gold_value, discount,
+    base (الخاضع), vat, claim (ضريبةٌ تُخصم), total, ret, ref_no}"""
+    from models import purchases as _pu
+    ensure_schema(conn)
+    _pu.ensure_schema(conn)
+    out = []
+    if kind in (None, "", "purchase", "purchase_return"):
+        for r in search(conn, q, date_from, date_to, kind or None,
+                        limit=100000):
+            ret = r["kind"] == "purchase_return"
+            disc = float(r.get("discount") or 0)
+            base = round(float(r["net"] or 0) - disc, 2)
+            out.append({
+                "src": "set_purchases", "id": r["id"], "no": r["doc_no"],
+                "date": r["doc_date"], "kind": r["kind"],
+                "kind_label": REG_LABEL[r["kind"]],
+                "party": r["supplier_name"],
+                "sup_inv": r["supplier_inv_no"] or "",
+                "weight": float(r["total_weight"] or 0),
+                "wages": float(r["wages"] or 0),
+                "gold_value": float(r["gold_value"] or 0),
+                "discount": disc, "base": base, "vat": float(r["vat"] or 0),
+                "claim": float(r["vat"] or 0), "total": float(r["total"] or 0),
+                "ret": ret, "ref_no": r.get("ref_no") or ""})
+    if kind in (None, "", "expense", "expense_return"):
+        sql = ("SELECT p.*, COALESCE(e.name, p.supplier) supplier_name"
+               " FROM purchases p LEFT JOIN entities e ON e.id=p.supplier_id"
+               " WHERE p.is_deleted=0 AND p.kind='expense'"
+               " AND p.purchase_date BETWEEN ? AND ?")
+        args = [date_from, date_to]
+        if kind == "expense":
+            sql += " AND COALESCE(p.is_return,0)=0"
+        elif kind == "expense_return":
+            sql += " AND COALESCE(p.is_return,0)=1"
+        if q:
+            sql += (" AND (p.purchase_no LIKE ? OR p.supplier_invoice_no"
+                    " LIKE ? OR COALESCE(e.name, p.supplier) LIKE ? OR"
+                    " p.description LIKE ?)")
+            args += [f"%{q}%"] * 4
+        for r in conn.execute(sql, args):
+            r = dict(r)
+            ret = bool(r.get("is_return"))
+            disc = float(r.get("discount") or 0)
+            base = float(r["amount"] or 0)
+            vat = float(r["vat_amount"] or 0)
+            out.append({
+                "src": "purchases", "id": r["id"], "no": r["purchase_no"],
+                "date": r["purchase_date"],
+                "kind": "expense_return" if ret else "expense",
+                "kind_label": REG_LABEL["expense_return" if ret
+                                        else "expense"],
+                "party": r["supplier_name"] or "",
+                "sup_inv": r.get("supplier_invoice_no") or "",
+                "weight": None, "wages": round(base + disc, 2),
+                "gold_value": 0.0, "discount": disc, "base": base,
+                "vat": vat,
+                "claim": vat if (r.get("tax_treatment") or "standard")
+                == "standard" else 0.0,
+                "total": float(r["total"] or 0), "ret": ret,
+                "ref_no": "", "description": r.get("description") or ""})
+    out.sort(key=lambda x: (str(x["date"]), x["src"], x["id"]))
+    return out

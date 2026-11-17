@@ -208,6 +208,15 @@ def _counterparty(conn, entry_id, self_names, cache, dim=None, ldesc=None):
             "SELECT DISTINCT a.id, a.code, a.name, a.type FROM journal_lines l"
             " JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=?"
             + cond + " ORDER BY l.id", [entry_id] + params_extra)]
+        # 5.8.1: السطر المناظر بالبيان نفسه ولو في البُعد الآخر — سطر
+        # «المشتريات الضريبية» يحمل الوزن والمصنعية، ومورده بالريال وحده
+        if params_extra and len(names) < 2 and dim:
+            names = [(short_name(r["code"], r["name"]), r["type"])
+                     for r in conn.execute(
+                "SELECT DISTINCT a.id, a.code, a.name, a.type"
+                " FROM journal_lines l JOIN accounts a ON a.id=l.account_id"
+                " WHERE l.entry_id=? AND l.line_desc=? ORDER BY l.id",
+                (entry_id, ldesc))]
         # لو لم يعطِ الترشيح ببيان السطر مقابلاً (سطر مفرد لا زوج)،
         # نرجع للبحث في القيد كله.
         if params_extra and len(names) < 2:

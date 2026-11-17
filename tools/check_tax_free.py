@@ -230,23 +230,130 @@ with db() as c:
     hc = pm.build_html("invoice", cn["id"])
     hp = pm.build_html("set_purchase", p2["id"])
     hr = pm.build_html("set_purchase", pr["id"])
-    check("قالب البيع: نوع التسعير · من حساب · الخصم · السطر اليدوي",
-          all(x in h for x in ("نوع التسعير", "من حساب", "1230",
-                               "خصم نقدي", "الإجمالي الخاضع للضريبة",
-                               "إدخال يدوي", "M9")), "")
+    # 5.8.1: لا «من/إلى حساب» ولا «الأسطر» ولا عمود موديل — والدفع ظاهر
+    # و«رقم الباركود/الصنف» اسم العمود
+    check("قالب البيع: نوع التسعير · الدفع · الخصم · رقم الباركود/الصنف",
+          all(x in h for x in ("نوع التسعير", "الدفع", "خصم نقدي",
+                               "الإجمالي الخاضع للضريبة",
+                               "رقم الباركود/الصنف"))
+          and not any(x in h for x in ("من حساب", "إلى حساب", "الأسطر",
+                                       "الموديل", "رقم التشغيل")))
     check("قالب الإشعار: «إشعار دائن — مرتجع مبيعات ضريبي» و«وزن المرتجع»",
           "مرتجع مبيعات ضريبي" in hc and "وزن المرتجع" in hc
-          and "إلى حساب" in hc and "خصم نقدي مردود" in hc)
-    check("قالب الشراء: نوع التسعير · إلى حساب · الخصم",
-          all(x in hp for x in ("نوع التسعير", "إلى حساب", "1230",
-                                "خصم نقدي من المورد")))
-    check("قالب مرتجع الشراء: «مرتجع مشتريات ضريبي» · من حساب · وزن المرتجع",
-          all(x in hr for x in ("مرتجع مشتريات ضريبي", "من حساب",
-                                "وزن المرتجع", "خصم نقدي مردود")))
+          and "إلى حساب" not in hc and "خصم نقدي مردود" in hc)
+    check("قالب الشراء: نوع التسعير · الدفع · الخصم — بلا «إلى حساب»",
+          all(x in hp for x in ("نوع التسعير", "الدفع",
+                                "خصم نقدي من المورد",
+                                "رقم الباركود/الصنف"))
+          and "إلى حساب" not in hp and "الموديل" not in hp)
+    check("قالب مرتجع الشراء: «مرتجع مشتريات ضريبي» · وزن المرتجع",
+          all(x in hr for x in ("مرتجع مشتريات ضريبي", "وزن المرتجع",
+                                "خصم نقدي مردود"))
+          and "من حساب" not in hr)
     from models import purchases as pu
     rows, tot, _by = pu.vat_register(c, D, D)
     check("سجل المشتريات: الصافي الخاضع بعد الخصم",
           any(abs(r["amount"] - 8900.0) < 0.005 for r in rows), rows)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  5.8.1: حسابا المشتريات ومردوداتها · الدفع من البنك · المصروفات الضريبية
+# ══════════════════════════════════════════════════════════════════
+print("— 5.8.1: المشتريات الضريبية ومردوداتها في الدليل")
+with db() as c:
+    st = journal.statement(c, acc_id(c, "5540"))
+    docs = [r for r in st if r["doc_no"]]
+    check("كشف «المشتريات الضريبية» 5540: صفٌّ لكل فاتورة باسم المورد",
+          len(docs) == 2 and {r["name"] for r in docs} == {"مورد أ",
+                                                           "مندوب ب"},
+          [(r["doc_no"], r["name"]) for r in docs])
+    check("5540 = الوزن المشترى 45 جم ومصنعية 120 + 1500",
+          bal(c, "5540") == (45.0, 1620.0), bal(c, "5540"))
+    st2 = [r for r in journal.statement(c, acc_id(c, "5545"))
+           if r["doc_no"]]
+    check("كشف «مردودات المشتريات الضريبية» 5545: المرتجع باسم مورده",
+          len(st2) == 1 and st2[0]["name"] == "مندوب ب"
+          and st2[0]["op"] == "مرتجع مشتريات ضريبي", st2)
+    check("مقابل الوزن 5549 يعيده للمخزون (−45 + 10)",
+          bal(c, "5549") == (-35.0, 0.0), bal(c, "5549"))
+    bs = __import__("models.reports", fromlist=["x"]).balance_sheet(c)
+    check("الميزانية متوازنة بعد حسابات 5.8.1",
+          bs["balanced_cash"] and bs["balanced_gold"],
+          (bs["diff_cash"], bs["diff_gold"]))
+
+print("— 5.8.1: الدفع من صندوقٍ أو بنكٍ يُختار من الشجرة")
+with db() as c:
+    from models.accounts import pay_accounts, resolve_pay
+    p10 = c.execute("SELECT id FROM accounts WHERE code='1010'").fetchone()[0]
+    c.execute("INSERT INTO accounts(code,name,type,parent_id,is_postable,"
+              "nature,balance_type) VALUES('1520','بنك الراجحي','asset',?,1,"
+              "'debit','cash')", (p10,))
+    bank = acc_id(c, "1520")
+    check("البنك الجديد يظهر في حسابات الدفع ويُقرأ «بنكي»",
+          any(r["id"] == bank for r in pay_accounts(c))
+          and resolve_pay(c, "cash", bank) == ("bank", bank))
+    check("حسابٌ ليس صندوقاً ولا بنكاً مرفوض للدفع",
+          raises(lambda: resolve_pay(c, "cash", acc_id(c, "1230")),
+                 "صندوقاً"))
+    b0 = bal(c, "1520")[1]
+    p3 = sp.create_purchase(c, sup, D, "INV-90", [
+        {"wo_no": "X1", "registered": 5, "karat": 18, "wage": 10}], "t",
+        pricing="wage", mode="free", pay_mode="cash", pay_account_id=bank)
+    check("شراءٌ مدفوعٌ من البنك: سند صرف تلقائي بالإجمالي (57.50)",
+          bool(p3["voucher_no"]) and round(bal(c, "1520")[1] - b0, 2)
+          == -57.5, (p3.get("voucher_no"), bal(c, "1520")))
+    rr3 = sp.returnable(c, p3["id"])
+    pr3 = sp.create_return(c, p3["id"], D, [
+        {"line_id": rr3[0]["line_id"], "weight": 2}], "عيب", "t")
+    check("مرتجعه يُستردّ إلى البنك نفسه بسند قبض (23.00)",
+          bool(pr3["voucher_no"]) and round(bal(c, "1520")[1] - b0, 2)
+          == -34.5, (pr3.get("voucher_no"), bal(c, "1520")))
+    s3 = tf.create_sale(c, com, [
+        {"wo_no": "Z9", "weight": 4, "karat": 18, "wage": 20}], D, "t",
+        "wage", subtype="standard", pay_mode="cash", pay_account_id=bank)
+    check("بيعٌ مقبوضٌ في البنك: سند قبض إليه",
+          bool(s3.get("voucher_no")) and round(bal(c, "1520")[1] - b0, 2)
+          == round(-34.5 + s3["grand_total"], 2), bal(c, "1520"))
+    rl3 = tx.returnable(c, s3["id"])
+    cn3 = tx.create_credit_note(c, s3["id"], D, [
+        {"item_id": rl3[0]["item_id"]}], "إرجاع", "t")
+    check("إشعاره الدائن (إدخال يدوي) يُردّ من البنك نفسه بسند صرف",
+          bool(cn3.get("voucher_no")) and round(bal(c, "1520")[1] - b0, 2)
+          == -34.5, (cn3.get("voucher_no"), bal(c, "1520")))
+    hs = __import__("services.print_manager",
+                    fromlist=["x"]).build_html("invoice", s3["id"])
+    check("قالب البيع يذكر البنك في «الدفع»", "بنك الراجحي" in hs)
+
+print("— 5.8.1: المصروفات الضريبية (كهرباء) والسجل الموحّد")
+with db() as c:
+    from models import purchases as pu
+    el = add_entity(c, "شركة الكهرباء", "supplier",
+                    vat_number="300000000000013", username="t")
+    net, vat = pu.split_amount(1150, "gross", "standard")
+    e1 = pu.create_purchase(c, "expense", el, "كهرباء نوفمبر", net, vat, D,
+                            "t", supplier_invoice_no="EL-11",
+                            account_code="5820", price_mode="gross",
+                            pay_mode="cash", pay_account_id=bank)
+    check("فاتورة الكهرباء: صافي 1,000 وضريبة 150 — من البنك",
+          (net, vat, e1["total"]) == (1000.0, 150.0, 1150.0)
+          and bal(c, "5820")[1] == 1000.0, (net, vat, e1))
+    reg = sp.tax_register(c, D, D)
+    kinds = [r["kind_label"] for r in reg]
+    check("السجل الموحّد: ذهب ومرتجعه ومصروفات",
+          "مصروفات ضريبية" in kinds and "مشتريات ذهب ضريبية" in kinds
+          and "مرتجع مشتريات ضريبي" in kinds, kinds)
+    claim = round(sum((-1 if r["ret"] else 1) * r["claim"] for r in reg), 2)
+    v = __import__("models.reports", fromlist=["x"]).vat_return(c, D, D)
+    check("ضريبة المدخلات في السجل = ضريبة المدخلات في الإقرار",
+          abs(claim - v["input_vat"]) < 0.02, (claim, v["input_vat"]))
+    check("حسابات شراء الذهب ليست في قائمة حسابات المصروف",
+          not {"5530", "5540", "5545", "5549"}
+          & {a["code"] for a in pu.purchase_accounts(c, "expense")})
+    hx = __import__("services.print_manager",
+                    fromlist=["x"]).build_html("purchase", e1["id"])
+    check("قالب فاتورة المصروف: «فاتورة مصروفات ضريبية» والبنك",
+          "فاتورة مصروفات ضريبية" in hx and "بنك الراجحي" in hx)
+    check("الدفتر متوازن في النهاية", ledger_ok(c)[0], ledger_ok(c))
 
 print()
 print(f"{len(OK)} ✔ · {len(BAD)} ✘")
