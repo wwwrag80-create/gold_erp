@@ -39,6 +39,12 @@ EPS_CASH = 0.011
 # ليست مديونيةً تجارية، وسقفها لا معنى له.
 CREDIT_TYPES = ("customer", "supplier", "other")
 
+
+def _custom_type(t):
+    """5.8.4: نوع جهةٍ أنشأه المستخدم — تجاريٌّ كالعميل والجهة الأخرى."""
+    from models import entity_types
+    return entity_types.is_custom(str(t or ""))
+
 _local = threading.local()
 
 
@@ -122,7 +128,8 @@ def over_limit(conn, account_ids=None):
     """
     out = []
     for r in _limited_rows(conn, account_ids):
-        if str(r["entity_type"] or "") not in CREDIT_TYPES:
+        if str(r["entity_type"] or "") not in CREDIT_TYPES \
+                and not _custom_type(r["entity_type"]):
             continue
         lim_c = float(r["lim_cash"] or 0)
         lim_g = float(r["lim_gold"] or 0)

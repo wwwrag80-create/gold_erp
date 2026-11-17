@@ -12,7 +12,7 @@
 
 الأوزان والأجور تُعرض بعيار العرض (`karat_view`) وتُخزَّن بمكافئ 18.
 """
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ui import kit
 
@@ -325,10 +325,110 @@ def balance_text(conn, account_id):
 ITEM_NO = "رقم الباركود/الصنف"          # كان «رقم التشغيل»
 
 
+LEVEL_TYPES = (QtWidgets.QLineEdit, QtWidgets.QComboBox,
+               QtWidgets.QAbstractSpinBox, QtWidgets.QPushButton,
+               QtWidgets.QToolButton)
+_TOGGLES = (QtWidgets.QRadioButton, QtWidgets.QCheckBox, QtWidgets.QLabel)
+_NO_LEVEL = frozenset(("rowAct", "rowDel", "goldStripBtn"))
+
+
+def ctrl_h():
+    """5.8.4: ارتفاعٌ واحد لكل خانةٍ وقائمةٍ وزرٍّ في الشاشتين — مشتقٌّ من
+    خطّ البرنامج (كقياس خانات المكتبة) فلا يُقصّ النصّ بخطٍّ مكبَّر."""
+    app = QtWidgets.QApplication.instance()
+    f = app.font() if app else QtGui.QFont()
+    return max(34, QtGui.QFontMetrics(f).height() + 14)
+
+
+class _Leveler(QtCore.QObject):
+    """يُبقي الارتفاع الموحّد بعد أنماط البرنامج: ورقة الأنماط تضبط عند
+    «تهيئة» كل خانة حدَّيها الأدنى والأعلى من `min-height` وحشوها — فتطول
+    القائمة وتقصر الخانة. فيُعاد الارتفاع بعد التهيئة وعند كل تغيير مظهرٍ
+    أو مقاس أو خط."""
+
+    _NOW = (QtCore.QEvent.Show, QtCore.QEvent.StyleChange,
+            QtCore.QEvent.FontChange)
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t in self._NOW:
+            _fix(obj)
+        elif t == QtCore.QEvent.Polish:
+            # الحدثُ يصل المرشِّح قبل أن تهيّئ الأنماطُ الخانة — فبعده
+            QtCore.QTimer.singleShot(0, lambda o=obj: _fix(o))
+        return False
+
+
+_LEVELER = []
+
+
+def _fix(wd):
+    try:
+        h = ctrl_h()
+        wd.setProperty("kitLevel", h)
+        if wd.minimumHeight() != h or wd.maximumHeight() != h:
+            wd.setFixedHeight(h)
+    except RuntimeError:                 # حُذفت الخانة قبل التأجيل
+        pass
+
+
+def _keep_level(wd):
+    if wd.property("kitLevelHooked"):
+        return
+    if not _LEVELER:
+        app = QtWidgets.QApplication.instance()
+        _LEVELER.append(_Leveler(app))
+    wd.installEventFilter(_LEVELER[0])
+    wd.setProperty("kitLevelHooked", True)
+
+
+def level(*items):
+    """يسوّي ارتفاع الخانات والقوائم والأزرار في الصفّ — فلا يميل الصفّ
+    بخانةٍ أطول من جارتها. يدخل الحاويات البسيطة (خانة الدفع، شريط
+    الفترة) دون الجداول والمجموعات."""
+    for it in items:
+        if it is None:
+            continue
+        if isinstance(it, QtWidgets.QLayout):
+            level(*[it.itemAt(i).widget() or it.itemAt(i).layout()
+                    for i in range(it.count())])
+        elif isinstance(it, LEVEL_TYPES):
+            if it.objectName() in _NO_LEVEL:
+                continue
+            _fix(it)
+            _keep_level(it)
+        elif isinstance(it, (QtWidgets.QAbstractScrollArea,
+                             QtWidgets.QGroupBox, QtWidgets.QLabel)):
+            continue
+        elif isinstance(it, QtWidgets.QWidget):
+            # الأبناء المباشرون بكل أسمائهم (`findChildren` بالاسم الفارغ في
+            # PyQt5 يطابق غير المسمّاة وحدها فيفوته زرٌّ مسمّى)
+            kids = [c for c in it.children()
+                    if isinstance(c, QtWidgets.QWidget)]
+            if kids and not hasattr(it, "caption") and it.layout() is not None \
+                    and all(
+                    isinstance(c, _TOGGLES) for c in kids) and any(
+                    isinstance(c, _TOGGLES[:2]) for c in kids):
+                # مجموعة اختيارات (نوع الفاتورة · مصدر الأصناف): بارتفاع
+                # الخانة واختياراتها في وسطه — على خطّ القوائم المجاورة
+                _fix(it)
+                _keep_level(it)
+                gl = it.layout()
+                m = gl.contentsMargins()
+                gl.setContentsMargins(m.left(), 0, m.right(), 0)
+                gl.setAlignment(QtCore.Qt.AlignVCenter)
+                continue
+            level(*kids)
+    return items[0] if len(items) == 1 else None
+
+
 def field(caption, widget):
     """خانةٌ بعنوانها الصغير فوقها — كخانات سطر الإدخال تماماً، فيتّسق
-    الرأس والسطر ويقصر ارتفاع الشاشة (لا عمود عناوين بجانب الخانات)."""
+    الرأس والسطر ويقصر ارتفاع الشاشة (لا عمود عناوين بجانب الخانات).
+    5.8.4: الخانة بالارتفاع الموحّد، والقيمة المعروضة نصّاً (كالرقم
+    الضريبي) في وسط ارتفاعها — فتصطفّ مع جاراتها."""
     w = QtWidgets.QWidget()
+    w.setObjectName("taxField")          # شفّافة داخل القسم (`ui.styles`)
     v = QtWidgets.QVBoxLayout(w)
     v.setContentsMargins(0, 0, 0, 0)
     v.setSpacing(2)
@@ -336,16 +436,30 @@ def field(caption, widget):
     lbl.setObjectName("cardSub")
     v.addWidget(lbl)
     if isinstance(widget, QtWidgets.QLayout):
+        items = [widget.itemAt(i).widget() for i in range(widget.count())]
+        if items and all(isinstance(x, _TOGGLES) for x in items if x):
+            # اختياراتٌ وحدها (نوع الفاتورة): في حاويةٍ بارتفاع الخانة
+            box = QtWidgets.QWidget()
+            box.setObjectName("taxField")
+            box.setLayout(widget)
+            widget = box
+    if isinstance(widget, QtWidgets.QLayout):
         v.addLayout(widget)
     else:
         v.addWidget(widget)
+    level(widget)
+    if isinstance(widget, QtWidgets.QLabel) and not widget.wordWrap():
+        widget.setMinimumHeight(ctrl_h())
+        widget.setAlignment((widget.alignment() & QtCore.Qt.AlignHorizontal_Mask)
+                            | QtCore.Qt.AlignVCenter)
     v.addStretch(1)                  # الخانات تصطفّ من أعلاها في الصف
     w.caption = lbl
     return w
 
 
 def hbox(*items, stretch=None):
-    """صفٌّ أفقي بلا هوامش: عناصرُ وأوزانُ تمدّدها (افتراضاً الأول يتمدّد)."""
+    """صفٌّ أفقي بلا هوامش: عناصرُ وأوزانُ تمدّدها (افتراضاً الأول يتمدّد).
+    5.8.4: خاناته وأزراره بارتفاعٍ واحد، وكلٌّ في وسط الصفّ."""
     lay = QtWidgets.QHBoxLayout()
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(6)
@@ -355,6 +469,9 @@ def hbox(*items, stretch=None):
             lay.addLayout(it, st)
         else:
             lay.addWidget(it, st)
+            if isinstance(it, LEVEL_TYPES):
+                lay.setAlignment(it, QtCore.Qt.AlignVCenter)
+        level(it)
     return lay
 
 
@@ -434,6 +551,14 @@ def new_pay_account(parent, username="", name=""):
 CREDIT = "credit"
 
 
+def party_text(r):
+    """5.8.4: الحساب في القوائم باسمه ونوعه — «شركة الريان · عميل»."""
+    from models import entities
+    t = entities.TYPE_LABELS.get(r["entity_type"] if "entity_type" in
+                                 r.keys() else r.get("type"), "")
+    return f"{r['name']}  ·  {t}" if t else r["name"]
+
+
 def pay_rows_recent(conn):
     """الصناديق والبنوك — آخرها إضافةً أولاً (5.8.3: النقر على الخانة
     يُظهر آخر الحسابات المضافة)."""
@@ -456,7 +581,7 @@ def pick_combo(tip=""):
     cb.setMinimumWidth(170)
     if tip:
         cb.setToolTip(tip)
-    return cb
+    return level(cb)
 
 
 def add_button(tip="صندوق أو بنك جديد — تكتب اسمه فقط، ويُحفظ ويُختار"):
@@ -466,7 +591,7 @@ def add_button(tip="صندوق أو بنك جديد — تكتب اسمه فقط
     b.setCursor(QtCore.Qt.PointingHandCursor)
     b.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
     b.setToolTip(tip)
-    return b
+    return level(b)
 
 
 class PayCombo(QtWidgets.QWidget):
@@ -613,6 +738,8 @@ class PeriodBar(QtWidgets.QWidget):
             else "month"
         self.mode = mode if mode in dict(self.MODES) else "month"
         self.set_mode(self.mode, emit=False)
+        level(self)                      # 5.8.4: أزرارها بارتفاع خانات السجل
+        self.lbl.setMinimumHeight(ctrl_h())
 
     def set_mode(self, mode, emit=True):
         from ui.widgets.common import save_pref
@@ -690,7 +817,7 @@ def search_button(tip="يعرض كل السندات في كل الفترات ح�
     b.setCursor(QtCore.Qt.PointingHandCursor)
     b.setToolTip(tip)
     b.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
-    return b
+    return level(b)
 
 
 def view_buttons(table, col, count, on_view, text="عرض"):

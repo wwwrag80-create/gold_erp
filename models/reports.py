@@ -513,12 +513,22 @@ def balance_sheet(conn, date_to=None, date_from=None):
 
     cust_dg, cust_dc, cust_cg, cust_cc = split_parties(["1600", "1650"])
     sup_dg, sup_dc, sup_cg, sup_cc = split_parties(["2300"])
+    # 5.8.4: لكل نوع جهةٍ أنشأه المستخدم سطرٌ مستقل — مدينه أصول ودائنه خصوم
+    from models import entity_types as _et
+    custom_a, custom_l = [], []
+    for _t in _et.all_types(conn).values():
+        if not _t["parent_code"]:
+            continue
+        dg, dc, cg, cc = split_parties([_t["parent_code"]])
+        custom_a.append((f"أرصدة {_t['plural']} المدينة", dc, dg))
+        custom_l.append((f"أرصدة {_t['plural']} الدائنة", cc, cg))
 
     assets = [
         ("الصناديق والبنوك", boxes_c, boxes_g),
         ("الخزائن (ذهب خام ومشغول)", vault_c, vault_g),
         ("أرصدة العملاء المدينة", cust_dc, cust_dg),
         ("أرصدة موردين مدينة (دفعات مقدمة)", sup_dc, sup_dg),
+        *custom_a,
         ("سلف وعهد الموظفين", emp_c, emp_g),
         ("الأصول الثابتة", fixed_c, fixed_g),
         ("ضريبة المدخلات", vat_in_c, vat_in_g),
@@ -540,6 +550,7 @@ def balance_sheet(conn, date_to=None, date_from=None):
     liabilities = [
         ("أرصدة الموردين الدائنة", sup_cc, sup_cg),
         ("أرصدة العملاء الدائنة (ذهب/نقد لدينا لهم)", cust_cc, cust_cg),
+        *custom_l,
         ("مستحقات وتسويات", round(-accr_c, 2), round(-accr_g, 3)),
         ("الالتزامات الضريبية", round(-vat_out_c, 2), round(-vat_out_g, 3)),
         ("مصروفات مستحقة", round(-acd_c, 2), round(-acd_g, 3)),

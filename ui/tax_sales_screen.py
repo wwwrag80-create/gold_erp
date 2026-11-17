@@ -91,35 +91,65 @@ def _fix_rows(t, extra=0):
 
 
 class NewCustomerDialog(QtWidgets.QDialog):
-    """عميلٌ جديد برقمه الضريبي — رقمٌ صحيح يجعل فاتورته «ضريبية» لا
-    «مبسطة»."""
+    """حسابٌ جديد من خانة الحساب في الفاتورة (5.8.4): **نوع الجهة** أولاً —
+    عميل أو مورد أو جهة أخرى أو نوعٌ أنشأه المستخدم (أو «+ نوع جديد») — ثم
+    الاسم والرقم الضريبي (رقمٌ صحيح يجعل فاتورته «ضريبية» لا «مبسطة»)."""
 
     def __init__(self, parent, username, etype="customer", require_vat=False):
         super().__init__(parent)
+        from ui.entity_type_dialog import fill_types
         self.username = username
         self.etype = etype
-        # 5.5.1: منشأةٌ لفاتورةٍ ضريبية (أو مورد) — رقمها الضريبي إلزامي
-        self.require_vat = bool(require_vat) or etype == "supplier"
+        # 5.5.1: منشأةٌ لفاتورةٍ ضريبية — رقمها الضريبي إلزامي
+        self._need_vat = bool(require_vat)
         self.customer_id = None
-        self.setWindowTitle("مورد جديد" if etype == "supplier"
-                            else "عميل جديد")
-        self.setMinimumWidth(460)
+        self.setWindowTitle("حساب جديد")
+        self.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.setMinimumWidth(500)
+        self.type = kit.ComboBox()
+        fill_types(self.type, "trade", keep=etype)
+        self.type.currentIndexChanged.connect(lambda *_: self._sync())
+        b_type = kit.PushButton("+ نوع جديد")
+        b_type.setObjectName("ghost")
+        b_type.setToolTip("نوع جهةٍ جديد كالعملاء والموردين — يُحفظ في كل مكان")
+        b_type.clicked.connect(self.new_type)
+        trow = QtWidgets.QHBoxLayout()
+        trow.setContentsMargins(0, 0, 0, 0)
+        trow.addWidget(self.type, 1)
+        trow.addWidget(b_type)
         self.name = kit.LineEdit()
+        self.name.setPlaceholderText("اسم الحساب كما يُطبع على الفاتورة")
         self.phone = kit.LineEdit()
         self.vat = kit.LineEdit()
-        self.vat.setPlaceholderText(
-            "15 رقماً يبدأ بـ3 وينتهي بـ3"
-            + (" — إلزامي" if self.require_vat else " — أو اتركه للفرد"))
         self.address = kit.LineEdit()
         form = QtWidgets.QFormLayout(self)
-        form.addRow("اسم المورد / الشركة:" if etype == "supplier"
-                    else "اسم العميل / الشركة:", self.name)
+        form.addRow("نوع الجهة:", trow)
+        form.addRow("الاسم:", self.name)
         form.addRow("الجوال:", self.phone)
         form.addRow("الرقم الضريبي:", self.vat)
         form.addRow("العنوان:", self.address)
-        btn = kit.PushButton("حفظ")
+        btn = kit.PushButton("حفظ الحساب")
         btn.clicked.connect(self.save)
         form.addRow(btn)
+        self._sync()
+
+    @property
+    def require_vat(self):
+        # المورد برقمه الضريبي (لفوترة المورد الإلكترونية) كما في التكويد
+        return self._need_vat or self.type.currentData() == "supplier"
+
+    def _sync(self):
+        self.etype = self.type.currentData() or self.etype
+        self.vat.setPlaceholderText(
+            "15 رقماً يبدأ بـ3 وينتهي بـ3"
+            + (" — إلزامي" if self.require_vat else " — أو اتركه للفرد"))
+
+    def new_type(self):
+        from ui.entity_type_dialog import fill_types, new_entity_type
+        code = new_entity_type(self, self.username)
+        if code:
+            fill_types(self.type, "trade", keep=code)
+            self._sync()
 
     def save(self):
         from services.fatoora import profile as pf
@@ -128,8 +158,9 @@ class NewCustomerDialog(QtWidgets.QDialog):
                 raise ValueError("أدخل الاسم")
             vat = self.vat.text().strip()
             if self.require_vat and not vat:
-                raise ValueError("اكتب الرقم الضريبي — الفاتورة الضريبية "
-                                 "لمنشأةٍ برقمها")
+                raise ValueError("اكتب الرقم الضريبي — " + (
+                    "إلزامي للموردين" if self.etype == "supplier"
+                    else "الفاتورة الضريبية لمنشأةٍ برقمها"))
             if vat and not pf.valid_vat(vat):
                 raise ValueError("الرقم الضريبي غير صحيح: 15 رقماً يبدأ "
                                  "بـ3 وينتهي بـ3 (أو اتركه فارغاً)")

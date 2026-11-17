@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS entities(
   vat_number TEXT DEFAULT '',
   address TEXT DEFAULT '',
   entity_type TEXT NOT NULL DEFAULT 'customer'
-    CHECK(entity_type IN ('customer','supplier','partner','employee','worker','other','internal')),
+    CHECK(entity_type IN ('customer','supplier','partner','employee','worker','other','internal') OR substr(entity_type,1,2)='x_'),
   account_id INTEGER NOT NULL REFERENCES accounts(id),
   capital_account_id INTEGER REFERENCES accounts(id),
   share_percent REAL NOT NULL DEFAULT 0,
@@ -1609,6 +1609,29 @@ def migrate_schema() -> None:
         # 4.48: أسطر فاتورة المورد — أكثر من حساب في فاتورة واحدة
         from models.purchases import ensure_schema as _pu_schema
         _pu_schema(conn)
+
+        # 5.8.4: أنواع جهات التعامل التي يُنشئها المستخدم — جدولها، وقيد
+        # نوع الجهة يقبل مفاتيحها («x_…») كما قُبل «worker» من قبل (18)
+        from models.entity_types import ensure_schema as _et_schema
+        _et_schema(conn)
+        ddl = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table'"
+            " AND name='entities'").fetchone()
+        if ddl and "substr(entity_type" not in (ddl["sql"] or ""):
+            import re as _re
+            fixed, n = _re.subn(
+                r"CHECK\s*\(\s*entity_type\s+IN\s*\(([^)]*)\)\s*\)",
+                lambda m: "CHECK(entity_type IN (" + m.group(1)
+                + ") OR substr(entity_type,1,2)='x_')", ddl["sql"] or "")
+            if n:
+                ver = conn.execute("PRAGMA schema_version").fetchone()[0]
+                conn.execute("PRAGMA writable_schema=ON")
+                conn.execute(
+                    "UPDATE sqlite_master SET sql=? WHERE type='table'"
+                    " AND name='entities'", (fixed,))
+                conn.execute("PRAGMA writable_schema=OFF")
+                # يُعاد تحميل المخطط في هذا الاتصال فيسري القيد الجديد فوراً
+                conn.execute(f"PRAGMA schema_version={int(ver) + 1}")
 
         # 4.59: طلبات العملاء من دليل الموديلات (بلا أثر محاسبي)
         from models.model_orders import ensure_schema as _mo_schema

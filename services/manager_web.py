@@ -817,6 +817,17 @@ _TYPE_LABEL = {"customer": "عميل", "supplier": "مورد", "partner": "شر�
                "internal": "داخلي"}
 
 
+def _type_label(t):
+    """اسم النوع — والأنواع التي أنشأها المستخدم (5.8.4) باسمها هي."""
+    if t in _TYPE_LABEL:
+        return _TYPE_LABEL[t]
+    try:
+        from models.entities import TYPE_LABELS
+        return TYPE_LABELS.get(t, "")
+    except Exception:                         # noqa: BLE001
+        return ""
+
+
 def search_accounts(conn, q, postable=False, limit=14):
     """حسابات الدليل باسمها أو رقمها — من أول حرف (همزةٌ وتاءٌ مربوطة
     لا تُفرّقان)."""
@@ -863,7 +874,7 @@ def search_parties(conn, q, limit=14, types=None):
             has.append(r)
     return [{"id": r["id"], "label": r["name"], "acc": r["account_id"],
              "type": r["entity_type"],
-             "sub": f"{_TYPE_LABEL.get(r['entity_type'], '')} · {r['code']}"}
+             "sub": f"{_type_label(r['entity_type'])} · {r['code']}"}
             for r in (starts + has)[:limit]]
 
 
@@ -3303,7 +3314,7 @@ def edit_payload(conn, kind, eid):
         r = conn.execute("SELECT id, name, entity_type FROM entities WHERE"
                          " id=?", (pid,)).fetchone()
         return ({"id": r["id"], "label": r["name"],
-                 "sub": _TYPE_LABEL.get(r["entity_type"], "")} if r else None)
+                 "sub": _type_label(r["entity_type"])} if r else None)
     if kind in ("sale", "sale_return"):
         inv = conn.execute("SELECT * FROM invoices WHERE id=?",
                            (d["rec_id"],)).fetchone()

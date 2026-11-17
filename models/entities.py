@@ -3,28 +3,75 @@
 شركاء، موظفون، وحسابات داخلية — البوابة الوحيدة لتأسيس الحسابات.
 كل جهة تُربط آلياً بحساب فرعي (أو حسابين للشريك) تحت مجموعتها في شجرة
 الحسابات، ويُولَّد قيد افتتاحي آلي لأي رصيد افتتاحي نقدي أو وزني."""
+from models import entity_types as _et
 from models.accounts import acc_id
 from services.accounting_engine import account_balance, post_entry
 from services.audit import log_action
 
+
+class _TypeMap(dict):
+    """قاموس الأنواع الثابتة — ويكمّله ما أنشأه المستخدم من أنواع (5.8.4).
+
+    `TYPE_LABELS[نوع]` و`.get(...)` و`in` تعمل لنوعٍ جديد كما تعمل للثابت،
+    فلا يتغيّر شيءٌ في الشاشات التي تعرض اسم النوع بجانب الجهة."""
+
+    def __init__(self, base, field):
+        super().__init__(base)
+        self._field = field
+
+    def __missing__(self, key):
+        row = _et.get(key)
+        if row is None:
+            raise KeyError(key)
+        return row[self._field]
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        return dict.__contains__(self, key) or _et.get(key) is not None
+
+
 # المجموعة الرئيسية في شجرة الحسابات لكل نوع جهة
-PARENT_CODE = {"customer": "1600", "supplier": "2300", "employee": "1950",
-               "worker": "1970", "other": "1650"}
+PARENT_CODE = _TypeMap({"customer": "1600", "supplier": "2300",
+                        "employee": "1950", "worker": "1970",
+                        "other": "1650"}, "parent_code")
 PARTNER_CAPITAL_PARENT = "3110"
 EMPLOYEE_ACCRUED_PARENT = "2200"   # مستحقات الموظفين (خصوم متداولة)
 PARTNER_CURRENT_PARENT = "3120"
 OPENING_SUSPENSE = "3900"      # الأرصدة الافتتاحية للتسوية
 
-TYPE_LABELS = {"customer": "عميل", "supplier": "مورد", "partner": "شريك",
-              "employee": "موظف", "worker": "عامل", "other": "جهة أخرى",
-              "internal": "حساب داخلي"}
+TYPE_LABELS = _TypeMap({"customer": "عميل", "supplier": "مورد",
+                        "partner": "شريك", "employee": "موظف",
+                        "worker": "عامل", "other": "جهة أخرى",
+                        "internal": "حساب داخلي"}, "label")
+# جمع النوع — عنوان مجموعته في الدليل والميزانية
+PLURALS = _TypeMap({"customer": "العملاء", "supplier": "الموردون",
+                    "partner": "الشركاء", "employee": "الموظفون",
+                    "worker": "العمال", "other": "الجهات الأخرى",
+                    "internal": "الحسابات الداخلية"}, "plural")
+BUILTIN_TYPES = ("customer", "supplier", "partner", "employee", "worker",
+                 "other")
 
 # حساب مستحقات عمال التصنيع — أب حسابات العمال الفرعية
 WORKER_ACCRUED_PARENT = "2250"
-ACC_TYPE = {"customer": "asset", "supplier": "liability", "employee": "asset",
-            "worker": "asset", "other": "asset"}
-PREFIX = {"customer": "عميل: ", "supplier": "مورد: ", "employee": "موظف: ",
-          "worker": "عامل: ", "other": "أخرى: "}
+ACC_TYPE = _TypeMap({"customer": "asset", "supplier": "liability",
+                     "employee": "asset", "worker": "asset",
+                     "other": "asset"}, "side")
+PREFIX = _TypeMap({"customer": "عميل: ", "supplier": "مورد: ",
+                   "employee": "موظف: ", "worker": "عامل: ",
+                   "other": "أخرى: "}, "prefix")
+
+
+def all_types(include_custom=True):
+    """[(المفتاح، الاسم)] لكل الأنواع — الثابتة ثم ما أنشأه المستخدم."""
+    out = [(t, dict.__getitem__(TYPE_LABELS, t)) for t in BUILTIN_TYPES]
+    if include_custom:
+        out += [(c, r["label"]) for c, r in _et.all_types().items()]
+    return out
 
 
 ALEF = "أإآٱا"
@@ -168,8 +215,8 @@ def add_entity(conn, name, entity_type, phone="", vat_number="", username=None,
     name = name.strip()
     if not name:
         raise ValueError("أدخل اسم الجهة")
-    if entity_type not in ("customer", "supplier", "partner", "employee",
-                           "worker", "other"):
+    custom = _et.get(entity_type)
+    if entity_type not in BUILTIN_TYPES and custom is None:
         raise ValueError("نوع الجهة غير صحيح")
     if entity_type == "supplier" and not vat_number.strip():
         raise ValueError("الرقم الضريبي إلزامي للموردين (لدعم الفوترة "
@@ -213,6 +260,22 @@ def add_entity(conn, name, entity_type, phone="", vat_number="", username=None,
         capital_account_id = _create_sub_account(
             conn, WORKER_ACCRUED_PARENT, f"مستحقات العامل: {name}",
             "liability", "cash")
+    elif custom is not None:
+        # 5.8.4: نوعٌ أنشأه المستخدم — حسابٌ تحت حسابه الرقابي بكودٍ من كوده
+        from models import coa
+        par = conn.execute("SELECT id, account_level FROM accounts WHERE id=?",
+                           (custom["account_id"],)).fetchone()
+        if not par:
+            raise ValueError(f"حساب النوع «{custom['plural']}» غير موجود"
+                             " في الشجرة")
+        account_id = conn.execute(
+            "INSERT INTO accounts(code,name,type,parent_id,is_postable,"
+            "nature,balance_type,account_level) VALUES(?,?,?,?,1,?,?,?)",
+            (coa.next_child_code(conn, par["id"]), custom["prefix"] + name,
+             custom["side"], par["id"],
+             "debit" if custom["side"] == "asset" else "credit",
+             custom["balance_type"], (par["account_level"] or 1) + 1)
+        ).lastrowid
     else:
         bal_type = "cash" if entity_type in ("supplier", "employee") else "both"
         if group_id and entity_type in ("customer", "other"):
@@ -414,7 +477,8 @@ def list_customers(conn):
     أسوأ من السماح بها.
     """
     return list_entities(conn, ("customer", "supplier", "partner",
-                                "employee", "worker", "other", "internal"))
+                                "employee", "worker", "other", "internal")
+                         + _et.codes(conn))
 
 
 def get_entity(conn, entity_id):
@@ -546,9 +610,14 @@ TRADE_TYPES = ("customer", "supplier", "other")
 STAFF_TYPES = ("employee", "worker")
 
 
+def trade_types():
+    """الأنواع التجارية: العميل والمورد والجهة الأخرى وما أنشأه المستخدم."""
+    return TRADE_TYPES + _et.codes()
+
+
 def allowed_types(entity_type):
-    if entity_type in TRADE_TYPES:
-        return TRADE_TYPES
+    if entity_type in trade_types():
+        return trade_types()
     if entity_type in STAFF_TYPES:
         return STAFF_TYPES
     return (entity_type,)
@@ -639,7 +708,7 @@ def change_entity_type(conn, entity_id, new_type, username):
         raise ValueError(f"يوجد {TYPE_LABELS[new_type]} بالاسم نفسه:"
                          f" «{dup['name']}»")
     moved = []
-    if new_type in TRADE_TYPES:
+    if new_type in trade_types():
         par = acc_id(conn, PARENT_CODE[new_type])
         coa.move_account(conn, e["account_id"], par, username,
                          entity_ok=True)
@@ -695,14 +764,24 @@ def directory(conn, types=None, q=""):
 GROUP_TYPE = {"1600": "customer", "2300": "supplier", "1650": "other"}
 
 
+def _group_type(code):
+    if code in GROUP_TYPE:
+        return GROUP_TYPE[code]
+    for c, r in _et.all_types().items():
+        if r["parent_code"] == code:
+            return c
+    return None
+
+
 def type_of_account(conn, account_id):
     """النوع التجاري الذي تقتضيه مكانة الحساب في الشجرة — أو None."""
     cur = conn.execute("SELECT id, code, parent_id FROM accounts WHERE id=?",
                        (account_id,)).fetchone()
     guard = 0
     while cur is not None and guard < 30:
-        if cur["code"] in GROUP_TYPE and cur["id"] != account_id:
-            return GROUP_TYPE[cur["code"]]
+        gt = _group_type(cur["code"]) if cur["id"] != account_id else None
+        if gt:
+            return gt
         if not cur["parent_id"]:
             break
         cur = conn.execute("SELECT id, code, parent_id FROM accounts"
@@ -724,7 +803,7 @@ def sync_types_from_tree(conn, account_ids, username):
             f"SELECT * FROM entities WHERE is_deleted=0 AND account_id IN ({q})",
             ids).fetchall():
         old = e["entity_type"]
-        if old not in TRADE_TYPES:
+        if old not in trade_types():
             continue
         new = type_of_account(conn, e["account_id"])
         if not new or new == old:

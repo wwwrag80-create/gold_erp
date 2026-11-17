@@ -209,8 +209,10 @@ def create_purchase(conn, kind, supplier_id, description, amount, vat_amount,
     if invoice_type not in dict(INVOICE_TYPES):
         invoice_type = "standard"
     sup = get_entity(conn, supplier_id)
-    if not sup or sup["entity_type"] != "supplier":
-        raise ValueError("اختر مورداً من دليل جهات التعامل")
+    # 5.8.4: أي حسابٍ من دليل جهات التعامل (مورد · عميل · جهة · نوعٌ أنشأه
+    # المستخدم) — لا الحساب الداخلي
+    if not sup or sup["is_deleted"] or sup["entity_type"] == "internal":
+        raise ValueError("اختر الحساب من دليل جهات التعامل")
     ensure_schema(conn)
     description = (description or "").strip()
     supplier_invoice_no = (supplier_invoice_no or "").strip()

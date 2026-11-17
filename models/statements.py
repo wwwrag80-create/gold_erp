@@ -274,11 +274,15 @@ _PARTY_SUPPLIER = ("2300",)          # موردون
 
 def _classify(node, by_id):
     """أقرب مفتاحٍ في _MAP بين الحساب وأسلافه، أو نوع الجهة."""
+    from models import entity_types as _et
+    # 5.8.4: أنواع الجهات التي أنشأها المستخدم — كالعملاء أو كالموردين
+    cust = _PARTY_ASSET + _et.control_codes("asset")
+    supp = _PARTY_SUPPLIER + _et.control_codes("liability")
     cur, seen = node, 0
     while cur is not None and seen < 20:
-        if cur["code"] in _PARTY_ASSET:
+        if cur["code"] in cust:
             return "party_customer"
-        if cur["code"] in _PARTY_SUPPLIER:
+        if cur["code"] in supp:
             return "party_supplier"
         if cur["code"] in _MAP:
             return _MAP[cur["code"]]

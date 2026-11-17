@@ -28,6 +28,9 @@ TEMPLATE = """
 
 QWidget { background: @bg; color: @ink; font-size: @fsBody; }
 QLabel { background: transparent; }
+/* 5.8.4: حاوية الخانة بعنوانها في الشاشتين الضريبيتين — بلا شريطٍ رمادي
+   داخل الأقسام البيضاء */
+QWidget#taxField { background: transparent; }
 /* ══ سلّم العناوين ══ */
 QLabel#title { font-size: 20px; font-weight: bold; color: @goldDim;
                padding: @sp_xs 2px 2px 2px; }

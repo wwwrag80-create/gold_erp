@@ -21,6 +21,26 @@ TYPE_ITEMS = [("عميل", "customer"), ("مورد", "supplier"),
               ("شريك", "partner"), ("موظف", "employee"),
               ("عامل", "worker"), ("جهة أخرى", "other")]
 
+
+def type_items():
+    """5.8.4: الأنواع الثابتة ثم ما أنشأه المستخدم («مكاتب الصيانة» …)."""
+    return [(lbl, code) for code, lbl in entities.all_types()]
+
+
+def _hint(t):
+    if t in HINTS:
+        return HINTS[t]
+    row = entities._et.get(t)
+    if not row:
+        return ""
+    side = ("ضمن الأصول المتداولة (مدينون لنا)" if row["side"] == "asset"
+            else "ضمن الخصوم المتداولة (دائنون لنا)")
+    bal = "رصيدين: نقدي ووزني (ذهب)" if row["balance_type"] == "both" \
+        else "رصيداً نقدياً"
+    return (f"نوعٌ أنشأته: يُنشأ حساب فرعي تحت «إجمالي {row['plural']}» "
+            f"({row['parent_code']}) {side}، يقبل {bal}، بكشف حسابٍ مفصّل"
+            " كالعملاء والموردين.")
+
 HINTS = {
     "customer": "يُنشأ حساب فرعي واحد تحت «إجمالي العملاء» يقبل رصيدين: "
                "نقدي ووزني (ذهب).",
@@ -53,9 +73,19 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.user = user
 
         self.etype = kit.ComboBox()
-        for label, val in TYPE_ITEMS:
+        for label, val in type_items():
             self.etype.addItem(label, val)
         self.etype.currentIndexChanged.connect(self._type_changed)
+        # 5.8.4: نوع جهةٍ جديد باسمه («مكاتب الصيانة») — تتفرّع تحته أسماؤه
+        self.b_new_type = kit.PushButton("+ نوع جهة جديد")
+        self.b_new_type.setObjectName("ghost")
+        self.b_new_type.setToolTip("أنشئ نوعاً جديداً كالعملاء أو الموردين —"
+                                   " يصير رسمياً في الدليل والميزانية وكل مكان")
+        self.b_new_type.clicked.connect(self.new_type)
+        type_row = QtWidgets.QHBoxLayout()
+        type_row.setContentsMargins(0, 0, 0, 0)
+        type_row.addWidget(self.etype, 1)
+        type_row.addWidget(self.b_new_type)
 
         self.name = kit.LineEdit()
         self.name.setPlaceholderText("اكتب الاسم — ستظهر الأسماء المشابهة تلقائياً")
@@ -88,7 +118,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         self.hint.setWordWrap(True)
 
         self.form = QtWidgets.QFormLayout()
-        self.form.addRow("نوع الجهة:", self.etype)
+        self.form.addRow("نوع الجهة:", type_row)
         self.form.addRow("الاسم:", self.name)
         self.form.addRow(self.similar)
         self.r_phone = self._row("رقم التواصل:", self.phone)
@@ -147,10 +177,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         # بنوعها ولكل نوعٍ مجموعه — فيُطابَق مجموعُ كل نوعٍ رصيدَ
         # مجموعته في ميزان المراجعة.
         self.f_type = kit.ComboBox()
-        self.f_type.addItem("كل الأنواع", None)
-        for label, val in TYPE_ITEMS:
-            self.f_type.addItem(label, val)
-        self.f_type.addItem("حساب داخلي", "internal")
+        self._fill_filter()
         self.f_type.currentIndexChanged.connect(self.refresh)
         self.f_search = kit.LineEdit()
         self.f_search.setPlaceholderText("بحث بالاسم أو الهاتف أو الرقم"
@@ -395,7 +422,7 @@ class EntitiesScreen(QtWidgets.QWidget):
         t = self.etype.currentData()
         is_emp = t in ("employee", "worker")
         is_partner = t == "partner"
-        is_trade = t in ("customer", "supplier", "other")
+        is_trade = t in entities.trade_types()
         self._show(self.r_phone, True)
         self._show(self.r_address, is_trade)
         self._show(self.r_vat, is_trade)
@@ -419,9 +446,44 @@ class EntitiesScreen(QtWidgets.QWidget):
                 f"الرصيد الوزني (ذهب جم {kv.label()}):")
             self.lbl_cash.setText("الرصيد النقدي — سلف سابقة (+ عليه):"
                                   if is_emp else "الرصيد النقدي (+ مدين / − دائن):")
-        self.hint.setText(HINTS.get(t, ""))
+        self.hint.setText(_hint(t))
         self._reload_completer()
         self._check_similar(self.name.text())
+
+    def _fill_filter(self):
+        keep = self.f_type.currentData()
+        self.f_type.blockSignals(True)
+        self.f_type.clear()
+        self.f_type.addItem("كل الأنواع", None)
+        for label, val in type_items():
+            self.f_type.addItem(label, val)
+        self.f_type.addItem("حساب داخلي", "internal")
+        i = self.f_type.findData(keep) if keep is not None else -1
+        self.f_type.setCurrentIndex(i if i >= 0 else 0)
+        self.f_type.blockSignals(False)
+
+    def _fill_types(self, select=None):
+        keep = select if select is not None else self.etype.currentData()
+        self.etype.blockSignals(True)
+        self.etype.clear()
+        for label, val in type_items():
+            self.etype.addItem(label, val)
+        i = self.etype.findData(keep)
+        self.etype.setCurrentIndex(i if i >= 0 else 0)
+        self.etype.blockSignals(False)
+        self._type_changed()
+
+    def new_type(self):
+        """نوع جهةٍ جديد — ثم يُختار فوراً لتُضاف أسماؤه تحته."""
+        from ui.entity_type_dialog import new_entity_type
+        code = new_entity_type(self, self.user.get("username", ""))
+        if not code:
+            return
+        self._fill_types(select=code)
+        self._fill_filter()
+        info(self, f"أُنشئ النوع «{entities.PLURALS[code]}» وحسابه الرقابي في"
+                   " شجرة الحسابات — اكتب الآن أسماء جهاته واحفظها.")
+        self.name.setFocus()
 
     def _reload_groups(self):
         """مجموعات النوع المختار: «بلا مجموعة» ثم مجموعاته بترتيب الدليل."""
@@ -517,6 +579,10 @@ class EntitiesScreen(QtWidgets.QWidget):
         from services import credit_guard
         # مجموعةٌ أُنشئت من شاشة «مجموعات العملاء» تظهر هنا فوراً
         self._reload_groups()
+        # ونوعٌ أُنشئ من شاشةٍ أخرى (خانة الحساب في الفواتير) يظهر هنا
+        if self.etype.count() != len(type_items()):
+            self._fill_types()
+            self._fill_filter()
         t = self.f_type.currentData()
         types = (t,) if t else None
         with db() as conn:
@@ -551,7 +617,7 @@ class EntitiesScreen(QtWidgets.QWidget):
                 return "—"
             return f"{_nf.f2(abs(v))}{unit} " + ("مدين" if v > 0 else "دائن")
 
-        order = [v for _l, v in TYPE_ITEMS] + ["internal"]
+        order = [v for _l, v in type_items()] + ["internal"]
         by_t = {}
         for d in items:
             by_t.setdefault(d["type"], []).append(d)
@@ -576,10 +642,8 @@ class EntitiesScreen(QtWidgets.QWidget):
                              _side(d["cash"], 2), _side(kv.g(d["gold"]), 3),
                              limit_txt, extra_of.get(d["id"], "—")))
                 self._row_ids.append(d["id"])
-            _pl = {"customer": "العملاء", "supplier": "الموردين",
-                   "partner": "الشركاء", "employee": "الموظفين",
-                   "worker": "العمال", "other": "الجهات الأخرى",
-                   "internal": "الحسابات الداخلية"}.get(tt, tt)
+            _pl = {"supplier": "الموردين", "employee": "الموظفين"}.get(
+                tt) or entities.PLURALS.get(tt, tt)
             rows.append(("", f"إجمالي {_pl} ({len(grp)})",
                          "", "", _side(tc, 2), _side(kv.g(tg), 3), "", ""))
             self._row_ids.append(None)
@@ -691,7 +755,7 @@ class EntityEditDialog(QtWidgets.QDialog):
         f.addRow("نوع الجهة:", self.type)
         f.addRow("الاسم:", self.name)
         f.addRow("رقم التواصل:", self.phone)
-        if t in entities.TRADE_TYPES:
+        if t in entities.trade_types():
             f.addRow("العنوان:", self.address)
             f.addRow("الرقم الضريبي:", self.vat)
         self.direct = kit.CheckBox(
@@ -739,6 +803,11 @@ class EntityEditDialog(QtWidgets.QDialog):
                    "other": "إجمالي الجهات الأخرى (أصول متداولة)",
                    "employee": "مستحقات الموظفين",
                    "worker": "رواتب العمال المستحقة"}.get(t1, "")
+            row = entities._et.get(t1)
+            if row:
+                grp = (f"إجمالي {row['plural']} ("
+                       + ("أصول متداولة" if row["side"] == "asset"
+                          else "خصوم متداولة") + ")")
             self.note.setText(
                 f"⚠ نقل النوع إعادةُ تصنيف: ينتقل حساب الجهة بقيوده ورصيده"
                 f" تحت «{grp}». لا يُمسّ قيدٌ سابق، ويظهر الرصيد في قسمه"

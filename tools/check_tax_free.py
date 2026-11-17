@@ -383,8 +383,8 @@ with db() as c:
           and bal(c, "5820")[1] == 1000.0, (net, vat, e1))
     reg = sp.tax_register(c, D, D)
     kinds = [r["kind_label"] for r in reg]
-    check("السجل الموحّد: ذهب ومرتجعه والمشتريات العامة",
-          "مشتريات عامة (مصروف)" in kinds and "مشتريات ذهب ضريبية" in kinds
+    check("السجل الموحّد: ذهب ومرتجعه والمشتريات النقدية",
+          "مشتريات نقدية (مصروف)" in kinds and "مشتريات ذهب ضريبية" in kinds
           and "مرتجع مشتريات ضريبي" in kinds, kinds)
     claim = round(sum((-1 if r["ret"] else 1) * r["claim"] for r in reg), 2)
     v = __import__("models.reports", fromlist=["x"]).vat_return(c, D, D)

@@ -178,6 +178,12 @@ def _field_height(widget, extra=14):
 
 
 def _measure_field(widget, extra):
+    # 5.8.4: خانةٌ في صفٍّ موحَّد الارتفاع (`tax_trade_kit.level`) تبقى عليه
+    # — فلا يُعيد قياسُ الخط بعد التهيئة خانةً أطول من جاراتها
+    lv = widget.property("kitLevel")
+    if lv:
+        widget.setFixedHeight(int(lv))
+        return int(lv)
     try:
         fm = QtGui.QFontMetrics(widget.font())
         h = max(33, fm.height() + extra)

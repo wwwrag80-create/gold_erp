@@ -101,10 +101,12 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
 
     def _build_header(self):
         box = tk.section("① بيانات الفاتورة")
-        self.supplier = search_combo("اكتب اسم المورد…")
+        # 5.8.4: أي حساب — مورد · عميل · جهة أخرى · نوعٌ أنشأه المستخدم
+        self.supplier = search_combo("اكتب اسم الحساب…")
         b_new = kit.PushButton("+ جديد")
         b_new.setObjectName("ghost")
-        b_new.setToolTip("مورد جديد في دليل جهات التعامل")
+        b_new.setToolTip("حسابٌ جديد: اختر نوعه (مورد · عميل · جهة …) واكتب"
+                         " اسمه")
         b_new.clicked.connect(self.new_supplier)
         self.sup_inv = kit.LineEdit()
         self.sup_inv.setPlaceholderText("إلزامي")
@@ -135,7 +137,8 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
         self.disc.valueChanged.connect(lambda *_: self._render())
         dest_f = tk.field("حساب المخزون", tk.hbox(self.dest, b_acc))
         dest_f.layout().addWidget(self.dest_bal)
-        r1 = tk.hbox(tk.field("المورد", tk.hbox(self.supplier, b_new)),
+        r1 = tk.hbox(tk.field("الحساب (مورد · عميل · جهة)",
+                              tk.hbox(self.supplier, b_new)),
                      tk.field("رقم فاتورة المورد", self.sup_inv),
                      tk.field("التاريخ", self.date),
                      tk.field("الدفع", self.pay), stretch=[5, 2, 1, 3])
@@ -547,7 +550,7 @@ class PurchaseInvoiceTab(QtWidgets.QWidget):
             rows = _parties(conn)
             self._reload_dest(conn)
             self.pay.reload(conn)
-        reload_combo(self.supplier, rows, lambda r: r["name"])
+        reload_combo(self.supplier, rows, tk.party_text)
 
 
 class PurchaseReturnTab(QtWidgets.QWidget):
@@ -803,7 +806,7 @@ class PurchaseRegisterTab(QtWidgets.QWidget):
     الفترات، وأعمدته:
     رقم الفاتورة · التاريخ · النوع · المورد · الوزن · الأجور · الخصم ·
     الضريبة · الإجمالي — وبجانبه «عرض»."""
-    COLS = ["رقم الفاتورة", "التاريخ", "النوع", "المورد", "فاتورة المورد",
+    COLS = ["رقم الفاتورة", "التاريخ", "النوع", "الحساب", "فاتورة المورد",
             "الوزن", "الأجور / المبلغ", "قيمة الذهب", "الخصم", "الضريبة",
             "الإجمالي", ""]
     C_GV, C_VIEW = 7, 11
@@ -963,7 +966,8 @@ class TaxPurchasesScreen(QtWidgets.QWidget):
                        wrap=tk.scroll)
         # 5.8.2: المشتريات العامة قسمٌ من هذه الشاشة (لم تعد شاشةً مستقلة)
         self._gen = self.tabs.count()
-        self._lazy.add("🛒  المشتريات العامة (مصروفات وأصول)",
+        # 5.8.4: «المشتريات النقدية» (كانت «العامة»)
+        self._lazy.add("💵  المشتريات النقدية (مصروفات وأصول)",
                        lambda: _general_purchases(user), wrap=tk.scroll)
         self._reg = self.tabs.count()
         self._lazy.add("☰  السجل", lambda: PurchaseRegisterTab(user))
@@ -991,7 +995,7 @@ class TaxPurchasesScreen(QtWidgets.QWidget):
         return self._lazy.get(self._reg)
 
     def load_document(self, source_id):
-        """فتح فاتورة مشتريات عامة للتعديل (من الكشوف وسجل التعديل)."""
+        """فتح فاتورة مشتريات نقدية للتعديل (من الكشوف وسجل التعديل)."""
         if self._gen is None:
             return
         self.tabs.setCurrentIndex(self._gen)

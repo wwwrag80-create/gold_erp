@@ -653,8 +653,8 @@ def _today():
 # ══════════════════════════ 5.8.1: السجل الموحّد ══════════════════════════
 REG_KINDS = (("", "كل المستندات"), ("purchase", "مشتريات ذهب ضريبية"),
              ("purchase_return", "مرتجع مشتريات ضريبي"),
-             ("general", "المشتريات العامة (مصروفات وأصول)"),
-             ("general_return", "مرتجع المشتريات العامة"))
+             ("general", "المشتريات النقدية (مصروفات وأصول)"),
+             ("general_return", "مرتجع المشتريات النقدية"))
 REG_LABEL = dict(REG_KINDS)
 
 
@@ -714,9 +714,9 @@ def tax_register(conn, date_from, date_to, q="", kind=None):
                 "src": "purchases", "id": r["id"], "no": r["purchase_no"],
                 "date": r["purchase_date"],
                 "kind": "general_return" if ret else "general",
-                "kind_label": ("مرتجع مشتريات عامة" if ret else
+                "kind_label": ("مرتجع مشتريات نقدية" if ret else
                                "شراء أصل ثابت" if asset else
-                               "مشتريات عامة (مصروف)"),
+                               "مشتريات نقدية (مصروف)"),
                 "party": r["supplier_name"] or "",
                 "sup_inv": r.get("supplier_invoice_no") or "",
                 "weight": None, "wages": round(base + disc, 2),

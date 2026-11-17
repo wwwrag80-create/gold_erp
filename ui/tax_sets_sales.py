@@ -147,10 +147,13 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.b_std.setChecked(True)
         self.b_std.toggled.connect(lambda *_: self._type_changed())
         self.date = date_edit()
-        self.customer = search_combo("اكتب اسم المشتري…")
+        # 5.8.4: أي حساب — عميل · مورد · جهة أخرى · نوعٌ أنشأه المستخدم
+        self.customer = search_combo("اكتب اسم الحساب…")
         self.customer.currentIndexChanged.connect(self._on_customer)
         self.b_new = kit.PushButton("+ جديد")
         self.b_new.setObjectName("ghost")
+        self.b_new.setToolTip("حسابٌ جديد: اختر نوعه (عميل · مورد · جهة …)"
+                              " واكتب اسمه")
         self.b_new.clicked.connect(self.new_customer)
         self.w_name = kit.LineEdit()
         self.w_name.setPlaceholderText("اسم المشتري (يُطبع على الفاتورة)")
@@ -179,7 +182,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.disc.valueChanged.connect(lambda *_: self._render())
         types = tk.hbox(self.b_std, self.b_simple, stretch=[0, 1])
         self.cust_field = tk.field(
-            "المحل / الشركة", tk.hbox(self.customer, self.walkin_box,
+            "الحساب", tk.hbox(self.customer, self.walkin_box,
                                       self.b_new, stretch=[3, 3, 0]))
         self.acc_field = tk.field("حساب المخزون", self.acc)
         self.acc_field.layout().addWidget(self.acc_bal)
@@ -306,7 +309,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             shown = [r for r in rows if pf.valid_vat(r.get("vat") or "")]
         else:
             shown = [{"id": WALKIN, "name": "👤 عميل نقدي — بلا حساب"}] + rows
-        reload_combo(self.customer, shown, lambda r: r["name"])
+        reload_combo(self.customer, shown,
+                     lambda r: tk.party_text(r) if r.get("type") else r["name"])
         if not self._std() and self.customer.currentData() is None:
             self.customer.setCurrentIndex(0)
 
@@ -326,7 +330,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.walkin_box.setVisible(walk)
         # 5.8.1: العميل النقدي يدفع في الحال — لا «آجل» في قائمة الدفع
         self.pay.set_allow_credit(not walk)
-        base = "المحل / الشركة" if self._std() else "العميل"
+        base = "الحساب"
         if walk:
             self.cust_field.caption.setText(
                 base + " — عميل نقدي: اكتب اسمه وجواله")
@@ -726,6 +730,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             walk = tx.walkin_customer(conn, False)
             self._parties = [
                 {"id": r["id"], "name": r["name"],
+                 "type": r["entity_type"],
                  "vat": (r["vat_number"] if "vat_number" in r.keys()
                          else "") or ""}
                 for r in entities.list_entities(conn)
