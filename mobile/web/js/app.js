@@ -2510,7 +2510,7 @@
         popShown = "web";
         const w = webWaiting;
         fetch("version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}))
-          .then((vj) => updatePop({ published: { version: vj.name || "" } }, () => w.postMessage("skipWaiting")));
+          .then((vj) => updatePop({ published: { version: vj.name || "", notes: vj.notes || "" } }, () => w.postMessage("skipWaiting")));
       }
       return;
     }
