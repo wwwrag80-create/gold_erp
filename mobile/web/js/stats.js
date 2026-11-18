@@ -91,6 +91,14 @@
     } catch (e) { return 0; }
   }
 
+  // فشل الإرسال (بلا شبكة مثلاً) والتطبيق مفتوح: محاولةٌ أخرى بعد 5 دقائق، وست مراتٍ على الأكثر في الجلسة
+  let retries = 0, retryTimer = 0;
+  function retry() {
+    if (retryTimer || retries >= 6) return;
+    retries++;
+    retryTimer = setTimeout(() => { retryTimer = 0; flush(true); }, 5 * 60 * 1000);
+  }
+
   let busy = false;
   async function flush(force) {
     if (busy) return;
@@ -110,17 +118,18 @@
       const ctl = root.AbortController ? new AbortController() : null;
       const to = ctl ? setTimeout(() => ctl.abort(), 15000) : 0;
       const r = await fetch(url, {
-        method: "POST", body, keepalive: true, credentials: "omit", cache: "no-store",
+        method: "POST", body, credentials: "omit", cache: "no-store",
         headers: { "Content-Type": "text/plain" }, signal: ctl ? ctl.signal : undefined,
       });
       if (to) clearTimeout(to);
-      if (!r.ok) return;
+      if (!r.ok) { retry(); return; }
       const cur = load() || st;
       cur.o = Math.max(0, (cur.o || 0) - sent);
       cur.t = now; cur.d = d; cur.v = v; cur.n = 0;
       save(cur);
     } catch (e) {
       /* بلا إنترنت أو خطأ: الفتحات محفوظة وتُرسل في المرة القادمة */
+      retry();
     } finally {
       busy = false;
     }
@@ -152,6 +161,11 @@
         else if (today() !== ((load() || {}).d || "")) flush(false);
       });
       root.addEventListener("online", () => flush(false));
+      // التطبيق مفتوحٌ طويلاً (أندرويد قد يُبقيه في الذاكرة أياماً): فحصٌ كل 10 دقائق وهو ظاهر —
+      // يُرسل فقط إن مضت 30 دقيقة على آخر رسالة أو تغيّر اليوم (فيُحسب نشطاً كل يوم يفتحه)
+      setInterval(() => {
+        if (root.document.visibilityState !== "hidden") flush(false);
+      }, 10 * 60 * 1000);
     } catch (e) { /* لا يمسّ التطبيق */ }
   }
 
