@@ -199,6 +199,60 @@ def doc_vat(net):
     return float(v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+# ══════════════════════════ 5.8.5: السعر شامل الضريبة ══════════════════════════
+# «أبغى الأجور مع الضريبة كذا»: يُكتب المبلغ شاملاً الضريبة، والنظام يفصله —
+# الصافي = الشامل ÷ 1.15 والباقي ضريبة. وهي طريقة إدخالٍ لا طريقة قيد: الفاتورة
+# تُرحَّل بطريقتها الأصل (الأجر فقط · سعر الطقم) بالصافي المفصول، فلا يتغيّر
+# شيءٌ في القيد ولا الإشعار الدائن ولا الإقرار ولا الفوترة الإلكترونية.
+INCL_PRICING = (("wage_incl", "الأجر شامل الضريبة — الذهب بالوزن", "wage"),
+                ("piece_incl", "سعر الطقم شامل الضريبة — بالريال", "piece"))
+INCL_BASE = {k: b for k, _l, b in INCL_PRICING}
+INCL_LABEL = {k: lbl for k, lbl, _b in INCL_PRICING}
+
+
+def incl_doc_net(total):
+    """صافي المستند (بالهللة) الذي يجعل «الصافي + ضريبته» = الإجمالي المطلوب.
+
+    الضريبة تُقرَّب على الصافي كله، فبعض الإجماليات لا يبلغها صافٍ بهللاتٍ
+    كاملة (1000 مثلاً: 869.57 ← 1000.01 و869.56 ← 999.99) — فيُختار الأقرب،
+    وعند التساوي الأقل على المشتري."""
+    t = round(float(total or 0), 2)
+    if t <= 0:
+        return 0.0
+    n0 = round(t / (1 + float(config.VAT_RATE)), 2)
+    best = None
+    for d in (0, -1, 1, -2, 2):
+        n = round(n0 + d / 100.0, 2)
+        if n < 0:
+            continue
+        diff = round(n + doc_vat(n) - t, 2)
+        key = (abs(diff), diff > 0)
+        if best is None or key < best[0]:
+            best = (key, n)
+    return best[1]
+
+
+def incl_nets(totals):
+    """صافي كل سطرٍ قبل الضريبة من مبلغه شاملاً الضريبة — ومجموعها صافي
+    المستند الذي يبلغ مجموع الشامل بالهللة (فرق التقريب على أكبر سطر)."""
+    xs = [round(max(0.0, float(x or 0)), 2) for x in totals]
+    if not xs:
+        return []
+    r = 1 + float(config.VAT_RATE)
+    nets = [round(x / r, 2) for x in xs]
+    diff = round(incl_doc_net(sum(xs)) - sum(nets), 2)
+    if diff:
+        i = max(range(len(nets)), key=lambda j: nets[j])
+        nets[i] = round(max(0.0, nets[i] + diff), 2)
+    return nets
+
+
+def incl_wage18(net, w18):
+    """الأجر للجرام (مكافئ 18، ست منازل) الذي يعطي صافي السطر بالهللة."""
+    w = float(w18 or 0)
+    return round(float(net or 0) / w, 6) if w > 0 else 0.0
+
+
 # ══════════════════════════ الإصدار ══════════════════════════
 def walkin_customer(conn, create=True):
     """حساب «عميل نقدي» للمبيعات المبسطة لأفرادٍ لا يُفتح لهم حساب — يُنشأ

@@ -22,6 +22,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ui import kit
 
+import config
 from database.database import db
 from models import entities, inventory
 from models import tax_invoices as tx
@@ -229,6 +230,11 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.e_rate.valueChanged.connect(self._rate_typed)
         self.e_net = kit.LineEdit()
         self.e_net.setReadOnly(True)
+        # 5.8.5: في «شامل الضريبة» يُكتب فيها إجمالي السطر شاملاً الضريبة
+        self.e_net.textEdited.connect(self._net_edited)
+        self._incl_total = None          # إجمالي السطر الشامل إن كُتب بيده
+        self._was_incl = False
+        self.l_net = tk.sub("صافي السطر")
         self.l_rate = tk.sub("الأجر/جم")
         self.btn_add = kit.PushButton("+ إضافة سطر")
         self.btn_add.clicked.connect(self.add_item)
@@ -244,7 +250,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         for c, (label, wd, st) in enumerate(fields):
             wd.setMinimumWidth(86)
             lbl = (self.l_rate if label is None else
-                   self.l_gp if label == "gp" else tk.sub(label))
+                   self.l_gp if label == "gp" else
+                   self.l_net if label == "صافي السطر" else tk.sub(label))
             g.addWidget(lbl, 0, c)
             g.addWidget(wd, 1, c)
             g.setColumnStretch(c, st)
@@ -362,9 +369,40 @@ class SetsInvoiceTab(QtWidgets.QWidget):
     def _k(self):
         return int(self.e_karat.currentData() or kv.active())
 
+    def _incl(self):
+        return self.pricing.inclusive()
+
     def _pricing_changed(self):
         piece, riyal = self.pricing.is_piece(), self.pricing.is_riyal()
-        self.l_rate.setText("سعر الطقم (ريال)" if piece else "الأجر/جم")
+        incl = self._incl()
+        if incl != self._was_incl:
+            # الأجر المقترح والأسطر المضافة تُنقل بين الصافي والشامل
+            f = 1 + config.VAT_RATE
+            self._wage18 = round(self._wage18 * f if incl
+                                 else self._wage18 / f, 6)
+            for it in self.items:
+                if incl:
+                    net = tk.line_calc(it["w18"], it["wage18"],
+                                       it["piece_price"], self._line_pricing(
+                                           it.get("gold_price") or 0,
+                                           it["karat"]))[2]
+                    it["incl"] = round(net * f, 2)
+                else:
+                    it.pop("incl", None)
+            self._was_incl = incl
+        self._incl_total = None
+        tail = " شامل الضريبة" if incl else ""
+        self.l_rate.setText(("سعر الطقم" + (tail or " (ريال)")) if piece
+                            else "الأجر/جم" + tail)
+        self.l_net.setText("إجمالي السطر شامل الضريبة" if incl and not piece
+                           else "صافي السطر")
+        self.e_net.setReadOnly(not (incl and not piece))
+        self.e_net.setToolTip("اكتب إجمالي السطر شاملاً الضريبة — يُحسب الأجر"
+                              " للجرام منه" if incl and not piece else "")
+        # الخصم النقدي لا يلزم مع المبلغ المتفق عليه شاملاً
+        if incl and self.disc.value():
+            self.disc.setValue(0)
+        self.disc.setEnabled(not incl)
         self.e_rate.blockSignals(True)
         self.e_rate.setValue(0 if piece else kv.rate(self._wage18, self._k()))
         self.e_rate.blockSignals(False)
@@ -406,6 +444,7 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self._wo = None
         self._avail18 = 0.0
         self._wage18 = 0.0
+        self._incl_total = None
         for f in (self.e_wo, self.e_model, self.e_net):
             f.clear()
         self.e_pieces.setValue(1)
@@ -450,7 +489,9 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self._wo = dict(wo)
         self._wo["bulk"] = bulk
         self._avail18 = float(avail)
-        self._wage18 = float(wo["wage_per_gram"] or 0)
+        self._wage18 = float(wo["wage_per_gram"] or 0) * (
+            1 + config.VAT_RATE if self._incl() else 1)
+        self._incl_total = None
         self.e_model.setText(wo["model_no"] or ("ايطالي" if bulk else "—"))
         self.e_pieces.setValue(_wo_pieces(wo))
         self.e_reg.blockSignals(True)
@@ -473,12 +514,45 @@ class SetsInvoiceTab(QtWidgets.QWidget):
     def _rate_typed(self, *_):
         if not self.pricing.is_piece():
             self._wage18 = kv.rate_store(self.e_rate.value(), self._k())
+        self._incl_total = None          # الأجر للجرام كُتب — الإجمالي منه
         self._line_changed()
+
+    def _incl_line(self):
+        """إجمالي سطر الإدخال شاملاً الضريبة (5.8.5)."""
+        if self.pricing.is_piece():
+            return round(self.e_rate.value(), 2)
+        if self._incl_total is not None:
+            return self._incl_total
+        from services import gold_math
+        return gold_math.total_wages(self._wage18, self._w18())
+
+    def _net_edited(self, txt):
+        """كُتب إجمالي السطر شاملاً — يُشتقّ منه الأجر للجرام."""
+        if not self._incl() or self.pricing.is_piece():
+            return
+        x = tk.num_text(txt)
+        self._incl_total = round(x, 2)
+        w18 = self._w18()
+        if w18 > 0:
+            self._wage18 = round(x / w18, 6)
+            self.e_rate.blockSignals(True)
+            self.e_rate.setValue(kv.rate(self._wage18, self._k()))
+            self.e_rate.blockSignals(False)
 
     def _line_changed(self, *_):
         if self._wo is None and not (self._free()
                                      and self.e_wo.text().strip()):
-            self.e_net.clear()
+            if not self.e_net.hasFocus():
+                self.e_net.clear()
+            return
+        if self._incl():
+            if self.e_net.hasFocus() and not self.pricing.is_piece():
+                return                   # يكتب الإجمالي الآن — لا يُكتب فوقه
+            x = self._incl_line()
+            f = 1 + config.VAT_RATE
+            self.e_net.setText(tk.m(x))
+            self.e_net.setToolTip(f"الصافي ≈ {tk.m(x / f)} + الضريبة ≈ "
+                                  f"{tk.m(x - x / f)}")
             return
         t = self._line_pricing()
         piece = self.e_rate.value() if self.pricing.is_piece() else 0
@@ -519,7 +593,17 @@ class SetsInvoiceTab(QtWidgets.QWidget):
             err(self, "اكتب سعر الطقم بالريال")
             self.e_rate.setFocus()
             return False
-        if free and not self.pricing.is_piece():
+        incl = None
+        if self._incl():
+            if self.e_net.hasFocus():
+                self._net_edited(self.e_net.text())
+            incl = self._incl_line()
+            if incl <= 0:
+                err(self, "اكتب المبلغ شاملاً الضريبة — الأجر للجرام أو إجمالي"
+                          " السطر")
+                self.e_rate.setFocus()
+                return False
+        elif free and not self.pricing.is_piece():
             self._wage18 = kv.rate_store(self.e_rate.value(), self._k())
         self.items.append({
             "wo_id": self._wo["id"], "wo_no": self._wo["work_order_no"],
@@ -532,6 +616,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                            else 0.0),
             "piece_price": (self.e_rate.value() if self.pricing.is_piece()
                             else 0.0), "wo": self._wo})
+        if incl is not None:
+            self.items[-1]["incl"] = incl
         self._clear_entry()
         self._render()
         return True
@@ -557,8 +643,18 @@ class SetsInvoiceTab(QtWidgets.QWidget):
         self.e_reg.setValue(kv.g(it["w18"], it["karat"]))
         self.e_reg.blockSignals(False)
         self.e_rate.blockSignals(True)
-        self.e_rate.setValue(it["piece_price"] if self.pricing.is_piece()
-                             else kv.rate(it["wage18"], it["karat"]))
+        if it.get("incl") is not None:
+            # شامل الضريبة: يعود المبلغ كما كُتب (والأجر للجرام منه)
+            x = float(it["incl"])
+            if self.pricing.is_piece():
+                self.e_rate.setValue(x)
+            else:
+                self._wage18 = round(x / it["w18"], 6) if it["w18"] else 0.0
+                self._incl_total = round(x, 2)
+                self.e_rate.setValue(kv.rate(self._wage18, it["karat"]))
+        else:
+            self.e_rate.setValue(it["piece_price"] if self.pricing.is_piece()
+                                 else kv.rate(it["wage18"], it["karat"]))
         self.e_rate.blockSignals(False)
         if it.get("gold_price"):
             self.e_gp.blockSignals(True)
@@ -571,6 +667,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
 
     def _render(self):
         t = self.tbl
+        if self._incl() and self.items:
+            tk.apply_incl(self.items, self.pricing.pricing(), "w18")
         # الصفوف تُفرَّغ أولاً فتذهب أزرارها معها — لا تبقى أزرار سطرٍ قديم
         t.setRowCount(0)
         t.setRowCount(len(self.items))
@@ -610,6 +708,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                                 self.disc.value())
         msgs = bad
         self.hint.setText("⚠ " + " · ".join(msgs) if msgs else (
+            tk.incl_hint(self.items, piece) if self._incl() and self.items
+            else
             "الذهب يُقيَّد على المشتري وزناً، والضريبة على الأجور وحدها"
             if not riyal else
             "الفاتورة كلها بالريال: الصافي = الوزن × (سعر الجرام + الأجر)"
@@ -641,6 +741,8 @@ class SetsInvoiceTab(QtWidgets.QWidget):
                     return
             if not self.items:
                 raise ValueError("أضف صنفاً واحداً على الأقل")
+            if self._incl():
+                tk.apply_incl(self.items, self.pricing.pricing(), "w18")
             for it in self.items:
                 t = self._line_pricing(it.get("gold_price") or 0, it["karat"])
                 _a, _b, _n, why = tk.line_calc(it["w18"], it["wage18"],

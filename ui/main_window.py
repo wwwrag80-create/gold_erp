@@ -310,6 +310,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quick.activated.connect(self._quick_open)
         try:
             self.quick.lineEdit().returnPressed.connect(self._quick_open)
+            # 5.8.5: الاختيار من قائمة الاقتراحات نفسها يفتح الكشف (كان
+            # يكتب الاسم في الخانة وحده فيُظنّ أن الكشف لم يظهر)
+            self.quick.completer().activated[QtCore.QModelIndex].connect(
+                lambda *_: QtCore.QTimer.singleShot(0, self._quick_open))
+            # والفهرس يتجدّد عند العودة إلى الخانة — فيظهر فيه الحساب
+            # الذي أُضيف بعد فتح البرنامج
+            self.quick.lineEdit().installEventFilter(self)
         except Exception:
             pass
         # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة — وبعد اتّضاح
@@ -1254,11 +1261,28 @@ class MainWindow(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(int(delay), t.start)
 
     def eventFilter(self, obj, ev):
-        if ev.type() in (QtCore.QEvent.MouseButtonPress,
-                         QtCore.QEvent.KeyPress, QtCore.QEvent.Wheel):
+        t = ev.type()
+        if t in (QtCore.QEvent.MouseButtonPress,
+                 QtCore.QEvent.KeyPress, QtCore.QEvent.Wheel):
             import time as _t
             self._last_input = _t.monotonic()
+        elif t == QtCore.QEvent.FocusIn:
+            self._quick_focus(obj)
         return super().eventFilter(obj, ev)
+
+    def _quick_focus(self, obj):
+        """5.8.5: فهرس البحث السريع يتجدّد عند التركيز عليه (إن مضى عليه
+        أكثر من ربع دقيقة والخانة فارغة) — فيظهر فيه الحساب الجديد."""
+        try:
+            q = self.__dict__.get("quick")
+            if q is None or obj is not q.lineEdit() \
+                    or q.lineEdit().text().strip():
+                return
+            import time
+            if time.monotonic() - self.__dict__.get("_quick_at", 0) > 15:
+                self._load_quick_index()
+        except Exception:
+            pass
 
     def _prebuild_step(self):
         import time as _t
@@ -2882,15 +2906,36 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.quick.lineEdit():
                 self.quick.lineEdit().clear()
             self.quick.blockSignals(False)
+            import time
+            self._quick_at = time.monotonic()
         except Exception:
             pass          # البحث السريع رفاهية لا تُعطّل الإقلاع
 
     def _quick_open(self, *_):
-        """يفتح كشف حساب الاسم المختار في دفتر الأستاذ."""
+        """يفتح كشف حساب الاسم المختار في دفتر الأستاذ.
+
+        5.8.5: «Enter» بعد كتابة الاسم كان يصل قبل أن تُفهم الكتابة —
+        فيفتح الحساب المختار قبله أو لا شيء. الآن يُفهم المكتوب أولاً
+        (`_resolve`)، ويُفتح كل اختيارٍ مرةً واحدة."""
+        import time
         try:
-            code = self.quick.currentData()
+            q = self.quick
+            txt = q.lineEdit().text().strip() if q.lineEdit() else ""
+            if txt and (q.currentIndex() < 0
+                        or q.itemText(q.currentIndex()) != txt):
+                q._resolve()
+            code = q.currentData()
             if code is None:
+                if txt:
+                    from ui.widgets.common import info
+                    info(self, f"لا حساب ولا جهة باسم «{txt}» — اكتب أول "
+                               "الحروف واختر من القائمة")
                 return
+            last = self.__dict__.get("_quick_last")
+            now = time.monotonic()
+            if last and last[0] == code and now - last[1] < 0.8:
+                return                     # النداء نفسه من إشارةٍ ثانية
+            self._quick_last = (code, now)
             self.open_ledger(code)
         except Exception as e:
             err(self, e)
@@ -3014,15 +3059,92 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
 
     def _start_models_link(self):
+        # 5.8.5: حارس الرابط يبدأ من الإقلاع (قبل الدخول) — وهنا احتياطاً
+        # إن لم يبدأ؛ وهو يعيد الرابط ويبقي الجهاز مستيقظاً ويراقبه
         try:
-            import threading
-            from services import models_web
-            threading.Thread(target=models_web.autostart, daemon=True,
-                             name="models-link").start()
+            from services import link_keeper
+            link_keeper.start()
+        except Exception:
+            try:
+                import threading
+                from services import models_web
+                threading.Thread(target=models_web.autostart, daemon=True,
+                                 name="models-link").start()
+            except Exception:
+                pass
+
+    # ══════════ 5.8.5: البرنامج في الخلفية ما دام رابط المدير يعمل ══════════
+    def _keep_in_background(self):
+        try:
+            from services import link_keeper
+            return (QtWidgets.QSystemTrayIcon.isSystemTrayAvailable()
+                    and link_keeper.active())
+        except Exception:
+            return False
+
+    def _ensure_tray(self):
+        tray = self.__dict__.get("_tray")
+        if tray is not None:
+            return tray
+        icon = self.windowIcon()
+        if icon.isNull():
+            icon = QtWidgets.QApplication.instance().windowIcon()
+        tray = QtWidgets.QSystemTrayIcon(icon, self)
+        tray.setToolTip("البرنامج يعمل في الخلفية — رابط المدير متاح")
+        menu = QtWidgets.QMenu(self)
+        menu.setLayoutDirection(QtCore.Qt.RightToLeft)
+        menu.addAction("فتح البرنامج", self._show_from_tray)
+        menu.addSeparator()
+        menu.addAction("خروج نهائي (يتوقف رابط المدير)",
+                       self._quit_from_tray)
+        tray.setContextMenu(menu)
+        tray.activated.connect(
+            lambda why: self._show_from_tray()
+            if why in (QtWidgets.QSystemTrayIcon.Trigger,
+                       QtWidgets.QSystemTrayIcon.DoubleClick) else None)
+        self._tray = tray
+        return tray
+
+    def _hide_to_tray(self):
+        try:
+            # ما لم يُرحَّل في الشاشات يُحفظ كما عند الإغلاق
+            from ui.widgets.draft_keeper import flush_all
+            flush_all()
         except Exception:
             pass
+        tray = self._ensure_tray()
+        tray.show()
+        self.hide()
+        if not self.__dict__.get("_tray_told"):
+            self._tray_told = True
+            tray.showMessage(
+                "البرنامج يعمل في الخلفية",
+                "رابط المدير يبقى يعمل. افتح البرنامج من أيقونته بجوار "
+                "الساعة، والخروج النهائي من قائمتها.",
+                QtWidgets.QSystemTrayIcon.Information, 6000)
+
+    def _show_from_tray(self):
+        self.showMaximized()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self):
+        self._quitting = True
+        self.showNormal()
+        self.close()
+        tray = self.__dict__.get("_tray")
+        if tray is not None:
+            tray.hide()
+        QtWidgets.QApplication.instance().quit()
 
     def closeEvent(self, event):
+        # 5.8.5: زرّ الإغلاق والرابط مفعّل ⇒ البرنامج يبقى في الخلفية (بجوار
+        # الساعة) فلا يتوقف الرابط — والخروج النهائي من قائمة الأيقونة
+        if event.spontaneous() and not self.__dict__.get("_quitting") \
+                and self._keep_in_background():
+            event.ignore()
+            self._hide_to_tray()
+            return
         # ضمان أخير: يُحفظ ترتيب القائمة وأسماؤها قبل الإغلاق
         try:
             self._save_nav_layout()

@@ -99,8 +99,16 @@ check("الرابط يفتح الرئيسية بلوحاتها", code == 200 and
       and h.count('class="tile') >= 9, code)
 check("«دليل الموديلات» أول لوحة، و«حركة الطقم» في «المزيد»",
       h.index("<b>دليل الموديلات</b>") < h.index("<b>الصناديق</b>")
-      < h.index("<b>فواتير / حركة المصنع</b>") < h.index("المزيد</div>")
+      < h.index("<b>فواتير / حركة المصنع</b>") < h.index('id="more"')
       < h.index("<b>حركة الطقم</b>") < h.index("<b>الوارد بتاريخ</b>"))
+# 5.8.5: لوحات «المزيد» مطويّة — تظهر بالنقر على «المزيد»، وفيها الشاشتان
+# الضريبيتان
+check("«المزيد» مطويٌّ افتراضاً (لوحاته تظهر بالنقر عليه)",
+      '<details class="more" id="more">' in h
+      and '<details class="more" id="more" open' not in h)
+check("وفيه «المبيعات الضريبية» و«المشتريات الضريبية» بقفلهما",
+      h.index('id="more"') < h.index("المبيعات الضريبية 🔒")
+      and "المشتريات الضريبية 🔒" in h and "/taxs" in h and "/taxp" in h)
 check("الرئيسية بلا بطاقات الأرقام (الذهب المشغول · المتاح للبيع · الصندوق"
       " النقدي · عمليات اليوم)", 'class="kpi' not in h
       and "الذهب المشغول" not in h and "المتاح للبيع" not in h
@@ -543,7 +551,7 @@ print("── 9) تحليل مبيعات العملاء · الأجر في ال�
 from models import sales_analytics as _sa  # noqa: E402
 from services import gold_math as _gm  # noqa: E402
 code, h = call("GET", "")
-_more = h[h.index("المزيد</div>"):]
+_more = h[h.index('id="more"'):]
 check("«تحليل مبيعات العملاء» في «المزيد» بعد «العملاء» مباشرة",
       _more.index("<b>العملاء — المبيعات والسداد</b>")
       < _more.index("<b>تحليل مبيعات العملاء</b>")

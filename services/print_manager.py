@@ -949,8 +949,7 @@ def _tpl_tax_invoice(conn, inv, items, cust):
     grand = float(inv["grand_total"] or 0)
     time_str = (inv.get("created_at") or "")[11:16]
     # سعر الجرام صار لكل سطرٍ بعياره (5.5.2) — في عمود الجدول لا في الرأس.
-    # 5.8.0: نوع التسعير بنصّه الكامل (الأجر فقط — الذهب بالوزن …)
-    price_txt = _ti.PRICING_LABEL.get(pricing, pricing)
+    # 5.8.5: نوع التسعير لا يُطبع على الفاتورة (طلب المالك) — شأنٌ داخلي
     pay = inv.get("pay_mode") or ""
     pairs = [("رقم المستند", en(inv["invoice_no"])),
              ("التاريخ", en(f"{inv['invoice_date']} {time_str}".strip())),
@@ -961,7 +960,6 @@ def _tpl_tax_invoice(conn, inv, items, cust):
         pairs.append(("الجوال", en(inv["buyer_phone"])))
     pairs.append(("الرقم الضريبي للبائع",
                   en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")))
-    pairs.append(("نوع التسعير", price_txt))
     if credit:
         ref = conn.execute("SELECT invoice_no, invoice_date FROM invoices"
                            " WHERE id=?", (inv.get("ref_invoice_id"),)
@@ -1048,7 +1046,6 @@ def _tpl_set_purchase(conn, doc_id):
                 *([thw("")] if riyal else []), thw(""),
                 *([thw(_w(d["gold_value"], 2))] if riyal else []),
                 thw(_w(d["net"], 2)))
-    price_txt = _ti.PRICING_LABEL.get(pricing, pricing)
     e = _ent(conn, d["supplier_id"])
     pairs = [("رقم المستند", en(d["doc_no"] or f"#{doc_id}")),
              ("التاريخ", en(d["doc_date"])),
@@ -1056,8 +1053,8 @@ def _tpl_set_purchase(conn, doc_id):
              ("الرقم الضريبي للمورد", en(e.get("vat_number") or "—")),
              ("فاتورة المورد", en(d["supplier_inv_no"] or "—")),
              ("الرقم الضريبي للمنشأة",
-              en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—")),
-             ("نوع التسعير", price_txt)]
+              en(getattr(config, "COMPANY_VAT_NUMBER", "") or "—"))]
+    # 5.8.5: نوع التسعير لا يُطبع على الفاتورة (طلب المالك)
     # 5.8.1: طريقة الدفع (آجل · الصندوق · البنك) — لا «من/إلى حساب»
     from models.accounts import pay_label
     pairs.append(("الدفع", pay_label(conn, d.get("pay_mode") or "credit",

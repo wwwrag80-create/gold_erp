@@ -159,6 +159,22 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             "أو من هنا مباشرةً")
         self.edit_lock.toggled.connect(self._edit_lock_toggled)
         g.addWidget(self.edit_lock, 5, 1, 1, 4)
+        # 5.8.5: الرابط يعمل دائماً — ولو انطفأت الشاشة أو أُغلقت النافذة
+        self.always = kit.CheckBox(
+            "الرابط يعمل دائماً: الجهاز لا ينام · البرنامج يبقى في الخلفية"
+            " · يبدأ مع ويندوز")
+        self.always.setToolTip(
+            "ما دام الرابط مفعّلاً: الشاشة تنطفئ وتُقفل كالمعتاد والجهاز يبقى"
+            " يعمل ومتصلاً، وإغلاق الغطاء على الكهرباء لا يُنيمه،\nوزرّ الإغلاق"
+            " يُخفي البرنامج بجوار الساعة بدل إيقافه، وبعد إعادة تشغيل الجهاز"
+            " يبدأ البرنامج والرابط وحدهما،\nوإن نام الجهاز ثم استيقظ عاد"
+            " الرابط بلا لمسة. يُرفع كل ذلك عند إيقاف الرابط أو هذا الخيار.")
+        self.always.toggled.connect(self._always_toggled)
+        g.addWidget(self.always, 6, 1, 1, 4)
+        self.always_state = QtWidgets.QLabel("")
+        self.always_state.setObjectName("cardSub")
+        self.always_state.setWordWrap(True)
+        g.addWidget(self.always_state, 7, 1, 1, 4)
         g.setColumnStretch(4, 1)
 
         acts = QtWidgets.QHBoxLayout()
@@ -215,11 +231,43 @@ class ModelsLinkDialog(QtWidgets.QDialog):
                                       manager_web.edits_locked(conn))
         except Exception:
             pass
+        try:
+            from services import link_keeper
+            self.always.blockSignals(True)
+            self.always.setChecked(link_keeper.always_on())
+            self.always.blockSignals(False)
+            self._always_label()
+        except Exception:
+            pass
         if st["enabled"]:
             self._run(mw.peek, self._show_peek, "جارٍ قراءة حال الرابط…")
         else:
             self._show(None, "<span style='color:#776b5e'>الرابط موقوف —"
                              " اضغط «تفعيل الرابط»</span>")
+
+    def _always_toggled(self, on):
+        try:
+            from services import link_keeper
+            link_keeper.set_always_on(on, self.user.get("username"))
+        except Exception as e:
+            err(self, e)
+        self._always_label()
+
+    def _always_label(self):
+        try:
+            from services import link_keeper
+            self.always_state.setText(link_keeper.status_text())
+        except Exception:
+            self.always_state.setText("")
+
+    def _keeper_now(self):
+        """بعد التفعيل أو الإيقاف: الجهاز والبدء مع ويندوز يتبعان الرابط."""
+        try:
+            from services import link_keeper
+            link_keeper.apply_now()
+        except Exception:
+            pass
+        QtCore.QTimer.singleShot(400, self._always_label)
 
     def _ops_toggled(self, on):
         try:
@@ -415,16 +463,20 @@ class ModelsLinkDialog(QtWidgets.QDialog):
             err(self, e)
             return
         uname = self.user.get("username")
-        self._run(lambda: mw.activate(uname), self._show_activate,
+
+        def _done(res):
+            self._show_activate(res)
+            self._keeper_now()
+        self._run(lambda: mw.activate(uname), _done,
                   "جارٍ تفعيل الرابط… (قد يستغرق ثواني)")
 
     def disable(self):
         uname = self.user.get("username")
-        self._run(lambda: mw.deactivate(uname),
-                  lambda _r: self._show(None, "<span style='color:#776b5e'>"
-                                              "الرابط موقوف — لا يُفتح من أي"
-                                              " مكان</span>"),
-                  "جارٍ الإيقاف…")
+        def _done(_r):
+            self._show(None, "<span style='color:#776b5e'>الرابط موقوف — لا"
+                             " يُفتح من أي مكان</span>")
+            self._keeper_now()
+        self._run(lambda: mw.deactivate(uname), _done, "جارٍ الإيقاف…")
 
     def new_link(self):
         if not ask(self, "إنشاء رابطٍ جديد؟\n\nالرابط القديم يبطل فوراً ولا"

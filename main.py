@@ -102,6 +102,13 @@ def main():
         code_overlay.boot_ok()
     except Exception:
         pass
+    # 5.8.5: رابط المدير يعمل من شاشة الدخول نفسها (بعد إعادة تشغيل الجهاز
+    # والبرنامج يبدأ مع ويندوز) — والحارس يبقي الجهاز مستيقظاً ويراقبه
+    try:
+        from services import link_keeper
+        link_keeper.start()
+    except Exception:
+        pass
 
     holder = wire_gate(app, gate)
     single_instance.set_target(lambda: holder.get("win") or gate)

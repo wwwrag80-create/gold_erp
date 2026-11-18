@@ -96,7 +96,8 @@ def _bring_up():
     if w is None:
         return
     try:
-        if w.isMinimized():
+        # 5.8.5: نافذةٌ مخفيّة بجوار الساعة (الرابط يعمل في الخلفية) تظهر
+        if w.isMinimized() or not w.isVisible():
             w.showMaximized()
         w.raise_()
         w.activateWindow()

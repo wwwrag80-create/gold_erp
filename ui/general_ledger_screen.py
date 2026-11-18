@@ -263,6 +263,14 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         """تُستدعى من لوحة التحكم عند الضغط على بطاقة — تفتح الكشف
         مفلتراً جاهزاً على حساب البطاقة."""
         idx = self.account.findData(account_code)
+        if idx < 0:
+            # 5.8.5: حسابٌ أُضيف بعد بناء الشاشة — تُحدَّث القائمة ثم يُختار
+            # (كان الكشف يبقى على الحساب السابق أو فارغاً)
+            try:
+                self.refresh()
+            except Exception:
+                pass
+            idx = self.account.findData(account_code)
         if idx >= 0:
             self.account.setCurrentIndex(idx)
         self.load()

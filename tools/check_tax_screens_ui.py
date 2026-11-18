@@ -132,6 +132,28 @@ inv.post()
 app.processEvents()
 ok("شراء ذهب من «مكتب صيانة» (نوعٌ أنشأه المستخدم)",
    MSGS and not MSGS[-1].startswith("ERR"), MSGS[-1:])
+inv.pricing.mode.setCurrentIndex(inv.pricing.mode.findData("piece_incl"))
+app.processEvents()
+inv.supplier.setCurrentIndex(inv.supplier.findData(M1))
+inv.sup_inv.setText("M-2")
+inv.e_wo.setText("BC-9")
+inv.e_reg.setValue(5)
+inv.e_gp.setValue(100)       # قيمة الذهب 500 (للفصل)
+inv.e_rate.setValue(1000)       # سعر الطقم شاملاً الضريبة
+inv.add_item()
+app.processEvents()
+ok("شراءٌ بسعر الطقم شاملاً: 1,000 ← صافي 869.56 + ضريبة 130.43 (أقرب هللة)",
+   inv.totals.text(inv.totals.c_net) == "869.56"
+   and inv.totals.text(inv.totals.c_total) == "999.99",
+   (inv.totals.text(inv.totals.c_net), inv.totals.text(inv.totals.c_total)))
+inv.post()
+app.processEvents()
+with db(readonly=True) as c:
+    pv = c.execute("SELECT * FROM set_purchases ORDER BY id DESC LIMIT 1"
+                   ).fetchone()
+ok("ورُحّل بطريقة «سعر الطقم» بالصافي", pv and pv["pricing"] == "piece"
+   and abs(float(pv["total"]) - 999.99) < 0.005, dict(pv) if pv else MSGS[-1:])
+inv.pricing.mode.setCurrentIndex(inv.pricing.mode.findData("wage"))
 
 print("— المشتريات النقدية")
 pw.tabs.setCurrentIndex(2)
@@ -200,6 +222,48 @@ si.post()
 app.processEvents()
 ok("بيعٌ ضريبي لجهةٍ من النوع الجديد", MSGS
    and not MSGS[-1].startswith("ERR"), MSGS[-1:])
+
+print("— 5.8.5: السعر شامل الضريبة")
+modes = [si.pricing.mode.itemData(i) for i in range(si.pricing.mode.count())]
+ok("طريقتا «شامل الضريبة» في قائمة التسعير (بيعاً وشراءً)",
+   "wage_incl" in modes and "piece_incl" in modes
+   and inv.pricing.mode.findData("wage_incl") >= 0, modes)
+si.pricing.mode.setCurrentIndex(si.pricing.mode.findData("wage_incl"))
+app.processEvents()
+ok("العنوانان: «الأجر/جم شامل الضريبة» و«إجمالي السطر شامل الضريبة»",
+   "شامل الضريبة" in si.l_rate.text() and "شامل" in si.l_net.text()
+   and not si.e_net.isReadOnly() and not si.disc.isEnabled(),
+   (si.l_rate.text(), si.l_net.text()))
+si.customer.setCurrentIndex(si.customer.findData(M1))
+si.e_wo.setText("BC-2")
+si.e_reg.setValue(10)
+si.e_net.setText("1150")
+si._net_edited("1150")          # كتب إجمالي السطر شاملاً الضريبة
+ok("الأجر للجرام يُشتقّ من الإجمالي (115 شاملاً)",
+   abs(si.e_rate.value() - 115) < 0.01, si.e_rate.value())
+si.add_item()
+si.e_wo.setText("BC-3")
+si.e_reg.setValue(4)
+si.e_rate.setValue(57.5)        # وكتب الأجر للجرام شاملاً
+si.add_item()
+app.processEvents()
+ok("الإجمالي = ما كُتب شاملاً (1,380.00) والضريبة مفصولة (180.00)",
+   si.totals.text(si.totals.c_total) == "1,380.00"
+   and si.totals.text(si.totals.c_vat) == "180.00"
+   and si.totals.text(si.totals.c_net) == "1,200.00",
+   (si.totals.text(si.totals.c_net), si.totals.text(si.totals.c_vat),
+    si.totals.text(si.totals.c_total)))
+snap(sw, "w_sale_incl")
+si.post()
+app.processEvents()
+with db(readonly=True) as c:
+    lv = c.execute("SELECT * FROM invoices ORDER BY id DESC LIMIT 1"
+                   ).fetchone()
+ok("رُحّلت بطريقة «الأجر فقط» بالصافي: 1,200 + 180 = 1,380",
+   lv["pricing"] == "wage" and round(lv["total_wages"], 2) == 1200
+   and round(lv["vat_amount"], 2) == 180
+   and round(lv["grand_total"], 2) == 1380, dict(lv))
+si.pricing.mode.setCurrentIndex(si.pricing.mode.findData("wage"))
 
 print("— «+ جديد»: حسابٌ بنوعه")
 from ui.tax_sales_screen import NewCustomerDialog  # noqa: E402

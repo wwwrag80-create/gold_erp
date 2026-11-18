@@ -350,6 +350,9 @@ def nav_items(base):
         ("analytics", "تحليل المبيعات", _link(base, "/analytics"),
          "analytics"),
         ("pnl", pnl, _link(base, tab="pnl"), "pnl"),
+        # 5.8.5: الشاشتان الضريبيتان كما في البرنامج
+        ("taxs", "المبيعات الضريبية", _link(base, "/taxs"), "sale"),
+        ("taxp", "المشتريات الضريبية", _link(base, "/taxp"), "purchase"),
     ]
 
 
@@ -710,7 +713,7 @@ _LOCK_JS = r"""
 # ══════════════════════════════════════════════════════════════════
 
 ROUTES = ("home", "sets", "boxes", "moves", "stmt", "analytics", "ops",
-          "doc", "api")
+          "doc", "api", "taxs", "taxp", "tax")
 
 
 def handles(rest, query):
@@ -755,6 +758,16 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
                   " SameSite=Strict")
             return _resp(303, "", headers={"Location": base + "/ops",
                                            "Set-Cookie": ck})
+        if head == "tax" and len(rest) == 3 and rest[1] == "post":
+            # 5.8.5: المستندات الضريبية خلف رمز لوحة تسجيل العمليات نفسه
+            with db(readonly=True) as conn:
+                if not ops_unlocked(conn, headers, csrf):
+                    return _json({"ok": False, "locked": True,
+                                  "unlock": base + "/ops/unlock",
+                                  "error": "لوحة تسجيل العمليات برمز — "
+                                           "أدخل رمزها أولاً"})
+            from services import tax_web
+            return _json(tax_web.post(rest[2], data))
         if head == "api" and len(rest) >= 2 and rest[1] in (
                 "post", "edit", "delete", "merge"):
             # كل كتابةٍ من الرابط خلف رمز اللوحة (إن ضُبط)
@@ -780,7 +793,24 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
             return _json(api(conn, rest[1:], query))
     if head == "doc":
         return doc_page(rest[1:], base, query)
+    if head == "tax":
+        from services import tax_web
+        with db(readonly=True) as conn:
+            if rest[1:2] == ["api"]:
+                return _json(tax_web.api(conn, rest[2:], query))
+        return _resp(404, _mw()._GONE)
     with db(readonly=True) as conn:
+        if head in ("taxs", "taxp"):
+            # 5.8.5: المبيعات والمشتريات الضريبية — خلف رمز لوحة العمليات
+            from services import tax_web
+            if not ops_unlocked(conn, headers, csrf) and ops_enabled(conn):
+                nxt = base + "/" + head + (
+                    f"?tab={query.get('tab')}" if str(
+                        query.get("tab") or "").isalpha() else "")
+                return _resp(200, unlock_page(base, csrf,
+                                              _safe_next(base, nxt)))
+            return _resp(200, tax_web.page(conn, base, csrf, head, query,
+                                           has_ops_pin(conn)))
         if head == "home":
             return _resp(200, home(conn, base, csrf))
         if head == "sets":
@@ -838,13 +868,17 @@ def search_accounts(conn, q, postable=False, limit=14):
         "SELECT id, code, name, is_postable FROM accounts WHERE is_active=1"
         + (" AND is_postable=1" if postable else "")
         + " ORDER BY code").fetchall()
+    # 5.8.5: حساب الجهة باسمٍ مسبوقٍ بنوعها («عميل: محمد») — فيُطابَق
+    # اسمها من أوله كذلك، وكانت تُدفع خلف أربعة عشر اسماً فلا تظهر
     starts, has = [], []
     for r in rows:
         name, code = _norm(r["name"]), str(r["code"])
-        if code.startswith(n) or name.startswith(n):
+        core = _norm(str(r["name"]).split(":", 1)[-1])
+        if code.startswith(n) or name.startswith(n) or core.startswith(n):
             starts.append(r)
         elif n in name or n in code:
             has.append(r)
+    limit = max(limit, 30)
     out = []
     for r in (starts + has)[:limit]:
         out.append({"id": r["id"], "code": r["code"], "name": r["name"],
@@ -1017,13 +1051,32 @@ def home(conn, base, csrf):
         tile("analytics", AN_TITLE, "المبيعات · المرتجعات · المباع الفعلي ·"
              " التحصيل — لكل عميل كشاشة البرنامج", _link(base, "/analytics")),
         tile("pnl", pnl, "لوحة الأرباح كما في البرنامج",
-             _link(base, tab="pnl"))))
+             _link(base, tab="pnl")),
+        # 5.8.5: الشاشتان الضريبيتان — خلف رمز لوحة تسجيل العمليات
+        tile("sale", "المبيعات الضريبية 🔒", "فاتورة ضريبية · مرتجع (إشعار "
+             "دائن) · السجل — كشاشة البرنامج", _link(base, "/taxs")),
+        tile("purchase", "المشتريات الضريبية 🔒", "مشتريات ذهب · مرتجع · "
+             "المشتريات النقدية · السجل", _link(base, "/taxp"))))
+    # 5.8.5: لوحات «المزيد» مطويّة — تظهر بالنقر على «المزيد» (ويُحفظ اختيارك)
     inner = (f'<div class="ptitle"><h2>{icon("home", 22)}الرئيسية</h2>'
              f'<span class="hint">اختر لوحةً — كل الأرقام من جهاز المصنع '
              f'لحظة الفتح</span></div>'
              f'<div class="tiles">{main}</div>'
-             f'<div class="sect">المزيد</div><div class="tiles">{more}</div>')
-    return frame(base, "home", "الرئيسية", inner, csrf)
+             f'<details class="more" id="more"><summary class="sect">المزيد'
+             f' <span class="mhint">— اضغط لإظهار اللوحات</span></summary>'
+             f'<div class="tiles">{more}</div></details>')
+    css = (".more>summary{cursor:pointer;list-style:none;user-select:none;"
+           "display:flex;align-items:center;gap:8px}"
+           ".more>summary::-webkit-details-marker{display:none}"
+           ".more>summary::before{content:'◀';font-size:12px;transition:"
+           "transform .15s}.more[open]>summary::before{transform:"
+           "rotate(-90deg)}.more .mhint{font-weight:500;font-size:13px;"
+           "opacity:.7}.more[open] .mhint{display:none}")
+    js = ("(function(){var d=document.getElementById('more');if(!d)return;"
+          "try{if(localStorage.getItem('mw_more')==='1')d.open=true;}"
+          "catch(_){}d.addEventListener('toggle',function(){try{"
+          "localStorage.setItem('mw_more',d.open?'1':'0');}catch(_){}});})();")
+    return frame(base, "home", "الرئيسية", inner, csrf, css=css, js=js)
 
 
 # ══════════════════════════════════════════════════════════════════

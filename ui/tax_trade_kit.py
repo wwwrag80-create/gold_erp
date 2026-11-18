@@ -106,10 +106,16 @@ class PricingBox(QtWidgets.QWidget):
         self.mode = kit.ComboBox()
         for key, label in tx.TAX_PRICING:
             self.mode.addItem(label, key)
+        # 5.8.5: السعر شامل الضريبة — يُكتب ما اتُّفق عليه مع الضريبة ويُفصل
+        for key, label, _b in tx.INCL_PRICING:
+            self.mode.addItem(label, key)
         self.mode.setToolTip(
             "الأجر فقط: الذهب يُقيَّد وزناً والضريبة على الأجور\n"
             "جرام + أجر: الوزن × (سعر الجرام + الأجر) بالريال — الضريبة على"
-            " الإجمالي\nبالقطعة: سعر الطقم بالريال — الضريبة على الإجمالي")
+            " الإجمالي\nبالقطعة: سعر الطقم بالريال — الضريبة على الإجمالي\n"
+            "شامل الضريبة: تكتب الأجر (أو سعر الطقم) كما اتفقت عليه مع "
+            "الضريبة،\nوالنظام يفصله تلقائياً: الصافي = المبلغ ÷ 1.15 والباقي"
+            " ضريبة")
         self.price = mspin()
         self.price.setToolTip("سعر جرام الذهب بالعيار المختار بجانبه — به "
                               "تُحسب قيمة الذهب بالريال")
@@ -136,8 +142,18 @@ class PricingBox(QtWidgets.QWidget):
             wd.setVisible(riyal)
         self.changed.emit()
 
-    def pricing(self):
+    def choice(self):
+        """الاختيار كما في القائمة (ومنه «شامل الضريبة»)."""
         return self.mode.currentData() or "wage"
+
+    def inclusive(self):
+        """هل تُكتب المبالغ شاملةً الضريبة؟ (5.8.5)"""
+        return self.choice() in tx.INCL_BASE
+
+    def pricing(self):
+        """طريقة القيد: «شامل الضريبة» يُرحَّل بطريقته الأصل بالصافي."""
+        c = self.choice()
+        return tx.INCL_BASE.get(c, c)
 
     def is_piece(self):
         return self.pricing() == "piece"
@@ -166,7 +182,10 @@ class PricingBox(QtWidgets.QWidget):
                      "price_karat": v["price_karat"] or 18,
                      "ref_invoice_id": None, "reason": ""}, str(e))
 
-    def set_values(self, pricing, gold_price=0.0, karat=0):
+    def set_values(self, pricing, gold_price=0.0, karat=0, inclusive=False):
+        if inclusive:
+            pricing = next((k for k, _l, b in tx.INCL_PRICING
+                            if b == (pricing or "wage")), pricing)
         i = self.mode.findData(pricing or "wage")
         self.mode.setCurrentIndex(i if i >= 0 else 0)
         self.price.setValue(float(gold_price or 0))
@@ -176,10 +195,44 @@ class PricingBox(QtWidgets.QWidget):
 
     def label(self):
         p = self.values()
+        if self.inclusive():
+            return tx.INCL_LABEL[self.choice()]
         if p["pricing"] in tx.RIYAL and self.with_price:
             return (f"{tx.PRICING_LABEL[p['pricing']]} — سعر الجرام "
                     f"{m(p['gold_price'])} عيار {p['price_karat']}")
         return tx.PRICING_LABEL[p["pricing"]]
+
+
+def apply_incl(items, base, wkey):
+    """5.8.5: أسطرٌ بمبالغها شاملةً الضريبة (`incl`) ← صافي كل سطر: أجر
+    الجرام (`wage18`) أو سعر الطقم (`piece_price`) — ومجموعها يبلغ المطلوب
+    بالهللة (`tx.incl_nets`)."""
+    nets = tx.incl_nets([it.get("incl") or 0 for it in items])
+    for it, n in zip(items, nets):
+        if base == "piece":
+            it["piece_price"] = n
+        else:
+            it["wage18"] = tx.incl_wage18(n, it.get(wkey) or 0)
+    return nets
+
+
+def incl_hint(items, piece):
+    """سطر التوضيح في وضع «شامل الضريبة»."""
+    tot = round(sum(float(it.get("incl") or 0) for it in items), 2)
+    what = "سعر الطقم" if piece else "الأجور"
+    return (f"{what} مكتوبةٌ شاملةً الضريبة ({m(tot)} ريال) — والنظام فصلها: "
+            f"الصافي = المبلغ ÷ {1 + config.VAT_RATE:g} والباقي ضريبة"
+            + ("" if piece else "، والذهب يُقيَّد على الطرف وزناً"))
+
+
+def num_text(txt):
+    """رقمٌ من نصٍّ يكتبه المستخدم (بالأرقام العربية أو الإنجليزية)."""
+    t = str(txt or "").strip().translate(str.maketrans(
+        "٠١٢٣٤٥٦٧٨٩٫", "0123456789.")).replace(",", "").replace("،", "")
+    try:
+        return max(0.0, float(t))
+    except ValueError:
+        return 0.0
 
 
 def line_pricing(pricing, gold_price=0.0, karat=0):
