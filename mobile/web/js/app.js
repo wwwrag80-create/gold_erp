@@ -233,10 +233,8 @@
   function docSummary(d) {
     const k = pk(D.shopById(st(), d.shopId));
     if (isInvKind(d.kind)) {
-      // فاتورةٌ بالماس وحده (بلا وزنٍ ولا أجور عمل): «ماس فقط» — وتفصيله في سطره
-      // تحتها (1.15.0: قيمة الماس ضمن أجورها، فالعبرة بأجور العمل لا بالإجمالي)
-      const work = (d.lines || []).reduce((s, l) => s + Number(l.wageOnly ? l.amount || 0 : l.wages || 0), 0);
-      if (!(d.totalW18 > 0) && !(work > 0) && (D.diamondOf(d) > 0 || D.diamondValueOf(d) > 0)) return T("ماس فقط");
+      // فاتورةٌ بالماس وحده (بلا وزنٍ ولا أجور): «ماس فقط» — وتفصيله في سطره تحتها
+      if (!(d.totalW18 > 0) && !(d.grand > 0) && (D.diamondOf(d) > 0 || D.diamondValueOf(d) > 0)) return T("ماس فقط");
       return T("{0} {1} · أجور {2}", gw(d.totalW18, k), unitK(k), f2(d.grand));
     }
     const parts = [];
@@ -1309,9 +1307,7 @@
               cell(T("الوزن"), li.reg18 > 0 ? gw(li.reg18, lk) : "—", icoGold),
               cell(T("💎 الماس"), li.diamond > 0 ? f2(li.diamond) : "—"),
               li.diamondValue > 0 ? cell(T("قيمة الماس"), f2(li.diamondValue)) : null,
-              // 1.15.0: قيمة الماس تُعدّ أجوراً — الأجور هنا شاملةٌ لها
-              cell(li.diamondValue > 0 && li.diaInWages ? T("الأجور مع الماس") : T("الأجور"),
-                f2(D.lineWages(li)), icoCash))));
+              cell(T("الأجور"), f2(li.wages), icoCash))));
       });
       const t = D.totals(inv.lines, inv.vat);
       const sets = inv.lines.filter((l) => !l.wageOnly).length;
@@ -1322,8 +1318,8 @@
       totalsBox.append(row(T("عدد الأطقم"), String(sets)),
         row(T("إجمالي الوزن (عيار {0})", k), gw(t.totalW18, k), "", icoGold),
         dia0 > 0 ? row(T("💎 إجمالي الماس (قيراط)"), f2(dia0)) : null,
-        dv0 > 0 ? row(T("💎 قيمة الماس (ريال) — ضمن الأجور"), f2(dv0)) : null,
-        row(dv0 > 0 ? T("إجمالي الأجور (مع قيمة الماس)") : T("إجمالي الأجور"), f2(t.wages), "", icoCash));
+        dv0 > 0 ? row(T("💎 قيمة الماس (ريال) — للكشف فقط"), f2(dv0)) : null,
+        row(T("إجمالي الأجور"), f2(t.wages), "", icoCash));
       if (inv.vat) totalsBox.append(row(T("ضريبة 15% على الأجور"), f2(t.vatAmt), "", icoCash));
       totalsBox.append(row(T("الإجمالي"), f2(t.grand) + T(" ريال"), "grand", icoCash));
       if (inv.shopId) {
@@ -1403,9 +1399,9 @@
       h("div", { class: "grid2" }, field(T("الطقم (اختياري)"), woIn), field(T("العيار"), karatSel)),
       h("div", { style: { marginTop: "2px" } }, detailsBtn), detailsBox,
       h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("الوزن (جم)"), reg), field(T("الأجور (ريال)"), wagesIn)),
-      // قيمة الماس بعد خانته مباشرة — 1.15.0: تُضاف إلى الأجور (وتظهر في كشف الماس)
+      // قيمة الماس بعد خانته مباشرة — للعرض في كشف الماس فقط
       h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("💎 الماس (قيراط)"), dia),
-        field(T("💎 قيمة الماس (ريال) — تُضاف للأجور"), diaVal)),
+        field(T("💎 قيمة الماس (ريال)"), diaVal)),
       h("div", { class: "fld", style: { marginTop: "8px" } }, h("span", null, T("صور الطقم")), photoBox, photoIn),
       photoStrip,
       // الأزرار قبل الإشعار: الإشعار يظهر عند مغادرة خانة الطقم —
@@ -1841,7 +1837,7 @@
       return;
     }
     if (mode === "gold") v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: {0} الذهب (جم عيار {1}) فوق، و{2} النقد والأجور (ريال) تحته.", P.ICO_GOLD, k, P.ICO_CASH) }));
-    else v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: 💎 الماس (قيراط) فوق، و{0} قيمة الماس (ريال) تحته — وهي محسوبةٌ ضمن الأجور في كشف الذهب.", P.ICO_CASH) }));
+    else v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: 💎 الماس (قيراط) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.", P.ICO_CASH) }));
     v.append(h("table", { class: "st-table" + (mode === "diamond" ? " dia" : " gold") },
       h("thead", null, h("tr", null, ...head.map((x) => h("th", null, x)))), tbody));
     if (n) v.append(h("div", { class: "muted small st-hint" }, T("اضغط على أي عملية لمعاينتها وصورها، ومنها تعديلها")));

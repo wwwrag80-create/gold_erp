@@ -162,13 +162,11 @@ function check(name, cond, detail) {
   await tap("button:has-text('+ إضافة')");
   await page.waitForTimeout(250);
   const l1 = page.locator(".line").first();
-  // 1.15.0: قيمة الماس تُضاف إلى الأجور — أجر المصنع 12 × 8 = 96 + الماس 750 = 846
-  check("أجر المصنع المتفق عليه (96) مع قيمة الماس (750) = 846 في السطر", (await l1.innerText()).includes("846.00") &&
-    (await l1.innerText()).includes("الأجور مع الماس"), await l1.innerText());
+  check("أجر المصنع المتفق عليه: 12 × 8 = 96", (await l1.innerText()).includes("96.00"));
   check("والسطر بصورته (وعليها +1) وماسه", (await l1.locator("img.thumb").count()) === 1 && (await l1.locator(".thumb-n").innerText()) === "+1" &&
     (await l1.innerText()).includes("0.50"));
-  check("وقيمة ماسه 750.00 ظاهرة — وهي ضمن إجمالي الأجور (846.00)", (await l1.innerText()).includes("750.00") &&
-    (await text(".totals")).includes("750.00") && (await page.locator(".totals .spread", { hasText: "إجمالي الأجور" }).innerText()).includes("846.00"));
+  check("وقيمة ماسه 750.00 — ولا تدخل الأجور (96.00)", (await l1.innerText()).includes("750.00") &&
+    (await text(".totals")).includes("750.00") && (await page.locator(".totals .spread", { hasText: "إجمالي الأجور" }).innerText()).includes("96.00"));
   check("وخانة الصورة تفرغ للسطر التالي", (await page.locator(".photo-pick img.thumb").count()) === 0);
   await fill("الوزن (جم)", "20");
   await shot("purchase_editor");
@@ -328,9 +326,7 @@ function check(name, cond, detail) {
   const ct = (await text(".wide-tile.cus")).replace(/\s+/g, " ");
   // الأمانة: 25 − 5 − 7 = 13 ذهباً، و500 − 100 − 300 = 100 أجوراً
   check("لي عند العملاء: 13.00 وأجور 100.00", ct.includes("لي عند العملاء") && ct.includes("13.00") && ct.includes("100.00"), ct);
-  // أجور المصنع 256 + قيمة الماس 750 − 200 = 806
-  check("وعليّ للمصانع بعد السداد: 77.33 ونقد 806.00", (await text(".wide-tile.fac")).includes("77.33") && (await text(".wide-tile.fac")).includes("806.00"),
-    await text(".wide-tile.fac"));
+  check("وعليّ للمصانع بعد السداد: 77.33 ونقد 56.00", (await text(".wide-tile.fac")).includes("77.33") && (await text(".wide-tile.fac")).includes("56.00"));
   await page.locator(".wide-tile.cus").click();
   await page.waitForSelector(".sheet");
   const cs1 = (await text(".sheet")).replace(/\s+/g, " ");
@@ -438,8 +434,8 @@ function check(name, cond, detail) {
   await page.goto(url + `#/statement/${facId}`);
   await page.waitForTimeout(200);
   const fk = await text(".st-bal");
-  // 50 + 32 − (4 جم عيار 21 = 4.667) = 77.33 عليّ · أجور 256 + الماس 750 − 200 = 806 عليّ
-  check("كشف المصنع: 77.33 جم و806.00 ريال عليّ (قيمة الماس ضمن الأجور)", fk.includes("77.33 جم عيار 18 عليّ") && fk.includes("806.00 ريال عليّ"), fk);
+  // 50 + 32 − (4 جم عيار 21 = 4.667) = 77.33 عليّ · أجور 256 − 200 = 56 عليّ
+  check("كشف المصنع: 77.33 جم و56.00 ريال عليّ", fk.includes("77.33 جم عيار 18 عليّ") && fk.includes("56.00 ريال عليّ"), fk);
   await shot("factory_statement");
 
   // كشف حساب المحل
@@ -523,10 +519,10 @@ function check(name, cond, detail) {
     const id = App.state.shops.find((x) => x.name === "محل النخبة").id;
     const x = PrintDoc.statementHtml(App.state, id, null, null, "diamond");
     return x.includes("كشف حساب الماس") && x.includes("T1 (0.50 · 900.00)") && x.includes("0.50 قيراط · 900.00 ريال"); }));
-  check("1.15.0: والقيمة ضمن أجور الفاتورة (180 + 900 = 1080)", await page.evaluate(() => {
+  check("والقيمة لا تدخل رصيد النخبة", await page.evaluate(() => {
     const sh = App.state.shops.find((x) => x.name === "محل النخبة");
     const inv = App.state.invoices.find((d) => d.shopId === sh.id && Domain.diamondValueOf(d) === 900);
-    return inv && inv.wages === 1080 && inv.grand === 1080; }));
+    return inv && inv.wages === 180 && inv.grand === 180; }));
   await tap(".st-period");
   await page.waitForSelector(".sheet .chip");
   await page.locator(".sheet .chip", { hasText: "هذا الشهر" }).click();
