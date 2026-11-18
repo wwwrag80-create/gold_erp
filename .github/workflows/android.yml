@@ -84,7 +84,7 @@ jobs:
       # و«play» ملف APK أيضاً: لمتاجر تطلب APK (متجر شاومي GetApps…) — بلا تحديثٍ ذاتي ولا إذن تثبيت
       - name: بناء ملف التثبيت (والنسخة التجريبية للمحاكي) وحزمة Google Play وملف المتاجر
         working-directory: mobile/android
-        run: gradle --no-daemon --stacktrace assembleDirectRelease assembleDirectDebug bundlePlayRelease assemblePlayRelease
+        run: gradle --no-daemon --stacktrace assembleDirectRelease assembleDirectDebug bundlePlayRelease assemblePlayRelease assemblePlayTrial
 
       # حزمة المتجر: تُفحص قبل أي رفع — API 36، وبلا أذونات التحديث الذاتي
       - name: فحص حزمة Google Play (AAB)
@@ -123,8 +123,12 @@ jobs:
           sha256sum jadeite-mobile-play-unsigned.aab | tee jadeite-mobile-play-unsigned.aab.sha256
           cp mobile/android/app/build/outputs/apk/play/release/app-play-release-unsigned.apk jadeite-mobile-play-unsigned.apk
           sha256sum jadeite-mobile-play-unsigned.apk | tee jadeite-mobile-play-unsigned.apk.sha256
+          # نسخة التجربة (تُثبَّت بجانب التطبيق — «ÀUR تجريبي») موقّعةٌ بمفتاح التجربة هنا
+          cp mobile/android/app/build/outputs/apk/play/trial/app-play-trial.apk "jadeite-mobile-trial-$V.apk"
+          sha256sum "jadeite-mobile-trial-$V.apk" | tee "jadeite-mobile-trial-$V.apk.sha256"
           gh release delete mobile-unsigned --yes --cleanup-tag || true
-          gh release create mobile-unsigned jadeite-mobile-unsigned.apk jadeite-mobile-unsigned.apk.sha256 \
+          gh release create mobile-unsigned "jadeite-mobile-trial-$V.apk" "jadeite-mobile-trial-$V.apk.sha256" \
+            jadeite-mobile-unsigned.apk jadeite-mobile-unsigned.apk.sha256 \
             jadeite-mobile-play-unsigned.aab jadeite-mobile-play-unsigned.aab.sha256 \
             jadeite-mobile-play-unsigned.apk jadeite-mobile-play-unsigned.apk.sha256 \
             --prerelease --target "$GITHUB_SHA" \

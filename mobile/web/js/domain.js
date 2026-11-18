@@ -136,7 +136,8 @@
     const wo = String(e.wo || "").trim();
     const reg = Number(e.reg || 0);
     const dia0 = Math.max(0, Number(e.diamond || 0));
-    // قيمة الماس (ريال): للعرض في كشف الماس فقط — لا تدخل الأجور ولا الرصيد
+    // قيمة الماس (ريال) — 1.15.0: تُحسب ضمن الأجور (في الفاتورة وكشف الذهب
+    // والرصيد)، وتبقى ظاهرةً كما هي في كشف الماس
     const diaVal = R(Math.max(0, Number(e.diamondValue || 0)), 2);
     const direct = e.wages !== undefined && e.wages !== null && e.wages !== "";
     const wagesAmt = direct ? R(Math.max(0, Number(e.wages)), 2) : null;
@@ -174,6 +175,9 @@
       big18: st18("big18", e.big), after18: st18("after18", e.after),
       standing18: st18("standing18", e.standing),
       reg18, diamond: R(Math.max(0, Number(e.diamond || 0)), 3), diamondValue: diaVal,
+      // قيمة الماس تُضاف إلى أجور السطر (`lineWages`) — وما حُفظ قبل 1.15.0
+      // يُرقّى عند فتح التطبيق (`diamondWagesUpgrade`)
+      diaInWages: true,
       stoneRate: e.stoneRate === undefined ? Gold.STONE_DISCOUNT_RATE : Number(e.stoneRate),
       rate18, wages,
       note: String(e.note || "").trim(),
@@ -223,13 +227,21 @@
     };
   }
 
+  // أجور السطر كما تدخل الفاتورة: الأجور + قيمة الماس (1.15.0) — قيمة الماس
+  // تُعدّ أجوراً في كل عملية
+  function lineWages(li) {
+    if (!li) return 0;
+    if (li.wageOnly) return R(Number(li.amount || 0), 2);
+    return R(Number(li.wages || 0) + (li.diaInWages ? Number(li.diamondValue || 0) : 0), 2);
+  }
+
   // الإجماليات كما في `_save`: الوزن يُجمع بتقريبٍ عند كل سطر
   function totals(lines, applyVat) {
     let w = 0;
     for (const li of lines) if (!li.wageOnly) w = R(w + Number(li.reg18 || 0), 3);
     const totalW18 = R(w, 3);
     let s = 0;
-    for (const li of lines) s += li.wageOnly ? R(Number(li.amount), 2) : li.wages;
+    for (const li of lines) s += lineWages(li);
     const wages = R(s, 2);
     const vatAmt = applyVat ? Gold.wagesVat(wages) : 0;
     const grand = R(wages + vatAmt, 2);
@@ -859,7 +871,7 @@
     for (const li of doc.lines || []) if (!li.wageOnly) s += Number(li.diamond || 0);
     return R(s, 3);
   }
-  // وقيمة ماسها (ريال) — للعرض في كشف الماس فقط: لا تدخل الأجور ولا الإجمالي ولا الرصيد
+  // وقيمة ماسها (ريال) — تُعرض كما هي في كشف الماس (وهي ضمن أجور الفاتورة)
   function diamondValueOf(doc) {
     let s = 0;
     for (const li of doc.lines || []) if (!li.wageOnly) s += Number(li.diamondValue || 0);
@@ -944,7 +956,23 @@
     for (const k of ["shops", "invoices", "vouchers", "held"]) {
       st[k] = Array.isArray(obj[k]) ? obj[k] : [];
     }
+    diamondWagesUpgrade(st);              // نسخةٌ قديمة: قيمة الماس أجورٌ فيها أيضاً
     return st;
+  }
+
+  // 1.15.0: قيمة الماس أجورٌ في **كل** فاتورة — ومنها ما حُفظ قبل هذا الإصدار:
+  // يُضمّ ماس أسطرها إلى أجورها ويُعاد إجماليها (والضريبة) مرةً واحدة، فيظهر في
+  // الفاتورة وكشف الذهب والرصيد. يعيد الفواتير التي تغيّرت (لتُحفظ)
+  function diamondWagesUpgrade(st) {
+    const changed = [];
+    for (const d of (st && st.invoices) || []) {
+      const lines = d.lines || [];
+      if (!lines.some((l) => !l.wageOnly && Number(l.diamondValue || 0) > 0 && !l.diaInWages)) continue;
+      for (const l of lines) if (!l.wageOnly) l.diaInWages = true;
+      Object.assign(d, totals(lines, !!d.vat));
+      changed.push(d);
+    }
+    return changed;
   }
 
   const api = {
@@ -954,9 +982,10 @@
     voucherRows, saveVoucher, deleteVoucher,
     effects, docsOf, statement, statementView, ST_FILTERS, balance, balanceAround, allBalances,
     woHistory, woLast, setTracks, searchSets, searchKey, daysBetween, toBackup, fromBackup, BACKUP_FORMAT,
+    diamondWagesUpgrade,
     GRADES, grade, boardSide, board, hasMovement, holdings, debtSummary, pieceById, docOrder,
     partyKarat, openHold, saveOpenHold,
-    diamondOf, diamondValueOf, diamondStatement, allDiamonds, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
+    diamondOf, diamondValueOf, diamondStatement, lineWages, allDiamonds, backupPhotos, exposure, linePhotos, docPhotos, MAX_PHOTOS,
   };
   root.Domain = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

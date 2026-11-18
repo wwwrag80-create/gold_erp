@@ -157,7 +157,7 @@
     // عيار حساب العميل/المصنع
     const k = pK(st, inv.shopId);
     const title = (INV_TITLE[inv.kind] || T("فاتورة")) + (inv.vat ? T(" ضريبية") : "");
-    // عمود الماس، وبعده قيمة الماس (ريال) — للعرض: لا تدخل الأجور ولا الإجمالي
+    // عمود الماس، وبعده قيمة الماس (ريال) — 1.15.0: وهي ضمن الأجور (عمود الأجور شاملٌ لها)
     const anyDv = inv.lines.some((l) => !l.wageOnly && l.diamondValue > 0);
     const anyDia = anyDv || inv.lines.some((l) => l.diamond > 0);
     let rows = "", n = 0;
@@ -171,7 +171,7 @@
       rows += `<tr><td>${n}</td>${anyPh ? phCell(li) : ""}<td>${li.wo ? `<span dir="auto">${esc(li.wo)}</span>` : "—"}</td>
         <td>${li.reg18 > 0 ? lk : "—"}</td><td>${li.reg18 > 0 ? f2(G.g(li.standing18, lk)) : "—"}</td><td><b>${li.reg18 > 0 ? gI(f2(G.g(li.reg18, lk))) : "—"}</b></td>
         ${anyDia ? `<td>${li.diamond ? f2(li.diamond) : "—"}</td>` : ""}${anyDv ? `<td>${li.diamondValue ? f2(li.diamondValue) : "—"}</td>` : ""}
-        <td>${cI(f2(li.wages))}</td></tr>`;
+        <td>${cI(f2(D.lineWages(li)))}</td></tr>`;
     }
     const sets = inv.lines.filter((l) => !l.wageOnly).length;
     rows += T("<tr class=\"tot\"><td colspan=\"{0}\">الإجمالي — {1} طقم · عيار {2}</td>\n      <td>{3}</td>{4}<td>{5}</td></tr>", anyPh ? 5 : 4, sets, k, gI(f2(G.g(inv.totalW18, k))), (anyDia ? `<td>${f2(D.diamondOf(inv))}</td>` : "") + (anyDv ? `<td>${f2(D.diamondValueOf(inv))}</td>` : ""), cI(f2(inv.wages)));
@@ -248,7 +248,7 @@
           `${r.kind === "prev" ? `<td class="z"></td>` : dc(f * (r.dd - r.dc), f * (r.vd - r.vc), false)}${dc(f * r.bal, f * r.vbal, true)}</tr>`;
       }
       body = header(st, T("كشف حساب الماس"), "", to || D.today()) + partyRow +
-        `<div class="legend">${T("في كل خانة: 💎 الماس (قيراط) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.", ICO_CASH)}</div>` +
+        `<div class="legend">${T("في كل خانة: 💎 الماس (قيراط) فوق، و{0} قيمة الماس (ريال) تحته — وهي محسوبةٌ ضمن الأجور في كشف الذهب.", ICO_CASH)}</div>` +
         T("<table><thead><tr><th>التاريخ</th><th>العملية</th><th>الأطقم (الماس · القيمة)</th><th>الحركة</th><th>الصافي</th></tr></thead>\n        <tbody>{0}</tbody></table>\n        <div class=\"sum\">\n          <div class=\"box\"><b>{1}</b><span>{2} قيراط · {6} ريال</span></div>\n          <div class=\"box\"><b>{3}</b><span>{4} قيراط · {7} ريال</span></div>\n          <div class=\"box\" style=\"grid-column:span 2\"><b>صافي الماس · قيمته</b><span>{5} قيراط · {8} ريال</span></div></div>\n        <div class=\"note\">الماس وقيمته للعرض والمعرفة: لا يدخلان الوزن ولا رصيد الذهب ولا الأجور.</div>", rows || T("<tr><td colspan=\"5\">لا ماس في الفترة</td></tr>"), fac ? T("البضاعة") : T("المبيعات"), f2(fac ? s.minus : s.plus), fac ? T("الإرجاع") : T("المرتجع"), f2(fac ? s.plus : s.minus), f2(f * s.diamond), f2(fac ? s.vminus : s.vplus), f2(fac ? s.vplus : s.vminus), f2(f * s.value));
     } else {
       // «عليه · له · الرصيد» (1.11): الذهب فوق والنقد تحته في كل خانة، ثم صفّ

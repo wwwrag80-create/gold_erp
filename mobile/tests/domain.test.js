@@ -320,7 +320,7 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("والحساب: 3 جم و75 ريال عليه", D.balance(t, sh.id).gold18 === 3 && D.balance(t, sh.id).cash === 75);
 }
 
-// ══ قيمة الماس (1.13.3): للعرض في كشف الماس فقط — لا تدخل الأجور ولا الإجمالي ولا الرصيد ══
+// ══ قيمة الماس: تظهر في كشف الماس كما هي — و1.15.0: تُحسب ضمن الأجور ══
 {
   const t = D.newState();
   const sh = D.saveShop(t, { name: "محل القيمة" });
@@ -332,8 +332,33 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   check("قيمة الماس وحدها تكفي سطراً (لا «أجور فقط»)", !D.buildLine({ diamondValue: 200 }).wageOnly);
   const s1 = D.saveInvoice(t, { kind: "sale", shopId: sh.id, date: "2026-04-01",
     lines: [l1, D.buildLine({ wo: "V2", reg: 5, wages: 40, diamond: 0.25, diamondValue: 500 })] });
-  check("لا تدخل الأجور ولا الإجمالي: 130 ريال", s1.wages === 130 && s1.grand === 130 && D.diamondValueOf(s1) === 2000.56, [s1.wages, s1.grand]);
-  check("ولا رصيد الحساب: 15 جم و130 ريال", D.balance(t, sh.id).gold18 === 15 && D.balance(t, sh.id).cash === 130);
+  check("1.15.0: قيمة الماس تُضاف إلى الأجور: 130 + 2000.56 = 2130.56 ريال",
+    s1.wages === 2130.56 && s1.grand === 2130.56 && D.diamondValueOf(s1) === 2000.56, [s1.wages, s1.grand]);
+  check("ورصيد الحساب (كشف الذهب): 15 جم و2130.56 ريال", D.balance(t, sh.id).gold18 === 15 && D.balance(t, sh.id).cash === 2130.56,
+    D.balance(t, sh.id));
+  check("أجور السطر مع ماسه: 90 + 1500.56", D.lineWages(l1) === 1590.56, D.lineWages(l1));
+  const tv = D.newState();
+  const shv = D.saveShop(tv, { name: "محل الضريبة" });
+  const sv = D.saveInvoice(tv, { kind: "sale", shopId: shv.id, vat: true, date: "2026-04-01",
+    lines: [D.buildLine({ wo: "V7", reg: 1, wages: 100, diamondValue: 100 })] });
+  check("والضريبة على الأجور مع الماس: 200 + 30", sv.wages === 200 && sv.vatAmt === 30 && sv.grand === 230, [sv.wages, sv.vatAmt]);
+  // فاتورةٌ محفوظةٌ قبل 1.15.0 (أجورها بلا قيمة الماس) تُرقّى عند فتح التطبيق أو الاسترجاع
+  const to = D.newState();
+  const sho = D.saveShop(to, { name: "محل قديم" });
+  const oldLine = Object.assign({}, l1);
+  delete oldLine.diaInWages;
+  to.invoices.push({ id: "in_old", no: "S-00009", kind: "sale", shopId: sho.id, date: "2026-01-01", vat: true,
+    desc: "", lines: [oldLine], totalW18: 10, wages: 90, vatAmt: 13.5, grand: 103.5 });
+  const up = D.diamondWagesUpgrade(to);
+  check("1.15.0: الفاتورة القديمة تُرقّى — 90 + 1500.56 = 1590.56 (+ ضريبتها)", up.length === 1 &&
+    to.invoices[0].wages === 1590.56 && to.invoices[0].vatAmt === 238.58 && to.invoices[0].grand === 1829.14 &&
+    D.balance(to, sho.id).cash === 1829.14, to.invoices[0]);
+  check("ومرةً واحدة فقط", D.diamondWagesUpgrade(to).length === 0);
+  const oldLine2 = Object.assign({}, l1);
+  delete oldLine2.diaInWages;
+  const bk = D.toBackup(Object.assign(D.newState(), { invoices: [Object.assign({}, to.invoices[0], {
+    wages: 90, grand: 103.5, vatAmt: 13.5, lines: [oldLine2] })] }));
+  check("والنسخة الاحتياطية القديمة عند الاسترجاع كذلك", D.fromBackup(bk).invoices[0].wages === 1590.56);
   D.saveInvoice(t, { kind: "sale_return", shopId: sh.id, date: "2026-04-03",
     lines: [D.buildLine({ wo: "V2", reg: 5, wages: 40, diamond: 0.25, diamondValue: 500 })] });
   D.saveInvoice(t, { kind: "sale", shopId: sh.id, date: "2026-04-04", lines: [D.buildLine({ wo: "V3", reg: 2, wages: 10, diamondValue: 300 })] });

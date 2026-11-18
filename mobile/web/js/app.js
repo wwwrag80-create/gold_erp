@@ -233,8 +233,10 @@
   function docSummary(d) {
     const k = pk(D.shopById(st(), d.shopId));
     if (isInvKind(d.kind)) {
-      // فاتورةٌ بالماس وحده (بلا وزنٍ ولا أجور): «ماس فقط» — وتفصيله في سطره تحتها
-      if (!(d.totalW18 > 0) && !(d.grand > 0) && (D.diamondOf(d) > 0 || D.diamondValueOf(d) > 0)) return T("ماس فقط");
+      // فاتورةٌ بالماس وحده (بلا وزنٍ ولا أجور عمل): «ماس فقط» — وتفصيله في سطره
+      // تحتها (1.15.0: قيمة الماس ضمن أجورها، فالعبرة بأجور العمل لا بالإجمالي)
+      const work = (d.lines || []).reduce((s, l) => s + Number(l.wageOnly ? l.amount || 0 : l.wages || 0), 0);
+      if (!(d.totalW18 > 0) && !(work > 0) && (D.diamondOf(d) > 0 || D.diamondValueOf(d) > 0)) return T("ماس فقط");
       return T("{0} {1} · أجور {2}", gw(d.totalW18, k), unitK(k), f2(d.grand));
     }
     const parts = [];
@@ -254,14 +256,14 @@
           h("span", { class: "num", text: docSummary(d) })),
         diaLine(d)));
   }
-  // ماس الفاتورة وقيمته — سطرٌ تحت ملخّصها في قوائم العمليات
+  // ماس الفاتورة (قيراط) — سطرٌ تحت ملخّصها في قوائم العمليات. 1.15.0: بلا
+  // قيمته هنا (هي ضمن الأجور في الملخّص)، وتظهر كما هي في كشف الماس
   function diaLine(d) {
     if (!isInvKind(d.kind)) return null;
-    const dia = D.diamondOf(d), dv = D.diamondValueOf(d);
-    if (!(dia > 0) && !(dv > 0)) return null;
+    const dia = D.diamondOf(d);
+    if (!(dia > 0)) return null;
     return h("div", { class: "dia-line small" }, h("span", null, T("💎 الماس")),
-      h("span", { class: "num" }, T("{0} قيراط", f2(dia))),
-      dv > 0 ? [h("span", { class: "muted" }, "·"), h("span", null, T("قيمته")), h("span", { class: "num" }, icoCash(), T("{0} ريال", f2(dv)))] : null);
+      h("span", { class: "num" }, T("{0} قيراط", f2(dia))));
   }
 
   // ══ صور الأطقم: مخزنٌ وحده، ومصغّرةٌ تُحمَّل عند الحاجة ══
@@ -722,7 +724,8 @@
   }
 
   // بطاقة الحساب (1.13.4): الاسم وعياره فوق، ثم ثلاث خانات متساوية —
-  // الذهب · الأجور · الماس (وقيمته تحته) — كلٌّ برقمه وكلمته (عليه/له)
+  // الذهب · الأجور (1.15.0: ومعها قيمة الماس) · الماس بالقيراط — كلٌّ برقمه
+  // وكلمته (عليه/له). قيمة الماس تظهر كما هي في كشف الماس وحده
   function acctCard(x, fac, b, dm) {
     const k = pk(x);
     const z = (v) => Math.abs(v) < 0.005;
@@ -731,10 +734,9 @@
         : h("b", { class: "v " + ((fac ? v < 0 : v > 0) ? "bal-on" : "bal-for") }, `${f2(Math.abs(v))} ${unit}`),
       z(v) ? null : h("span", { class: "w " + ((fac ? v < 0 : v > 0) ? "bal-on" : "bal-for") }, balWord(v, fac)));
     // الماس كالكشف: للمصنع البضاعة «+» من جهته
-    const f = fac ? -1 : 1, dia = f * ((dm && dm.diamond) || 0), dv = f * ((dm && dm.value) || 0);
+    const f = fac ? -1 : 1, dia = f * ((dm && dm.diamond) || 0);
     const dcell = h("div", { class: "ab dia" }, h("span", { class: "lb" }, T("💎 الماس")),
-      z(dia) && z(dv) ? h("b", { class: "v muted" }, "—")
-        : [h("b", { class: "v" }, T("{0} قيراط", f2(dia))), h("span", { class: "w val" }, icoCash(), T("{0} ريال", f2(dv)))]);
+      z(dia) ? h("b", { class: "v muted" }, "—") : h("b", { class: "v" }, T("{0} قيراط", f2(dia))));
     return h("div", { class: "list-item acct", onclick: () => go(`shop/${x.id}`) },
       h("div", { class: "acct-top" },
         h("span", { class: "avatar" + (fac ? " fac" : "") }, fac ? ico("package", 20) : (x.name.trim()[0] || T("؟"))),
@@ -761,12 +763,12 @@
     v.append(h("div", { class: "kpis" },
       h("div", { class: "kpi" }, h("b", null, T("رصيد الذهب (عيار {0})", k)), h("div", { class: "v num" }, goldBal(b.gold18, fac, k))),
       h("div", { class: "kpi" }, h("b", null, fac ? T("رصيد النقد والأجور") : T("رصيد الأجور والنقد")), h("div", { class: "v num" }, cashBal(b.cash, fac)))));
-    // وصافي الماس وقيمته — إن كان للحساب ماس (يفتح كشف الماس)
+    // وصافي الماس بالقيراط — إن كان للحساب ماس (يفتح كشف الماس، وفيه قيمته).
+    // 1.15.0: قيمة الماس ضمن رصيد الأجور أعلاه — فلا تُكرَّر هنا
     const dm = D.allDiamonds(s)[id], fd = fac ? -1 : 1;
-    if (dm && (Math.abs(dm.diamond) >= 0.0005 || Math.abs(dm.value) >= 0.005)) {
+    if (dm && Math.abs(dm.diamond) >= 0.0005) {
       v.append(h("div", { class: "note-bar info tap dia-kpi", style: { marginBottom: "12px" }, onclick: () => go(`statement/${id}?view=diamond`) },
-        h("span", null, T("💎 صافي الماس")), h("b", { class: "num" }, T("{0} قيراط", f2(fd * dm.diamond))),
-        h("span", { class: "muted" }, "·"), h("span", null, T("قيمته")), h("b", { class: "num" }, icoCash(), T("{0} ريال", f2(fd * dm.value)))));
+        h("span", null, T("💎 صافي الماس")), h("b", { class: "num" }, T("{0} قيراط", f2(fd * dm.diamond)))));
     }
     if (shop.agreedWage18) {
       v.append(h("div", { class: "note-bar info", style: { marginBottom: "12px" } },
@@ -1307,7 +1309,9 @@
               cell(T("الوزن"), li.reg18 > 0 ? gw(li.reg18, lk) : "—", icoGold),
               cell(T("💎 الماس"), li.diamond > 0 ? f2(li.diamond) : "—"),
               li.diamondValue > 0 ? cell(T("قيمة الماس"), f2(li.diamondValue)) : null,
-              cell(T("الأجور"), f2(li.wages), icoCash))));
+              // 1.15.0: قيمة الماس تُعدّ أجوراً — الأجور هنا شاملةٌ لها
+              cell(li.diamondValue > 0 && li.diaInWages ? T("الأجور مع الماس") : T("الأجور"),
+                f2(D.lineWages(li)), icoCash))));
       });
       const t = D.totals(inv.lines, inv.vat);
       const sets = inv.lines.filter((l) => !l.wageOnly).length;
@@ -1318,8 +1322,8 @@
       totalsBox.append(row(T("عدد الأطقم"), String(sets)),
         row(T("إجمالي الوزن (عيار {0})", k), gw(t.totalW18, k), "", icoGold),
         dia0 > 0 ? row(T("💎 إجمالي الماس (قيراط)"), f2(dia0)) : null,
-        dv0 > 0 ? row(T("💎 قيمة الماس (ريال) — للكشف فقط"), f2(dv0)) : null,
-        row(T("إجمالي الأجور"), f2(t.wages), "", icoCash));
+        dv0 > 0 ? row(T("💎 قيمة الماس (ريال) — ضمن الأجور"), f2(dv0)) : null,
+        row(dv0 > 0 ? T("إجمالي الأجور (مع قيمة الماس)") : T("إجمالي الأجور"), f2(t.wages), "", icoCash));
       if (inv.vat) totalsBox.append(row(T("ضريبة 15% على الأجور"), f2(t.vatAmt), "", icoCash));
       totalsBox.append(row(T("الإجمالي"), f2(t.grand) + T(" ريال"), "grand", icoCash));
       if (inv.shopId) {
@@ -1399,9 +1403,9 @@
       h("div", { class: "grid2" }, field(T("الطقم (اختياري)"), woIn), field(T("العيار"), karatSel)),
       h("div", { style: { marginTop: "2px" } }, detailsBtn), detailsBox,
       h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("الوزن (جم)"), reg), field(T("الأجور (ريال)"), wagesIn)),
-      // قيمة الماس بعد خانته مباشرة — للعرض في كشف الماس فقط
+      // قيمة الماس بعد خانته مباشرة — 1.15.0: تُضاف إلى الأجور (وتظهر في كشف الماس)
       h("div", { class: "grid2", style: { marginTop: "8px" } }, field(T("💎 الماس (قيراط)"), dia),
-        field(T("💎 قيمة الماس (ريال)"), diaVal)),
+        field(T("💎 قيمة الماس (ريال) — تُضاف للأجور"), diaVal)),
       h("div", { class: "fld", style: { marginTop: "8px" } }, h("span", null, T("صور الطقم")), photoBox, photoIn),
       photoStrip,
       // الأزرار قبل الإشعار: الإشعار يظهر عند مغادرة خانة الطقم —
@@ -1837,7 +1841,7 @@
       return;
     }
     if (mode === "gold") v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: {0} الذهب (جم عيار {1}) فوق، و{2} النقد والأجور (ريال) تحته.", P.ICO_GOLD, k, P.ICO_CASH) }));
-    else v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: 💎 الماس (قيراط) فوق، و{0} قيمة الماس (ريال) تحته — للعرض فقط، لا تدخل الرصيد.", P.ICO_CASH) }));
+    else v.append(h("div", { class: "muted small st-legend", html: T("في كل خانة: 💎 الماس (قيراط) فوق، و{0} قيمة الماس (ريال) تحته — وهي محسوبةٌ ضمن الأجور في كشف الذهب.", P.ICO_CASH) }));
     v.append(h("table", { class: "st-table" + (mode === "diamond" ? " dia" : " gold") },
       h("thead", null, h("tr", null, ...head.map((x) => h("th", null, x)))), tbody));
     if (n) v.append(h("div", { class: "muted small st-hint" }, T("اضغط على أي عملية لمعاينتها وصورها، ومنها تعديلها")));
@@ -2794,6 +2798,11 @@
 
   async function start() {
     App.state = await S.load();
+    // 1.15.0: الفواتير المحفوظة قبلها — قيمة الماس تُضمّ إلى أجورها مرةً واحدة
+    try {
+      const up = D.diamondWagesUpgrade(App.state);
+      if (up.length) await S.write(up.map((d) => ["invoices", "put", d]));
+    } catch (e) { console.error(e); }
     applyTheme();
     for (const b of document.querySelectorAll("#tabs button")) {
       b.querySelector(".i").append(ico(b.dataset.ic, b.dataset.tab === "plus" ? 26 : 22));
