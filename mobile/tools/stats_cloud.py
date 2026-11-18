@@ -108,11 +108,43 @@ def query(acc, uuid, sql, params=None):
 
 
 def shape(cfg):
-    """ما في إعداد البيئة من أسماء (بلا قيم) — للتأكد أن الربط لم يمسّ غيره."""
+    """ما في إعداد البيئة من أسماء (بلا قيم) — للتأكد أن الربط لم يمسّ غيره. الفارغ (null · {} · []) سواء."""
     out = {}
     for k, v in (cfg or {}).items():
-        out[k] = sorted(v.keys()) if isinstance(v, dict) else v
+        v = sorted(v.keys()) if isinstance(v, dict) else v
+        if v not in (None, [], "", {}):
+            out[k] = v
     return out
+
+
+def names(env_vars):
+    """أسماء المتغيّرات وأنواعها — بلا قيمها أبداً."""
+    return {k: (v or {}).get("type", "?") for k, v in (env_vars or {}).items()}
+
+
+def inspect(acc):
+    """يطبع حال المشروع (أسماء فقط) ويقارن متغيّرات كل بيئة بآخر نشرٍ لها قبل الربط."""
+    dc = cf("GET", f"/accounts/{acc}/pages/projects/{PROJECT}").get("deployment_configs") or {}
+    report = {}
+    for env in DBS:
+        cfg = dc.get(env) or {}
+        print(f"  [{env}] الإعداد الآن:", {k: (sorted(v.keys()) if isinstance(v, dict) else v) for k, v in cfg.items()
+                                           if k != "env_vars"}, "· المتغيّرات:", names(cfg.get("env_vars")))
+        deps = cf("GET", f"/accounts/{acc}/pages/projects/{PROJECT}/deployments?env={env}&per_page=10") or []
+        old = None
+        for d in deps:
+            if d.get("env_vars") is not None:
+                old = d
+                break
+        if old is not None:
+            print(f"  [{env}] متغيّرات آخر نشر ({old.get('created_on', '')[:16]}):", names(old.get("env_vars")))
+            missing = {k: v for k, v in (old.get("env_vars") or {}).items() if k not in (cfg.get("env_vars") or {})}
+            report[env] = missing
+            if missing:
+                print(f"  [{env}] ✘ ناقصة الآن:", names(missing))
+            else:
+                print(f"  [{env}] ✔ لا متغيّر ناقص")
+    return report
 
 
 def setup():
@@ -232,6 +264,8 @@ def main():
         if action == "setup":
             acc, ids, _changed = setup()
             check(acc, ids)
+        elif action == "inspect":
+            inspect(account())
         elif action == "check":
             check()
         else:

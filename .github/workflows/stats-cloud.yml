@@ -33,4 +33,8 @@ jobs:
       - name: إعداد قاعدة الإحصاء وفحصها
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: python3 mobile/tools/stats_cloud.py "${{ inputs.action || 'setup' }}"
+          ACTION: ${{ inputs.action }}
+        # الإجراء: من زرّ التشغيل، أو أول كلمةٍ في mobile/tools/stats_cloud.request (setup · check · inspect)
+        run: |
+          A="${ACTION:-$(awk 'NR==1{print $1}' mobile/tools/stats_cloud.request)}"
+          python3 mobile/tools/stats_cloud.py "${A:-setup}"
