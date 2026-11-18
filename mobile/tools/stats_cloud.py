@@ -14,8 +14,12 @@ check:
 
 المفتاح (CLOUDFLARE_API_TOKEN) يُضاف مرةً في أسرار المستودع بصلاحيتين: D1 (Edit) وCloudflare Pages (Edit).
 """
+import base64
+import hashlib
 import json
 import os
+import secrets
+import subprocess
 import sys
 import time
 import urllib.error
@@ -214,6 +218,34 @@ def http(method, url, body=None, headers=None):
         return e.code, e.read().decode("utf-8", "replace")
 
 
+def live_dashboard(acc, test_db):
+    """فحص لوحة موقع التجربة كاملاً (mobile/tests/stats_live.mjs): الاستقبال والحماية والدخول والأرقام.
+    للدخول: كلمةٌ عشوائية مؤقتة في قاعدة التجربة وحدها (لا تُطبع)، ثم تُعاد كلمة المالك كما كانت
+    وتُحذف جلسات الفحص وحدها. قاعدة الموقع لا تُمسّ."""
+    pw = secrets.token_urlsafe(18)
+    salt = secrets.token_bytes(16)
+    stored = "p2$10000${}${}".format(base64.b64encode(salt).decode(),
+                                      base64.b64encode(hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 10000)).decode())
+    old = query(acc, test_db, "SELECT v FROM meta WHERE k='pw'")
+    sess = {r["h"] for r in query(acc, test_db, "SELECT h FROM sess")}
+    query(acc, test_db, "INSERT INTO meta(k,v) VALUES('pw',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", [stored])
+    try:
+        r = subprocess.run(["node", "mobile/tests/stats_live.mjs", TRIAL_SITE], env={**os.environ, "STATS_PASS": pw},
+                           capture_output=True, text=True, timeout=180)
+        print("\n".join("    " + x for x in r.stdout.strip().splitlines()))
+        if r.returncode:
+            raise CFError("فحص لوحة موقع التجربة لم ينجح كاملاً" + (": " + r.stderr[-400:] if r.stderr else ""))
+        print("✔ لوحة موقع التجربة: كل الفحوص نجحت (حقيقيةٌ على Cloudflare)")
+    finally:
+        if old:
+            query(acc, test_db, "UPDATE meta SET v=? WHERE k='pw'", [old[0]["v"]])
+        else:
+            query(acc, test_db, "DELETE FROM meta WHERE k='pw'")
+        for row in query(acc, test_db, "SELECT h FROM sess"):
+            if row["h"] not in sess:
+                query(acc, test_db, "DELETE FROM sess WHERE h=?", [row["h"]])
+
+
 def check(acc=None, ids=None):
     acc = acc or account()
     ids = ids or {env: database(acc, name, create=False)[0] for env, name in DBS.items()}
@@ -242,6 +274,7 @@ def check(acc=None, ids=None):
     last = (trial[0] if trial else {}).get("t")
     print(f"✔ أجهزة النسخة التجريبية في قاعدة التجربة: {n}"
           + (f" · آخر رسالة {time.strftime('%Y-%m-%d %H:%M', time.gmtime(last / 1000 + 3 * 3600))} (الرياض)" if last else ""))
+    live_dashboard(acc, ids["preview"])
     for sql in ("DELETE FROM devices WHERE id LIKE 'test-%'", "DELETE FROM act WHERE id LIKE 'test-%'",
                 "DELETE FROM updates WHERE id LIKE 'test-%'"):
         query(acc, ids["preview"], sql)

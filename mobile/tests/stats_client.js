@@ -127,6 +127,49 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   check("إصدارٌ جديد (تحديث): يُرسل فوراً", m && JSON.parse(m.body).v === VERSION, m && m.body);
   await ctx.close();
 
+  console.log("── انقطاع الإنترنت أثناء الاستخدام");
+  const b4 = got.length;
+  ({ ctx, page, errors } = await open({ welcomed: true }));
+  await page.route(END, (r) => r.abort("internetdisconnected"));       // الخادم غير موجود أصلاً
+  await page.goto(url);
+  await wait(4500);
+  const tabs = ["customers", "holdings", "more", "home"];
+  let worked = true;
+  for (const t of tabs) {
+    await page.locator(`#tabs button[data-tab="${t}"]`).click();
+    await wait(300);
+    worked = worked && (await page.evaluate(() => document.querySelector("#view").children.length > 0));
+  }
+  let s3 = await st(page);
+  check("بلا شبكة: التطبيق يعمل كاملاً (الحسابات · الممتلكات · المزيد · الرئيسية)", worked && errors.length === 0, errors);
+  check("ولا رسالة خرجت، والفتح محفوظ لوقت الاتصال", got.length === b4 && s3.o === 1 && !s3.t, s3);
+  await page.unroute(END);
+  await ctx.setOffline(true);
+  for (const t of tabs) { await page.locator(`#tabs button[data-tab="${t}"]`).click(); await wait(150); }
+  check("وضع الطيران: التنقل يعمل بلا أخطاء", errors.length === 0, errors);
+  await ctx.setOffline(false);
+  m = await next(b4 + 1);
+  check("عودة الاتصال: تُرسل الفتحات المحفوظة وحدها", m && JSON.parse(m.body).o === 1 && JSON.parse(m.body).n === 0, m && m.body);
+  await ctx.close();
+
+  console.log("── السرعة");
+  async function loadTime(withStats) {
+    const times = [];
+    for (let k = 0; k < 4; k++) {
+      const o = await open({ welcomed: true, noEndpoint: !withStats });
+      if (!withStats) await o.page.route("**/js/stats.js", (r) => r.fulfill({ status: 200, contentType: "text/javascript", body: "" }));
+      await o.page.goto(url);
+      await o.page.waitForFunction(() => document.querySelector("#view") && document.querySelector("#view").children.length > 0);
+      times.push(await o.page.evaluate(() => performance.now()));
+      await o.ctx.close();
+    }
+    times.sort((x, y) => x - y);
+    return (times[1] + times[2]) / 2;
+  }
+  const tWith = await loadTime(true), tWithout = await loadTime(false);
+  console.log(`    زمن فتح الرئيسية: بالإحصاء ${tWith.toFixed(0)} م.ث · بدونه ${tWithout.toFixed(0)} م.ث`);
+  check("لا أثر يُذكر على سرعة الفتح (أقل من 60 م.ث فرقاً)", tWith - tWithout < 60, { tWith, tWithout });
+
   console.log("── لا أثر في الشاشة");
   ({ ctx, page } = await open());
   await page.route("**/js/stats.js", (r) => r.fulfill({ status: 200, contentType: "text/javascript", body: "" }));
