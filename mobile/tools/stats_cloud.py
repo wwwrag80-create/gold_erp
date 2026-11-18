@@ -288,6 +288,45 @@ def check(acc=None, ids=None):
         print("✔ قاعدة الموقع جاهزة — تنتظر أول رسالة (تُنشأ جداولها تلقائياً)")
 
 
+SITE = os.environ.get("STATS_SITE", "https://gold-erp.pages.dev")
+
+
+def prod_check():
+    """بعد النشر: الموقع نفسه يستقبل ويحفظ، واللوحة محمية. رسالة الفحص (بلا فتحات) تُحذف وأثرها في عدّ اليوم يُطرح؛
+    ولا دخول إلى لوحة المالك ولا مساس بكلمة مروره."""
+    acc = account()
+    prod = database(acc, DBS["production"], create=False)[0]
+    if not prod:
+        raise CFError("قاعدة الموقع غير موجودة — شغّل setup")
+    test_id = f"test-prod-{int(time.time())}-{os.getpid()}"
+    body = json.dumps({"i": test_id, "v": "1.15.0", "p": "web", "o": 0, "n": 0}).encode()
+    for attempt in range(24):           # النشر قد يحتاج دقائق بعد الدفع إلى main
+        code, _ = http("POST", SITE + "/api/p", body, {"Content-Type": "text/plain", "Origin": "https://appassets.androidplatform.net"})
+        if code == 200:
+            break
+        print(f"  … الموقع يردّ {code} — انتظار النشر")
+        time.sleep(15)
+    else:
+        raise CFError("الموقع لا يستقبل الرسائل بعد")
+    rows = query(acc, prod, "SELECT first_day FROM devices WHERE id=?", [test_id])
+    if not rows:
+        raise CFError("وصلت الرسالة إلى الموقع لكنها لم تُحفظ")
+    day = rows[0]["first_day"]
+    query(acc, prod, "DELETE FROM devices WHERE id=?", [test_id])
+    query(acc, prod, "DELETE FROM act WHERE id=?", [test_id])
+    query(acc, prod, "UPDATE daily SET active=MAX(active-1,0) WHERE day=?", [day])
+    print("✔ الموقع: رسالةٌ وصلت وحُفظت في قاعدة الموقع، ثم حُذفت وطُرح أثرها")
+    code, html = http("GET", SITE + "/stats")
+    print("✔ لوحة المالك تُفتح بكلمة المرور فقط" if code == 200 and 'name="pw"' in html and 'id="app"' not in html
+          else f"✘ لوحة المالك: {code}")
+    code, _ = http("GET", SITE + "/stats/data")
+    print("✔ أرقامها مرفوضة بلا دخول" if code == 401 else f"✘ /stats/data بلا دخول: {code}")
+    code, html = http("GET", SITE + "/app/version.json")
+    print("✔ نسخة الويب المنشورة:", json.loads(html).get("name") if code == 200 else code)
+    code, html = http("GET", SITE + "/")
+    print("✔ صفحة الموقع تعمل" if code == 200 and "ÀUR" in html else f"✘ صفحة الموقع: {code}")
+
+
 def main():
     if not TOKEN:
         print("ℹ لم يُضف مفتاح Cloudflare بعد (سرّ المستودع CLOUDFLARE_API_TOKEN) — لا شيء يُفعل الآن.")
@@ -297,6 +336,8 @@ def main():
         if action == "setup":
             acc, ids, _changed = setup()
             check(acc, ids)
+        elif action == "prod":
+            prod_check()
         elif action == "inspect":
             inspect(account())
         elif action == "check":
