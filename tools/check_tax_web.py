@@ -275,8 +275,17 @@ with db() as c:
     mweb.set_ops_pin(c, "4321")
 OPS["cookie"] = False
 code, h = call("GET", "taxs")
-check("برمز لوحة العمليات: الصفحة تطلبه أولاً", code == 200
-      and "رمز اللوحة" in h and "فاتورة ضريبية" not in h)
+check("5.8.6: المقفلة تفتح على سجلّها بلا رمز — والعمليات بـ🔒", code == 200
+      and "صافي ضريبة المخرجات" in h and "فاتورة ضريبية 🔒" in h
+      and "رمز اللوحة" not in h, h[:300])
+code, h = call("GET", "taxp", {"tab": "reg", "all": "1"})
+check("وسجل المشتريات يُقرأ بلا رمز", "ضريبة المدخلات" in h
+      and "رمز اللوحة" not in h)
+code, h = call("GET", "taxs", {"tab": "inv"})
+check("وفاتورة البيع تطلب رمز اللوحات", "رمز اللوحة" in h
+      and "طريقة التسعير" not in h)
+code, h = call("GET", "taxp", {"tab": "cash"})
+check("والمشتريات النقدية كذلك", "رمز اللوحة" in h)
 r = post("tax_sale", {"party": SHOP})
 check("والترحيل بلا الرمز مقفل", r.get("locked") is True, r)
 OPS["cookie"] = True
@@ -285,7 +294,10 @@ check("وبالرمز تفتح", "طريقة التسعير" in h)
 with db() as c:
     mweb.set_ops_enabled(c, False)
 code, h = call("GET", "taxp")
-check("إيقاف التسجيل من البرنامج يقفل الشاشتين", "موقوفٌ من البرنامج" in h)
+check("إيقاف التسجيل يقفل عمليات الشاشتين", "من الرابط موقوف" in h)
+code, h = call("GET", "taxp", {"tab": "reg"})
+check("ويبقى السجل يُقرأ", "ضريبة المدخلات" in h
+      and "من الرابط موقوف" not in h)
 with db() as c:
     mweb.set_ops_enabled(c, True)
 
@@ -310,6 +322,10 @@ if OUT:
     mw.register()                    # مسار الرابط في الخادم (كالتفعيل)
     base = f"http://127.0.0.1:{addr[1]}/{mw.PREFIX}/{TOK}"
     opin = "4321"
+    with db(readonly=True) as c:
+        SHOP_CODE = c.execute("SELECT a.code FROM entities e JOIN accounts a"
+                              " ON a.id=e.account_id WHERE e.id=?",
+                              (SHOP,)).fetchone()[0]
     code = f"""
 const {{ chromium }} = require('playwright');
 (async () => {{
@@ -324,7 +340,8 @@ const {{ chromium }} = require('playwright');
     await Promise.all([p.waitForNavigation(), p.click('form button')]);
     for (const [u, n] of [['/taxs', 'sale'], ['/taxs?tab=reg&all=1', 'sreg'],
         ['/taxs?tab=ret', 'sret'], ['/taxp', 'pur'], ['/taxp?tab=cash', 'cash'],
-        ['/taxp?tab=reg&all=1', 'preg'], ['', 'home']]) {{
+        ['/taxp?tab=reg&all=1', 'preg'], ['/stmt?code={SHOP_CODE}', 'stmt'],
+        ['/sec', 'sec'], ['', 'home']]) {{
       await p.goto('{base}' + u);
       await p.waitForTimeout(300);
       if (n === 'sale') {{
@@ -349,6 +366,16 @@ const {{ chromium }} = require('playwright');
         const t = await p.locator('#tot .kpi.gold .v').innerText();
         if (t.trim() !== '57.50') errs.push('cash total ' + t);
         if (!(await p.locator('#post').innerText()).includes('مرتجع')) errs.push('cash ret label');
+      }}
+      if (n === 'stmt') {{
+        const opts = await p.locator('#mop option').allInnerTexts();
+        if (opts.length < 3) errs.push('stmt filter options ' + opts.join('|'));
+        await p.selectOption('#mop', {{ index: 1 }});
+        await p.waitForTimeout(200);
+        const vis = await p.locator('tr[data-s]:visible').count();
+        const all = await p.locator('tr[data-s]').count();
+        const sum = await p.locator('#mopsum').innerText();
+        if (!(vis > 0 && vis < all) || !sum.includes('حركة')) errs.push('stmt filter ' + vis + '/' + all + ' ' + sum);
       }}
       if (n === 'home') {{ await p.click('#more summary'); await p.waitForTimeout(200); }}
       await p.screenshot({{ path: '{OUT}/web_' + n + '_' + tag + '.png', fullPage: n !== 'home' }});

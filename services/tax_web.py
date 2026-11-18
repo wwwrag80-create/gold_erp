@@ -249,21 +249,24 @@ padding:8px 12px;margin:0;cursor:pointer;font-weight:700}
 """
 
 
-def _tabs(base, head, tab):
+def _tabs(base, head, tab, locked=False):
+    """أقسام الشاشة — والعمليات بـ🔒 إن قفلها المدير (السجل مفتوحٌ دائماً)."""
     return '<div class="ttabs">' + "".join(
         f'<a class="{"on" if k == tab else ""}" href="'
         f'{_e(M._link(base, "/" + head, tab=k))}">{M.icon(ic, 18)}'
-        f'{_e(t)}</a>' for k, t, ic in TABS[head]) + '</div>'
+        f'{_e(t)}{" 🔒" if locked and k != "reg" else ""}</a>'
+        for k, t, ic in TABS[head]) + '</div>'
 
 
-def page(conn, base, csrf, head, query, has_pin=False):
+def page(conn, base, csrf, head, query, has_pin=False, locked=False):
     query = query or {}
     title = PAGES[head]
-    if not M.ops_enabled(conn):
-        return M._lock_page(base, csrf, "تسجيل العمليات من الرابط موقوفٌ من "
-                                        "البرنامج — والشاشات الضريبية منه.")
     keys = [k for k, _t, _i in TABS[head]]
     tab = query.get("tab") if query.get("tab") in keys else keys[0]
+    # 5.8.6: السجل يُقرأ دائماً — والعمليات وحدها تتبع السماح بالتسجيل وقفلها
+    if tab != "reg" and not M.ops_enabled(conn):
+        return M._lock_page(base, csrf, "تسجيل العمليات من الرابط موقوف — "
+                                        "والسجل مفتوحٌ للقراءة.")
     lock_btn = (f'<form method="post" action="{_e(base + "/ops/lock")}" '
                 f'style="margin:0"><input type="hidden" name="csrf" value="'
                 f'{_e(csrf)}"><button class="btn sm gh">{M.icon("lock", 15)}'
@@ -271,7 +274,7 @@ def page(conn, base, csrf, head, query, has_pin=False):
     top = (f'<div class="ptitle"><h2>{M.icon("all", 22)}{_e(title)}</h2>'
            f'<span class="hint">كشاشة البرنامج — تُرحَّل باسم «{M.WEB_USER}»'
            f' وتظهر فيه فوراً</span><span class="sp"></span>{lock_btn}</div>'
-           + _tabs(base, head, tab))
+           + _tabs(base, head, tab, locked))
     if tab == "reg":
         body = (_sales_register(conn, base, query) if head == "taxs"
                 else _pur_register(conn, base, query))

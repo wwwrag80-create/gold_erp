@@ -215,7 +215,7 @@ def edit_lock_action(data):
             h = _get(conn, K_EDIT_PIN, "").strip()
         if not h:
             return {"ok": False, "error": "لا رمز للقفل بعد — اضبطه من "
-                    "البرنامج: «🔗 رابط المدير» ← «رمز قفل التعديل والحذف»"}
+                    "«🔐 الرموز والأقفال» في الرابط"}
         if m._locked():
             return {"ok": False, "error": "محاولات كثيرة — انتظر ربع ساعة ثم"
                                           " حاول ثانيةً"}
@@ -227,6 +227,51 @@ def edit_lock_action(data):
     return {"ok": True, "locked": want,
             "msg": "قُفل التعديل والحذف في الرابط" if want
             else "فُتح التعديل والحذف في الرابط"}
+
+
+# ══════════════════════════════════════════════════════════════════
+#  5.8.6: الرموز والأقفال من الرابط نفسه — المدير يتحكّم بها لا جهاز المصنع
+# ------------------------------------------------------------------
+#  صفحة «🔐 الرموز والأقفال» في الرابط: رمز اللوحات المقفلة (كان رمز لوحة
+#  تسجيل العمليات) واختيار اللوحات التي يقفلها، ورمز قفل التعديل والحذف،
+#  ورمز دخول الرابط، والسماح بالتسجيل من الرابط. وتغيير أي رمزٍ يطلب الرمز
+#  الحالي أولاً. ونافذة الرابط في البرنامج لا تُظهر الرموز (إعادة ضبطها عند
+#  نسيانها للمدير العام وحده — ويظهر ذلك في الرابط).
+# ══════════════════════════════════════════════════════════════════
+K_LOCKED = "mw_locked_panels"
+K_SEC_RESET = "mw_sec_reset_at"
+DEFAULT_LOCKED = ("ops", "tax")
+
+
+def lockable():
+    """[(مفتاح اللوحة، اسمها)] — ما يقفله المدير برمز اللوحات."""
+    return (("ops", "تسجيل عمليات — ومعه التعديل والحذف والدمج"),
+            ("tax", "عمليات المبيعات والمشتريات الضريبية (سجلّاهما مفتوحان)"),
+            ("boxes", "الصناديق"), ("stmt", "كشف حساب"),
+            ("moves", MOVES_TITLE), ("sets", "حركة الطقم"),
+            ("guide", "دليل الموديلات"), ("received", "الوارد بتاريخ"),
+            ("customers", "العملاء — المبيعات والسداد"),
+            ("analytics", AN_TITLE), ("pnl", "الأرباح والخسائر"))
+
+
+def locked_panels(conn):
+    raw = str(_get(conn, K_LOCKED, "") or "")
+    if not raw:
+        return set(DEFAULT_LOCKED)
+    try:
+        keys = dict(lockable())
+        return {x for x in json.loads(raw) if x in keys}
+    except (ValueError, TypeError):
+        return set(DEFAULT_LOCKED)
+
+
+def panel_locked(conn, key):
+    """اللوحة مقفلة الآن: لها رمزٌ واختارها المدير."""
+    return has_ops_pin(conn) and key in locked_panels(conn)
+
+
+def panel_open(conn, key, headers, csrf):
+    return not panel_locked(conn, key) or ops_unlocked(conn, headers, csrf)
 
 
 def _safe_next(base, nxt):
@@ -353,6 +398,8 @@ def nav_items(base):
         # 5.8.5: الشاشتان الضريبيتان كما في البرنامج
         ("taxs", "المبيعات الضريبية", _link(base, "/taxs"), "sale"),
         ("taxp", "المشتريات الضريبية", _link(base, "/taxp"), "purchase"),
+        # 5.8.6: الرموز والأقفال يضبطها المدير من الرابط نفسه
+        ("sec", "الرموز والأقفال", _link(base, "/sec"), "lock"),
     ]
 
 
@@ -396,6 +443,7 @@ border-radius:20px;padding:5px 12px;white-space:nowrap}
 padding:5px 13px;white-space:nowrap;cursor:pointer;color:#f7ecd3;
 background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.35)}
 .elockb:hover{background:rgba(255,255,255,.16)}
+a.elockb{text-decoration:none;display:inline-flex;align-items:center;margin-inline-start:6px}
 .elockb.on{background:#F5E3B3;color:#4E3618;border-color:#F5E3B3}
 #lkdlg input{width:100%;padding:11px;font-size:18px;text-align:center;
 letter-spacing:5px;border:1px solid var(--line);border-radius:10px;
@@ -661,7 +709,9 @@ def frame(base, active, title, inner, csrf="", css="", js="", sub=""):
 <header class="mhead"><div class="in"><div><h1>{_e(co or "رابط المدير")}</h1>
 <div class="sub">{_e(sub or "مباشرةً من جهاز المصنع")}</div></div>
 <span class="sp"></span><span class="live">● مباشر · {now} · الأوزان
- {_e(_unit())}</span>{_lock_btn()}</div>{nav_html(base, active)}</header>
+ {_e(_unit())}</span>{_lock_btn()}{('<a class="elockb" href="' + _e(base + "/sec")
+ + '" title="الرموز والأقفال — يضبطها المدير من هنا">🔐 الرموز</a>')
+ if csrf else ""}</div>{nav_html(base, active)}</header>
 <main class="mmain">{inner}</main>
 <div class="mfoot"><a href="{_e(base)}">الرئيسية</a> · إصدار
  {_e(_mw()._version())} · <a href="{_e(base)}/logout">خروج</a></div>
@@ -685,7 +735,7 @@ _LOCK_JS = r"""
  function close(){d.classList.remove('on');d.style.display='none';}
  b.addEventListener('click',function(){var lk=b.getAttribute('data-locked')==='1';
   if(b.getAttribute('data-pin')!=='1'){MW.toast('اضبط رمز القفل أولاً من '+
-   'البرنامج: «🔗 رابط المدير» ← «رمز قفل التعديل والحذف»',false);return;}
+   '«🔐 الرموز والأقفال» في الرابط',false);return;}
   d.querySelector('h4').textContent=lk?'🔓 فتح التعديل والحذف':
    '🔒 قفل التعديل والحذف';
   d.querySelector('.note').textContent=lk?'يعود التعديل والحذف والدمج في '+
@@ -713,7 +763,7 @@ _LOCK_JS = r"""
 # ══════════════════════════════════════════════════════════════════
 
 ROUTES = ("home", "sets", "boxes", "moves", "stmt", "analytics", "ops",
-          "doc", "api", "taxs", "taxp", "tax")
+          "doc", "api", "taxs", "taxp", "tax", "sec")
 
 
 def handles(rest, query):
@@ -727,6 +777,19 @@ def handles(rest, query):
         return not any(query.get(k) for k in ("view", "sort", "day", "st",
                                               "d", "from", "to"))
     return rest[0] in ROUTES
+
+
+def _here(base, rest, query):
+    """عنوان الصفحة الحالية — للعودة إليها بعد إدخال رمز اللوحة."""
+    from urllib.parse import urlencode
+    q = {k: v for k, v in (query or {}).items()
+         if isinstance(v, str) and len(v) < 200}
+    return (base + "/" + "/".join(rest) + (f"?{urlencode(q)}" if q else ""))
+
+
+def _locked_json(base):
+    return _json({"ok": False, "locked": True, "unlock": base + "/ops/unlock",
+                  "error": "هذه اللوحة مقفلة برمز — أدخل رمز اللوحات أولاً"})
 
 
 def route(method, rest, query, headers, body, base, csrf, pin_set=False):
@@ -746,8 +809,16 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
                           "حدّثها ثم أعد المحاولة"}, 403)
         if head == "api" and rest[1:2] == ["editlock"]:
             return _json(edit_lock_action(data))
+        if head == "sec":
+            # 5.8.6: الرموز والأقفال — خلف رمز اللوحات (إن كان له رمز)
+            with db(readonly=True) as conn:
+                if not ops_unlocked(conn, headers, csrf):
+                    return _locked_json(base)
+            return sec_action(data, base, csrf)
         if head == "boxes":
             with db(readonly=True) as conn:
+                if not panel_open(conn, "boxes", headers, csrf):
+                    return _locked_json(base)
                 if edits_locked(conn):
                     return _json({"ok": False, "error": EDIT_LOCKED_MSG})
             return _json(boxes_action(data))
@@ -759,24 +830,18 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
             return _resp(303, "", headers={"Location": base + "/ops",
                                            "Set-Cookie": ck})
         if head == "tax" and len(rest) == 3 and rest[1] == "post":
-            # 5.8.5: المستندات الضريبية خلف رمز لوحة تسجيل العمليات نفسه
+            # المستندات الضريبية خلف رمز اللوحات — إن قفلها المدير
             with db(readonly=True) as conn:
-                if not ops_unlocked(conn, headers, csrf):
-                    return _json({"ok": False, "locked": True,
-                                  "unlock": base + "/ops/unlock",
-                                  "error": "لوحة تسجيل العمليات برمز — "
-                                           "أدخل رمزها أولاً"})
+                if not panel_open(conn, "tax", headers, csrf):
+                    return _locked_json(base)
             from services import tax_web
             return _json(tax_web.post(rest[2], data))
         if head == "api" and len(rest) >= 2 and rest[1] in (
                 "post", "edit", "delete", "merge"):
-            # كل كتابةٍ من الرابط خلف رمز اللوحة (إن ضُبط)
+            # التسجيل والتعديل والحذف والدمج — خلف رمز اللوحات إن قُفل
             with db(readonly=True) as conn:
-                if not ops_unlocked(conn, headers, csrf):
-                    return _json({"ok": False, "locked": True,
-                                  "unlock": base + "/ops/unlock",
-                                  "error": "لوحة تسجيل العمليات برمز — "
-                                           "أدخل رمزها أولاً"})
+                if not panel_open(conn, "ops", headers, csrf):
+                    return _locked_json(base)
             if rest[1] == "post" and len(rest) == 3:
                 return _json(post_op(rest[2], data))
             if rest[1] == "edit" and len(rest) == 4 and rest[3].isdigit():
@@ -800,17 +865,36 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
                 return _json(tax_web.api(conn, rest[2:], query))
         return _resp(404, _mw()._GONE)
     with db(readonly=True) as conn:
+        if head == "ops" and rest[1:2] == ["unlock"]:
+            return _resp(200, unlock_page(
+                base, csrf, _safe_next(base, query.get("next"))))
+        # 5.8.6: اللوحة التي قفلها المدير تطلب رمز اللوحات أولاً — وسجلّا
+        # المبيعات والمشتريات الضريبية مفتوحان دائماً (عملياتهما وحدها مقفلة)
+        key = {"taxs": "tax", "taxp": "tax", "sec": "ops"}.get(head, head)
+        tax_locked = False
         if head in ("taxs", "taxp"):
-            # 5.8.5: المبيعات والمشتريات الضريبية — خلف رمز لوحة العمليات
+            tax_locked = not panel_open(conn, "tax", headers, csrf)
+            if tax_locked and not query.get("tab"):
+                query = dict(query, tab="reg")   # المقفل يفتح على سجلّه
+            if query.get("tab") == "reg":
+                key = ""
+        if head == "sec":
+            gate = not ops_unlocked(conn, headers, csrf)
+        elif head == "ops":
+            gate = not panel_open(conn, key, headers, csrf) \
+                and ops_enabled(conn)
+        else:
+            gate = key in dict(lockable()) and not panel_open(
+                conn, key, headers, csrf)
+        if gate:
+            return _resp(200, unlock_page(base, csrf, _safe_next(
+                base, _here(base, rest, query))))
+        if head in ("taxs", "taxp"):
             from services import tax_web
-            if not ops_unlocked(conn, headers, csrf) and ops_enabled(conn):
-                nxt = base + "/" + head + (
-                    f"?tab={query.get('tab')}" if str(
-                        query.get("tab") or "").isalpha() else "")
-                return _resp(200, unlock_page(base, csrf,
-                                              _safe_next(base, nxt)))
             return _resp(200, tax_web.page(conn, base, csrf, head, query,
-                                           has_ops_pin(conn)))
+                                           has_ops_pin(conn), tax_locked))
+        if head == "sec":
+            return _resp(200, sec_page(conn, base, csrf, pin_set))
         if head == "home":
             return _resp(200, home(conn, base, csrf))
         if head == "sets":
@@ -824,18 +908,199 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
         if head == "analytics":
             return _resp(200, analytics_page(conn, base, csrf, query))
         if head == "ops":
-            if rest[1:2] == ["unlock"]:
-                return _resp(200, unlock_page(
-                    base, csrf, _safe_next(base, query.get("next"))))
-            if not ops_unlocked(conn, headers, csrf) and ops_enabled(conn):
-                nxt = base + "/" + "/".join(rest) + (
-                    f"?edit={query.get('edit')}"
-                    if str(query.get("edit") or "").isdigit() else "")
-                return _resp(200, unlock_page(base, csrf,
-                                              _safe_next(base, nxt)))
             return _resp(200, ops_page(conn, base, csrf, rest[1:], query,
                                        has_ops_pin(conn)))
     return _resp(404, _mw()._GONE)
+
+
+# ══════════════════════════ صفحة الرموز والأقفال ══════════════════════════
+_SEC_CSS = """
+.secg{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.secg .panel{margin:0}.secg h3{margin:0 0 8px}.secg .st{font-weight:800}
+.secg .st.on{color:#1F8A4C}.secg .st.off{color:#8a7a66}
+.plist{display:grid;gap:6px;margin:8px 0}.plist label{flex-direction:row;
+align-items:center;gap:8px;margin:0;font-weight:600}
+"""
+
+
+def _pin_box(kind, title, has, note, extra=""):
+    cur = ('<label>الرمز الحالي<input type="password" inputmode="numeric" '
+           f'maxlength="12" autocomplete="off" data-f="cur" data-k="{kind}">'
+           '</label>' if has else "")
+    return (f'<section class="panel" data-pin="{kind}"><h3>{_e(title)}</h3>'
+            f'<div class="st {"on" if has else "off"}">'
+            f'{"🔒 مضبوط" if has else "بلا رمز"}</div>'
+            f'<p class="note">{_e(note)}</p><div class="fg">{cur}'
+            '<label>الرمز الجديد (4 إلى 12)<input type="password" inputmode="'
+            'numeric" maxlength="12" autocomplete="off" data-f="new"></label>'
+            '<label>تأكيده<input type="password" inputmode="numeric" '
+            'maxlength="12" autocomplete="off" data-f="new2"></label></div>'
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+            f'<button class="btn gold" data-act="set">{"تغيير الرمز" if has else "حفظ الرمز"}'
+            '</button>' + (f'<button class="btn gh" data-act="clear">إلغاء الرمز'
+                           '</button>' if has else "") + f'</div>{extra}</section>')
+
+
+def sec_page(conn, base, csrf, login_set=False):
+    has_p, has_e = has_ops_pin(conn), has_edit_pin(conn)
+    locked = locked_panels(conn)
+    rows = "".join(
+        f'<label><input type="checkbox" value="{k}"'
+        f'{" checked" if k in locked else ""}{"" if has_p else " disabled"}>'
+        f' {_e(t)}</label>' for k, t in lockable())
+    reset = _get(conn, K_SEC_RESET, "")
+    ops_on = ops_enabled(conn)
+    inner = (
+        f'<div class="ptitle"><h2>{icon("lock", 22)}الرموز والأقفال</h2>'
+        '<span class="hint">يضبطها المدير من هنا وحده — لا تظهر في البرنامج على'
+        ' جهاز المصنع. وتغيير أي رمزٍ يطلب رمزه الحالي.</span></div>'
+        + (f'<div class="msg info">أُعيد ضبط الرموز من البرنامج (المدير العام) في'
+           f' {_e(reset)} — اضبطها من جديد.</div>' if reset else "")
+        + '<div class="secg">'
+        + _pin_box("panel", "رمز اللوحات المقفلة", has_p,
+                   "يفتح اللوحات التي تختارها أدناه على هذا الجهاز 12 ساعة.",
+                   f'<h3 style="margin-top:14px">اللوحات المقفلة</h3>'
+                   f'<div class="plist">{rows}</div>'
+                   + ('' if has_p else '<p class="note">اضبط رمز اللوحات أولاً'
+                      ' ثم اختر ما يُقفل.</p>')
+                   + ('<button class="btn gold" data-act="panels">حفظ '
+                      'اللوحات المقفلة</button>' if has_p else ""))
+        + _pin_box("edit", "رمز قفل التعديل والحذف", has_e,
+                   "يقفل التعديل والحذف والعكس والدمج في الرابط كله أو يفتحها "
+                   "من زرّ «🔒» في أعلى الصفحات.")
+        + _pin_box("login", "رمز دخول الرابط", login_set,
+                   "يُطلب عند فتح الرابط على أي جهاز. تغييره يُخرج الأجهزة "
+                   "الأخرى حتى تُدخله.")
+        + '<section class="panel" data-pin="ops"><h3>تسجيل العمليات من الرابط'
+          f'</h3><div class="st {"on" if ops_on else "off"}">'
+          f'{"✔ مسموح" if ops_on else "⏹ موقوف"}</div><p class="note">بيع · '
+          'مرتجع · قبض · صرف · قيد · توريد، والمبيعات والمشتريات الضريبية — '
+          'تُرحَّل في دفاتر المصنع باسم «رابط المدير». والسجلّات والكشوف تبقى '
+          'تُقرأ.</p><button class="btn gold" data-act="ops">'
+          f'{"إيقاف التسجيل" if ops_on else "السماح بالتسجيل"}</button>'
+          '</section></div>')
+    js = r"""
+(function(){document.querySelectorAll('section[data-pin]').forEach(function(sec){
+ var kind=sec.getAttribute('data-pin');
+ function val(f){var i=sec.querySelector('[data-f="'+f+'"]');return i?i.value.trim():'';}
+ sec.querySelectorAll('[data-act]').forEach(function(b){b.onclick=function(){
+  var act=b.getAttribute('data-act'),d={kind:kind,act:act,cur:val('cur'),pin:val('new'),pin2:val('new2')};
+  if(act==='set'&&(d.pin.length<4||d.pin!==d.pin2)){MW.toast(d.pin.length<4?
+   'الرمز من 4 إلى 12 خانة':'الرمز وتأكيده غير متطابقين',false);return;}
+  if(act==='panels')d.panels=[].slice.call(sec.querySelectorAll('.plist input:checked')).map(function(x){return x.value;});
+  b.disabled=true;MW.post('/sec',d).then(function(r){b.disabled=false;
+   if(!r.ok){if(r.locked&&r.unlock){location.href=r.unlock+'?next='+encodeURIComponent(location.pathname);return;}
+    MW.toast(r.error||'تعذّر',false);return;}
+   MW.toast(r.msg,true);setTimeout(function(){location.reload();},700);});};});});})();
+"""
+    return frame(base, "sec", "الرموز والأقفال", inner, csrf, css=_SEC_CSS,
+                 js=js)
+
+
+def sec_action(data, base, csrf):
+    """تغيير رمزٍ أو إلغاؤه (بالرمز الحالي) · اللوحات المقفلة · السماح
+    بالتسجيل — من صفحة «الرموز والأقفال». والمحاولات الخاطئة تُحصى."""
+    from database.database import db
+    m = _mw()
+    kind, act = str(data.get("kind") or ""), str(data.get("act") or "")
+    cur = str(data.get("cur") or "").strip()
+    pin = str(data.get("pin") or "").strip()
+    keys = {"panel": K_OPS_PIN, "edit": K_EDIT_PIN, "login": m.K_PIN}
+    headers = {}
+    with _post_lock:
+        with db(readonly=True) as conn:
+            if kind in keys:
+                h = _get(conn, keys[kind], "").strip()
+                if h and act in ("set", "clear"):
+                    if m._locked():
+                        return _json({"ok": False, "error": "محاولات كثيرة — "
+                                      "انتظر ربع ساعة ثم حاول ثانيةً"})
+                    if not m._pin_ok(h, cur):
+                        m._fail()
+                        return _json({"ok": False,
+                                      "error": "الرمز الحالي غير صحيح"})
+        try:
+            with db() as conn:
+                if kind in keys and act == "set":
+                    if pin != str(data.get("pin2") or "").strip():
+                        raise ValueError("الرمز وتأكيده غير متطابقين")
+                    {"panel": set_ops_pin, "edit": set_edit_pin,
+                     "login": m.set_pin}[kind](conn, pin, WEB_USER)
+                    msg = "حُفظ الرمز الجديد"
+                elif kind in keys and act == "clear":
+                    {"panel": set_ops_pin, "edit": set_edit_pin,
+                     "login": m.set_pin}[kind](conn, "", WEB_USER)
+                    msg = "أُلغي الرمز"
+                elif kind == "panel" and act == "panels":
+                    allowed = dict(lockable())
+                    want = [x for x in (data.get("panels") or [])
+                            if x in allowed]
+                    _set(conn, K_LOCKED, json.dumps(want))
+                    m._audit(conn, WEB_USER, "اللوحات المقفلة في الرابط: "
+                             + ("، ".join(allowed[x] for x in want)
+                                or "لا شيء"))
+                    msg = "حُفظت اللوحات المقفلة"
+                elif kind == "ops" and act == "ops":
+                    on = not ops_enabled(conn)
+                    set_ops_enabled(conn, on, WEB_USER)
+                    m._audit(conn, WEB_USER, "السماح بتسجيل العمليات من الرابط"
+                             if on else "إيقاف تسجيل العمليات من الرابط")
+                    msg = ("سُمح بالتسجيل من الرابط" if on
+                           else "أُوقف التسجيل من الرابط")
+                else:
+                    raise ValueError("طلبٌ غير معروف")
+                if kind in keys:
+                    _set(conn, K_SEC_RESET, "")
+                # الجهاز الذي غيّر الرمز يبقى داخلاً بالرمز الجديد
+                if kind == "panel":
+                    nh = _get(conn, K_OPS_PIN, "").strip()
+                    headers["Set-Cookie"] = (
+                        f"{OPS_COOKIE}={_ops_cookie_value(csrf, nh)}; Path="
+                        f"{base}; Max-Age={OPS_HOURS * 3600}; HttpOnly; "
+                        "SameSite=Strict" if nh else
+                        f"{OPS_COOKIE}=; Path={base}; Max-Age=0; HttpOnly;"
+                        " SameSite=Strict")
+                elif kind == "login":
+                    nh = _get(conn, m.K_PIN, "").strip()
+                    tok, sec = _get(conn, m.K_TOKEN), _get(conn, m.K_SECRET)
+                    headers["Set-Cookie"] = (
+                        f"{m.COOKIE}={m._cookie_value(tok, sec, nh)}; Path="
+                        f"{base}; Max-Age={m.COOKIE_DAYS * 86400}; HttpOnly;"
+                        " SameSite=Lax" if nh else
+                        f"{m.COOKIE}=; Path={base}; Max-Age=0; HttpOnly;"
+                        " SameSite=Lax")
+        except ValueError as e:
+            return _json({"ok": False, "error": str(e)})
+    return _resp(200, json.dumps({"ok": True, "msg": msg},
+                                 ensure_ascii=False),
+                 "application/json; charset=utf-8",
+                 dict({"Cache-Control": "no-store"}, **headers))
+
+
+def reset_codes(username):
+    """من البرنامج (المدير العام وحده): إعادة ضبط رموز الرابط كلها عند
+    نسيانها — ويظهر ذلك في صفحة «الرموز والأقفال» حتى تُضبط من جديد."""
+    from database.database import db
+    from datetime import datetime
+    m = _mw()
+    with db() as conn:
+        set_ops_pin(conn, "", username)
+        set_edit_pin(conn, "", username)
+        m.set_pin(conn, "", username)
+        _set(conn, K_SEC_RESET, datetime.now().strftime("%Y-%m-%d %H:%M"),
+             username)
+        m._audit(conn, username, "إعادة ضبط رموز رابط المدير من البرنامج")
+    return True
+
+
+def tab_gate(conn, tab, headers, csrf, base):
+    """5.8.6: لوحات «tab» (الدليل · الوارد · العملاء · الأرباح) في صفحة
+    الموديلات — صفحة الرمز إن قفلها المدير، وإلا None."""
+    key = tab if tab in dict(lockable()) else ""
+    if key and not panel_open(conn, key, headers, csrf):
+        return _resp(200, unlock_page(base, csrf, _safe_next(
+            base, f"{base}/?tab={key}")))
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1020,7 +1285,14 @@ def home(conn, base, csrf):
     # 5.6.3: بلا بطاقات الأرقام أعلى الرئيسية (الذهب المشغول · المتاح للبيع ·
     # الصندوق النقدي · عمليات اليوم) — اللوحات وحدها
 
+    # 5.8.6: اللوحة التي قفلها المدير يظهر عليها 🔒
+    locked_now = locked_panels(conn) if has_ops_pin(conn) else set()
+
+    def lk(key):
+        return " 🔒" if key in locked_now else ""
+
     def tile(key, title, sub, href, main=False, badge=""):
+        title = title + (lk(key) if key in dict(lockable()) else "")
         return (f'<a class="tile{" main" if main else ""}" href="{_e(href)}">'
                 f'{icon(key, 38)}<b>{_e(title)}</b><small>{_e(sub)}</small>'
                 + (f'<span class="n">{_e(badge)}</span>' if badge else "")
@@ -1053,10 +1325,13 @@ def home(conn, base, csrf):
         tile("pnl", pnl, "لوحة الأرباح كما في البرنامج",
              _link(base, tab="pnl")),
         # 5.8.5: الشاشتان الضريبيتان — خلف رمز لوحة تسجيل العمليات
-        tile("sale", "المبيعات الضريبية 🔒", "فاتورة ضريبية · مرتجع (إشعار "
-             "دائن) · السجل — كشاشة البرنامج", _link(base, "/taxs")),
-        tile("purchase", "المشتريات الضريبية 🔒", "مشتريات ذهب · مرتجع · "
-             "المشتريات النقدية · السجل", _link(base, "/taxp"))))
+        tile("sale", "المبيعات الضريبية" + lk("tax"), "فاتورة ضريبية · "
+             "مرتجع (إشعار دائن) · السجل — كشاشة البرنامج",
+             _link(base, "/taxs")),
+        tile("purchase", "المشتريات الضريبية" + lk("tax"), "مشتريات ذهب · "
+             "مرتجع · المشتريات النقدية · السجل", _link(base, "/taxp")),
+        tile("lock", "الرموز والأقفال", "رموز اللوحات والتعديل والدخول — "
+             "يضبطها المدير من هنا", _link(base, "/sec"))))
     # 5.8.5: لوحات «المزيد» مطويّة — تظهر بالنقر على «المزيد» (ويُحفظ اختيارك)
     inner = (f'<div class="ptitle"><h2>{icon("home", 22)}الرئيسية</h2>'
              f'<span class="hint">اختر لوحةً — كل الأرقام من جهاز المصنع '
@@ -1560,7 +1835,9 @@ def _scrap_section(conn, base, sel, query):
         acts = ("" if r.get("op") in ("رصيد سابق", "تسوية") else
                 _doc_links(base, r.get("src"), r.get("sid"), r.get("eid")))
         srows.append(
-            f'<tr data-s="{_e(s.lower())}"><td class="n">{_e(r["date"])}'
+            f'<tr data-s="{_e(s.lower())}" data-op="{_e(r.get("op") or "")}"'
+            + _sum_attr({"وارد (جم)": r["inw"], "صادر (جم)": r["outw"]})
+            + f'><td class="n">{_e(r["date"])}'
             f'</td><td>{_e(r.get("op") or "")}</td><td class="n">'
             f'{_e(r.get("doc_no") or "")}</td><td>{_e(r.get("name") or "")}'
             + (f'<br><small class="note">{_e(r["desc"])}</small>'
@@ -1573,8 +1850,8 @@ def _scrap_section(conn, base, sel, query):
             f'<span class="pill">الرصيد {_m(st["closing"])} جم</span>'
             f'<span class="pill">وارد {_m(st["total_in"])}</span><span '
             f'class="pill">صادر {_m(st["total_out"])}</span><span class="sp">'
-            f'</span><input id="mq" placeholder="ابحث في الكشف…" style="'
-            f'min-width:200px"></h3>'
+            f'</span>{_op_filter()}<input id="mq" placeholder="ابحث في الكشف…"'
+            f' style="min-width:200px"></h3>{_OPSUM}'
             + (f'<div class="scroll"><table class="tbl"><tr><th>التاريخ</th>'
                f'<th>العملية</th><th>المستند</th><th>الجهة / البيان</th>'
                f'<th class="n">وارد (جم)</th><th class="n">صادر (جم)</th>'
@@ -1882,15 +2159,57 @@ MOVE_KINDS = (("supply", "الوارد"), ("sale", "المبيعات"),
               ("fixing", "التسكير"), ("purchase", "المشتريات"),
               ("other", "عمليات أخرى"), ("all", "الكل"))
 
+# البحث في الكشف — و5.8.6: «فرز» بالعملية (مبيعات · مرتجع · قبض · صرف · …):
+# قائمةٌ تُبنى من عمليات الكشف نفسه (`data-op`) بعددها، والمعروض يُجمع تحتها
+# (`data-sum` لكل صف) — والبحث والفرز معاً
 _SEARCH_JS = r"""
-(function(){var q=document.getElementById('mq');if(!q)return;
- q.addEventListener('input',function(){var v=q.value.trim().toLowerCase(),n=0;
-  document.querySelectorAll('tr[data-s]').forEach(function(r){
-   var hit=!v||(r.getAttribute('data-s')||'').indexOf(v)>=0;
-   r.style.display=hit?'':'none';if(hit)n++;});
-  var e=document.getElementById('mnone');if(e)e.style.display=n?'none':'';});
+(function(){var q=document.getElementById('mq'),op=document.getElementById('mop');
+ if(!q&&!op)return;var rows=[].slice.call(document.querySelectorAll('tr[data-s]'));
+ if(op){var cnt={},order=[];rows.forEach(function(r){var o=r.getAttribute('data-op');
+   if(!o)return;if(!(o in cnt)){cnt[o]=0;order.push(o);}cnt[o]++;});
+  order.sort(function(a,b){return cnt[b]-cnt[a];});
+  op.innerHTML='<option value="">فرز: كل العمليات</option>'+order.map(function(o){
+   return '<option value="'+MW.esc(o)+'">'+MW.esc(o)+' ('+cnt[o]+')</option>';}).join('');
+  if(!order.length)op.style.display='none';}
+ function fmt(k,v){return MW.fmt(v);}
+ function apply(){var v=q?q.value.trim().toLowerCase():'',o=op?op.value:'',n=0,sum={},keys=[];
+  rows.forEach(function(r){var ro=r.getAttribute('data-op')||'';
+   var hit=(!v||(r.getAttribute('data-s')||'').indexOf(v)>=0)&&(!o||ro===o);
+   r.style.display=hit?'':'none';if(!hit)return;n++;
+   var js=r.getAttribute('data-sum');if(!js||!o)return;
+   try{var d=JSON.parse(js);Object.keys(d).forEach(function(k){if(!(k in sum)){sum[k]=0;keys.push(k);}
+    sum[k]+=+d[k]||0;});}catch(_){}});
+  var e=document.getElementById('mnone');if(e)e.style.display=n?'none':'';
+  var b=document.getElementById('mopsum');if(b){if(!o){b.style.display='none';return;}
+   b.style.display='';b.innerHTML='<b>'+MW.esc(o)+'</b>: '+n+' حركة'+keys.map(function(k){
+    return ' · '+MW.esc(k)+' <b class="n">'+fmt(k,sum[k])+'</b>';}).join('')+
+    '<br><small>الرصيد في الجدول رصيد الكشف كاملاً — والمجموع هنا للعمليات المعروضة وحدها</small>';}}
+ if(q)q.addEventListener('input',apply);if(op)op.addEventListener('change',apply);
 })();
 """
+
+
+def _op_filter():
+    """قائمة «فرز» بالعملية وسطر مجموعها — بجانب البحث في الكشف (5.8.6)."""
+    return ('<select id="mop" title="فرز الكشف بالعملية" style="max-width:'
+            '220px"><option value="">فرز: كل العمليات</option></select>')
+
+
+_OPSUM = ('<div id="mopsum" class="msg info" style="display:none;margin:0 0 '
+          '8px"></div>')
+
+
+def _gv(v18):
+    """وزنٌ مخزَّن (مكافئ 18) رقماً بعيار العرض — لمجموع «فرز»."""
+    from services import karat_view as kv
+    return kv.g(float(v18 or 0))
+
+
+def _sum_attr(d):
+    """`data-sum` لصفٍّ: {اسم العمود: قيمته} للمجموع تحت «فرز»."""
+    d = {k: round(float(v or 0), 3) for k, v in d.items() if v}
+    return (f' data-sum="{_e(json.dumps(d, ensure_ascii=False))}"'
+            if d else "")
 
 
 def _amount_txt(d):
@@ -1953,7 +2272,8 @@ def moves_page(conn, base, csrf, query):
                else "")
         w = float(d.get("weight") or 0)
         rows.append(
-            f'<tr data-s="{_e(s)}"><td class="n">{_e(d.get("date"))}'
+            f'<tr data-s="{_e(s)}" data-op="{_e(d.get("op") or "")}"'
+            + _sum_attr({"الوزن": _gv(w)}) + f'><td class="n">{_e(d.get("date"))}'
             f'<br><small>{_e(d.get("time") or "")}</small></td>'
             f'<td><span class="pill {_e(d["group"])}">{_e(d.get("op") or "")}'
             f'</span></td><td class="n">{_e(d["no"])}</td>'
@@ -1969,8 +2289,9 @@ def moves_page(conn, base, csrf, query):
     body = (f'<div class="panel"><h3>{icon(g, 20)}{_e(title)} — '
             f'{_e(_span(d1, d2))}<span class="pill">{len(docs)} عملية</span>'
             f'<span class="pill">{_w(tw)} {u}</span><span class="sp"></span>'
+            f'{_op_filter()}'
             f'<input id="mq" placeholder="ابحث بالطرف أو الرقم أو رقم التشغيل'
-            f'…" style="min-width:240px"></h3>'
+            f'…" style="min-width:240px"></h3>' + _OPSUM
             + ('<div class="scroll"><table class="tbl"><tr><th>التاريخ</th>'
                '<th>العملية</th><th>المستند</th><th>الطرف</th>'
                '<th class="n">الوزن</th><th>الأجور / النقد</th><th></th></tr>'
@@ -2048,8 +2369,14 @@ def stmt_page(conn, base, csrf, query):
             mg = (f'<input type="checkbox" class="mg" data-id="'
                   f'{_e(info["rec"])}" data-k="{_e(info["kind"])}" data-no="'
                   f'{_e(r.get("doc_no") or "")}" title="اختر للدمج">')
+        prev = r.get("op") == "رصيد سابق"
         trs.append(
-            f'<tr data-s="{_e(s.lower())}"><td class="n">{mg}{_e(r["date"])}</td>'
+            f'<tr data-s="{_e(s.lower())}" data-op="'
+            f'{"" if prev else _e(r.get("op") or "")}"'
+            + ("" if prev else _sum_attr({
+                "مدين ذهب": _gv(r["gd"]), "دائن ذهب": _gv(r["gc"]),
+                "مدين نقد": r["cd"], "دائن نقد": r["cc"]}))
+            + f'><td class="n">{mg}{_e(r["date"])}</td>'
             f'<td>{_e(r.get("op") or "")}</td><td class="n">'
             f'{_e(r.get("doc_no") or "")}</td><td>{_e(r.get("name") or "")}'
             + (f'<br><small class="note">{_e(r["desc"])}</small>'
@@ -2080,8 +2407,9 @@ def stmt_page(conn, base, csrf, query):
     table = (f'<div class="panel"><h3>{icon("stmt", 20)}{_e(acc["name"])}'
              f'<span class="pill">{_e(acc["code"])}</span><span class="pill">'
              f'الأحدث أولاً</span><span class="sp">'
-             f'</span>{mg_btn}<input id="mq" placeholder="ابحث في الكشف…" '
-             f'style="min-width:220px"></h3><div class="scroll"><table '
+             f'</span>{mg_btn}{_op_filter()}<input id="mq" placeholder="ابحث'
+             f' في الكشف…" style="min-width:220px"></h3>{_OPSUM}<div '
+             f'class="scroll"><table '
              f'class="tbl"><tr><th>التاريخ</th><th>العملية</th><th>المستند'
              f'</th><th>الطرف / البيان</th><th class="n">مدين ذهب</th>'
              f'<th class="n">دائن ذهب</th><th class="n bal">رصيد ذهب ({u})</th>'
@@ -2441,18 +2769,19 @@ def _lock_page(base, csrf, why):
         f'<div class="ptitle"><h2>{icon("lock", 22)}تسجيل العمليات</h2></div>'
         f'<div class="panel"><div class="msg info">{_e(why)}</div>'
         '<p class="note">التسجيل من الرابط يكتب في دفاتر المصنع مباشرةً. '
-        'لتفعيله افتح في البرنامج: «🔗 رابط المدير» ← علّم خانة «السماح '
-        'بتسجيل العمليات من الرابط».</p></div>'), csrf)
+        f'لتفعيله: <a href="{_e(base + "/sec")}">🔐 الرموز والأقفال</a> ← '
+        '«السماح بالتسجيل».</p></div>'), csrf)
 
 
 def unlock_page(base, csrf, nxt, error=""):
-    """رمز لوحة تسجيل العمليات — يُطلب مرةً ويبقى 12 ساعة على الجهاز."""
-    return frame(base, "ops", "رمز لوحة تسجيل العمليات", (
-        f'<div class="ptitle"><h2>{icon("lock", 22)}لوحة تسجيل العمليات'
+    """رمز اللوحات المقفلة — يُطلب مرةً ويبقى 12 ساعة على الجهاز (5.8.6:
+    لكل لوحةٍ قفلها المدير من «الرموز والأقفال»)."""
+    return frame(base, "sec", "رمز اللوحات المقفلة", (
+        f'<div class="ptitle"><h2>{icon("lock", 22)}لوحة مقفلة'
         f'</h2></div><div class="panel" style="max-width:460px;margin:20px '
-        f'auto"><p class="note" style="margin-top:0">التسجيل والتعديل والحذف '
-        f'والدمج من الرابط برمزٍ خاص ضبطه المدير في البرنامج. أدخله لفتح '
-        f'اللوحة على هذا الجهاز {OPS_HOURS} ساعة.</p>'
+        f'auto"><p class="note" style="margin-top:0">هذه اللوحة قفلها المدير '
+        f'برمز اللوحات (من «الرموز والأقفال» في الرابط). أدخله لفتح اللوحات '
+        f'المقفلة على هذا الجهاز {OPS_HOURS} ساعة.</p>'
         + (f'<div class="msg bad">{_e(error)}</div>' if error else "")
         + f'<form method="post" action="{_e(base + "/ops/unlock")}" '
         f'class="fl" style="margin:0"><input type="hidden" name="csrf" '

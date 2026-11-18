@@ -962,6 +962,11 @@ def handle(method, parts, query, headers, body):
     if rest:
         return _resp(404, _GONE)
     with db(readonly=True) as conn:
+        # 5.8.6: اللوحة التي قفلها المدير (الدليل · الوارد · العملاء · الأرباح)
+        gate = manager_web.tab_gate(conn, str(query.get("tab") or "guide"),
+                                    headers, _csrf(token, secret), base)
+        if gate is not None:
+            return gate
         return _resp(200, page_html(conn, query, base))
 
 

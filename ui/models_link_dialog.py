@@ -103,18 +103,32 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         g = QtWidgets.QGridLayout()
         g.addWidget(QtWidgets.QLabel("نوع الرابط:"), 0, 0)
         g.addWidget(self.mode, 0, 1, 1, 4)
-        g.addWidget(QtWidgets.QLabel("رمز الدخول:"), 1, 0)
-        g.addWidget(self.pin, 1, 1)
-        g.addWidget(btn_pin, 1, 2)
-        g.addWidget(btn_nopin, 1, 3)
-        g.addWidget(self.pin_state, 1, 4)
+        # 5.8.6: الرموز والأقفال يضبطها المدير من الرابط نفسه («🔐 الرموز
+        # والأقفال») — لا تظهر هنا على جهاز المصنع. وتبقى خاناتها القديمة
+        # مخفيّة (لا تُضاف للنافذة)
+        sec = QtWidgets.QLabel(
+            "🔐 الرموز والأقفال (رمز دخول الرابط · رمز اللوحات المقفلة واختيارها"
+            " · رمز قفل التعديل والحذف · السماح بالتسجيل) يضبطها المدير من "
+            "الرابط نفسه: «الرموز والأقفال» في أعلى صفحاته — ولا تظهر هنا.")
+        sec.setWordWrap(True)
+        sec.setObjectName("cardSub")
+        g.addWidget(sec, 1, 0, 1, 5)
+        self.btn_reset = kit.PushButton("إعادة ضبط رموز الرابط (عند نسيانها)")
+        self.btn_reset.setObjectName("ghost")
+        self.btn_reset.setToolTip("للمدير العام وحده: تُلغى رموز الرابط كلها "
+                                  "ليضبطها المدير من جديد — ويظهر ذلك له في "
+                                  "الرابط")
+        self.btn_reset.clicked.connect(self.reset_codes)
+        su = self.user or {}
+        self.btn_reset.setVisible(bool(su.get("is_super")
+                                       or su.get("role") == "super_admin"))
+        g.addWidget(self.btn_reset, 2, 0, 1, 2)
         # 5.6.0: تسجيل العمليات من الرابط (بيع · مرتجع · قبض · صرف · قيد ·
         # توريد). 5.6.1: خيارٌ واحد — يُسمح أو لا يُسمح — بلا اشتراط رمز
         self.ops = kit.CheckBox("السماح بتسجيل العمليات من الرابط")
         self.ops.setToolTip("بيع · مرتجع · قبض · صرف · قيد يومي · توريد — "
                             "تُرحَّل في دفاتر هذا الجهاز باسم «رابط المدير»")
         self.ops.toggled.connect(self._ops_toggled)
-        g.addWidget(self.ops, 2, 1, 1, 4)
         # 5.7.0: رمزٌ خاص بلوحة «تسجيل العمليات» (والتعديل والحذف والدمج من
         # الرابط) — فلا يسجّل فيها إلا من يعرفه، ولو فُتح الرابط نفسه
         self.ops_pin = kit.LineEdit()
@@ -128,11 +142,6 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         b_noopin.setObjectName("ghost")
         b_noopin.clicked.connect(lambda: self.save_ops_pin(clear=True))
         self.ops_pin_state = QtWidgets.QLabel("")
-        g.addWidget(QtWidgets.QLabel("رمز لوحة تسجيل العمليات:"), 3, 0)
-        g.addWidget(self.ops_pin, 3, 1)
-        g.addWidget(b_opin, 3, 2)
-        g.addWidget(b_noopin, 3, 3)
-        g.addWidget(self.ops_pin_state, 3, 4)
         # 5.7.6: رمز «قفل التعديل والحذف» — زرٌّ في أعلى صفحات الرابط يقفل
         # التعديل والحذف والعكس والدمج كلها أو يفتحها بهذا الرمز
         self.edit_pin = kit.LineEdit()
@@ -147,18 +156,12 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         b_noepin.setToolTip("يلغي الرمز ويفتح القفل إن كان مقفلاً")
         b_noepin.clicked.connect(lambda: self.save_edit_pin(clear=True))
         self.edit_pin_state = QtWidgets.QLabel("")
-        g.addWidget(QtWidgets.QLabel("رمز قفل التعديل والحذف:"), 4, 0)
-        g.addWidget(self.edit_pin, 4, 1)
-        g.addWidget(b_epin, 4, 2)
-        g.addWidget(b_noepin, 4, 3)
-        g.addWidget(self.edit_pin_state, 4, 4)
         self.edit_lock = kit.CheckBox(
             "التعديل والحذف في الرابط مقفلان الآن")
         self.edit_lock.setToolTip(
             "يُقفل ويُفتح من زر «🔒» في أعلى صفحات الرابط برمز القفل — "
             "أو من هنا مباشرةً")
         self.edit_lock.toggled.connect(self._edit_lock_toggled)
-        g.addWidget(self.edit_lock, 5, 1, 1, 4)
         # 5.8.5: الرابط يعمل دائماً — ولو انطفأت الشاشة أو أُغلقت النافذة
         self.always = kit.CheckBox(
             "الرابط يعمل دائماً: الجهاز لا ينام · البرنامج يبقى في الخلفية"
@@ -244,6 +247,26 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         else:
             self._show(None, "<span style='color:#776b5e'>الرابط موقوف —"
                              " اضغط «تفعيل الرابط»</span>")
+
+    def reset_codes(self):
+        """المدير العام وحده: تُلغى رموز الرابط كلها عند نسيانها."""
+        su = self.user or {}
+        if not (su.get("is_super") or su.get("role") == "super_admin"):
+            err(self, "إعادة ضبط رموز الرابط للمدير العام وحده")
+            return
+        if not ask(self, "إعادة ضبط رموز الرابط كلها؟\n\nيُلغى رمز الدخول ورمز "
+                         "اللوحات المقفلة ورمز قفل التعديل والحذف — ويضبطها "
+                         "المدير من جديد من «الرموز والأقفال» في الرابط (ويرى "
+                         "هناك أنها أُعيد ضبطها)."):
+            return
+        try:
+            from services import manager_web
+            manager_web.reset_codes(su.get("username") or "admin")
+        except Exception as e:
+            err(self, e)
+            return
+        self._show(None, "<span style='color:#1F8A4C'>أُعيد ضبط رموز الرابط —"
+                         " اضبطها من «الرموز والأقفال» في الرابط</span>")
 
     def _always_toggled(self, on):
         try:

@@ -106,9 +106,11 @@ check("«دليل الموديلات» أول لوحة، و«حركة الطقم
 check("«المزيد» مطويٌّ افتراضاً (لوحاته تظهر بالنقر عليه)",
       '<details class="more" id="more">' in h
       and '<details class="more" id="more" open' not in h)
-check("وفيه «المبيعات الضريبية» و«المشتريات الضريبية» بقفلهما",
-      h.index('id="more"') < h.index("المبيعات الضريبية 🔒")
-      and "المشتريات الضريبية 🔒" in h and "/taxs" in h and "/taxp" in h)
+check("وفيه «المبيعات الضريبية» و«المشتريات الضريبية» و«الرموز والأقفال»",
+      h.index('id="more"') < h.index("<b>المبيعات الضريبية")
+      and "<b>المشتريات الضريبية" in h and "/taxs" in h and "/taxp" in h
+      and "<b>الرموز والأقفال</b>" in h)
+check("وبلا رمز لوحات: لا 🔒 على أي لوحة", "🔒</b>" not in h)
 check("الرئيسية بلا بطاقات الأرقام (الذهب المشغول · المتاح للبيع · الصندوق"
       " النقدي · عمليات اليوم)", 'class="kpi' not in h
       and "الذهب المشغول" not in h and "المتاح للبيع" not in h
@@ -479,7 +481,7 @@ code, h = call("GET", "ops")
 lk = api("api/delete", {"nonce": "n-del-lock-1", "eid": e_a})
 code2, h2 = call("GET", "ops/sale", {"edit": str(e_a)})
 check("برمز اللوحة: الصفحة تطلبه، والحذف والتعديل مقفلان بلا رمزها",
-      'name="pin"' in h and "لوحة تسجيل العمليات" in h
+      'name="pin"' in h and "لوحة مقفلة" in h
       and lk.get("locked") and lk["ok"] is False and 'name="pin"' in h2
       and "next" in h2, lk)
 with db(readonly=True) as c:
@@ -524,7 +526,7 @@ with db() as c:
     b_code = c.execute("SELECT a.code FROM entities n JOIN accounts a ON"
                        " a.id=n.account_id WHERE n.id=?", (B,)).fetchone()[0]
 code, h = call("GET", "stmt", {"code": b_code})
-dates = _re.findall(r'<tr data-s="[^"]*"><td class="n">(?:<input[^>]*>)?'
+dates = _re.findall(r'<tr data-s="[^"]*"[^>]*><td class="n">(?:<input[^>]*>)?'
                     r'(\d{4}-\d{2}-\d{2})', h)
 check("كشف الحساب يُفتح على كل الحركة والأحدث أعلاه",
       "الأحدث أولاً" in h and 'class="chip on"' in h
@@ -626,8 +628,8 @@ check("بلا رمز: الزر ظاهر في الأعلى ويطلب ضبط ال
       'id="elockb"' in h and 'data-pin="0"' in h and "🔓 قفل التعديل والحذف"
       in h)
 r = api("api/editlock", {"pin": "1234", "lock": True})
-check("بلا رمز: القفل يُرفض بسببٍ مفهوم", not r["ok"]
-      and "اضبطه من البرنامج" in r["error"], r)
+check("بلا رمز: القفل يُرفض بسببٍ مفهوم (اضبطه من «الرموز والأقفال»)",
+      not r["ok"] and "الرموز والأقفال" in r["error"], r)
 with db() as c:
     mweb.set_edit_pin(c, "2468", "t")
     try:
