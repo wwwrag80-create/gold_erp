@@ -82,7 +82,8 @@ final class BackupFolder {
     }
 
     // ══ المجلد التلقائي «ÀUR» في «المستندات» (أندرويد 10+) ══
-    static final String AUTO_NAME = "ÀUR";
+    // «ÀUR» — ونسخة التجربة مجلدها «ÀUR تجريبي» فلا تكتب فوق نسخ التطبيق (1.15.0)
+    static final String AUTO_NAME = BuildConfig.BACKUP_DIR;
     static final String AUTO_REL = Environment.DIRECTORY_DOCUMENTS + "/" + AUTO_NAME + "/";
 
     @androidx.annotation.ChecksSdkIntAtLeast(api = 29)

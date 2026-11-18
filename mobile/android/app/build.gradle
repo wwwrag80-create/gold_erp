@@ -27,6 +27,8 @@ android {
         targetSdk 36
         versionCode ver.code as int
         versionName ver.name as String
+        // مجلد النسخ الاحتياطية التلقائي في «المستندات»
+        buildConfigField "String", "BACKUP_DIR", "\"ÀUR\""
     }
 
     buildTypes {
@@ -35,6 +37,16 @@ android {
             manifestPlaceholders = [admobAppId: admobTestApp]
             buildConfigField "String", "ADMOB_BANNER_ID", "\"${admobTestBanner}\""
             buildConfigField "boolean", "ADMOB_TEST_IDS", "true"
+        }
+        // نسخة التجربة (1.15.0): تُثبَّت **بجانب** التطبيق لا فوقه — معرّفٌ آخر واسمٌ آخر
+        // («ÀUR تجريبي») ومجلد نسخٍ آخر، فلا تمسّ بيانات التطبيق المنشور ولا مفتاحه.
+        // تُوقَّع بمفتاح التجربة على خادم البناء (كنسخة التطوير) — تُجرَّب ثم تُحذف
+        trial {
+            initWith debug
+            applicationIdSuffix ".trial"
+            versionNameSuffix "-trial"
+            matchingFallbacks = ['debug']
+            buildConfigField "String", "BACKUP_DIR", "\"ÀUR تجريبي\""
         }
         // النسخة المنشورة: معرّفات المالك من admob.properties
         release {
