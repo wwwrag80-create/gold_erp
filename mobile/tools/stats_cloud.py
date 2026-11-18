@@ -55,18 +55,41 @@ def cf(method, path, body=None, raw_url=None):
     return data.get("result")
 
 
+def mask(acc):
+    return acc[:4] + "…" + acc[-3:]
+
+
 def account():
     ids = []
     try:
         ids = [a["id"] for a in (cf("GET", "/accounts?per_page=50") or [])]
+        print(f"  الحسابات التي يراها المفتاح: {len(ids)}", [mask(a) for a in ids])
     except CFError as e:
         print("  (قائمة الحسابات غير متاحة بهذا المفتاح:", e, ")")
-    for acc in ids + [ACCOUNT_FALLBACK]:
+    seen = []
+    for acc in dict.fromkeys(ids + [ACCOUNT_FALLBACK]):
         try:
             cf("GET", f"/accounts/{acc}/pages/projects/{PROJECT}")
             return acc
-        except CFError:
-            continue
+        except CFError as e:
+            seen.append(acc)
+            print(f"  مشروع {PROJECT} في الحساب {mask(acc)}: {e}")
+            try:
+                names = [x.get("name") for x in (cf("GET", f"/accounts/{acc}/pages/projects") or [])]
+                print(f"  مشاريع Pages التي يراها المفتاح في {mask(acc)}:", names)
+            except CFError as e2:
+                print(f"  قائمة مشاريع Pages في {mask(acc)}: {e2}")
+            try:
+                cf("GET", f"/accounts/{acc}/d1/database?per_page=5")
+                print(f"  صلاحية D1 في {mask(acc)}: ✔")
+            except CFError as e3:
+                print(f"  صلاحية D1 في {mask(acc)}: {e3}")
+    for path in ("/user/tokens/verify", f"/accounts/{ACCOUNT_FALLBACK}/tokens/verify"):
+        try:
+            r = cf("GET", path) or {}
+            print(f"  فحص المفتاح ({path.split('/')[1]}): {r.get('status')}")
+        except CFError as e:
+            print(f"  فحص المفتاح ({path.split('/')[1]}): {e}")
     raise CFError("لم يُعثر على مشروع Pages «gold-erp» بهذا المفتاح — تأكّد من صلاحية Cloudflare Pages (Edit)")
 
 
