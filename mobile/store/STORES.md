@@ -53,6 +53,9 @@
   - الأنواع (جمعٌ ومشاركة مع Google، للإعلان والتحليلات ومنع الاحتيال، وليست اختيارية للعرض):
     **Device or other IDs** · **Approximate location** (من IP) · **App interactions** ·
     **Diagnostics / Crash logs**.
+  - وإحصاءات الاستخدام الخاصة بنا (خادم الموقع، لا تُشارك): **App activity ← App interactions** (عدد مرات الفتح)
+    و**Device or other IDs** (رقمٌ عشوائي يصنعه التطبيق، لا معرّف الجهاز) — **جمعٌ بلا مشاركة**، للتحليلات،
+    وليست اختيارية، ومشفّرة أثناء النقل.
   - بيانات الحسابات والصور: **لا تُجمع** (تبقى في الجهاز، لا تُنقل إلينا).
 - **المعرّف الإعلاني (Advertising ID)** في App content: **نعم، يستخدمه** — للإعلانات (مكتبة Google تضيف
   إذن `AD_ID` وأذونات `ACCESS_ADSERVICES_*` بنفسها). الأذونات الأخرى في الحزمة: الإنترنت وحالة الشبكة
@@ -72,7 +75,8 @@
 - **App Privacy** (إجابات جاهزة، من مكتبة Google): يُجمع ويُستخدم لإعلانات طرفٍ ثالث وتحليلات:
   **Identifiers ← Device ID** · **Location ← Coarse** · **Usage Data ← Product Interaction, Advertising Data** ·
   **Diagnostics ← Crash Data, Performance Data, Other**. «التتبّع» (Tracking): **نعم للمعرّف الإعلاني**
-  إن فعّلت رسالة IDFA، وإلا لا. بيانات الحسابات: لا تُجمع.
+  إن فعّلت رسالة IDFA، وإلا لا. ومن إحصاءاتنا: **Identifiers ← Device ID** (رقمٌ عشوائي) و**Usage Data ←
+  Product Interaction** — للتحليلات، غير مرتبطة بهوية المستخدم، وليست للتتبّع. بيانات الحسابات: لا تُجمع.
 - **التشفير**: `ITSAppUsesNonExemptEncryption = false` (لا سؤال تصدير).
 - **صور الشاشة**: iPhone 6.9″ (أو 6.7″) — من صور تجربة المحاكي.
 

@@ -5,6 +5,7 @@
 - الجذر: صفحة التثبيت (mobile/site/index.html) وسياسة الخصوصية وملفا ads.txt/app-ads.txt.
 - app/: التطبيق نفسه (mobile/web) يعمل من الشاشة الرئيسية وبلا إنترنت؛ sw.js يُكتب فيه رقم
   الإصدار وقائمة الملفات (فيُنزَّل الإصدار الجديد وينتظر «حدّث الآن»).
+- _worker.js و_routes.json: إحصاءات الاستخدام (mobile/site/_worker.js) — /api/p و/stats وحدهما.
 - تطبيق أندرويد: آخر إصدارٍ منشور (mobile/dist/versions.json) يُنسخ إلى الموقع باسم AUR.apk. وحين يُنشر
   في Google Play (site/config.json ← "play_live": true) يصير زرّ أندرويد رابط المتجر، والملف بديلاً تحته.
 """
@@ -72,6 +73,16 @@ def main(out: Path) -> None:
         shutil.copy(ROOT / "site" / name, out / name)
     shutil.copy(ROOT / "dist" / apk["file"], out / "AUR.apk")
     (out / ".nojekyll").write_text("", encoding="utf-8")
+    # إحصاءات الاستخدام (Cloudflare): خادمٌ صغير لمسارين فقط — /api/p (يستقبل من التطبيق) و/stats (لوحة
+    # المالك). وكل ما عداهما يبقى ملفاتٍ ثابتة لا يمرّ به (_routes.json)
+    worker = (ROOT / "site" / "_worker.js").read_text(encoding="utf-8")
+    dash = (ROOT / "site" / "stats_dash.js").read_text(encoding="utf-8")
+    assert worker.count('"/*DASH_JS*/"') == 1 and "</script" not in dash
+    # نصّ اللوحة سلسلةٌ داخل الخادم (لا شيفرةٌ تُعاد صياغتها عند تجميعه على Cloudflare)
+    (out / "_worker.js").write_text(worker.replace('"/*DASH_JS*/"', json.dumps(dash, ensure_ascii=False)),
+                                    encoding="utf-8")
+    (out / "_routes.json").write_text(json.dumps(
+        {"version": 1, "include": ["/api/p", "/stats", "/stats/*"], "exclude": []}), encoding="utf-8")
     # Netlify: نوع ملف التطبيق الصحيح، وعامل الخدمة يُفحص كل مرة (فيصل التحديث فوراً)
     (out / "_headers").write_text(
         "/app/manifest.webmanifest\n  Content-Type: application/manifest+json\n"

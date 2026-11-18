@@ -1,0 +1,36 @@
+name: إحصاءات الاستخدام (Cloudflare)
+
+# يُعدّ قاعدة الإحصاء المجانية على Cloudflare (D1) ويربطها بالموقع، ثم يرسل رسالةً تجريبية ويتأكد
+# أنها حُفظت (mobile/tools/stats_cloud.py). يتكرر بلا ضرر. يحتاج سرّ المستودع CLOUDFLARE_API_TOKEN
+# (صلاحيتان: D1 Edit · Cloudflare Pages Edit)، وبدونه لا يفعل شيئاً.
+on:
+  push:
+    branches: [claude/gold-accounting-system-9o1vmw]
+    paths:
+      - mobile/tools/stats_cloud.py
+      - mobile/tools/stats_cloud.request
+      - .github/workflows/stats-cloud.yml
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "setup (إعداد وفحص) أو check (فحص فقط)"
+        required: false
+        default: setup
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stats-cloud
+  cancel-in-progress: false
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: إعداد قاعدة الإحصاء وفحصها
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python3 mobile/tools/stats_cloud.py "${{ inputs.action || 'setup' }}"
