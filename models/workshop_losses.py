@@ -195,6 +195,9 @@ def delete_loss(conn, loss_id, username, reason=""):
     الحذف من الجدول وحده يترك القيد قائماً فيختل الميزان، والعكس بلا
     حذف يُبقي السند ظاهراً وقد رُدّ أثره. لذلك يتمّان معاً أو لا شيء.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف الفاقد")
     from services.audit import reverse_entry
     ensure_schema(conn)
     row = conn.execute(

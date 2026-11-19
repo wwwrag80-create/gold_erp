@@ -160,6 +160,9 @@ def add_sub_account(conn, parent_id, name, username, measurement=None):
 
 
 def rename_account(conn, account_id, new_name, username):
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل الحسابات")
     new_name = (new_name or "").strip()
     if not new_name:
         raise ValueError("أدخل الاسم الجديد")
@@ -233,6 +236,9 @@ def set_active(conn, account_id, active, username):
 
 def delete_account(conn, account_id, username):
     """حذف حساب — ممنوع تماماً إن كانت له أي حركة أو فروع أو وسم نظامي."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف الحسابات")
     acc = get_account(conn, account_id)
     if not acc:
         raise ValueError("الحساب غير موجود")
@@ -317,6 +323,9 @@ def delete_subtree(conn, account_id, username, force=False):
     الحسابات الفارغة وحدها، ومع `force` تُجمَّد ذوات الحركة بدل حذفها
     فلا يضيع أثرها المحاسبي.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف الحسابات")
     acc = conn.execute("SELECT * FROM accounts WHERE id=?",
                        (account_id,)).fetchone()
     if not acc:

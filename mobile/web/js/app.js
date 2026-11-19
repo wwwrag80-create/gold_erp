@@ -504,14 +504,14 @@
           ico("history", 18), T(" عندك نسخة سابقة من بياناتك؟ اضغط هنا لاسترجاعها من ملف")));
       }
     }
-    // اللوحات: العميل يميناً والمصنع يساراً، صفّاً صفّاً
+    // اللوحات: البيع والمرتجع يميناً، والمشتريات ومرتجعها يساراً — كلٌّ منها لأي حساب (عميلاً كان أو مصنعاً)
     const tile = (icon, label, hint, to, fac) => h("button", { class: "op-tile" + (fac ? " fac" : ""), onclick: () => go(to) },
       h("span", { class: "op-ic" }, ico(icon, 26)), h("span", { class: "op-t" }, label), h("span", { class: "op-h" }, hint));
     v.append(h("div", { class: "op-grid" },
-      tile("receipt", T("بيع للعميل"), T("ذهب · أجور · ماس"), "invoice/new?kind=sale"),
-      tile("return", T("مرتجع للعميل"), T("يرجع إلى يدك"), "invoice/new?kind=sale_return"),
-      tile("package", T("بضاعة من مصنع"), T("تدخل يدك"), "invoice/new?kind=purchase", true),
-      tile("return", T("إرجاع للمصنع"), T("يخرج من يدك"), "invoice/new?kind=purchase_return", true),
+      tile("receipt", T("بيع"), T("لأي حساب · ذهب · أجور · ماس"), "invoice/new?kind=sale"),
+      tile("return", T("مرتجع"), T("يرجع إلى يدك"), "invoice/new?kind=sale_return"),
+      tile("package", T("مشتريات (بضاعة)"), T("تدخل يدك"), "invoice/new?kind=purchase", true),
+      tile("return", T("مرتجع (بضاعة)"), T("يخرج من يدك"), "invoice/new?kind=purchase_return", true),
       tile("in", T("تحصيل (قبض)"), T("قبض واستلام من العملاء والمصانع"), "voucher/new?kind=receipt"),
       tile("out", T("سداد (دفع)"), T("سداد للعملاء والمصانع"), "voucher/new?kind=payment", true)));
     // كشف حساب
@@ -778,11 +778,11 @@
       : quickBtn("edit", fac ? T("تعديل المصنع") : T("تعديل العميل"), () => go(`shop-form/${id}`));
     v.append(h("div", { class: "quick" }, ...(fac ? [
       quickBtn("out", T("سداد (دفع)"), () => go(`voucher/new?kind=payment&shop=${id}`)),
-      quickBtn("package", T("بضاعة من المصنع"), () => go(`invoice/new?kind=purchase&shop=${id}`)),
-      quickBtn("return", T("إرجاع للمصنع"), () => go(`invoice/new?kind=purchase_return&shop=${id}`)),
+      quickBtn("package", T("مشتريات (بضاعة)"), () => go(`invoice/new?kind=purchase&shop=${id}`)),
+      quickBtn("return", T("مرتجع (بضاعة)"), () => go(`invoice/new?kind=purchase_return&shop=${id}`)),
       quickBtn("book", T("كشف الحساب"), () => go(`statement/${id}`)), contact,
     ] : [
-      quickBtn("receipt", T("فاتورة بيع"), () => go(`invoice/new?kind=sale&shop=${id}`)),
+      quickBtn("receipt", T("بيع"), () => go(`invoice/new?kind=sale&shop=${id}`)),
       quickBtn("return", T("مرتجع"), () => go(`invoice/new?kind=sale_return&shop=${id}`)),
       quickBtn("in", T("تحصيل (قبض)"), () => go(`voucher/new?kind=receipt&shop=${id}`)),
       quickBtn("book", T("كشف الحساب"), () => go(`statement/${id}`)), contact,
@@ -799,13 +799,22 @@
     const shop = id ? D.shopById(s, id) : null;
     const fac = shop ? D.isFactory(shop) : (q && q.type === "factory");
     const word = fac ? T("المصنع") : T("العميل");
+    // حسابٌ جديد: «نوع الجهة» أولاً — عميل أو مصنع — ويُعاد النموذج بنوعه ومعه ما كُتب من الاسم والجوال
+    const typeSeg = shop ? null : h("div", { class: "seg" },
+      ...[["shop", T("عميل")], ["factory", T("مصنع")]].map(([t, label]) => h("button", { type: "button",
+        class: (t === "factory") === !!fac ? "on" : "", onclick: () => {
+          if ((t === "factory") === !!fac) return;
+          const qs = [t === "factory" ? "type=factory" : "", name.value ? "nm=" + encodeURIComponent(name.value) : "",
+            phone.value ? "ph=" + encodeURIComponent(phone.value) : ""].filter(Boolean).join("&");
+          replace("shop-form" + (qs ? "?" + qs : ""));
+        } }, label)));
     setBar(shop ? T("تعديل {0}", word) : fac ? T("مصنع جديد") : T("عميل جديد"), "", { noTabs: true });
     // عيار الحساب: لكل عميلٍ ومصنعٍ عياره — به يُعرض رصيده وكشفه، ويبدأ به كل سطرٍ في فواتيره
     let k = shop ? ek(shop) : vk();
     const karatSel = h("select", { class: "in" }, G.KARATS.map((x) => h("option", { value: x, text: T("عيار {0}", x) })));
     karatSel.value = String(k);
-    const name = h("input", { class: "in", value: shop ? shop.name : "", placeholder: T("اسم {0}", word), enterkeyhint: "next" });
-    const phone = h("input", { class: "in", value: shop ? shop.phone : "", inputmode: "tel", dir: "ltr", placeholder: "05xxxxxxxx" });
+    const name = h("input", { class: "in", value: shop ? shop.name : (q && q.nm) || "", placeholder: T("اسم {0}", word), enterkeyhint: "next" });
+    const phone = h("input", { class: "in", value: shop ? shop.phone : (q && q.ph) || "", inputmode: "tel", dir: "ltr", placeholder: "05xxxxxxxx" });
     const notes = h("textarea", { class: "in", rows: 2, placeholder: T("ملاحظات (اختياري)") });
     notes.value = shop ? shop.notes : "";
     const wage = numInput({ value: shop && shop.agreedWage18 ? G.rate(shop.agreedWage18, k) : 0 });
@@ -855,6 +864,7 @@
     const v = view();
     v.append(
       h("div", { class: "card" }, h("h2", null, fac ? T("بيانات المصنع") : T("بيانات العميل")),
+        typeSeg ? field(T("نوع الجهة"), typeSeg) : null, typeSeg ? h("div", { style: { height: "8px" } }) : null,
         field(T("اسم {0}", word), name), h("div", { style: { height: "8px" } }),
         field(T("الجوال"), phone), h("div", { style: { height: "8px" } }),
         field(T("عيار الحساب"), karatSel),
@@ -896,8 +906,8 @@
       shop ? h("button", { class: "btn ghost", onclick: del }, T("حذف")) : null));
   }
 
-  // ══ الفاتورة: بيع · مرتجع (العميل) — بضاعة من مصنع · إرجاع للمصنع ══
-  const INV_TITLE = { sale: T("فاتورة بيع"), sale_return: T("مرتجع"), purchase: T("بضاعة من مصنع"), purchase_return: T("إرجاع للمصنع") };
+  // ══ الفاتورة: بيع · مرتجع — مشتريات (بضاعة) · مرتجع (بضاعة) — كلها لأي حساب، عميلاً أو مصنعاً ══
+  const INV_TITLE = { sale: T("بيع"), sale_return: T("مرتجع"), purchase: T("مشتريات (بضاعة)"), purchase_return: T("مرتجع (بضاعة)") };
 
   // رأس المستند: نوعه، والحساب (يُبدَّل بلمسة)، والتاريخ — مكان خاناتٍ في الصفحة
   function docHeader(title, partyName, partyPh, date, onParty, onDate) {
@@ -942,7 +952,7 @@
     const editing = mode === "edit";
     const forFactory = () => D.FACTORY_KINDS.includes(inv.kind);
     const isOut = () => D.OUT_KINDS.includes(inv.kind);
-    const partyWord = () => (forFactory() ? T("المصنع") : T("العميل"));
+    const partyWord = () => T("الحساب");
     const party = () => D.shopById(s, inv.shopId);
     // عيار الحساب: إجماليات الفاتورة والرصيد بعدها بعيار العميل/المصنع، ومنه يبدأ كل سطر
     const partyK = () => ek(party());
@@ -956,9 +966,10 @@
         inv.date, pickParty, (d) => { inv.date = d; header(); refresh(); });
     };
     async function pickParty() {
+      // أي حسابٍ — العملاء ثم المصانع، ونوع كلٍّ تحت اسمه — والجديد يُختار نوعه في نموذجه
       const fac = forFactory();
-      const it = await pickSheet(T("اختر {0}", partyWord()), partyItems(fac ? "factory" : "shop"),
-        { addLabel: fac ? T("+ مصنع جديد") : T("+ عميل جديد"), empty: fac ? T("لا مصانع بعد") : T("لا عملاء بعد") });
+      const it = await pickSheet(T("اختر الحساب"), partyItems(null),
+        { addLabel: T("+ حساب جديد"), empty: T("لا حسابات بعد") });
       if (!it) return;
       if (it.add) { saveDraft(); go(fac ? "shop-form?type=factory" : "shop-form"); return; }
       inv.shopId = it.id;
@@ -1327,7 +1338,8 @@
       if (inv.vat) totalsBox.append(row(T("ضريبة 15% على الأجور"), f2(t.vatAmt), "", icoCash));
       totalsBox.append(row(T("الإجمالي"), f2(t.grand) + T(" ريال"), "grand", icoCash));
       if (inv.shopId) {
-        const fac = forFactory();
+        // اتجاه الرصيد بنوع الحساب نفسه (عميل/مصنع) لا بنوع الفاتورة — فالبيع قد يكون لمصنع
+        const fac = D.isFactory(party());
         const before = D.balance(s, inv.shopId, inv.id);
         const e = D.effects({ kind: inv.kind, totalW18: t.totalW18, grand: t.grand });
         const g18 = Num_round3(before.gold18 + e.gd - e.gc);
@@ -1872,7 +1884,7 @@
       docs.slice(0, 300).forEach((d) => list.append(docItem(d)));
     };
     for (const [kk, label] of [["", T("الكل")], ["sale", T("بيع")], ["sale_return", T("مرتجع")], ["receipt", T("تحصيل")],
-      ["payment", T("سداد")], ["purchase", T("بضاعة")], ["purchase_return", T("إرجاع للمصنع")]]) {
+      ["payment", T("سداد")], ["purchase", T("مشتريات")], ["purchase_return", T("مرتجع (بضاعة)")]]) {
       chips.append(h("button", { class: "chip" + (kk === kind ? " on" : ""), onclick: (e) => {
         kind = kk;
         for (const c of chips.children) c.classList.remove("on");
@@ -2171,6 +2183,7 @@
     v.append(h("div", { class: "stats" },
       tile(T("العملاء"), String(rows.length)), tile(T("المبيعات"), fmt(TS.sales), unit), tile(T("المرتجع"), fmt(TS.returns),
         TS.retPct === null ? unit : `${f2(TS.retPct)}% · ${unit}`),
+      tile(T("صافي المبيعات"), fmt(TS.net), T("المبيعات − المرتجع")),
       tile(T("التحصيل"), fmt(TS.paid), TS.paidPct === null ? unit : `${f2(TS.paidPct)}% · ${unit}`), tile(T("الباقي"), fmt(TS.remaining), unit)));
     if (!rows.length) { v.append(h("div", { class: "empty" }, T("لا حركة في الفترة"))); return; }
     for (const r of rows) {
@@ -2181,16 +2194,20 @@
       v.append(h("div", { class: "list-item col", onclick: () => go(`shop/${r.id}`) },
         h("div", { class: "spread" }, h("span", { class: "t" }, r.name,
           side === "gold" ? h("span", { class: "muted small" }, T(" · عيار {0}", rk)) : null), gradeBadge(x.grade)),
+        // صافي المبيعات = المبيعات − المرتجع (1.16)؛ والرصيد السابق يُضاف إلى الباقي
         h("div", { class: "grid3 small" },
-          h("div", null, h("span", { class: "muted" }, T("الصافي")), h("b", { class: "num" }, fr(x.net))),
+          h("div", null, h("span", { class: "muted" }, T("المبيعات")), h("b", { class: "num" }, fr(x.sales))),
+          h("div", null, h("span", { class: "muted" }, T("المرتجع")), h("b", { class: "num" }, fr(x.returns))),
+          h("div", null, h("span", { class: "muted" }, T("صافي المبيعات")), h("b", { class: "num" }, fr(x.net)))),
+        h("div", { class: "grid3 small", style: { marginTop: "4px" } },
+          h("div", null, h("span", { class: "muted" }, T("رصيد سابق")), h("b", { class: "num" }, fr(x.open))),
           h("div", null, h("span", { class: "muted" }, T("التحصيل")), h("b", { class: "num" }, fr(x.paid))),
           h("div", null, h("span", { class: "muted" }, T("الباقي")), h("b", { class: "num" }, fr(x.remaining)))),
         h("div", { class: "row small", style: { marginTop: "6px" } }, meter(x.paidPct),
           h("span", { class: "muted num", style: { minWidth: "48px", textAlign: root.I18N.end } }, x.paidPct === null ? "—" : `${f2(x.paidPct)}%`)),
         h("div", { class: "muted small" },
           r.lastPay ? [T("آخر تحصيل "), h("span", { dir: "ltr", text: dmy(r.lastPay) })] : T("لا تحصيل في الفترة"),
-          r.lastSale ? [T(" · آخر بيع "), h("span", { dir: "ltr", text: dmy(r.lastSale) })] : null,
-          x.open ? [T(" · رصيد سابق "), h("span", { class: "num", text: fr(x.open) })] : null)));
+          r.lastSale ? [T(" · آخر بيع "), h("span", { dir: "ltr", text: dmy(r.lastSale) })] : null)));
     }
   }
 
@@ -2697,16 +2714,16 @@
   async function newSheet() {
     const r = await sheet((box, close) => {
       box.append(h("h3", null, T("عملية جديدة")),
-        h("div", { class: "sec-title" }, T("مع العملاء")),
+        h("div", { class: "sec-title" }, T("البيع والتحصيل")),
         h("div", { class: "quick" },
-          quickBtn("receipt", T("فاتورة بيع"), () => close("invoice/new?kind=sale")),
+          quickBtn("receipt", T("بيع"), () => close("invoice/new?kind=sale")),
           quickBtn("return", T("مرتجع"), () => close("invoice/new?kind=sale_return")),
           quickBtn("in", T("تحصيل (قبض)"), () => close("voucher/new?kind=receipt"))),
-        h("div", { class: "sec-title" }, T("مع المصانع")),
+        h("div", { class: "sec-title" }, T("المشتريات والسداد")),
         h("div", { class: "quick" },
           quickBtn("out", T("سداد (دفع)"), () => close("voucher/new?kind=payment")),
-          quickBtn("package", T("بضاعة من مصنع"), () => close("invoice/new?kind=purchase")),
-          quickBtn("return", T("إرجاع للمصنع"), () => close("invoice/new?kind=purchase_return"))),
+          quickBtn("package", T("مشتريات (بضاعة)"), () => close("invoice/new?kind=purchase")),
+          quickBtn("return", T("مرتجع (بضاعة)"), () => close("invoice/new?kind=purchase_return"))),
         h("div", { class: "sec-title" }, T("حساب جديد")),
         h("div", { class: "quick" },
           quickBtn("store", T("عميل جديد"), () => close("shop-form")),

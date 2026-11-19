@@ -530,6 +530,9 @@ def can_delete(conn, entity_id) -> bool:
 
 
 def delete_entity(conn, entity_id, username) -> None:
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف الجهات")
     if not can_delete(conn, entity_id):
         raise ValueError("لا يمكن حذف جهة لها حركات أو رصيد قائم")
     e = get_entity(conn, entity_id)
@@ -632,6 +635,9 @@ def _rename_acc(conn, account_id, new_name):
 def update_entity(conn, entity_id, username, name=None, phone=None,
                   address=None, vat_number=None, job_title=None,
                   basic_salary=None, share_percent=None, direct_pay=None):
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل الجهات")
     e = get_entity(conn, entity_id)
     if not e or e["is_deleted"]:
         raise ValueError("الجهة غير موجودة")
@@ -688,6 +694,9 @@ def update_entity(conn, entity_id, username, name=None, phone=None,
 
 def change_entity_type(conn, entity_id, new_type, username):
     """ينقل الجهة إلى نوعٍ آخر — وحسابها تحت مجموعته الرقابية."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل نوع الجهة")
     from models import coa
     e = get_entity(conn, entity_id)
     if not e or e["is_deleted"]:

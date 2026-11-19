@@ -194,6 +194,89 @@ def set_edit_pin(conn, pin, username=None):
                  if pin else "إلغاء رمز قفل التعديل والحذف في الرابط")
 
 
+# 5.9: «رمز المدير» — رمزٌ واحد يضبطه المدير من الرابط فيقفل التعديل والحذف في
+# البرنامج نفسه (كل جهاز): أي مستندٍ أو حسابٍ أو جهةٍ أو موديل (`services/desk_guard`)،
+# ونافذة «🔗 رابط المدير» في دليل الموديلات لا تُفتح إلا به. ويفتح صفحة الرموز
+# في الرابط كذلك. وقفل التعديل يُفعَّل ويُوقف من الرابط بالرمز نفسه.
+K_DESK_PIN = "mw_desk_pin"
+K_DESK_LOCK = "mw_desk_locked"
+
+
+def has_desk_pin(conn):
+    return bool(_get(conn, K_DESK_PIN, "").strip())
+
+
+def desk_locked(conn):
+    """قفل التعديل والحذف في البرنامج يسري: للمدير رمزٌ ولم يوقفه."""
+    return has_desk_pin(conn) and _get(conn, K_DESK_LOCK, "1") != "0"
+
+
+def check_desk_pin(conn, pin):
+    h = _get(conn, K_DESK_PIN, "").strip()
+    return bool(h) and _mw()._pin_ok(h, str(pin or "").strip())
+
+
+def set_desk_locked(conn, on, username=None):
+    _set(conn, K_DESK_LOCK, "1" if on else "0", username or WEB_USER)
+    _mw()._audit(conn, username or WEB_USER,
+                 "قفل التعديل والحذف في البرنامج برمز المدير" if on
+                 else "فتح التعديل والحذف في البرنامج (رمز المدير)")
+
+
+def set_desk_pin(conn, pin, username=None):
+    """رمز المدير: 4 إلى 12 خانة. ضبطه يُفعّل القفل، وإلغاؤه يفتحه."""
+    pin = str(pin or "").strip()
+    if pin and not (4 <= len(pin) <= 12):
+        raise ValueError("رمز المدير من 4 إلى 12 خانة")
+    _set(conn, K_DESK_PIN, _mw()._hash_pin(pin) if pin else "",
+         username or WEB_USER)
+    _set(conn, K_DESK_LOCK, "1" if pin else "0", username or WEB_USER)
+    _mw()._audit(conn, username, "تعيين رمز المدير (قفل التعديل والحذف في "
+                 "البرنامج)" if pin else "إلغاء رمز المدير")
+
+
+# 5.9: صفحة الرموز تُقفل عند الخروج منها — فتحُها برمزٍ لهذه الزيارة وحدها
+# (ملف تعريفٍ قصير)، وأي صفحةٍ أخرى تُفتح بعدها تمحوه، فتطلب الرمز من جديد.
+SEC_COOKIE = "mwsec"
+SEC_MINUTES = 30
+
+
+def _sec_hashes(conn):
+    """الرموز التي تفتح صفحة الرموز: رمز اللوحات، ورمز المدير."""
+    return [h for h in (_get(conn, K_OPS_PIN, "").strip(),
+                        _get(conn, K_DESK_PIN, "").strip()) if h]
+
+
+def _sec_cookie_value(csrf, hashes):
+    import hashlib
+    return hmac.new(str(csrf).encode("utf-8"),
+                    ("sec|" + "|".join(hashes)).encode("utf-8"),
+                    hashlib.sha256).hexdigest()[:40]
+
+
+def sec_unlocked(conn, headers, csrf):
+    hs = _sec_hashes(conn)
+    if not hs:
+        return True
+    got = _mw()._cookies(headers).get(SEC_COOKIE, "")
+    return bool(got) and hmac.compare_digest(got, _sec_cookie_value(csrf, hs))
+
+
+def sec_exit(r, method, rest, headers, base):
+    """الخروج من صفحة الرموز يقفلها: أي صفحةٍ أخرى تمحو ملف تعريفها."""
+    head = rest[0] if rest else "home"
+    if method != "GET" or head in ("sec", "api", "doc", "tax", "img",
+                                   "imgver"):
+        return r
+    if not _mw()._cookies(headers).get(SEC_COOKIE):
+        return r
+    h = r.setdefault("headers", {})
+    if "Set-Cookie" not in h:
+        h["Set-Cookie"] = (f"{SEC_COOKIE}=; Path={base}; Max-Age=0; HttpOnly;"
+                           " SameSite=Strict")
+    return r
+
+
 def _edit_lock_state():
     """(له رمز؟، مقفل؟) — لرأس كل صفحة."""
     try:
@@ -810,10 +893,12 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
         if head == "api" and rest[1:2] == ["editlock"]:
             return _json(edit_lock_action(data))
         if head == "sec":
-            # 5.8.6: الرموز والأقفال — خلف رمز اللوحات (إن كان له رمز)
+            # الرموز والأقفال — خلف رمزها لهذه الزيارة (5.9: تُقفل عند الخروج)
             with db(readonly=True) as conn:
-                if not ops_unlocked(conn, headers, csrf):
-                    return _locked_json(base)
+                if not sec_unlocked(conn, headers, csrf):
+                    return _json({"ok": False, "locked": True,
+                                  "unlock": base + "/ops/unlock",
+                                  "error": "صفحة الرموز مقفلة — افتحها برمزها"})
             return sec_action(data, base, csrf)
         if head == "boxes":
             with db(readonly=True) as conn:
@@ -879,7 +964,7 @@ def route(method, rest, query, headers, body, base, csrf, pin_set=False):
             if query.get("tab") == "reg":
                 key = ""
         if head == "sec":
-            gate = not ops_unlocked(conn, headers, csrf)
+            gate = not sec_unlocked(conn, headers, csrf)
         elif head == "ops":
             gate = not panel_open(conn, key, headers, csrf) \
                 and ops_enabled(conn)
@@ -943,6 +1028,7 @@ def _pin_box(kind, title, has, note, extra=""):
 
 def sec_page(conn, base, csrf, login_set=False):
     has_p, has_e = has_ops_pin(conn), has_edit_pin(conn)
+    has_d, d_on = has_desk_pin(conn), desk_locked(conn)
     locked = locked_panels(conn)
     rows = "".join(
         f'<label><input type="checkbox" value="{k}"'
@@ -953,10 +1039,25 @@ def sec_page(conn, base, csrf, login_set=False):
     inner = (
         f'<div class="ptitle"><h2>{icon("lock", 22)}الرموز والأقفال</h2>'
         '<span class="hint">يضبطها المدير من هنا وحده — لا تظهر في البرنامج على'
-        ' جهاز المصنع. وتغيير أي رمزٍ يطلب رمزه الحالي.</span></div>'
+        ' جهاز المصنع. وتغيير أي رمزٍ يطلب رمزه الحالي. وتُقفل هذه الصفحة عند'
+        ' الخروج منها.</span>'
+        f'<a class="btn gh sm" href="{_e(_link(base, "/"))}">🔒 قفل وخروج</a>'
+        '</div>'
         + (f'<div class="msg info">أُعيد ضبط الرموز من البرنامج (المدير العام) في'
            f' {_e(reset)} — اضبطها من جديد.</div>' if reset else "")
         + '<div class="secg">'
+        + _pin_box("desk", "🛡 رمز المدير — قفل التعديل والحذف في البرنامج",
+                   has_d,
+                   "رمزٌ واحد: لا يُعدَّل ولا يُحذف في البرنامج (أي جهاز) مستندٌ ولا"
+                   " حسابٌ ولا جهةٌ ولا موديلٌ ولا رقم تشغيل إلا به — ونافذة «رابط"
+                   " المدير» في دليل الموديلات لا تُفتح إلا به.",
+                   (f'<div class="st {"on" if d_on else "off"}" style="margin-top:'
+                    f'12px">{"🔒 التعديل والحذف مقفلان في البرنامج" if d_on else "🔓 التعديل والحذف مفتوحان في البرنامج"}'
+                    '</div><p class="note">للتبديل: اكتب الرمز الحالي أعلاه ثم '
+                    'اضغط.</p><button class="btn gold" data-act="'
+                    f'{"dopen" if d_on else "dlock"}">'
+                    f'{"فتح التعديل والحذف" if d_on else "قفل التعديل والحذف"}'
+                    '</button>') if has_d else "")
         + _pin_box("panel", "رمز اللوحات المقفلة", has_p,
                    "يفتح اللوحات التي تختارها أدناه على هذا الجهاز 12 ساعة.",
                    f'<h3 style="margin-top:14px">اللوحات المقفلة</h3>'
@@ -987,6 +1088,7 @@ def sec_page(conn, base, csrf, login_set=False):
   var act=b.getAttribute('data-act'),d={kind:kind,act:act,cur:val('cur'),pin:val('new'),pin2:val('new2')};
   if(act==='set'&&(d.pin.length<4||d.pin!==d.pin2)){MW.toast(d.pin.length<4?
    'الرمز من 4 إلى 12 خانة':'الرمز وتأكيده غير متطابقين',false);return;}
+  if((act==='dlock'||act==='dopen')&&!d.cur){MW.toast('اكتب الرمز الحالي أولاً',false);return;}
   if(act==='panels')d.panels=[].slice.call(sec.querySelectorAll('.plist input:checked')).map(function(x){return x.value;});
   b.disabled=true;MW.post('/sec',d).then(function(r){b.disabled=false;
    if(!r.ok){if(r.locked&&r.unlock){location.href=r.unlock+'?next='+encodeURIComponent(location.pathname);return;}
@@ -1005,13 +1107,16 @@ def sec_action(data, base, csrf):
     kind, act = str(data.get("kind") or ""), str(data.get("act") or "")
     cur = str(data.get("cur") or "").strip()
     pin = str(data.get("pin") or "").strip()
-    keys = {"panel": K_OPS_PIN, "edit": K_EDIT_PIN, "login": m.K_PIN}
+    keys = {"panel": K_OPS_PIN, "edit": K_EDIT_PIN, "login": m.K_PIN,
+            "desk": K_DESK_PIN}
     headers = {}
     with _post_lock:
         with db(readonly=True) as conn:
             if kind in keys:
                 h = _get(conn, keys[kind], "").strip()
-                if h and act in ("set", "clear"):
+                if kind == "desk" and act in ("dlock", "dopen") and not h:
+                    return _json({"ok": False, "error": "اضبط رمز المدير أولاً"})
+                if h and act in ("set", "clear", "dlock", "dopen"):
                     if m._locked():
                         return _json({"ok": False, "error": "محاولات كثيرة — "
                                       "انتظر ربع ساعة ثم حاول ثانيةً"})
@@ -1025,12 +1130,18 @@ def sec_action(data, base, csrf):
                     if pin != str(data.get("pin2") or "").strip():
                         raise ValueError("الرمز وتأكيده غير متطابقين")
                     {"panel": set_ops_pin, "edit": set_edit_pin,
-                     "login": m.set_pin}[kind](conn, pin, WEB_USER)
+                     "login": m.set_pin, "desk": set_desk_pin}[kind](
+                        conn, pin, WEB_USER)
                     msg = "حُفظ الرمز الجديد"
                 elif kind in keys and act == "clear":
                     {"panel": set_ops_pin, "edit": set_edit_pin,
-                     "login": m.set_pin}[kind](conn, "", WEB_USER)
+                     "login": m.set_pin, "desk": set_desk_pin}[kind](
+                        conn, "", WEB_USER)
                     msg = "أُلغي الرمز"
+                elif kind == "desk" and act in ("dlock", "dopen"):
+                    set_desk_locked(conn, act == "dlock", WEB_USER)
+                    msg = ("قُفل التعديل والحذف في البرنامج" if act == "dlock"
+                           else "فُتح التعديل والحذف في البرنامج")
                 elif kind == "panel" and act == "panels":
                     allowed = dict(lockable())
                     want = [x for x in (data.get("panels") or [])
@@ -1086,6 +1197,7 @@ def reset_codes(username):
     with db() as conn:
         set_ops_pin(conn, "", username)
         set_edit_pin(conn, "", username)
+        set_desk_pin(conn, "", username)
         m.set_pin(conn, "", username)
         _set(conn, K_SEC_RESET, datetime.now().strftime("%Y-%m-%d %H:%M"),
              username)
@@ -2775,7 +2887,22 @@ def _lock_page(base, csrf, why):
 
 def unlock_page(base, csrf, nxt, error=""):
     """رمز اللوحات المقفلة — يُطلب مرةً ويبقى 12 ساعة على الجهاز (5.8.6:
-    لكل لوحةٍ قفلها المدير من «الرموز والأقفال»)."""
+    لكل لوحةٍ قفلها المدير من «الرموز والأقفال»). وصفحة الرموز نفسها (5.9)
+    تُفتح برمز اللوحات أو رمز المدير لهذه الزيارة وحدها."""
+    if str(nxt or "").split("?")[0] == base + "/sec":
+        return frame(base, "sec", "الرموز والأقفال", (
+            f'<div class="ptitle"><h2>{icon("lock", 22)}الرموز والأقفال مقفلة'
+            '</h2></div><div class="panel" style="max-width:460px;margin:20px '
+            'auto"><p class="note" style="margin-top:0">أدخل رمز اللوحات أو رمز '
+            'المدير لفتح الرموز — وتُقفل من جديد عند الخروج منها.</p>'
+            + (f'<div class="msg bad">{_e(error)}</div>' if error else "")
+            + f'<form method="post" action="{_e(base + "/ops/unlock")}" '
+            f'class="fl" style="margin:0"><input type="hidden" name="csrf" '
+            f'value="{_e(csrf)}"><input type="hidden" name="next" value="'
+            f'{_e(nxt)}"><label style="flex:1 1 200px">الرمز<input '
+            'name="pin" type="password" inputmode="numeric" maxlength="12" '
+            'autocomplete="off" autofocus required></label><button class="btn">'
+            f'{icon("lock", 16)}فتح الرموز</button></form></div>'), csrf)
     return frame(base, "sec", "رمز اللوحات المقفلة", (
         f'<div class="ptitle"><h2>{icon("lock", 22)}لوحة مقفلة'
         f'</h2></div><div class="panel" style="max-width:460px;margin:20px '
@@ -2796,6 +2923,21 @@ def _unlock(data, base, csrf):
     from database.database import db
     m = _mw()
     nxt = _safe_next(base, data.get("next"))
+    if nxt.split("?")[0] == base + "/sec":
+        with db(readonly=True) as conn:
+            hs = _sec_hashes(conn)
+        if not hs:
+            return _resp(303, "", headers={"Location": nxt})
+        if m._locked():
+            return _resp(429, unlock_page(base, csrf, nxt, "محاولات كثيرة — "
+                                          "انتظر ربع ساعة ثم حاول ثانيةً"))
+        pin = str(data.get("pin") or "").strip()
+        if not any(m._pin_ok(h, pin) for h in hs):
+            m._fail()
+            return _resp(401, unlock_page(base, csrf, nxt, "الرمز غير صحيح"))
+        ck = (f"{SEC_COOKIE}={_sec_cookie_value(csrf, hs)}; Path={base}; "
+              f"Max-Age={SEC_MINUTES * 60}; HttpOnly; SameSite=Strict")
+        return _resp(303, "", headers={"Location": nxt, "Set-Cookie": ck})
     with db(readonly=True) as conn:
         h = _get(conn, K_OPS_PIN, "").strip()
     if not h:

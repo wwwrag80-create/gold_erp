@@ -70,7 +70,7 @@ function check(name, cond, detail) {
   await page.waitForSelector("#tabs");
   const tiles = await page.locator(".op-tile .op-t").allInnerTexts();
   check("الرئيسية: ستّ لوحاتٍ بالترتيب", tiles.join("،") ===
-    "بيع للعميل،مرتجع للعميل،بضاعة من مصنع،إرجاع للمصنع،تحصيل (قبض)،سداد (دفع)", tiles.join("،"));
+    "بيع،مرتجع،مشتريات (بضاعة)،مرتجع (بضاعة)،تحصيل (قبض)،سداد (دفع)", tiles.join("،"));
   const hints = await page.locator(".op-tile .op-h").allInnerTexts();
   check("وتحت التحصيل والسداد توضيحهما", hints[4] === "قبض واستلام من العملاء والمصانع" && hints[5] === "سداد للعملاء والمصانع", hints.join("،"));
   check("ثم «كشف حساب» ثم «بحث عن طقم» ثم «الأطقم التي معي» ثم «عمليات اليوم» — ولا لوحات أرصدة", (await page.locator(".wide-tile .op-t").allInnerTexts()).join("،") ===
@@ -136,7 +136,9 @@ function check(name, cond, detail) {
   // بضاعة من المصنع: طقمٌ باسمه وآخر بلا اسم
   await page.goto(url + "#/invoice/new?kind=purchase");
   await page.waitForSelector(".sheet");
-  check("اختيار المصنع يعرض المصانع وحدها", (await page.locator(".sheet .list-item").count()) === 1);
+  // 1.16: المشتريات لأي حساب — القائمة فيها العملاء والمصانع، ونوع كلٍّ تحت اسمه
+  check("اختيار الحساب يعرض كل الحسابات (محلان ومصنع) بأنواعها", (await page.locator(".sheet .list-item").count()) === 3 &&
+    (await text(".sheet")).includes("مصنع ·") && (await text(".sheet")).includes("عميل ·"));
   await page.locator(".sheet .list-item", { hasText: "مصنع الريان" }).click();
   await page.waitForTimeout(150);
   const html0 = await page.content();
@@ -233,7 +235,7 @@ function check(name, cond, detail) {
   // بيعٌ لمحل: الوزن غير المسمّى (20 جم) بالوزن مباشرةً — لا يُختار من الأطقم — وسطرٌ بوزنٍ فقط
   await page.goto(url + "#/invoice/new?kind=sale");
   await page.waitForSelector(".sheet");
-  check("اختيار المحل يعرض المحلات وحدها", (await page.locator(".sheet .list-item").count()) === 2);
+  check("والبيع لأي حسابٍ كذلك (محلان ومصنع)", (await page.locator(".sheet .list-item").count()) === 3);
   await page.locator(".sheet .list-item", { hasText: "محل الأمانة" }).click();
   await page.waitForTimeout(150);
   await tap("button:has-text('اختر من الطقوم التي معي (1)')");
@@ -247,7 +249,7 @@ function check(name, cond, detail) {
     (await page.locator(".sheet").count()) === 0 &&
     (await page.locator("label.f", { hasText: "الأجور" }).locator("input").inputValue()) === "");
   check("والأجور المتفق عليها تُقترح للوزن (20 × 20 = 400)", (await page.locator("label.f", { hasText: "الأجور" }).locator("input").getAttribute("placeholder")) === "تلقائي 400.00");
-  check("الرأس: «فاتورة بيع» واسم العميل والتاريخ — بلا خانات", (await text("#bar h1")).includes("فاتورة بيع") &&
+  check("الرأس: «بيع» واسم العميل والتاريخ — بلا خانات", (await text("#bar h1")).trim().startsWith("بيع") &&
     (await text("#bar .chip-btn.party")).includes("محل الأمانة") && (await page.locator("#bar .chip-btn.date").count()) === 1 &&
     !(await page.content()).includes("العملية والحساب") && !(await page.content()).includes("الأجر لكل جرام"));
   await tap("button:has-text('+ إضافة')");
@@ -617,9 +619,23 @@ function check(name, cond, detail) {
   await tap("#tabs button[data-tab=plus]");
   await page.waitForSelector(".sheet");
   const ns = await text(".sheet");
-  check("«+» بلا قبض ولا صرف: مع العملاء · مع المصانع", ns.includes("مع العملاء") && ns.includes("مع المصانع") &&
+  check("«+» بلا قبض ولا صرف: البيع والتحصيل · المشتريات والسداد", ns.includes("البيع والتحصيل") && ns.includes("المشتريات والسداد") &&
+    ns.includes("مشتريات (بضاعة)") && ns.includes("مرتجع (بضاعة)") &&
     ns.includes("تحصيل (قبض)") && ns.includes("سداد (دفع)") && !ns.includes("سند قبض") && !ns.includes("سند صرف"));
   await page.goBack();
+
+  // 1.16: حسابٌ جديد — «نوع الجهة» (عميل · مصنع)، والاسم المكتوب يبقى عند التبديل
+  await page.goto(url + "#/shop-form");
+  await page.waitForTimeout(200);
+  check("حسابٌ جديد: «نوع الجهة» عميل · مصنع، والعميل مختار", (await page.content()).includes("نوع الجهة") &&
+    (await page.locator(".seg button.on", { hasText: "عميل" }).count()) === 1);
+  await fill("اسم العميل", "جهة التجربة");
+  await page.locator(".seg button", { hasText: "مصنع" }).first().click();
+  await page.waitForTimeout(200);
+  check("اختيار «مصنع» يجعله نموذج مصنع ويُبقي الاسم", (await text("#bar h1")).includes("مصنع جديد") &&
+    (await page.locator("label.f", { hasText: "اسم المصنع" }).locator("input").inputValue()) === "جهة التجربة");
+  await page.goto(url + "#/home");
+  await page.waitForTimeout(200);
 
   // السجل
   await page.goto(url + "#/log");

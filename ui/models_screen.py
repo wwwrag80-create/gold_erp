@@ -20,7 +20,7 @@ from ui import kit
 from database.database import db
 from services import karat_view as kv
 from models import models_catalog as mc
-from ui.widgets.common import (ask, big_label, date_edit, dstr, err, info,
+from ui.widgets.common import (ask, date_edit, dstr, err, info,
                                title_label)
 from services import numfmt as _nf
 from ui.widgets.common import live_search
@@ -31,6 +31,89 @@ HEADERS = ["الموديل / رقم التشغيل", "العدد", "الوزن �
 # بل مكانُ القطعة اليوم ويومُ ورودها.
 HEADERS_IN = ["الموديل / رقم التشغيل", "العدد", "الوزن المقيد",
               "مع من الآن  ·  تاريخ الوارد"]
+
+
+class SummaryPanel(QtWidgets.QFrame):
+    """لوحة الملخص الثابتة أسفل شاشة الموديلات (5.9): بارزةٌ بخطٍّ واضح.
+
+    كانت سطراً نصياً واحداً يضيع تحت الجدول؛ صارت بطاقاتٍ في لوحةٍ ثابتة
+    لا تتحرك مع الجدول — لكل رقمٍ بطاقته: عنوانٌ صغير فوق رقمٍ كبير عريض.
+    والنص يُعطى كما كان (`setText`) فيُقسَّم عند «|» إلى بطاقات، وكلُّ
+    قسمٍ عند أول «:» إلى عنوانه وقيمته — فلا يتغيّر من يكتب الملخص.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("modelsSummary")
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
+                           QtWidgets.QSizePolicy.Fixed)
+        self._text = ""
+        self._lay = QtWidgets.QHBoxLayout(self)
+        self._lay.setContentsMargins(10, 8, 10, 8)
+        self._lay.setSpacing(10)
+
+    def text(self):
+        return self._text
+
+    @staticmethod
+    def _parts(txt):
+        out = []
+        for part in [x.strip() for x in str(txt).split("|") if x.strip()]:
+            if ":" in part:
+                lab, val = part.split(":", 1)
+                out.append((lab.strip(), val.strip()))
+            else:
+                bits = part.split(" ", 1)
+                if len(bits) == 2 and bits[0].replace(",", "").isdigit():
+                    lab = {"موديل": "الموديلات"}.get(bits[1].strip(),
+                                                    bits[1].strip())
+                    out.append((lab, bits[0]))                  # «120 موديل»
+                else:
+                    out.append(("", part))
+        return out
+
+    def setText(self, txt):
+        self._text = str(txt or "")
+        while self._lay.count():
+            it = self._lay.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        try:
+            from ui import theme
+            p = theme.palette(theme.current_theme())
+        except Exception:
+            p = {}
+        bg, edge = p.get("sumBg", "#FDF3E2"), p.get("sumEdge", "#E6C68A")
+        ink, sub = p.get("sumInk", "#5A3806"), p.get("muted", "#4A443A")
+        card = p.get("surface", "#FFFFFF")
+        self.setStyleSheet(
+            f"QFrame#modelsSummary {{ background: {bg}; border: 2px solid {edge};"
+            f" border-radius: 10px; }}"
+            f"QFrame#sumCard {{ background: {card}; border: 1px solid {edge};"
+            f" border-radius: 8px; }}"
+            f"QLabel#sumLab {{ color: {sub}; font-size: 13px; font-weight: bold;"
+            f" background: transparent; border: none; }}"
+            f"QLabel#sumVal {{ color: {ink}; font-size: 20px; font-weight: 800;"
+            f" background: transparent; border: none; }}")
+        parts = self._parts(self._text)
+        for lab, val in parts:
+            c = QtWidgets.QFrame()
+            c.setObjectName("sumCard")
+            v = QtWidgets.QVBoxLayout(c)
+            v.setContentsMargins(12, 6, 12, 6)
+            v.setSpacing(1)
+            if lab:
+                lb = QtWidgets.QLabel(lab)
+                lb.setObjectName("sumLab")
+                lb.setAlignment(QtCore.Qt.AlignCenter)
+                v.addWidget(lb)
+            vl = QtWidgets.QLabel(val)
+            vl.setObjectName("sumVal")
+            vl.setAlignment(QtCore.Qt.AlignCenter)
+            vl.setWordWrap(not lab)
+            v.addWidget(vl)
+            self._lay.addWidget(c, 1)
+        self.setToolTip(self._text)
 
 
 class ModelsScreen(QtWidgets.QWidget):
@@ -204,7 +287,8 @@ class ModelsScreen(QtWidgets.QWidget):
         self.model.setHorizontalHeaderLabels(HEADERS)
         self.tree.setModel(self.model)
 
-        self.summary = big_label()
+        # ملخصٌ بارز في لوحةٍ ثابتة أسفل الشاشة (5.9) — لا يتحرك مع الجدول
+        self.summary = SummaryPanel()
         note = QtWidgets.QLabel(
             "رقم الموديل تصنيف وصفي لا مالي — لا يُنشأ له حساب ولا يدخل "
             "في القيود. يُدخَل من شاشة الإنتاج والتوريد قبل رقم التشغيل.")
@@ -544,7 +628,7 @@ class ModelsScreen(QtWidgets.QWidget):
         self.summary.setText(
             f"{len(models)} موديل   |   الوارد في {span}: "
             f"{n_in + n_out} طقم · {_nf.f2(kv.g(w_tot))} {kv.unit()}"
-            f"   |   بالخزنة: {n_in} · عند الجهات: {n_out}")
+            f"   |   بالخزنة: {n_in} طقم   |   عند الجهات: {n_out} طقم")
         self._sum_base = self.summary.text()
         if self.search.text().strip():
             self.apply_filter(self.search.text())
@@ -1063,6 +1147,8 @@ class ModelsScreen(QtWidgets.QWidget):
             if not ok:
                 return
             with db() as conn:
+                from services import desk_guard
+                desk_guard.require(conn, "تغيير موديل الطقم")
                 r = mc.assign_model(conn, wo_id, new,
                                     self.user["username"])
             info(self, f"الطقم {r['wo']} ← الموديل {r['model'] or '—'}")
@@ -1235,6 +1321,9 @@ class ModelsScreen(QtWidgets.QWidget):
         """نافذة رابط المدير: توليده ونسخه ونوعه ورمز دخوله."""
         try:
             from ui.models_link_dialog import ModelsLinkDialog
+            # 5.9: لا تُفتح إلا برمز المدير (إن ضبطه) — فلا يعبث بها المستخدم
+            if not ModelsLinkDialog.allowed(self, self.user):
+                return
             ModelsLinkDialog(self, self.user).exec_()
         except Exception as e:
             err(self, e)

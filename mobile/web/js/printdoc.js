@@ -114,7 +114,7 @@
   }
 
   const APP = "ÀUR";
-  const INV_TITLE = { sale: T("فاتورة بيع"), sale_return: T("مرتجع"), purchase: T("بضاعة من مصنع"), purchase_return: T("إرجاع للمصنع") };
+  const INV_TITLE = { sale: T("فاتورة بيع"), sale_return: T("مرتجع"), purchase: T("مشتريات (بضاعة)"), purchase_return: T("مرتجع (بضاعة)") };
   const PARTY_WORD = { sale: T("العميل"), sale_return: T("من"), purchase: T("المصنع"), purchase_return: T("إلى") };
 
   function balTxt(v, unit) {

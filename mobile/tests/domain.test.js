@@ -163,9 +163,9 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
 
   const bm = D.board(t3, curM + "-01", null);
   const ra = bm.rows.find((r) => r.id === A.id), rb = bm.rows.find((r) => r.id === Bs.id);
-  check("العملاء: الرصيد السابق 10 ومبيعات 20 ومرتجع 10 وسداد 15 — الباقي 5",
+  check("العملاء: الرصيد السابق 10 ومبيعات 20 ومرتجع 10 — صافي المبيعات 10 (مبيعات − مرتجع)، والمستحق 20، وسداد 15 — الباقي 5",
     ra.gold.open === 10 && ra.gold.sales === 20 && ra.gold.returns === 10 && ra.gold.paid === 15 &&
-    ra.gold.net === 20 && ra.gold.remaining === 5, ra.gold);
+    ra.gold.net === 10 && ra.gold.due === 20 && ra.gold.remaining === 5, ra.gold);
   check("نسبة السداد 75% فالتقدير «جيد»، ونسبة المرتجع 33.3%",
     ra.gold.paidPct === 75 && ra.gold.grade === "جيد" && ra.gold.retPct === 33.3, ra.gold);
   check("والنقد: سداد 50% فالتقدير «مقبول» والباقي 100",
@@ -200,8 +200,26 @@ check("وملفٌ غريب يُرفض", throws(() => D.fromBackup({ foo: 1 }), /
   const pin = D.saveInvoice(t, { kind: "purchase", shopId: fac.id, date: "2026-02-01",
     lines: [D.buildLine({ wo: "T1", reg: 20, wage: 5 }), D.buildLine({ reg: 12, wage: 5 })] });
   check("رقمها P-00001", pin.no === "P-00001", pin.no);
-  check("البضاعة تُرحَّل للمصنع على المحل؟ لا — المحل مرفوض", throws(() => D.saveInvoice(t, { kind: "purchase", shopId: shopA.id, lines: [plain] }), /اختر المصنع/));
-  check("والبيع لا يُرحَّل على مصنع", throws(() => D.saveInvoice(t, { kind: "sale", shopId: fac.id, lines: [plain] }), /اختر العميل/));
+  // 1.16: البيع والمرتجع والمشتريات ومرتجعها لأي حساب — عميلاً أو مصنعاً (على نسخةٍ فلا تمسّ ما بعدها)
+  {
+    const t2 = JSON.parse(JSON.stringify(t));
+    const near = (a, b) => Math.abs(a - b) < 1e-6;
+    const fb0 = D.balance(t2, fac.id);
+    const sf = D.saveInvoice(t2, { kind: "sale", shopId: fac.id, date: "2026-02-02", lines: [D.buildLine({ reg: 4, wage: 5 })] });
+    const fb1 = D.balance(t2, fac.id);
+    check("بيعٌ لمصنعٍ يُقبل، ويُنقص ما عليّ له بوزنه وأجوره", sf.kind === "sale" && sf.totalW18 > 0 &&
+      near(fb1.gold18, fb0.gold18 + sf.totalW18) && near(fb1.cash, fb0.cash + sf.grand), { fb0, fb1 });
+    const sb0 = D.balance(t2, shopA.id);
+    const pc = D.saveInvoice(t2, { kind: "purchase", shopId: shopA.id, date: "2026-02-02", lines: [D.buildLine({ reg: 3, wage: 2 })] });
+    const sb1 = D.balance(t2, shopA.id);
+    check("ومشترياتٌ (بضاعة) من عميلٍ تُقبل، وتُنقص ما عليه", pc.kind === "purchase" &&
+      near(sb1.gold18, sb0.gold18 - pc.totalW18) && near(sb1.cash, sb0.cash - pc.grand), { sb0, sb1 });
+    const rt = D.saveInvoice(t2, { kind: "sale_return", shopId: fac.id, date: "2026-02-03", lines: [D.buildLine({ reg: 1, wage: 5 })] });
+    const pr = D.saveInvoice(t2, { kind: "purchase_return", shopId: shopA.id, date: "2026-02-03", lines: [D.buildLine({ reg: 1, wage: 2 })] });
+    check("والمرتجع ومرتجع البضاعة لأي حسابٍ كذلك", rt.kind === "sale_return" && pr.kind === "purchase_return");
+    check("وبلا حساب: «اختر الحساب»", throws(() => D.saveInvoice(t2, { kind: "sale", shopId: "", lines: [plain] }), /اختر الحساب/));
+    check("والكشف يعرض بيع المصنع في حسابه", D.statement(t2, fac.id, null, null).rows.some((r) => r.kind === "sale"));
+  }
   let fb = D.balance(t, fac.id);
   check("عليّ للمصنع: 50 + 32 = 82 جم، و1000 + 160 = 1160 ريال", fb.gold18 === -82 && fb.cash === -1160, fb);
   let hd = D.holdings(t);

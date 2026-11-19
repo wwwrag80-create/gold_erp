@@ -30,6 +30,30 @@ STEPS = (
 
 
 class ModelsLinkDialog(QtWidgets.QDialog):
+
+    @staticmethod
+    def allowed(parent, user):
+        """5.9: لا تُفتح إلا برمز المدير (إن ضبطه من رابطه) — فلا يعبث بها
+        المستخدم على جهاز المصنع. والمدير العام يفتحها بلا رمز: منها يعيد
+        ضبط الرموز إن نُسيت."""
+        user = user or {}
+        if user.get("is_super") or user.get("role") == "super_admin":
+            return True
+        from database.database import db
+        from services import manager_web
+        with db(readonly=True) as conn:
+            if not manager_web.has_desk_pin(conn):
+                return True
+        from ui.desk_prompt import ask_manager_code
+        pin = ask_manager_code("فتح نافذة «رابط المدير»")
+        if pin is None:
+            return False
+        with db(readonly=True) as conn:
+            ok = manager_web.check_desk_pin(conn, pin)
+        if not ok:
+            err(parent, "رمز المدير غير صحيح")
+        return ok
+
     def __init__(self, parent, user):
         super().__init__(parent)
         self.user = user or {}

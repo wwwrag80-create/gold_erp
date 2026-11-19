@@ -322,6 +322,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # القائمة تُملأ بعد اكتمال الإقلاع فلا تتأخّر النافذة — وبعد اتّضاح
         # النظام فوق البوابة (5.4: 0.7 ث) لا في أثنائه فيتعثّر
         QtCore.QTimer.singleShot(1400, self._load_quick_index)
+        # 5.9: رمز المدير — نافذة طلبه لكل تعديلٍ أو حذفٍ حين يقفلهما المدير
+        try:
+            from services import desk_guard
+            from ui.desk_prompt import ask_manager_code
+            desk_guard.set_prompt(ask_manager_code)
+        except Exception:
+            pass
         # 4.52: رابط دليل الموديلات للمدير — إن كان مفعّلاً يعود مع البرنامج
         # (في خيطٍ خلفي: أوامر Tailscale قد تستغرق ثواني)
         QtCore.QTimer.singleShot(3000, self._start_models_link)

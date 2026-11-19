@@ -378,6 +378,9 @@ def _italian_guard(old=None, new=None):
 
 def rename_model(conn, old_no, new_no, username):
     """يعيد تسمية موديل — تصنيف وصفي، بلا أي أثر مالي."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل الموديلات")
     from services.audit import log_action
     new_no = str(new_no or "").strip()
     if not new_no:
@@ -854,6 +857,9 @@ def delete_model(conn, model_no, username, reason=""):
     أي قيد. حذفه يفكّ الرابط فقط — الأطقم تبقى بأوزانها وحالاتها
     وفواتيرها كما هي تماماً، وتنتقل لمجموعة «بلا موديل».
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف الموديلات")
     from services.audit import log_action
     name = str(model_no or "").strip()
     if not name:

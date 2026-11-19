@@ -36,7 +36,7 @@
 
   const KIND_LABEL = {
     sale: "فاتورة بيع", sale_return: "مرتجع",
-    purchase: "بضاعة من مصنع", purchase_return: "إرجاع للمصنع",
+    purchase: "مشتريات (بضاعة)", purchase_return: "مرتجع (بضاعة)",
     receipt: "تحصيل", payment: "سداد", opening: "رصيد افتتاحي",
   };
   const PREFIX = { sale: "S", sale_return: "R", purchase: "P", purchase_return: "PR", receipt: "RV", payment: "PV" };
@@ -272,7 +272,8 @@
     const party = shopById(st, draft.shopId);
     const forFactory = FACTORY_KINDS.includes(draft.kind);
     if (!SHOP_KINDS.includes(draft.kind) && !forFactory) throw new Error(T("نوع الفاتورة غير صحيح"));
-    if (!party || isFactory(party) !== forFactory) throw new Error(forFactory ? T("اختر المصنع") : T("اختر العميل"));
+    // البيع والمرتجع والمشتريات ومرتجعها لأي حساب — عميلاً كان أو مصنعاً: أثرها على رصيده واحد
+    if (!party) throw new Error(T("اختر الحساب"));
     const lines = draft.lines || [];
     checkLines(lines);
     const t = totals(lines, !!draft.vat);
@@ -602,8 +603,9 @@
 
   // ══ العملاء — المبيعات والسداد (كـmodels/customer_board.py) ══
   // لكل عميلٍ وجهين (ذهب · نقد): رصيدٌ سابق، مبيعات (ومعها سندات الصرف:
-  // ما صُرف له فصار عليه)، مرتجع، صافي = سابق + مبيعات − مرتجع، سداد،
-  // باقي = صافي − سداد، ونسبتا المرتجع والسداد، وتقديرٌ بكلمة.
+  // ما صُرف له فصار عليه)، مرتجع، صافي المبيعات = مبيعات − مرتجع (1.16)،
+  // المستحق = سابق + صافي، سداد، باقي = المستحق − سداد، ونسبتا المرتجع
+  // والسداد (من المستحق)، وتقديرٌ بكلمة.
   const GRADES = ["مسدَّد", "ممتاز", "جيد", "مقبول", "سيء"];
   function pct(part, whole) { return whole > 1e-9 ? R(part / whole * 100, 1) : null; }
   function grade(paidPct, remaining, hasSales, paid) {
@@ -617,10 +619,11 @@
   function boardSide(d, dec) {
     const x = {};
     for (const k of ["open", "sales", "returns", "paid", "other"]) x[k] = R(d[k] || 0, dec);
-    x.net = R(x.open + x.sales - x.returns, 3);
-    x.remaining = R(x.net - x.paid + x.other, 3);
+    x.net = R(x.sales - x.returns, 3);
+    x.due = R(x.open + x.net, 3);
+    x.remaining = R(x.due - x.paid + x.other, 3);
     x.retPct = pct(x.returns, x.open + x.sales);
-    x.paidPct = pct(x.paid, x.net);
+    x.paidPct = pct(x.paid, x.due);
     x.grade = grade(x.paidPct, x.remaining, x.sales > 0.0005 || x.open > 0.0005, x.paid);
     return x;
   }

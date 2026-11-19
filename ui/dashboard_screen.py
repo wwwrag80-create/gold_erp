@@ -1107,6 +1107,8 @@ class DashboardScreen(QtWidgets.QWidget):
             done = []
             with db() as conn:
                 if new_model != ("" if r["model"] == "—" else r["model"]):
+                    from services import desk_guard
+                    desk_guard.require(conn, "تغيير موديل الطقم")
                     mc.assign_model(conn, r["id"], new_model,
                                     self.user["username"])
                     done.append(f"الموديل ← {new_model or '—'}")

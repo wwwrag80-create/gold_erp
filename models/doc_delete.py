@@ -166,6 +166,9 @@ def retire(conn, d, username, why="حذف"):
 
 def delete(conn, entry_id, username, reason=""):
     """يحذف المستند ويعكس قيده ويُحرِّر رقمه — داخل معاملة conn."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف المستندات")
     d = check(conn, entry_id)
     from models import reversal
     back = reversal.reverses(conn, d["eid"])

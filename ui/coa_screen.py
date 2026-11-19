@@ -508,6 +508,8 @@ class CoaScreen(QtWidgets.QWidget):
             if dlg.exec_() != QtWidgets.QDialog.Accepted:
                 return
             with db() as conn:
+                from services import desk_guard
+                desk_guard.require(conn, "نقل الحسابات")
                 res = coa.move_account(conn, aid, dlg.target_id(),
                                        self.user["username"],
                                        recode=dlg.recode.isChecked())

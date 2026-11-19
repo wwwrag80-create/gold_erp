@@ -230,6 +230,9 @@ def edit_invoice_items(conn, invoice_id, new_cart, username,
 
     كل ذلك داخل معاملة واحدة — فإن فشلت خطوة تراجع كل شيء.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل الفواتير")
     from services.fatoora import ledger as _fatoora
     _fatoora.guard_change(conn, "invoices", invoice_id, "تعديل بنود")
     from models import tax_invoices as _txg
@@ -691,6 +694,9 @@ def edit_supply(conn, wo_id, gold, small_stones, big_stones, username,
     فتعديله يُعكس القيد القديم كاملاً ويُرحَّل الجديد داخل معاملة واحدة
     — فلا يختلّ ميزان الذهب بين الخزنتين إطلاقاً.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل التوريد")
     # في مكانه داخل دفعته (4.75): لا يُحذف إخوته ولا تنقطع فواتيره عنه
     from models import inventory
     return inventory.edit_supply_item(

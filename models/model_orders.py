@@ -246,6 +246,9 @@ def set_status(conn, order_id, status, username):
 
 def delete_order(conn, order_id, username):
     """حذفٌ منطقي — الطلب لا يظهر ويبقى أثره في سجل التتبع."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف الطلبات")
     ensure_schema(conn)
     o = conn.execute("SELECT order_no FROM model_orders WHERE id=?",
                      (order_id,)).fetchone()

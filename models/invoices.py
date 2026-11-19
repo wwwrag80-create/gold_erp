@@ -1177,6 +1177,9 @@ def update_invoice(conn, invoice_id, cart, username, apply_vat=None,
     فعلاً فالأداة الصحيحة فاتورة جديدة أو تسوية وزن، لا تعديل مستند
     قديم.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل الفواتير")
     from models import tax_invoices as _txg
     _txg.guard(conn, invoice_id, "تعديل")
     _wos_before = _invoice_wos(conn, invoice_id)

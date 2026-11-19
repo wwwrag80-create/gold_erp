@@ -949,8 +949,10 @@ def handle(method, parts, query, headers, body):
     # وتسجيل العمليات (`services.manager_web`)
     from services import manager_web
     if manager_web.handles(rest, query):
-        return manager_web.route(method, rest, query, headers, body, base,
-                                 _csrf(token, secret), bool(pin_hash))
+        return manager_web.sec_exit(
+            manager_web.route(method, rest, query, headers, body, base,
+                              _csrf(token, secret), bool(pin_hash)),
+            method, rest, headers, base)
     if method != "GET":
         return _resp(405, _GONE)
     if rest[:1] == ["img"] and len(rest) == 2:
@@ -967,7 +969,8 @@ def handle(method, parts, query, headers, body):
                                     headers, _csrf(token, secret), base)
         if gate is not None:
             return gate
-        return _resp(200, page_html(conn, query, base))
+        return manager_web.sec_exit(_resp(200, page_html(conn, query, base)),
+                                    method, ["guide"], headers, base)
 
 
 def _ver_of(path):
@@ -1953,7 +1956,7 @@ def _board(conn, query, base):
         f'<div class="out">المرتجع<b>{fmt(ps, s["returns"])}</b>{u} · '
         f'{pct(s["ret_pct"])}</div>'
         f'<div class="in">السداد<b>{fmt(ps, s["paid"])}</b>{u} · '
-        f'{pct(s["paid_pct"])} من الصافي</div>'
+        f'{pct(s["paid_pct"])} من المستحق</div>'
         f'<div>الباقي<b>{fmt(ps, s["remaining"])}</b>{u} · على '
         f'{owing:,} عميلاً</div>')
 

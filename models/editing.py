@@ -50,6 +50,9 @@ def void_for_edit(conn, entry_id, username, note=""):
     يُستدعى **داخل** نفس معاملة الحفظ الجديدة، فإن فشل الترحيل الجديد
     لأي سبب (قيد غير متوازن، رصيد غير كافٍ...) تُلغى المعاملة كلها
     ويعود المستند القديم كما كان دون أي أثر جانبي."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل المستندات")
     e = conn.execute("SELECT * FROM journal_entries WHERE id=?",
                      (entry_id,)).fetchone()
     if not e:

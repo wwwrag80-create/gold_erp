@@ -1452,6 +1452,9 @@ def rename_work_order(conn, wo_id, new_no, username, reason=""):
     والفواتير، فتُحدَّث تلك البيانات معه ليبقى الأثر متسقاً ويُتتبَّع
     الطقم برقمه الجديد في كل الكشوف.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل رقم التشغيل")
     new_no = str(new_no or "").strip()
     if not new_no:
         raise ValueError("أدخل رقم التشغيل الجديد")
@@ -1586,6 +1589,9 @@ def edit_supply_item(conn, wo_id, gold, small_stones, big_stones, username,
     والمباع كذلك: فاتورة بيعه لا تُمسّ (`update_supply_batch`).
     `model_no`: رقم موديلٍ جديد (None = يبقى كما هو).
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل التوريد")
     wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
                       (wo_id,)).fetchone()
     if not wo:
@@ -1623,6 +1629,9 @@ def delete_supply_item(conn, wo_id, username, notes=""):
     · معه أطقم أخرى ← يُخرج سطره وحده من الدفعة ويُعدَّل قيدها بالفرق،
       فلا يُحذف إخوته معه (كان حذف القيد المشترك يحذفهم جميعاً).
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف التوريد")
     from models import wo_moves
     from services.audit import log_action, reverse_entry
     wo = conn.execute("SELECT * FROM work_orders WHERE id=? AND is_deleted=0",
@@ -1723,6 +1732,9 @@ def delete_work_order(conn, wo_id, username, reason=""):
 
     والرقم التجميعي إن حُذف بدأ التوريد التالي برقمه رصيداً جديداً.
     ورقم الطقم المحذوف يعود متاحاً لطقمٍ جديد."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف رقم التشغيل")
     from services.audit import log_action
     info = work_order_delete_info(conn, wo_id)
     if info["blocked"]:
@@ -1825,6 +1837,9 @@ def update_supply_batch(conn, entry_id, rows, entry_date, username,
     والقيد يُعدَّل بالفرق الصافي فقط — فلا يتضخّم دفتر الأستاذ بقيود
     عكسية لعملية لم تتغيّر إلا جزئياً.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل التوريد")
     entry = conn.execute(
         "SELECT * FROM journal_entries WHERE id=? AND is_deleted=0",
         (entry_id,)).fetchone()

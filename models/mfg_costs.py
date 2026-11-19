@@ -969,6 +969,9 @@ def edit_posted_salary(conn, period, employee_id, values, username,
     يُحفظ صفّه بالقيم الجديدة ثم يُعاد قيدُه هو وحده بالصافي الجديد
     وبالتاريخ المختار (إلغاءٌ ثم ترحيل — `repost_salary`). يعيد
     {net, entry_id, old_entry_id} أو None إن لم يتغيّر شيء."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل الرواتب المرحّلة")
     eid = int(employee_id)
     rows = [r for r in list_salaries(conn, period)
             if r["employee_id"] == eid]

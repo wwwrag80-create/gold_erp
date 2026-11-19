@@ -439,6 +439,9 @@ def update_voucher(conn, voucher_id, username, kind=None, entity_id=None,
     وقيدها، ويُستبدل محتوى القيد القائم بها — فيبقى رقم السند
     وتاريخه ومعرّف قيده كما هي.
     """
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل السندات")
     v = conn.execute(
         "SELECT * FROM vouchers WHERE id=? AND is_deleted=0",
         (voucher_id,)).fetchone()

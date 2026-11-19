@@ -287,12 +287,18 @@ def create_group(conn, name, username, kind="customer", parent_id=None):
 
 
 def rename_group(conn, group_id, name, username, kind="customer"):
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "تعديل المجموعات")
     gid = _check_group(conn, group_id, kind)
     return coa.rename_account(conn, gid, name, username)
 
 
 def delete_group(conn, group_id, username, kind="customer"):
     """تُحذف المجموعة الخالية وحدها — من فيها يُنقل أولاً."""
+    # 5.9: رمز المدير — التعديل والحذف في البرنامج مقفلان به
+    from services import desk_guard
+    desk_guard.require(conn, "حذف المجموعات")
     gid = _check_group(conn, group_id, kind)
     if coa.child_count(conn, gid):
         raise ValueError("المجموعة فيها جهات — انقلها إلى مجموعةٍ أخرى أو"

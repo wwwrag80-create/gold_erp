@@ -4662,18 +4662,19 @@ def main():
         check("تضييق الفترة ينقل ما قبلها إلى «رصيد سابق» ولا يغيّر الباقي",
               _same48 and len(_res48["rows"]) == len(_res48b["rows"]))
         _p48 = [r for r in _res48["rows"] if r["gold"]["paid"] > 0
-                and r["gold"]["net"] > 0]
-        check("نسبة السداد = السداد ÷ صافي المبيعات",
+                and r["gold"]["due"] > 0]
+        check("نسبة السداد = السداد ÷ المستحق (رصيد سابق + صافي المبيعات)",
               all(abs(r["gold"]["paid_pct"] - round(
-                  r["gold"]["paid"] / r["gold"]["net"] * 100, 1)) < 0.06
+                  r["gold"]["paid"] / r["gold"]["due"] * 100, 1)) < 0.06
                   for r in _p48), f"{len(_p48)} عميلاً")
-        check("صافي المبيعات = رصيد سابق + المبيعات − المرتجع",
-              all(abs(r[sd]["net"] - (r[sd]["open"] + r[sd]["sales"]
-                                     - r[sd]["returns"])) < 0.002
+        check("صافي المبيعات = المبيعات − المرتجع (5.9)",
+              all(abs(r[sd]["net"] - (r[sd]["sales"] - r[sd]["returns"]))
+                  < 0.002
                   for r in _res48b["rows"] for sd in ("gold", "cash"))
               and any(r["gold"]["open"] > 0 for r in _res48b["rows"]))
-        check("والباقي = الصافي − السداد + الحركات الأخرى",
-              all(abs(r[sd]["remaining"] - (r[sd]["net"] - r[sd]["paid"]
+        check("والباقي = رصيد سابق + الصافي − السداد + الحركات الأخرى",
+              all(abs(r[sd]["remaining"] - (r[sd]["open"] + r[sd]["net"]
+                                           - r[sd]["paid"]
                                            + r[sd]["other"])) < 0.002
                   for r in _res48b["rows"] for sd in ("gold", "cash")))
         _pd48 = [r["gold"]["paid"] for r in _res48["rows"]]
@@ -4995,8 +4996,10 @@ def main():
               abs(_r50["gold"]["open"] - 120.0) < 0.001
               and abs(_r50["cash"]["open"] - 900.0) < 0.01,
               f"{_r50['gold']['open']} · {_r50['cash']['open']}")
-        check("وصافي المبيعات يشمله فتُقاس عليه النسبة",
-              abs(_r50["gold"]["net"] - 120.0) < 0.001)
+        check("والمستحق يشمله فتُقاس عليه النسبة (والصافي مبيعاتٌ − مرتجع)",
+              abs(_r50["gold"]["due"] - (120.0 + _r50["gold"]["net"])) < 0.001
+              and abs(_r50["gold"]["net"] - (_r50["gold"]["sales"]
+                                             - _r50["gold"]["returns"])) < 0.001)
         check("والقيد اليومي بخصمٍ مسموح (مصروفات) سدادٌ لا رصيدٌ سابق",
               abs(_r50["cash"]["paid"] - 40.0) < 0.01
               and abs(_r50["cash"]["open"] - 900.0) < 0.01

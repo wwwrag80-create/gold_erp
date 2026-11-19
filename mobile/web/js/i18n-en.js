@@ -707,4 +707,15 @@ window.I18N_EN = {
 "اختر العميل أو المصنع": "Choose the customer or factory",
 "سند تحصيل (قبض)": "Collection (receipt) voucher",
 "سند سداد (دفع)": "Payment voucher",
+// 1.16: العمليات لأي حساب · نوع الجهة
+"لأي حساب · ذهب · أجور · ماس": "Any account · gold · wages · diamonds",
+"مشتريات (بضاعة)": "Purchases (goods)",
+"مرتجع (بضاعة)": "Goods return",
+"نوع الجهة": "Account type",
+"+ حساب جديد": "+ New account",
+"مشتريات": "Purchases",
+"البيع والتحصيل": "Sales & collections",
+"المشتريات والسداد": "Purchases & payments",
+"صافي المبيعات": "Net sales",
+"المبيعات − المرتجع": "Sales − returns",
 };
