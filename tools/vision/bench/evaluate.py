@@ -38,7 +38,9 @@ CANDIDATES = {
     "dinov2reg-s-q8": ("onnx-community__dinov2-with-registers-small__onnx__model_quantized.onnx", 224, IMNET, "vit4"),
     "dinov2-b-q8": ("Xenova__dinov2-base__onnx__model_quantized.onnx", 224, IMNET, "vit"),
     "dinov2reg-b-q8": ("onnx-community__dinov2-with-registers-base__onnx__model_quantized.onnx", 224, IMNET, "vit4"),
-    "dinov3-s": ("onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__onnx__model.onnx", 224, IMNET, "vit5"),
+    "dinov3-s": ("dinov3s/model.onnx", 224, IMNET, "vit5"),
+    "dinov3-s@320": ("dinov3s/model.onnx", 320, IMNET, "vit5"),
+    "dinov3-s@288": ("dinov3s/model.onnx", 288, IMNET, "vit5"),
     "dinov3-s-q8": ("onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__onnx__model_quantized.onnx", 224, IMNET, "vit5"),
     "dinov3-b-q8": ("onnx-community__dinov3-vitb16-pretrain-lvd1689m-ONNX__onnx__model_quantized.onnx", 224, IMNET, "vit5"),
     "clip-b32-q8": ("Xenova__clip-vit-base-patch32__onnx__vision_model_quantized.onnx", 224, CLIPN, "embeds"),
@@ -206,9 +208,13 @@ def norm(x):
     return x / (np.linalg.norm(x, axis=-1, keepdims=True) + 1e-9)
 
 
+CAL = []          # (أعلى درجة، الثانية، صحيحٌ أولاً؟) — لمعايرة «قوي/قريب»
+
+
 def ranks(qf, qid, cf, cid, agg):
     """ترتيب الصحيح لكل لقطة. qf: [لقطة][تنويع] · cf: [طقم][زاوية]."""
     out = []
+    CAL.clear()
     for q, true in zip(qf, qid):
         sc = []
         for c in cf:
@@ -217,14 +223,36 @@ def ranks(qf, qid, cf, cid, agg):
                 sc.append(s.max())
             else:                               # لكل تنويعٍ أفضل زاوية، ثم المتوسط
                 sc.append(s.max(1).mean())
-        order = np.argsort(-np.array(sc))
+        sc = np.array(sc)
+        order = np.argsort(-sc)
         out.append(int(np.nonzero(np.array(cid)[order] == true)[0][0]) + 1)
+        CAL.append((float(sc[order[0]]), float(sc[order[1]]), out[-1] == 1))
     return np.array(out)
 
 
 def summary(r):
     return (f"top1 {np.mean(r == 1) * 100:5.1f}  top5 {np.mean(r <= 5) * 100:5.1f}"
             f"  top10 {np.mean(r <= 10) * 100:5.1f}  mrr {np.mean(1 / r):.3f}")
+
+
+CAT_SETS = {"full": {"f"}, "pieces": {"f", "p"}, "pieces+win": {"f", "p", "w"},
+            "all": {"f", "p", "w", "d"}}
+Q_SETS = {"single": {"q"}, "crops": {"q", "c"}, "crops+flip": {"q", "c", "x"},
+          "flip": {"q", "x"}}
+
+
+def tagged_catalog(im):
+    """كل زوايا الكتالوج مرةً واحدة بوسومها: f كامل · p قطعة · w نافذة · d داكن."""
+    allv = catalog_views(im, "all")
+    n_p = len(catalog_views(im, "pieces")) - 1
+    n_w = len(catalog_views(im, "pieces+win")) - 1 - n_p
+    tags = ["f"] + ["p"] * n_p + ["w"] * n_w + ["d"]
+    return list(zip(allv, tags))
+
+
+def tagged_query(im):
+    v = query_views(im, "crops+flip")
+    return list(zip(v, ["q", "c", "c", "x"]))
 
 
 def main():
@@ -237,10 +265,15 @@ def main():
             shots.append((m["id"], s["kind"], phoneify(BENCH / "raw" / s["file"], seed)))
     ids = list(cats)
     print(f"{len(ids)} طقماً · {len(shots)} لقطة "
-          f"({sum(1 for s in shots if s[1] == 'set')} للطقم كاملاً)")
+          f"({sum(1 for s in shots if s[1] == 'set')} للطقم كاملاً)", flush=True)
     names = ONLY or list(CANDIDATES)
     configs = [("full", "single"), ("pieces", "single"), ("pieces+win", "single"),
-               ("pieces+win", "crops"), ("pieces+win", "crops+flip"), ("all", "crops+flip")]
+               ("pieces", "crops"), ("pieces+win", "crops"), ("pieces", "crops+flip"),
+               ("pieces+win", "crops+flip"), ("all", "crops+flip"), ("full", "crops+flip")]
+    cviews = {i: tagged_catalog(cats[i]) for i in ids}
+    qviews = [tagged_query(s[2]) for s in shots]
+    sel = [s[0] for s in shots]
+    is_set = np.array([s[1] == "set" for s in shots])
     results = {}
     for name in names:
         if not (MODELS / CANDIDATES[name][0]).exists():
@@ -252,49 +285,55 @@ def main():
             print(f"── {name}: {e}")
             continue
         t0 = time.time()
-        cache_c, cache_q = {}, {}
-        for ck, qk in configs:
-            if ck not in cache_c:
-                vs = {i: catalog_views(cats[i], ck) for i in ids}
-                flat = [v for i in ids for v in vs[i]]
-                f = enc.run(flat)
-                cache_c[ck] = (vs, f)
-            if qk not in cache_q:
-                qv = [query_views(s[2], qk) for s in shots]
-                f = enc.run([v for vv in qv for v in vv])
-                cache_q[qk] = (qv, f)
+        try:
+            cf_all = enc.run([v for i in ids for v, _ in cviews[i]])
+            qf_all = enc.run([v for vv in qviews for v, _ in vv])
+        except Exception as e:                          # noqa: BLE001
+            print(f"── {name}: تعذّر التشغيل — {str(e)[:120]}", flush=True)
+            continue
         dt = time.time() - t0
-        for ck, qk in configs:
-            vs, cfe = cache_c[ck]
-            qv, qfe = cache_q[qk]
-            for feat in cfe:
-                cf, pos = [], 0
-                for i in ids:
-                    n = len(vs[i])
-                    cf.append(norm(cfe[feat][pos:pos + n]))
-                    pos += n
-                qf, pos = [], 0
-                for vv in qv:
-                    qf.append(norm(qfe[feat][pos:pos + len(vv)]))
-                    pos += len(vv)
+        for feat in cf_all:
+            cpos, cmap = 0, {}
+            for i in ids:
+                n = len(cviews[i])
+                cmap[i] = (norm(cf_all[feat][cpos:cpos + n]), [t for _, t in cviews[i]])
+                cpos += n
+            qpos, qmap = 0, []
+            for vv in qviews:
+                qmap.append((norm(qf_all[feat][qpos:qpos + len(vv)]), [t for _, t in vv]))
+                qpos += len(vv)
+            for ck, qk in configs:
+                cf = [e[[t in CAT_SETS[ck] for t in tg]] for e, tg in (cmap[i] for i in ids)]
+                qf = [e[[t in Q_SETS[qk] for t in tg]] for e, tg in qmap]
                 for agg in ("max", "meanmax"):
                     if qk == "single" and agg == "meanmax":
                         continue
-                    r = ranks(qf, [s[0] for s in shots], cf, ids, agg)
-                    rs = r[[s[1] == "set" for s in shots]]
-                    rp = r[[s[1] != "set" for s in shots]]
+                    r = ranks(qf, sel, cf, ids, agg)
                     key = f"{name:16s} {feat:8s} cat={ck:10s} q={qk:10s} {agg:7s}"
-                    results[key] = (np.mean(1 / r), summary(r), summary(rs), summary(rp))
-        print(f"── {name}  ({dt:.0f} ث)")
-        for key, (_, a, s_, p_) in sorted(
+                    results[key] = (float(np.mean(1 / r)), summary(r), summary(r[is_set]),
+                                    summary(r[~is_set]), list(CAL))
+        print(f"── {name}  ({dt:.0f} ث)", flush=True)
+        for key, (_, a, s_, p_, _c) in sorted(
                 ((k, v) for k, v in results.items() if k.startswith(f"{name:16s}")),
-                key=lambda kv: -kv[1][0])[:6]:
-            print(f"  {key}\n     الكل  {a}\n     طقم   {s_}\n     قطعة  {p_}")
+                key=lambda kv: -kv[1][0])[:4]:
+            print(f"  {key}\n     الكل  {a}\n     طقم   {s_}\n     قطعة  {p_}", flush=True)
     print("\n══ الأفضل ══")
-    for key, (_, a, s_, p_) in sorted(results.items(), key=lambda kv: -kv[1][0])[:15]:
+    best = sorted(results.items(), key=lambda kv: -kv[1][0])
+    for key, (_, a, s_, p_, _c) in best[:25]:
         print(f"  {key}  | {a} | طقم {s_.split('  mrr')[0]} | قطعة {p_.split('  mrr')[0]}")
+    if best:
+        key, v = best[0]
+        cal = np.array([(a, b, c) for a, b, c in v[4]])
+        good, bad = cal[cal[:, 2] == 1], cal[cal[:, 2] == 0]
+        print(f"\n══ معايرة {key.split()[0]} ══")
+        for nm, arr in (("صحيحٌ أولاً", good), ("خطأ أولاً", bad)):
+            if len(arr):
+                print(f"  {nm} ({len(arr)}): الدرجة p10/50/90 = "
+                      f"{np.percentile(arr[:, 0], [10, 50, 90]).round(3)}  الفارق p10/50/90 = "
+                      f"{np.percentile(arr[:, 0] - arr[:, 1], [10, 50, 90]).round(3)}")
     (BENCH / "results.json").write_text(json.dumps(
-        {k: list(v) for k, v in results.items()}, ensure_ascii=False, indent=1), encoding="utf-8")
+        {k: list(v[:4]) for k, v in results.items()}, ensure_ascii=False, indent=1),
+        encoding="utf-8")
 
 
 if __name__ == "__main__":

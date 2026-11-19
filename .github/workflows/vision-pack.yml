@@ -1,0 +1,62 @@
+# حزمة أدوات «البحث بالصورة» — تُبنى من مدخلاتٍ مثبّتة (tools/vision/pack.json)
+# وتُنشر في إصدارٍ باسمها (vision-pack-N). الإصدار المنشور لا يُستبدل أبداً:
+# البرنامج يطابق بصمته، فحزمةٌ جديدة = اسمٌ جديد.
+name: حزمة البحث بالصورة
+
+on:
+  push:
+    branches: ["claude/gold-accounting-system-9o1vmw"]
+    paths: ["tools/vision/pack.json", ".github/workflows/vision-pack.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vision-pack
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: الأدوات
+        run: pip install "onnx==1.23.2" numpy onnxruntime
+      - name: المدخلات (النموذج · المحرّك · الترخيص)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          P=tools/vision/pack.json
+          TAG=$(python -c "import json;print(json.load(open('$P'))['tag'])")
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::الإصدار $TAG منشورٌ من قبل — لا يُستبدل"; echo "SKIP=1" >> "$GITHUB_ENV"; exit 0
+          fi
+          mkdir -p in
+          for f in $(python -c "import json;d=json.load(open('$P'));print(' '.join(d['assets']))"); do
+            gh release download vision-models -p "$f" -D in
+          done
+          V=$(python -c "import json;print(json.load(open('$P'))['ort'])")
+          curl -sSL -o ort.tgz "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-$V.tgz"
+          tar xzf ort.tgz
+          ls -la in package/dist | head -40
+      - name: البناء
+        if: env.SKIP != '1'
+        run: |
+          set -e
+          python tools/vision/pack_from_spec.py tools/vision/pack.json in package/dist "$TAG.zip" | tee build.json
+          sha256sum "$TAG.zip" | tee "$TAG.zip.sha256"
+      - name: النشر
+        if: env.SKIP != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" "$TAG.zip" "$TAG.zip.sha256" --prerelease --target "$GITHUB_SHA" \
+            --title "Photo search tools pack ($TAG)" \
+            --notes "Image model + ONNX Runtime Web for the manager link photo search. Verified by SHA-256 in the desktop program."

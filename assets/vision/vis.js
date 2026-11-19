@@ -258,7 +258,28 @@
         if (bb && bb.n > 0.01 * sub.w * sub.h) { out.push(padSquare(c, sub, white, 0.05)); kinds.push('w'); }
       });
     }
-    return {v: out.slice(0, 12), k: kinds.slice(0, 12)};
+    // الطقم على خلفيةٍ داكنة (كالمخمل الأسود في المحلّات)
+    if (V.dark) {
+      var dk = [24, 22, 26], g = c.getContext('2d'), id = g.getImageData(0, 0, c.width, c.height);
+      var dc = canvasOf(c.width, c.height), dg = dc.getContext('2d'), od = dg.createImageData(c.width, c.height);
+      for (var i = 0, j = 0; j < mk.m.length; i += 4, j++) {
+        var on = mk.m[j];
+        od.data[i] = on ? id.data[i] : dk[0]; od.data[i + 1] = on ? id.data[i + 1] : dk[1];
+        od.data[i + 2] = on ? id.data[i + 2] : dk[2]; od.data[i + 3] = 255;
+      }
+      dg.putImageData(od, 0, 0);
+      out.push(padSquare(dc, box, dk, 0.06)); kinds.push('d');
+    }
+    // الطقم مائلاً (الجوال يصوّره بزاوية): انضغاطٌ رأسي ودورانٌ خفيف
+    (V.tilts || []).forEach(function (t) {
+      var f = out[0], s = f.width, tc = canvasOf(s, s), tg = tc.getContext('2d');
+      tg.fillStyle = '#fff'; tg.fillRect(0, 0, s, s);
+      tg.translate(s / 2, s / 2); tg.scale(1, t[0]); tg.rotate(-t[1] * Math.PI / 180);
+      tg.imageSmoothingQuality = 'high';
+      tg.drawImage(f, -s / 2, -s / 2);
+      out.push(tc); kinds.push('s');
+    });
+    return {v: out.slice(0, 16), k: kinds.slice(0, 16)};
   }
 
   // قصّات صورة المدير داخل الإطار الذي حدّده
@@ -338,7 +359,9 @@
       if (i >= cs.length) return Promise.resolve(res);
       var part = cs.slice(i, i + bs); i += bs;
       var feeds = {}; feeds[M.input_name || 'pixel_values'] = tensorOf(part);
-      return sess.run(feeds).then(function (out) {
+      // المخرج المطلوب وحده (لا تُنسخ رموز الصورة كلها من المحرّك)
+      var run = M.output ? sess.run(feeds, [M.output]) : sess.run(feeds);
+      return run.then(function (out) {
         res = res.concat(pool(out, part.length));
         return step();
       });

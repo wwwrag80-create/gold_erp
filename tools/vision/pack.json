@@ -1,0 +1,26 @@
+{
+ "tag": "vision-pack-1",
+ "id": "dinov3s-224-v1",
+ "model": "onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__onnx__model.onnx",
+ "model_data": "onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__onnx__model.onnx_data",
+ "assets": [
+  "onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__onnx__model.onnx",
+  "onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__onnx__model.onnx_data",
+  "onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__LICENSE.md"
+ ],
+ "licenses": ["onnx-community__dinov3-vits16-pretrain-lvd1689m-ONNX__LICENSE.md"],
+ "ort": "1.31.1",
+ "input": 224,
+ "skip": 5,
+ "pool": "embeds",
+ "output": "pooler_output",
+ "mean": [0.485, 0.456, 0.406],
+ "std": [0.229, 0.224, 0.225],
+ "views": {"work": 384, "pieces": 5, "windows": true, "dark": true,
+           "tilts": [[0.82, 0], [0.82, 12], [0.82, -12], [0.66, 0]]},
+ "query": {"crops": [0.8, 0.62], "flip": true},
+ "agg": "meanmax",
+ "thr": {"hi": 0.7, "mid": 0.6, "gap": 0.02},
+ "batch": 4,
+ "fp16_weights": true
+}

@@ -204,8 +204,8 @@ r = call("POST", "vis/index", body={"model": "test-model-1", "dim": 32, "items":
     headers={"X-Csrf": CSRF})
 check("بصمةٌ تالفة (طولٌ خاطئ): لا تُقبل", json.loads(text(r))["ok"] == 0)
 r = call("POST", "vis/index", body={"model": "test-model-1", "dim": 32, "items": {
-    k2: {"v": V[k2], "e": [vec(32)] * 13}}}, headers={"X-Csrf": CSRF})
-check("أكثر من 12 بصمة للموديل: لا تُقبل", json.loads(text(r))["ok"] == 0)
+    k2: {"v": V[k2], "e": [vec(32)] * 17}}}, headers={"X-Csrf": CSRF})
+check("أكثر من 16 بصمة للموديل: لا تُقبل", json.loads(text(r))["ok"] == 0)
 r = call("POST", "vis/index", body={"model": "نموذج-آخر", "dim": 32,
                                     "items": good}, headers={"X-Csrf": CSRF})
 check("بصماتٌ من نموذجٍ آخر: مرفوضة", r["code"] == 400)

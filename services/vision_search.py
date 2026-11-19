@@ -30,6 +30,7 @@ import json
 import os
 import re
 import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -53,11 +54,13 @@ CTYPES = {".js": "text/javascript; charset=utf-8",
           ".wasm": "application/wasm", ".onnx": "application/octet-stream",
           ".json": "application/json", ".txt": "text/plain; charset=utf-8"}
 
-MAX_VIEWS = 12          # بصمات الموديل الواحد (الطقم · القطع · النوافذ)
+MAX_VIEWS = 16          # بصمات الموديل الواحد (الطقم · القطع · نوافذ · داكن · مائل)
 MAX_DIM = 2048
+RETRY_S = 60            # مهلةٌ بعد تنزيلٍ فاشل قبل إعادة المحاولة
 
 _lock = threading.Lock()
-_dl = {"state": "", "done": 0, "total": 0, "error": "", "thread": None}
+_dl = {"state": "", "done": 0, "total": 0, "error": "", "thread": None,
+       "at": 0.0}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -118,7 +121,12 @@ def ensure_async():
         t = _dl.get("thread")
         if t is not None and t.is_alive():
             return status()
-        _dl.update(state="downloading", done=0, total=PACK_SIZE, error="")
+        # بعد فشلٍ: لا إعادة قبل دقيقة — فلا تُنزَّل الحزمة كل ثوانٍ
+        # والصفحة مفتوحةٌ تسأل
+        if _dl["state"] == "error" and time.time() - _dl.get("at", 0) < RETRY_S:
+            return status()
+        _dl.update(state="downloading", done=0, total=PACK_SIZE, error="",
+                   at=time.time())
         t = threading.Thread(target=_download_safe, name="vision-pack",
                              daemon=True)
         _dl["thread"] = t
@@ -133,7 +141,7 @@ def _download_safe():
             _dl.update(state="", error="")
     except Exception as e:                       # noqa: BLE001
         with _lock:
-            _dl.update(state="error", error=_why(e))
+            _dl.update(state="error", error=_why(e), at=time.time())
         try:
             from services.health import log_error
             log_error("vision_search/download", e)
