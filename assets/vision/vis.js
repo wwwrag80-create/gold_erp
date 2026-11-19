@@ -19,7 +19,7 @@
   var M = null;          // manifest الحزمة
   var sess = null;       // جلسة النموذج
   var IDX = {};          // مفتاح الصورة ← {v, e:[Float32Array], k:[]}
-  var ready = false, readyWaiters = [];
+  var ready = false, readyWaiters = [], runQ = Promise.resolve(), searching = false;
   var shots = [];        // بصمات لقطات المدير (لقطة ثانية تُدمج)
   var photo = null;      // الصورة الحالية (ImageBitmap/Canvas) وإطارها
   var busy = false;
@@ -372,7 +372,8 @@
       var part = cs.slice(i, i + bs); i += bs;
       var feeds = {}; feeds[M.input_name || 'pixel_values'] = tensorOf(part);
       // المخرج المطلوب وحده (لا تُنسخ رموز الصورة كلها من المحرّك)
-      var run = M.output ? sess.run(feeds, [M.output]) : sess.run(feeds);
+      var run = runQ = runQ.catch(function () {}).then(function () {
+        return M.output ? sess.run(feeds, [M.output]) : sess.run(feeds); });
       return run.then(function (out) {
         res = res.concat(pool(out, part.length));
         return step();
@@ -451,7 +452,9 @@
           prep('تجهيز صور الدليل للبحث (مرةً واحدة)…', done, total,
                done + ' من ' + total + ' موديل' + (done > 3 && left > 5
                  ? ' · بقي نحو ' + (left > 90 ? Math.round(left / 60) + ' دقيقة' : left + ' ثانية') : ''));
-          return (pendBytes > 80000 ? flush() : Promise.resolve()).then(one);
+          if (done % 8 === 0 && shots.length && !$('res').hidden) render();
+          var gate = function () { return searching ? sleep(150).then(gate) : Promise.resolve(); };
+          return (pendBytes > 80000 ? flush() : Promise.resolve()).then(gate).then(one);
         });
     };
     return one();
@@ -525,7 +528,9 @@
   function render() {
     var list = rank(), top = list.slice(0, 12);
     $('rT').textContent = list.length ? 'أقرب الموديلات لصورتك' : 'لا موديلات بصورٍ في الدليل';
-    $('rS').textContent = (shots.length > 1 ? 'من ' + shots.length + ' لقطات · ' : '') +
+    var nIdx = Object.keys(IDX).length;
+    $('rS').textContent = (nIdx < CAT.length ? 'قورنت بـ' + nIdx + ' من ' + CAT.length + ' موديل — التجهيز مستمر والترتيب يتحدّث وحده · ' : '') +
+      (shots.length > 1 ? 'من ' + shots.length + ' لقطات · ' : '') +
       'مقارنةً بـ' + list.length + ' موديل — الأقرب أولاً';
     $('list').innerHTML = top.map(function (r, i) { return card(r, i, list); }).join('') +
       (list.length > 12 ? '<button class="alt more" type="button" id="more">عرض المزيد</button>' : '');
@@ -612,7 +617,8 @@
     var thumb = canvasOf(128, 128);
     thumb.getContext('2d').drawImage(photo.c, b.x, b.y, b.w, b.h, 0, 0, 128, 128);
     $('qimg').src = thumb.toDataURL('image/jpeg', 0.8);
-    $('go').disabled = true; $('go').textContent = ready ? '… جارٍ البحث' : '… بانتظار تجهيز الأداة';
+    $('go').disabled = true; $('go').textContent = ready ? '… جارٍ البحث' : '… تشغيل الأداة (ثوانٍ)';
+    searching = true;
     whenReady().then(function () {
       return embed(queryViews(photo.c, b));
     }).then(function (qs) {
@@ -622,7 +628,7 @@
       render();
       $('res').scrollIntoView({behavior: 'smooth', block: 'start'});
     }).catch(function (e) { fail('تعذّر البحث: ' + (e && e.message || e)); })
-      .then(function () { busy = false; $('go').disabled = false; $('go').textContent = '🔍 ابحث'; });
+      .then(function () { busy = false; searching = false; $('go').disabled = false; $('go').textContent = '🔍 ابحث'; });
   }
 
   $('cam').onchange = function () { openPhoto(this.files[0], false); this.value = ''; };
@@ -642,10 +648,13 @@
     return;
   }
   prep('جارٍ الاتصال بجهاز المصنع…', 0, 0, 'يمكنك التصوير الآن — يبدأ البحث متى جهزت الأداة.');
-  waitPack().then(startEngine).then(loadIndex).then(buildIndex).then(function () {
+  waitPack().then(startEngine).then(loadIndex).then(function () {
     ready = true;
-    show('prep', false);
     readyWaiters.splice(0).forEach(function (r) { r(); });
+    return buildIndex();
+  }).then(function () {
+    show('prep', false);
+    if (shots.length && !$('res').hidden) render();
     window.__visReady = true;
   }).catch(function (e) {
     fail('تعذّر تجهيز البحث بالصورة: ' + (e && e.message || e));
