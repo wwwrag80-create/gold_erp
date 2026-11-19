@@ -405,9 +405,9 @@ class MainWindow(QtWidgets.QMainWindow):
         h.addSpacing(8)
         h.addWidget(lbl_karat)
         h.addWidget(self.karat_box)
-        h.addSpacing(8)
+        h.addSpacing(4)
         h.addWidget(self._year_button())
-        h.addSpacing(8)
+        h.addSpacing(4)
         h.addWidget(btn_view)
         h.addWidget(btn_update)
         h.addWidget(btn_backup)
@@ -2234,7 +2234,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 closed = fiscal_years.is_closed(c, y)
         except Exception:
             pass
-        b.setText(f"📅 السنة {y}" + (" 🔒" if closed else "") + " ▾")
+        b.setText(f"📅 {y}" + ("🔒" if closed else ""))
         b.setToolTip(
             f"السنة المالية التي تعمل فيها: {y}"
             + (" — مُقفلة (للعرض والكشوف)" if closed else "")
@@ -2242,7 +2242,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "\nكل سنةٍ محفوظةٌ بحساباتها، والأرصدة تنتقل للسنة الجديدة.")
         past = not work_year.is_current()
         b.setStyleSheet(
-            "QToolButton#yearBtn{font-weight:bold;padding:3px 10px;"
+            "QToolButton#yearBtn{font-weight:bold;padding:3px 6px;"
             "border-radius:6px;" + ("color:#FFFFFF;background:#A33131;"
                                     if past else "") + "}")
 
