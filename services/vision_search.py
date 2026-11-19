@@ -374,6 +374,10 @@ def catalog(conn, base):
                       str(i["date"])] for i in g["sold"]],
             "stock": [[str(i["wo"]), mw._w(i["reg"]), str(i["date"])]
                       for i in g["in_stock"]],
+            # 5.10.3: أوزان القطع الفعلية بالجرام (بلا تحويل عيار) — يطابقها
+            # الوزن الذي يزنه المدير للقطعة التي أمامه
+            "w": sorted({round(float(i["reg"] or 0), 2)
+                         for i in g["in_stock"] + g["sold"] if i["reg"]}),
         })
     return out
 
@@ -552,6 +556,9 @@ def page_html(conn, base, csrf):
  <div class="ctitle">حدِّد القطعة بالإطار (اسحبه أو اسحب زواياه)</div>
  <div id="stage"><canvas id="cv"></canvas><div id="box"><i class="h tl"></i>
  <i class="h tr"></i><i class="h bl"></i><i class="h br"></i></div></div>
+ <label class="wt">⚖ وزن القطعة بالجرام <small>(اختياري — إن وزنتها يرفع
+  الدقة كثيراً)</small><input id="wt" type="number" inputmode="decimal"
+  step="0.01" min="0" placeholder="مثلاً 24.35"></label>
  <div class="btns">
   <button id="go" class="big" type="button">🔍 ابحث</button>
   <button id="full" class="alt" type="button">الصورة كاملة</button>
@@ -609,6 +616,11 @@ transition:width .3s}
 .small{font-size:12.5px;color:#7a6c57}
 .err{border-color:#e5b4ae;background:#fff4f2;color:#8f2a1f}
 .ctitle{font-weight:700;margin-bottom:8px}
+label.wt{display:block;margin:12px 0 4px;font-weight:700}
+label.wt small{font-weight:400;color:#7a6c57}
+label.wt input{display:block;width:100%;margin-top:6px;padding:12px;font-size:18px;
+border:1px solid var(--line);border-radius:10px;font-family:inherit}
+.chip.wm{background:#e8eefc;color:#26457a}
 #stage{position:relative;touch-action:none;user-select:none;margin:0 auto;
 max-width:100%;overflow:hidden;border-radius:10px}
 #cv{display:block;width:100%;height:auto;border-radius:10px;background:#222}

@@ -15,6 +15,7 @@ const { chromium, devices } = require('playwright');
   const bench = process.argv[3];
   const limit = +(process.argv[4] || 0) || 1e9;
   const mobile = process.argv.includes('--mobile');
+  const withWeight = process.argv.includes('--weight');
   const photos = JSON.parse(fs.readFileSync(path.join(bench, 'photos.json'), 'utf8')).slice(0, limit);
   const OK = [], BAD = [];
   const check = (n, c, info) => { (c ? OK : BAD).push(n); console.log((c ? '  ✔ ' : '  ✘ ') + n + (c ? '' : '  [' + (info || '') + ']')); };
@@ -53,6 +54,14 @@ const { chromium, devices } = require('playwright');
     const s0 = Date.now();
     await p.setInputFiles('#gal', path.join(bench, 'photos', ph.file));
     await p.waitForSelector('#crop:not([hidden])');
+    if (withWeight) {
+      // وزن القطعة كما يزنها المدير (بخطأ ميزانٍ صغير ±0.8%)
+      const w = await p.evaluate((id) => {
+        const c = JSON.parse(document.getElementById('vis-data').textContent).catalog.find(x => x.m === id);
+        return c && c.w.length ? c.w[0] : 0;
+      }, ph.id);
+      await p.fill('#wt', w ? String((w * (ranks.length % 2 ? 1.008 : 0.992)).toFixed(2)) : '');
+    }
     await p.click('#full');
     await p.waitForSelector('#res:not([hidden]) .hit');
     ts += Date.now() - s0;

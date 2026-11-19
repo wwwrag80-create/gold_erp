@@ -45,7 +45,8 @@ D0 = datetime.date.today().isoformat()
 with db() as c:
     rep = add_entity(c, "المندوب سالم", "customer", username="t")
     inventory.create_work_orders_batch(c, [
-        {"wo_no": f"{1000 + 2 * i + j}", "model_no": m, "gold": 20 + i % 7,
+        {"wo_no": f"{1000 + 2 * i + j}", "model_no": m,
+         "gold": round(12 + (i * 7.37 + j * 3.11) % 48, 2),
          "small_stones": 0, "big_stones": 0, "wage_per_gram": 10}
         for i, m in enumerate(ids) for j in range(2)], D0, "t")
     W = {r[1]: r[0] for r in c.execute("SELECT id, work_order_no FROM work_orders")}

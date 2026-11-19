@@ -138,6 +138,9 @@ check("وما بالخزنة وما عند المناديب (V1: 1 مباع لم
       and cat["V1"]["sold"][0][2] == "مندوب الصور"
       and cat["V1"]["sold"][0][0] == "900", cat["V1"])
 check("ورمز التحقّق في الصفحة", blob["csrf"] == CSRF)
+check("وأوزان القطع الفعلية بالجرام لمطابقة الوزن (5.10.3)",
+      cat["V1"]["w"] == sorted({10.0, 13.0}) or len(cat["V1"]["w"]) == 2, cat["V1"]["w"])
+check("وخانة «وزن القطعة» في الصفحة", 'id="wt"' in page)
 hd = r["headers"]
 check("الصفحة معزولة (COOP/COEP) لتعمل كل الأنوية",
       hd.get("Cross-Origin-Opener-Policy") == "same-origin"

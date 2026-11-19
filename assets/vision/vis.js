@@ -475,16 +475,28 @@
     });
     return out;
   }
+  // الوزن (اختياري): الموديل الذي فيه قطعةٌ بوزنٍ قريب يتقدّم — الشكل يرتّب
+  // ما تقارب وزنه. ±2% مطابقة، وتخفّ حتى ±10%.
+  function weightBoost(c, w) {
+    if (!(w > 0) || !c.w || !c.w.length) return {b: 0, x: null};
+    var best = null, d = 1e9;
+    c.w.forEach(function (x) { var e = Math.abs(x - w) / w; if (e < d) { d = e; best = x; } });
+    var b = d <= 0.02 ? 0.3 : d <= 0.1 ? 0.3 * (0.1 - d) / 0.08 : 0;
+    return {b: b, x: b > 0 ? best : null};
+  }
   function rank() {
     // لقطاتٌ متعددة للطقم نفسه: متوسط درجاتها
-    var sum = {};
+    var sum = {}, w = parseFloat(($('wt') && $('wt').value || '').replace(',', '.'));
     shots.forEach(function (qs) {
       score(qs).forEach(function (r) {
-        (sum[r.c.k] = sum[r.c.k] || {c: r.c, s: 0}).s += r.s / shots.length;
+        (sum[r.c.k] = sum[r.c.k] || {c: r.c, s: 0, v: 0}).v += r.s / shots.length;
       });
     });
-    return Object.keys(sum).map(function (k) { return sum[k]; })
-      .sort(function (a, b) { return b.s - a.s; });
+    return Object.keys(sum).map(function (k) {
+      var r = sum[k], wb = weightBoost(r.c, w);
+      r.s = r.v + wb.b; r.wx = wb.x;
+      return r;
+    }).sort(function (a, b) { return b.s - a.s; });
   }
   function band(s, i, list) {
     var T = M.thr || {hi: 0.7, mid: 0.55};
@@ -494,8 +506,8 @@
     return ['s-lo', 'تشابهٌ ضعيف'];
   }
   function card(r, i, list) {
-    var c = r.c, b = band(r.s, i, list), unit = esc(D.unit);
-    var pct = Math.max(0, Math.min(100, Math.round(100 * r.s)));
+    var c = r.c, b = band(r.v, i, list.map(function (x) { return {s: x.v}; })), unit = esc(D.unit);
+    var pct = Math.max(0, Math.min(100, Math.round(100 * r.v)));
     var sold = c.sold.length ? '<h3 class="out">طرف المناديب</h3><table><tr><th>رقم التشغيل</th><th>الوزن</th><th>مع من</th><th>التاريخ</th></tr>' +
       c.sold.map(function (x) { return '<tr><td>' + esc(x[0]) + '</td><td class="n">' + esc(x[1]) + '</td><td>' + esc(x[2]) + '</td><td class="n">' + esc(x[3]) + '</td></tr>'; }).join('') + '</table>' : '';
     var stock = c.stock.length ? '<h3 class="in">بالخزنة (متاح للبيع)</h3><table><tr><th>رقم التشغيل</th><th>الوزن</th><th>أُدخل</th></tr>' +
@@ -505,7 +517,8 @@
       '<a href="' + esc(c.full) + '" target="_blank" rel="noopener"><img loading="lazy" src="' + esc(c.img) + '" alt="' + esc(c.m) + '"></a>' +
       '<div><h2><span>الموديل ' + esc(c.m) + '</span><span class="sim ' + b[0] + '">' + b[1] + ' · ' + pct + '%</span></h2>' +
       '<div class="chips"><span class="chip in">بالخزنة ' + c.in + ' · ' + esc(c.inw) + ' ' + unit + '</span>' +
-      '<span class="chip out">عند المناديب ' + c.out + ' · ' + esc(c.outw) + ' ' + unit + '</span></div></div>' +
+      '<span class="chip out">عند المناديب ' + c.out + ' · ' + esc(c.outw) + ' ' + unit + '</span>' +
+      (r.wx != null ? '<span class="chip wm">⚖ قطعةٌ بوزن ' + r.wx.toFixed(2) + ' جم</span>' : '') + '</div></div>' +
       (n ? '<details' + (i === 0 ? ' open' : '') + '><summary>التفاصيل — ' + n + ' قطعة</summary>' + stock + sold + '</details>' : '') +
       '</article>';
   }
