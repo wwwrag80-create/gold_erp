@@ -16,6 +16,7 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, reload_combo, search_combo,
                                title_label)
 from services import numfmt as _nf
+from services import work_year as _wy
 
 DOC_COLS = ["الرقم", "النوع", "التاريخ", "الجهة", "الوزن", "القيمة"]
 # عمود الوزن بمكافئ عيار المصنع — يُسمّى عند التعبئة (`_doc_cols`)
@@ -58,7 +59,7 @@ class OperationsScreen(QtWidgets.QWidget):
         self.kind.addItem("سندات القبض والصرف", "vouchers")
         self.kind.currentIndexChanged.connect(self.load_docs)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-3))
+        self.d_from.setDate(_wy.qref().addMonths(-3))
         self.d_to = date_edit()
         btn_load = kit.PushButton("عرض العمليات")
         btn_load.clicked.connect(self.load_docs)
@@ -138,7 +139,7 @@ class OperationsScreen(QtWidgets.QWidget):
     def _audit_tab(self):
         w = QtWidgets.QWidget()
         self.a_from = date_edit()
-        self.a_from.setDate(QtCore.QDate.currentDate().addMonths(-3))
+        self.a_from.setDate(_wy.qref().addMonths(-3))
         self.a_to = date_edit()
         self.a_action = kit.ComboBox()
         self.a_action.addItem("كل الأنواع", None)

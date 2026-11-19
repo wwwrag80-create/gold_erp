@@ -254,7 +254,14 @@ def mspin(maximum=1_000_000_000.0, minimum=0.0):
 
 
 def date_edit():
-    d = kit.DateEdit(QtCore.QDate.currentDate())
+    # 5.9: «اليوم» داخل السنة التي يعمل فيها المستخدم (زرّ «السنة»): اليوم في
+    # السنة الجارية، وآخر السنة لسنةٍ سابقة
+    try:
+        from services import work_year as _wy
+        start = _wy.qref()
+    except Exception:
+        start = QtCore.QDate.currentDate()
+    d = kit.DateEdit(start)
     d.setCalendarPopup(True)
     d.setDisplayFormat("yyyy-MM-dd")
     return d

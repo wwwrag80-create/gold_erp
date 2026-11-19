@@ -29,6 +29,7 @@ from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill,
 from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from services import work_year as _wy
 
 
 def rnum(v, d=2):
@@ -46,7 +47,7 @@ class DossierScreen(QtWidgets.QWidget):
         self.party.setMinimumWidth(300)
         self.party.setMaximumWidth(340)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-1))
+        self.d_from.setDate(_wy.qref().addMonths(-1))
         self.d_to = date_edit()
 
         btn = kit.PushButton("📇 افتح الملف")

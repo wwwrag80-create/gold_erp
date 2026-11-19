@@ -33,6 +33,7 @@ from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from services import work_year as _wy
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -67,7 +68,7 @@ class ConsignmentTab(QtWidgets.QWidget):
         self.period.setCurrentIndex(3)
         self.period.currentIndexChanged.connect(self.apply_period)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+        self.d_from.setDate(_wy.qstart())
         self.d_to = date_edit()
         btn = kit.PushButton("إعداد القائمة")
         btn.clicked.connect(self.load)
@@ -115,7 +116,7 @@ class ConsignmentTab(QtWidgets.QWidget):
         kind = self.period.currentData()
         if kind == "custom":
             return
-        s, e = period_range(kind, date.today())
+        s, e = period_range(kind, _wy.ref_date())
         self.d_from.setDate(QtCore.QDate(s.year, s.month, s.day))
         self.d_to.setDate(QtCore.QDate(e.year, e.month, e.day))
         # اختيار المدة يكفي: الأرقام تظهر فوراً بلا ضغط «إعداد» (4.49)
@@ -229,7 +230,7 @@ class StandardIncomeTab(QtWidgets.QWidget):
         # والفترات الأطول بالاختيار
         self.period.setCurrentIndex(0)
         self.period.currentIndexChanged.connect(self.apply_period)
-        _s, _e = period_range("month", date.today())
+        _s, _e = period_range("month", _wy.ref_date())
         self.d_from = date_edit()
         self.d_from.setDate(QtCore.QDate(_s.year, _s.month, _s.day))
         self.d_to = date_edit()
@@ -286,7 +287,7 @@ class StandardIncomeTab(QtWidgets.QWidget):
         kind = self.period.currentData()
         if kind == "custom":
             return
-        s, e = period_range(kind, date.today())
+        s, e = period_range(kind, _wy.ref_date())
         self.d_from.setDate(QtCore.QDate(s.year, s.month, s.day))
         self.d_to.setDate(QtCore.QDate(e.year, e.month, e.day))
         # اختيار المدة يكفي: الأرقام تظهر فوراً بلا ضغط «إعداد» (4.49)

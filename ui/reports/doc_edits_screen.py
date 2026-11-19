@@ -27,6 +27,7 @@ from ui.widgets.table_fit import fit_columns
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from services import work_year as _wy
 
 
 def snum(v, d=2):
@@ -147,7 +148,7 @@ class DocEditsScreen(QtWidgets.QWidget):
             a, b = "2000-01-01", QtCore.QDate.currentDate().toString(
                 "yyyy-MM-dd")
         else:
-            a, b = self._dp.period_range(k)
+            a, b = self._dp.period_range(k, _wy.ref_date())
         for d, v in ((self.d_from, a), (self.d_to, b)):
             d.blockSignals(True)
             d.setDate(QtCore.QDate.fromString(v, "yyyy-MM-dd"))

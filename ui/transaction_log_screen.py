@@ -6,7 +6,7 @@
 **الجدول على نموذج بيانات (4.69)** — `ui.widgets.ledger_view`: سنةٌ من
 الفواتير تُعرض فوراً، والفرز بالقيمة، والتصفية الفورية داخل النتائج
 بلا رجوعٍ للقاعدة، وصفّ إجماليٍّ لما يظهر يتغيّر مع التصفية."""
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtWidgets
 
 from ui import kit
 
@@ -19,6 +19,7 @@ from ui.widgets.common import ask, date_edit, dstr, err, info, title_label
 from ui.widgets.ledger_view import LedgerView
 from services import numfmt as _nf
 from ui.widgets.common import live_search
+from services import work_year as _wy
 
 
 def _inv_kind(r):
@@ -162,7 +163,7 @@ class TransactionLogScreen(QtWidgets.QWidget):
         self.q.setPlaceholderText("بحث برقم المستند أو اسم العميل...")
         self.q.returnPressed.connect(self.search)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+        self.d_from.setDate(_wy.qstart())
         self.d_to = date_edit()
         btn = kit.PushButton("بحث")
         btn.clicked.connect(self.search)

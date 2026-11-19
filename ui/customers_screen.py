@@ -31,6 +31,7 @@ from ui.widgets.table_tools import (TOTAL_ROLE, enhance, export_csv,
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
 from ui.widgets.common import live_search
+from services import work_year as _wy
 
 ACC_ROLE = QtCore.Qt.UserRole + 11          # معرّف الحساب في خلية الاسم
 
@@ -98,7 +99,7 @@ class CustomersScreen(QtWidgets.QWidget):
             "كل حركة العميل منذ فتح حسابه — بلا «رصيد سابق»")
         self.d_from = date_edit()
         self.d_from.setDate(
-            QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+            _wy.qstart())
         self.d_to = date_edit()
         self.search = kit.LineEdit()
         self.search.setPlaceholderText("🔍 ابحث باسم العميل أو رقم حسابه…")

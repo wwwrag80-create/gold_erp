@@ -23,6 +23,7 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err,
                                title_label)
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from services import work_year as _wy
 
 def _acc_label(r):
     """اسم الصف: «الرمز — الاسم» للحساب، والاسم وحده لصفّ «ايطالي / نواعم»."""
@@ -217,7 +218,7 @@ class DashboardScreen(QtWidgets.QWidget):
         # نطاق التاريخ لهذه اللوحة — يُحفظ معها
         self.d_from = date_edit()
         self.d_from.setDate(
-            QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+            _wy.qstart())
         self.d_to = date_edit()
         # الفترة تُختار باسمها فتُحسب تواريخها وتظهر الأرقام فوراً — والكتابة
         # باليد في «فترة مخصّصة» وحدها (4.49)

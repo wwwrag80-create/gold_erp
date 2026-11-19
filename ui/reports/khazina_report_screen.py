@@ -2,7 +2,7 @@
 """تقرير إنتاج خزينة التصنيع: مطابقة المدخلات (ذهب من الصب/الكسر +
 فصوص وأحجار عبر قيود اليومية) مقابل المخرجات (الوزن المقيد للأطقم
 المُنتَجة) — للمطابقة بين ما استلمته الخزينة وما أنتجته فعلياً."""
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtWidgets
 
 from ui import kit
 
@@ -12,13 +12,14 @@ from models.reports import khazina_tiles, production_inputs_summary
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, make_table, title_label)
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from services import work_year as _wy
 
 
 class KhazinaReportScreen(QtWidgets.QWidget):
     def __init__(self, user):
         super().__init__()
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+        self.d_from.setDate(_wy.qstart())
         self.d_to = date_edit()
         btn = kit.PushButton("إعداد التقرير")
         btn.clicked.connect(self.load)

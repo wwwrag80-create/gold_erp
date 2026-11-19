@@ -8,7 +8,6 @@
 فلا يُجمع ريالٌ مع جرام في عمودٍ واحد.
 """
 import csv
-from datetime import date
 
 from PyQt5 import QtCore, QtWidgets
 
@@ -24,6 +23,7 @@ from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from services import work_year as _wy
 
 COLS = ["الكود", "اسم الحساب",
         "أول المدة — مدين", "أول المدة — دائن",
@@ -51,11 +51,10 @@ class TrialBalanceScreen(QtWidgets.QWidget):
         self.user = user
         self.last = None
 
-        today = date.today()
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate(today.year, 1, 1))
+        self.d_from.setDate(_wy.qstart())
         self.d_to = date_edit()
-        self.d_to.setDate(QtCore.QDate(today.year, 12, 31))
+        self.d_to.setDate(_wy.qend())
         self.all_time = kit.CheckBox("كل المدة")
         self.all_time.stateChanged.connect(self._toggle_period)
         self.dim = kit.ComboBox()

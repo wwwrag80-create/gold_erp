@@ -4,7 +4,7 @@
 تكشف أي تغييرٍ جرى على قيدٍ مرحَّل **من خارج النظام** (بفتح ملف قاعدة
 البيانات ببرنامج آخر). شرح الآلية كاملاً في `models/integrity.py`.
 """
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtWidgets
 
 from ui import kit
 
@@ -15,6 +15,7 @@ from services import numfmt as _nf
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, tab_widget, title_label)
 from ui.widgets.table_tools import enhance
+from services import work_year as _wy
 
 COLS = ["رقم القيد", "رقم المستند", "التاريخ", "المستخدم", "البيان",
         "نوع الخلل"]
@@ -110,7 +111,7 @@ class IntegrityScreen(QtWidgets.QWidget):
         intro.setObjectName("cardSub")
         intro.setWordWrap(True)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-3))
+        self.d_from.setDate(_wy.qref().addMonths(-3))
         self.d_to = date_edit()
         self.sys_chk = QtWidgets.QCheckBox(
             "مع الأرصدة الافتتاحية والإقفال وتسويات نهاية الفترة")

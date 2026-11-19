@@ -13,6 +13,7 @@ from models.reports import vat_return
 from ui.widgets.common import (Card, big_label, date_edit, dstr, err, fill, info, make_table, title_label)
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from services import work_year as _wy
 
 PERIODS = [("شهري", "month"), ("ربع سنوي", "quarter"), ("نصف سنوي", "half"),
            ("سنوي", "year"), ("مخصص", "custom")]
@@ -97,7 +98,7 @@ class VatReturnScreen(QtWidgets.QWidget):
         kind = self.period.currentData()
         if kind == "custom":
             return
-        s, e = period_range(kind, date.today())
+        s, e = period_range(kind, _wy.ref_date())
         from PyQt5.QtCore import QDate
         self.d_from.setDate(QDate(s.year, s.month, s.day))
         self.d_to.setDate(QDate(e.year, e.month, e.day))

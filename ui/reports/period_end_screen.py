@@ -14,7 +14,6 @@
 
 كل تسوية تُقيَّد **بالفرق** عمّا قُيِّد قبلها — فإعادة الحساب لا تكرّر القيد.
 """
-from datetime import date
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -26,6 +25,7 @@ from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, tab_widget, title_label)
 from ui.widgets.flow_layout import FlowLayout
 from services import numfmt as _nf
+from services import work_year as _wy
 
 
 def _m(v):
@@ -46,11 +46,10 @@ class PeriodEndScreen(QtWidgets.QWidget):
     def __init__(self, user):
         super().__init__()
         self.user = user
-        today = date.today()
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate(today.year, 1, 1))
+        self.d_from.setDate(_wy.qstart())
         self.d_to = date_edit()
-        self.d_to.setDate(QtCore.QDate(today.year, 12, 31))
+        self.d_to.setDate(_wy.qend())
         self.cmp_on = kit.CheckBox("مع المقارنة")
         self.cmp_on.setChecked(True)
         btn = kit.PushButton("تحديث")

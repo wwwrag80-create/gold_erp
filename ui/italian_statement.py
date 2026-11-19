@@ -14,6 +14,7 @@ from services import numfmt as _nf
 from ui import kit
 from ui.widgets.common import (date_edit, dstr, err, make_table, fill,
                                style_total_item)
+from services import work_year as _wy
 
 COLS = ["التاريخ", "العملية", "المستند", "الرقم", "من / إلى",
         "وارد (مدين)", "صادر (دائن)", "الرصيد"]
@@ -32,7 +33,7 @@ class ItalianStatementDialog(QtWidgets.QDialog):
         if date_from:
             self.d1.setDate(QtCore.QDate.fromString(date_from, "yyyy-MM-dd"))
         else:
-            self.d1.setDate(QtCore.QDate.currentDate().addMonths(-1))
+            self.d1.setDate(_wy.qref().addMonths(-1))
         if date_to:
             self.d2.setDate(QtCore.QDate.fromString(date_to, "yyyy-MM-dd"))
         self.use_dates.setChecked(bool(date_from or date_to))

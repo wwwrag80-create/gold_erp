@@ -24,6 +24,7 @@ from ui.widgets.common import (Card, big_label, bulk_rows, busy, date_edit,
                                dstr, err, info, make_table, mspin,
                                reload_combo, title_label, warn)
 from services import numfmt as _nf
+from services import work_year as _wy
 
 COLS = ["✓", "التاريخ", "المستند", "البيان", "وارد (مدين)",
         "صادر (دائن)", "مرجع الكشف", "طُوبق بواسطة"]
@@ -39,7 +40,7 @@ class BankReconScreen(QtWidgets.QWidget):
         self.acc.setMinimumWidth(240)
         self.acc.currentIndexChanged.connect(self.load)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-1))
+        self.d_from.setDate(_wy.qref().addMonths(-1))
         self.d_to = date_edit()
         self.stmt = mspin(minimum=-1_000_000_000.0)
         self.stmt.setToolTip(

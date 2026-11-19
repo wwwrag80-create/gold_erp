@@ -17,6 +17,7 @@ from services import karat_view as kv
 from ui.widgets.common import (ask, big_label, date_edit, dstr, err, fill,
                                info, make_table, search_combo, title_label)
 from services import numfmt as _nf
+from services import work_year as _wy
 
 
 class WorkshopAccountsScreen(QtWidgets.QWidget):
@@ -36,7 +37,7 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
                                    QtWidgets.QSizePolicy.Fixed)
         self.d_from = date_edit()
         self.d_from.setDate(
-            QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+            _wy.qstart())
         self.d_to = date_edit()
         # المدة تُختار باسمها فتُحسب تواريخها وتتحدّث الأرصدة فوراً (4.49)
         from models import dash_panels as _dp
@@ -104,7 +105,7 @@ class WorkshopAccountsScreen(QtWidgets.QWidget):
             self.d_from.setDate(QtCore.QDate(2000, 1, 1))
             self.d_to.setDate(QtCore.QDate.currentDate())
         else:
-            d1, d2 = self._dp.period_range(k)
+            d1, d2 = self._dp.period_range(k, _wy.ref_date())
             self.d_from.setDate(QtCore.QDate.fromString(d1, "yyyy-MM-dd"))
             self.d_to.setDate(QtCore.QDate.fromString(d2, "yyyy-MM-dd"))
         if self.rows:

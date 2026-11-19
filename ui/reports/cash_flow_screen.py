@@ -14,7 +14,6 @@
 القائمة بالريال: الذهب مخزونٌ لا نقد، وحركته في قائمة المركز المالي.
 """
 import csv
-from datetime import date
 
 from PyQt5 import QtCore, QtWidgets
 
@@ -29,6 +28,7 @@ from ui.widgets.flow_layout import FlowLayout
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from services import work_year as _wy
 
 
 class CashFlowScreen(QtWidgets.QWidget):
@@ -43,11 +43,10 @@ class CashFlowScreen(QtWidgets.QWidget):
             self.period.addItem(label, key)
         self.period.setCurrentIndex(3)
         self.period.currentIndexChanged.connect(self.apply_period)
-        today = date.today()
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate(today.year, 1, 1))
+        self.d_from.setDate(_wy.qstart())
         self.d_to = date_edit()
-        self.d_to.setDate(QtCore.QDate(today.year, 12, 31))
+        self.d_to.setDate(_wy.qend())
         self.method = kit.ComboBox()
         self.method.addItem("الطريقة غير المباشرة", "indirect")
         self.method.addItem("الطريقة المباشرة", "direct")
@@ -107,7 +106,7 @@ class CashFlowScreen(QtWidgets.QWidget):
         kind = self.period.currentData()
         if kind == "custom":
             return
-        s, e = period_range(kind, date.today())
+        s, e = period_range(kind, _wy.ref_date())
         self.d_from.setDate(QtCore.QDate(s.year, s.month, s.day))
         self.d_to.setDate(QtCore.QDate(e.year, e.month, e.day))
 

@@ -20,6 +20,7 @@ from ui.widgets.common import (Card, ask, big_label, date_edit, dstr, err,
 from models.editing import EDITABLE
 from services import numfmt as _nf
 from ui.widgets.common import guard_click
+from services import work_year as _wy
 
 
 def _doc_target(r, builders):
@@ -61,7 +62,7 @@ class GeneralLedgerScreen(QtWidgets.QWidget):
         except Exception:
             pass
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate(QtCore.QDate.currentDate().year(), 1, 1))
+        self.d_from.setDate(_wy.qstart())
         self.d_to = date_edit()
         # مرشّح نوع العملية: يعرض حركة الحساب من نوع بعينه
         self.op_kind = kit.ComboBox()

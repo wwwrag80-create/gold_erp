@@ -111,6 +111,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # يرى نظامه المحاسبي وحده بلا أي شاشة إدارية.
         self.is_super = bool(user.get("is_super")
                              or user.get("role") == "super_admin")
+        # 5.9: السنة المالية التي يعمل فيها هذا المستخدم (زرّ «السنة»)
+        try:
+            from services import work_year
+            with db(readonly=True) as _c:
+                work_year.load(_c, user.get("username"))
+        except Exception:
+            pass
         self.setWindowTitle(self._app_title())
         try:
             from services import app_icon
@@ -398,6 +405,8 @@ class MainWindow(QtWidgets.QMainWindow):
         h.addSpacing(8)
         h.addWidget(lbl_karat)
         h.addWidget(self.karat_box)
+        h.addSpacing(8)
+        h.addWidget(self._year_button())
         h.addSpacing(8)
         h.addWidget(btn_view)
         h.addWidget(btn_update)
@@ -2194,6 +2203,158 @@ class MainWindow(QtWidgets.QMainWindow):
                        f"والمخزون والتقارير بمكافئ عيار {k}.")
         except Exception as e:
             err(self, e)
+
+    # ══════════════════════════════════════════════════════════════
+    #  السنوات المالية (5.9) — زرّ «السنة»: لكل سنةٍ حساباتها
+    # ══════════════════════════════════════════════════════════════
+
+    def _year_button(self):
+        b = QtWidgets.QToolButton()
+        b.setObjectName("yearBtn")
+        b.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        b.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                        QtWidgets.QSizePolicy.Fixed)
+        m = QtWidgets.QMenu(b)
+        m.aboutToShow.connect(lambda: self._fill_year_menu(m))
+        b.setMenu(m)
+        self._year_btn = b
+        self._refresh_year_button()
+        return b
+
+    def _refresh_year_button(self):
+        b = getattr(self, "_year_btn", None)
+        if b is None:
+            return
+        from services import work_year
+        from models import fiscal_years
+        y = work_year.year()
+        closed = False
+        try:
+            with db(readonly=True) as c:
+                closed = fiscal_years.is_closed(c, y)
+        except Exception:
+            pass
+        b.setText(f"📅 السنة {y}" + (" 🔒" if closed else "") + " ▾")
+        b.setToolTip(
+            f"السنة المالية التي تعمل فيها: {y}"
+            + (" — مُقفلة (للعرض والكشوف)" if closed else "")
+            + "\nاضغط لتبديل السنة، أو لإقفالها وبدء الجديدة."
+            "\nكل سنةٍ محفوظةٌ بحساباتها، والأرصدة تنتقل للسنة الجديدة.")
+        past = not work_year.is_current()
+        b.setStyleSheet(
+            "QToolButton#yearBtn{font-weight:bold;padding:3px 10px;"
+            "border-radius:6px;" + ("color:#FFFFFF;background:#A33131;"
+                                    if past else "") + "}")
+
+    def _fill_year_menu(self, m):
+        from services import work_year
+        from models import fiscal_years
+        m.clear()
+        try:
+            with db(readonly=True) as c:
+                ys = fiscal_years.years(c)
+                nxt = fiscal_years.next_to_close(c)
+                last = fiscal_years.closed_through(c)
+        except Exception as e:
+            err(self, e)
+            return
+        cur = work_year.year()
+        t = m.addAction("السنة المالية التي تعمل فيها:")
+        t.setEnabled(False)
+        for y in reversed(ys):
+            a = m.addAction(
+                f"{y['year']}" + ("   🔒 مُقفلة" if y["closed"] else "   مفتوحة")
+                + ("   (الجارية)" if y["current"] else ""))
+            a.setCheckable(True)
+            a.setChecked(y["year"] == cur)
+            a.triggered.connect(
+                lambda _=False, yy=y["year"]: self._switch_year(yy))
+        m.addSeparator()
+        if nxt is not None:
+            m.addAction(f"🔒 إقفال سنة {nxt} وبدء سنة {nxt + 1}…").triggered.connect(
+                lambda _=False, yy=nxt: self._close_year(yy))
+        else:
+            a = m.addAction("🔒 إقفال السنة — يتاح بعد انتهائها (31-12)")
+            a.setEnabled(False)
+        if last is not None and self.is_super:
+            m.addAction(f"🔓 إعادة فتح سنة {last} للتصحيح…").triggered.connect(
+                lambda _=False, yy=last: self._reopen_year(yy))
+        m.addSeparator()
+        m.addAction("ℹ كيف تعمل السنوات المالية؟").triggered.connect(
+            self._years_help)
+
+    def _rebuild_screens(self):
+        """بعد تبديل السنة: تُهدم الشاشات المبنيّة فتُبنى بفترات السنة الجديدة،
+        والشاشة الحالية تُعاد في مكانها."""
+        row = getattr(self, "_current_row", 0)
+        for r in list(self.__dict__.get("_alive", [])) + [row]:
+            if r and r > 0:
+                rel = getattr(self.screens[r], "release", None)
+                if callable(rel):
+                    try:
+                        rel()
+                    except Exception:
+                        pass
+        self.__dict__["_alive"] = []
+        self.__dict__["_history"] = []
+        if row > 0:
+            self._current_row = 0
+            self.switch(row)
+
+    def _switch_year(self, y):
+        from services import work_year
+        if int(y) == work_year.year():
+            return
+        try:
+            with db() as c:
+                work_year.set_year(c, self.user.get("username"), y)
+        except Exception as e:
+            err(self, e)
+            return
+        self._refresh_year_button()
+        self._rebuild_screens()
+
+    def _close_year(self, y):
+        if not (self.is_super or self.user.get("role_local", "accountant")
+                == "accountant"):
+            err(self, "إقفال السنة للمحاسب أو المدير العام")
+            return
+        from ui.year_dialog import YearCloseDialog
+        dlg = YearCloseDialog(self, self.user, y)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted and dlg.result_data:
+            self._switch_year(dlg.result_data["next"])
+        self._refresh_year_button()
+
+    def _reopen_year(self, y):
+        from models import fiscal_years
+        if not ask(self, f"إعادة فتح سنة {y} للتصحيح؟\n\n"
+                         f"• تُفتح سنة {y} وحدها للتعديل (وما قبلها يبقى مقفلاً).\n"
+                         f"• بعد التصحيح أقفلها من جديد من زرّ «السنة» — "
+                         "فيُرحَّل ما تغيّر من نتيجتها فقط."):
+            return
+        try:
+            with db() as c:
+                fiscal_years.reopen_year(c, y, self.user.get("username"))
+        except Exception as e:
+            err(self, e)
+            return
+        info(self, f"فُتحت سنة {y} للتصحيح. أقفلها من جديد من زرّ «السنة» "
+                   "بعد الانتهاء.")
+        self._refresh_year_button()
+
+    def _years_help(self):
+        info(self,
+             "السنوات المالية\n\n"
+             "• اختر السنة من زرّ «📅 السنة» فتعرض كل الشاشات حسابات تلك السنة: "
+             "الكشوف والتقارير والسجلّات تبدأ من أولها وتنتهي بآخرها.\n"
+             "• بعد انتهاء السنة: «إقفال سنة … وبدء سنة …» — تُصفَّر الإيرادات "
+             "والمصروفات ويُرحَّل صافي الربح إلى الأرباح المحتجزة، وتُقفل السنة "
+             "فلا يُضاف فيها شيءٌ ولا يُعدَّل.\n"
+             "• أرصدة العملاء والمصانع والصناديق والذهب والمخزون تنتقل للسنة "
+             "الجديدة كما هي («رصيدٌ سابق»)، فلا يُعاد إدخال شيء.\n"
+             "• كل سنةٍ تبقى محفوظةً كاملة: ارجع إليها من الزرّ نفسه متى شئت.\n"
+             "• الزرّ أحمر حين تعمل في سنةٍ غير الجارية — تنبيهٌ ألّا تُسجَّل "
+             "عملياتٌ في سنةٍ لم تقصدها.")
 
     # ══════════════════════════════════════════════════════════════
     #  المظهر ومقاس الخط

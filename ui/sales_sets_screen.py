@@ -19,6 +19,7 @@ from services import numfmt as _nf
 from ui import kit
 from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
                                make_table, search_combo, title_label)
+from services import work_year as _wy
 
 COLS = ["فاتورة البيع", "التاريخ", "بِيع إلى", "رقم التشغيل", "الموديل",
         "الوزن", "الحال", "المرتجع", "أين هو الآن"]
@@ -128,7 +129,7 @@ class SalesSetsScreen(QtWidgets.QWidget):
         self.party = search_combo("كل الجهات — أو اكتب اسم الجهة…")
         self.party.setMinimumWidth(260)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-3))
+        self.d_from.setDate(_wy.qref().addMonths(-3))
         self.d_to = date_edit()
         b_pick = kit.PushButton("☑ اختر الفواتير…")
         b_pick.clicked.connect(self.pick)

@@ -19,6 +19,7 @@ from ui.widgets.common import (big_label, bulk_rows, busy, date_edit, dstr,
                                err, info, make_table, run_bg, title_label,
                                warn)
 from services import numfmt as _nf
+from services import work_year as _wy
 
 # ══ سقف العرض ══
 # البحث قد يُرجع آلاف المستندات، وكل صفٍّ يحمل ثلاثة أزرار. لا أحد
@@ -121,7 +122,7 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
             self.kind.addItem(label, key)
         self.kind.currentIndexChanged.connect(self.search)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-6))
+        self.d_from.setDate(_wy.qref().addMonths(-6))
         self.d_to = date_edit()
         self.include_deleted = kit.CheckBox("إظهار المحذوف منطقياً")
         self.include_deleted.stateChanged.connect(self.search)
@@ -340,7 +341,7 @@ class DocumentArchiveScreen(QtWidgets.QWidget):
             self.q.setText(str(term or ""))
             self.kind.setCurrentIndex(0)          # كل الأنواع
             self.d_from.setDate(
-                QtCore.QDate.currentDate().addMonths(-int(months)))
+                _wy.qref().addMonths(-int(months)))
             self.d_to.setDate(QtCore.QDate.currentDate())
             self.search()
         except Exception as e:

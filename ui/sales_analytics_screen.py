@@ -21,6 +21,7 @@ from ui.widgets.common import (big_label, date_edit, dstr, err, fill,
                                title_label)
 from ui.widgets.table_tools import enhance as _enhance
 from services import numfmt as _nf
+from services import work_year as _wy
 
 PANELS = [("sales", "إجمالي المبيعات"), ("returns", "إجمالي المرتجعات"),
           ("net_sold", "إجمالي المباع الفعلي"), ("collection", "إجمالي التحصيل")]
@@ -149,7 +150,7 @@ class SalesAnalyticsScreen(QtWidgets.QWidget):
         self.customer = search_combo("اكتب اسم العميل…")
         self.customer.currentIndexChanged.connect(self.on_customer)
         self.d_from = date_edit()
-        self.d_from.setDate(QtCore.QDate.currentDate().addMonths(-6))
+        self.d_from.setDate(_wy.qref().addMonths(-6))
         self.d_to = date_edit()
         # العيارات: اللوحات والتقرير المطبوع يخرجان بالعيار المختار
         self.karat = karat_combo()
