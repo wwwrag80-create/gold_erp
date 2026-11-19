@@ -90,3 +90,86 @@ class YearCloseDialog(QtWidgets.QDialog):
                    + ("• أُخذت نسخةٌ احتياطية قبل الإقفال." if r.get("backup")
                       else ""))
         self.accept()
+
+
+class YearStartDialog(QtWidgets.QDialog):
+    """«بدء سنة جديدة دون إقفال السابقة» (5.10.2): تعرض الأرصدة الافتتاحية
+    التي تنتقل إليها، ثم تبدأها وتنقل المستخدم إليها."""
+
+    def __init__(self, parent, user, year):
+        super().__init__(parent)
+        self.user = user or {}
+        self.year = int(year)
+        self.started = None
+        self.setWindowTitle(f"بدء سنة {self.year}")
+        self.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.setMinimumSize(620, 520)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(QtWidgets.QLabel(
+            f"<h2 style='margin:0'>▶ بدء سنة {self.year} — والأرصدة الافتتاحية "
+            f"من {self.year - 1}</h2>"))
+        with db(readonly=True) as conn:
+            ob = fiscal_years.opening_balances(conn, self.year)
+        note = QtWidgets.QLabel(
+            f"<b>الأرصدة الافتتاحية لسنة {self.year}</b> = الأرصدة كما هي في "
+            f"{ob['as_of']}، تنتقل وحدها إلى كل حسابٍ وكشف («رصيدٌ سابق»):"
+            + ("" if ob["prev_closed"] else
+               f"<br>• سنة {self.year - 1} <b>تبقى مفتوحة</b>: تقبل التصحيح، "
+               "وتُقفلها متى شئت بعد انتهائها من زرّ «السنة» — فيُرحَّل صافيها "
+               "إلى الأرباح المحتجزة وتتعدّل الأرصدة الافتتاحية معها تلقائياً."))
+        note.setWordWrap(True)
+        note.setTextFormat(QtCore.Qt.RichText)
+        lay.addWidget(note)
+        tbl = QtWidgets.QTableWidget(0, 3)
+        tbl.setHorizontalHeaderLabels(["الحساب", "نقد (ريال)", f"ذهب ({kv.unit()})"])
+        tbl.verticalHeader().setVisible(False)
+        tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        tbl.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        words = {"asset": "أصول", "liability": "خصوم", "equity": "حقوق ملكية"}
+        rows = list(ob["rows"])
+        if abs(ob["unclosed_cash"]) > 0.005 or abs(ob["unclosed_gold"]) > 0.0005:
+            rows.append({"code": "", "name": "نتيجة سنواتٍ لم تُقفل بعد (ربح +)",
+                         "type": "equity", "cash": ob["unclosed_cash"],
+                         "gold": ob["unclosed_gold"]})
+        for r in rows:
+            i = tbl.rowCount()
+            tbl.insertRow(i)
+            sign = 1 if r["type"] == "asset" else -1
+            name = (f"{r['code']} · " if r["code"] else "") + r["name"] \
+                + f"  ({words.get(r['type'], '')})"
+            vals = [name, _nf.f2(sign * r["cash"]) if r["code"] else _nf.f2(r["cash"]),
+                    _nf.f2(kv.g(sign * r["gold"])) if r["code"] else _nf.f2(kv.g(r["gold"]))]
+            for j, v in enumerate(vals):
+                it = QtWidgets.QTableWidgetItem(v)
+                if j:
+                    it.setTextAlignment(QtCore.Qt.AlignCenter)
+                tbl.setItem(i, j, it)
+        if not rows:
+            tbl.insertRow(0)
+            tbl.setItem(0, 0, QtWidgets.QTableWidgetItem("لا أرصدة قبل هذه السنة"))
+        lay.addWidget(tbl, 1)
+        row = QtWidgets.QHBoxLayout()
+        self.btn = kit.PushButton(f"▶ بدء سنة {self.year}")
+        self.btn.setObjectName("primary")
+        self.btn.clicked.connect(self.run)
+        cancel = kit.PushButton("إلغاء")
+        cancel.clicked.connect(self.reject)
+        row.addWidget(self.btn)
+        row.addStretch(1)
+        row.addWidget(cancel)
+        lay.addLayout(row)
+
+    def run(self):
+        try:
+            with db() as conn:
+                self.started = fiscal_years.start_next_year(
+                    conn, self.user.get("username"))
+        except Exception as e:
+            err(self, e)
+            return
+        info(self, f"بدأت سنة {self.started}.\n\n"
+                   "• الأرصدة الافتتاحية انتقلت كما هي، والإيرادات والمصروفات تبدأ "
+                   "من صفر في تقاريرها.\n"
+                   f"• سنة {self.started - 1} باقيةٌ مفتوحة — تنتقل إليها من زرّ "
+                   "«السنة» للتصحيح، وتُقفلها متى شئت.")
+        self.accept()

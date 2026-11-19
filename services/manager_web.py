@@ -200,15 +200,51 @@ def set_edit_pin(conn, pin, username=None):
 # في الرابط كذلك. وقفل التعديل يُفعَّل ويُوقف من الرابط بالرمز نفسه.
 K_DESK_PIN = "mw_desk_pin"
 K_DESK_LOCK = "mw_desk_locked"
+# 5.10.2: ما يقفله الرمز — التعديل · الحذف · كلاهما (علامتا صحّ في لوحته)
+K_DESK_EDIT = "mw_desk_lock_edit"
+K_DESK_DEL = "mw_desk_lock_del"
 
 
 def has_desk_pin(conn):
     return bool(_get(conn, K_DESK_PIN, "").strip())
 
 
-def desk_locked(conn):
-    """قفل التعديل والحذف في البرنامج يسري: للمدير رمزٌ ولم يوقفه."""
-    return has_desk_pin(conn) and _get(conn, K_DESK_LOCK, "1") != "0"
+def desk_kinds(conn):
+    """(التعديل مقفل؟، الحذف مقفل؟) كما اختارهما المدير — كلاهما افتراضاً."""
+    return (_get(conn, K_DESK_EDIT, "1") != "0",
+            _get(conn, K_DESK_DEL, "1") != "0")
+
+
+def desk_locked(conn, kind=None):
+    """قفل البرنامج يسري: للمدير رمزٌ ولم يوقفه — و`kind` («edit» · «delete»)
+    من بين ما اختار قفله (بلا `kind`: أيّهما)."""
+    if not (has_desk_pin(conn) and _get(conn, K_DESK_LOCK, "1") != "0"):
+        return False
+    ed, de = desk_kinds(conn)
+    if kind == "edit":
+        return ed
+    if kind == "delete":
+        return de
+    return ed or de
+
+
+def desk_label(conn):
+    ed, de = desk_kinds(conn)
+    if not desk_locked(conn):
+        return "🔓 التعديل والحذف مفتوحان في البرنامج"
+    return ("🔒 التعديل والحذف مقفلان في البرنامج" if ed and de else
+            "🔒 التعديل وحده مقفلٌ في البرنامج (الحذف مفتوح)" if ed else
+            "🔒 الحذف وحده مقفلٌ في البرنامج (التعديل مفتوح)")
+
+
+def set_desk_kinds(conn, edit, delete, username=None):
+    _set(conn, K_DESK_EDIT, "1" if edit else "0", username or WEB_USER)
+    _set(conn, K_DESK_DEL, "1" if delete else "0", username or WEB_USER)
+    _set(conn, K_DESK_LOCK, "1" if (edit or delete) else "0",
+         username or WEB_USER)
+    _mw()._audit(conn, username or WEB_USER, "رمز المدير يقفل في البرنامج: "
+                 + ("التعديل والحذف" if edit and delete else "التعديل وحده"
+                    if edit else "الحذف وحده" if delete else "لا شيء"))
 
 
 def check_desk_pin(conn, pin):
@@ -1029,6 +1065,7 @@ def _pin_box(kind, title, has, note, extra=""):
 def sec_page(conn, base, csrf, login_set=False):
     has_p, has_e = has_ops_pin(conn), has_edit_pin(conn)
     has_d, d_on = has_desk_pin(conn), desk_locked(conn)
+    d_ed, d_de = desk_kinds(conn)
     locked = locked_panels(conn)
     rows = "".join(
         f'<label><input type="checkbox" value="{k}"'
@@ -1052,12 +1089,21 @@ def sec_page(conn, base, csrf, login_set=False):
                    " حسابٌ ولا جهةٌ ولا موديلٌ ولا رقم تشغيل إلا به — ونافذة «رابط"
                    " المدير» في دليل الموديلات لا تُفتح إلا به.",
                    (f'<div class="st {"on" if d_on else "off"}" style="margin-top:'
-                    f'12px">{"🔒 التعديل والحذف مقفلان في البرنامج" if d_on else "🔓 التعديل والحذف مفتوحان في البرنامج"}'
-                    '</div><p class="note">للتبديل: اكتب الرمز الحالي أعلاه ثم '
-                    'اضغط.</p><button class="btn gold" data-act="'
+                    f'12px">{_e(desk_label(conn))}</div>'
+                    '<h3 style="margin-top:12px">ما يُقفل في البرنامج</h3>'
+                    '<div class="plist dk">'
+                    f'<label><input type="checkbox" data-dk="edit"'
+                    f'{" checked" if d_on and d_ed else ""}> قفل التعديل</label>'
+                    f'<label><input type="checkbox" data-dk="del"'
+                    f'{" checked" if d_on and d_de else ""}> قفل الحذف</label>'
+                    '</div><p class="note">اختر ما يُقفل ثم اكتب الرمز الحالي '
+                    'أعلاه واضغط «حفظ». بلا علامةٍ: يُفتح الاثنان.</p>'
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+                    '<button class="btn gold" data-act="dkinds">حفظ ما يُقفل'
+                    '</button><button class="btn gh" data-act="'
                     f'{"dopen" if d_on else "dlock"}">'
-                    f'{"فتح التعديل والحذف" if d_on else "قفل التعديل والحذف"}'
-                    '</button>') if has_d else "")
+                    f'{"فتح الكل" if d_on else "قفل التعديل والحذف"}'
+                    '</button></div>') if has_d else "")
         + _pin_box("panel", "رمز اللوحات المقفلة", has_p,
                    "يفتح اللوحات التي تختارها أدناه على هذا الجهاز 12 ساعة.",
                    f'<h3 style="margin-top:14px">اللوحات المقفلة</h3>'
@@ -1088,7 +1134,8 @@ def sec_page(conn, base, csrf, login_set=False):
   var act=b.getAttribute('data-act'),d={kind:kind,act:act,cur:val('cur'),pin:val('new'),pin2:val('new2')};
   if(act==='set'&&(d.pin.length<4||d.pin!==d.pin2)){MW.toast(d.pin.length<4?
    'الرمز من 4 إلى 12 خانة':'الرمز وتأكيده غير متطابقين',false);return;}
-  if((act==='dlock'||act==='dopen')&&!d.cur){MW.toast('اكتب الرمز الحالي أولاً',false);return;}
+  if((act==='dlock'||act==='dopen'||act==='dkinds')&&!d.cur){MW.toast('اكتب الرمز الحالي أولاً',false);return;}
+  if(act==='dkinds'){var e=sec.querySelector('[data-dk="edit"]'),x=sec.querySelector('[data-dk="del"]');d.edit=!!(e&&e.checked);d.del=!!(x&&x.checked);}
   if(act==='panels')d.panels=[].slice.call(sec.querySelectorAll('.plist input:checked')).map(function(x){return x.value;});
   b.disabled=true;MW.post('/sec',d).then(function(r){b.disabled=false;
    if(!r.ok){if(r.locked&&r.unlock){location.href=r.unlock+'?next='+encodeURIComponent(location.pathname);return;}
@@ -1114,9 +1161,10 @@ def sec_action(data, base, csrf):
         with db(readonly=True) as conn:
             if kind in keys:
                 h = _get(conn, keys[kind], "").strip()
-                if kind == "desk" and act in ("dlock", "dopen") and not h:
+                if kind == "desk" and act in ("dlock", "dopen", "dkinds") \
+                        and not h:
                     return _json({"ok": False, "error": "اضبط رمز المدير أولاً"})
-                if h and act in ("set", "clear", "dlock", "dopen"):
+                if h and act in ("set", "clear", "dlock", "dopen", "dkinds"):
                     if m._locked():
                         return _json({"ok": False, "error": "محاولات كثيرة — "
                                       "انتظر ربع ساعة ثم حاول ثانيةً"})
@@ -1138,7 +1186,15 @@ def sec_action(data, base, csrf):
                      "login": m.set_pin, "desk": set_desk_pin}[kind](
                         conn, "", WEB_USER)
                     msg = "أُلغي الرمز"
+                elif kind == "desk" and act == "dkinds":
+                    ed, de = bool(data.get("edit")), bool(data.get("del"))
+                    set_desk_kinds(conn, ed, de, WEB_USER)
+                    msg = ("قُفل في البرنامج: " + ("التعديل والحذف" if ed and de
+                           else "التعديل وحده" if ed else "الحذف وحده")
+                           if ed or de else "فُتح التعديل والحذف في البرنامج")
                 elif kind == "desk" and act in ("dlock", "dopen"):
+                    if act == "dlock":
+                        set_desk_kinds(conn, True, True, WEB_USER)
                     set_desk_locked(conn, act == "dlock", WEB_USER)
                     msg = ("قُفل التعديل والحذف في البرنامج" if act == "dlock"
                            else "فُتح التعديل والحذف في البرنامج")

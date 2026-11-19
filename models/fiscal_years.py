@@ -26,6 +26,8 @@ from models import fiscal
 from services.audit import log_action
 
 WORK_KEY = "fiscal_work_year"
+# 5.10.2: آخر سنةٍ «بُدئت» قبل أوانها أو دون إقفال ما قبلها — تظهر في القائمة
+STARTED_KEY = "fiscal_started_through"
 
 
 def _today():
@@ -64,7 +66,7 @@ def years(conn):
     حالها: مقفلة؟ وكم قيداً فيها."""
     cur = _today().year
     first = min(first_year(conn), cur)
-    last = max(cur, (closed_through(conn) or 0) + 1)
+    last = max(cur, (closed_through(conn) or 0) + 1, started_through(conn) or 0)
     counts = {int(r["y"]): r["n"] for r in conn.execute(
         "SELECT substr(entry_date,1,4) y, COUNT(*) n FROM journal_entries"
         " WHERE is_deleted=0 GROUP BY y") if str(r["y"] or "").isdigit()}
@@ -73,6 +75,80 @@ def years(conn):
         out.append({"year": y, "closed": is_closed(conn, y),
                     "entries": counts.get(y, 0), "current": y == cur})
     return out
+
+
+def started_through(conn):
+    try:
+        return int(str(fiscal.get_setting(conn, STARTED_KEY, "") or "").strip())
+    except ValueError:
+        return None
+
+
+def latest_year(conn):
+    return years(conn)[-1]["year"]
+
+
+def start_next_year(conn, username):
+    """يبدأ السنة التالية لآخر سنةٍ في القائمة **دون إقفال ما قبلها** (5.10.2).
+
+    الأرصدة الافتتاحية تنتقل وحدها: الدفتر واحدٌ متصل، فرصيد كل حسابٍ في أول
+    السنة الجديدة هو رصيده في آخر التي قبلها («رصيدٌ سابق» في كل كشف). والسنة
+    السابقة تبقى مفتوحةً تقبل التصحيح، وتُقفل متى شاء المدير بعد انتهائها —
+    فيُرحَّل صافيها حينئذٍ بقيدٍ بتاريخ 31-12 إلى الأرباح المحتجزة."""
+    y = latest_year(conn) + 1
+    fiscal.set_setting(conn, STARTED_KEY, str(y), username)
+    set_work_year(conn, username, y)
+    log_action(conn, username, "fiscal_year_start", "settings", None,
+               f"بدء سنة {y} (والأرصدة الافتتاحية من {y - 1}) دون إقفال {y - 1}")
+    return y
+
+
+def opening_balances(conn, year):
+    """الأرصدة الافتتاحية لسنة `year` = الأرصدة كما هي في 31-12 من السنة قبلها.
+
+    تُجمع حسابات الميزانية (أصول · خصوم · حقوق ملكية) تحت حسابها في
+    المستوى الثالث (الصناديق · العملاء · المخزون …) نقداً وذهباً، ومعها صافي
+    إيرادات ومصروفات سنواتٍ لم تُقفل بعد (يُرحَّل للأرباح المحتجزة عند إقفالها)."""
+    start = f"{int(year)}-01-01"
+    acc = {r["id"]: dict(r) for r in conn.execute(
+        "SELECT id, code, name, type, parent_id, account_level FROM accounts")}
+
+    def head(aid):
+        """الحساب في المستوى الثالث من الشجرة (الصناديق · العملاء · المخزون…)."""
+        chain, a, seen = [], acc.get(aid), set()
+        while a and a["id"] not in seen:
+            seen.add(a["id"])
+            chain.append(a)
+            a = acc.get(a.get("parent_id"))
+        return chain[-3] if len(chain) >= 3 else (chain[0] if chain else None)
+    rows, pnl_c, pnl_g = {}, 0.0, 0.0
+    for r in conn.execute(
+            "SELECT l.account_id a, SUM(COALESCE(l.cash_debit,0)-COALESCE(l.cash_credit,0)) c,"
+            " SUM(COALESCE(l.gold_debit,0)-COALESCE(l.gold_credit,0)) g"
+            " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+            " AND e.is_deleted=0 WHERE e.entry_date < ? GROUP BY l.account_id",
+            (start,)):
+        a = acc.get(r["a"])
+        if not a:
+            continue
+        c, g = float(r["c"] or 0), float(r["g"] or 0)
+        if a["type"] in ("revenue", "expense"):
+            pnl_c += c
+            pnl_g += g
+            continue
+        if a["type"] not in ("asset", "liability", "equity"):
+            continue
+        h = head(a["id"]) or a
+        x = rows.setdefault(h["id"], {"code": h["code"], "name": h["name"],
+                                      "type": h["type"], "cash": 0.0, "gold": 0.0})
+        x["cash"] += c
+        x["gold"] += g
+    out = [dict(x, cash=round(x["cash"], 2), gold=round(x["gold"], 3))
+           for x in sorted(rows.values(), key=lambda x: x["code"])
+           if abs(x["cash"]) > 0.005 or abs(x["gold"]) > 0.0005]
+    return {"year": int(year), "as_of": f"{int(year) - 1}-12-31", "rows": out,
+            "unclosed_cash": round(-pnl_c, 2), "unclosed_gold": round(-pnl_g, 3),
+            "prev_closed": is_closed(conn, int(year) - 1)}
 
 
 def open_years(conn):

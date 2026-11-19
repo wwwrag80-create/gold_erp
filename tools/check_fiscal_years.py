@@ -209,5 +209,59 @@ with db(readonly=True) as c:
     check("وبرمز المدير يُقفل", fy.is_closed(c, Y1))
 desk_guard.set_prompt(None)
 
+print("── 8) بدء سنةٍ جديدة دون إقفال السابقة — والأرصدة الافتتاحية تنتقل (5.10.2)")
+with db(readonly=True) as c:
+    last0 = fy.latest_year(c)
+    ob_expected = journal.statement(c, ACC, f"{Y2}-01-01", f"{Y2}-12-31")
+check(f"آخر سنةٍ في القائمة الآن {Y2}", last0 == Y2, last0)
+with db() as c:
+    ny = fy.start_next_year(c, "u9")
+with db(readonly=True) as c:
+    ys = [y["year"] for y in fy.years(c)]
+    check(f"بدأت سنة {Y2 + 1} وظهرت في القائمة", ny == Y2 + 1 and ys[-1] == Y2 + 1, ys)
+    check(f"وسنة {Y2} باقيةٌ مفتوحة (لم تُقفل)", not fy.is_closed(c, Y2)
+          and fiscal.lock_date(c) == f"{Y1}-12-31")
+    check("وصار المستخدم يعمل فيها", fy.work_year(c, "u9") == Y2 + 1)
+    ob = fy.opening_balances(c, Y2 + 1)
+    rec = [r for r in ob["rows"] if r["type"] == "asset"]
+    bal = c.execute("SELECT ROUND(SUM(l.cash_debit-l.cash_credit),2) c,"
+                    " ROUND(SUM(l.gold_debit-l.gold_credit),3) g FROM journal_lines l"
+                    " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
+                    " WHERE l.account_id=? AND e.entry_date<?", (ACC, f"{Y2 + 1}-01-01")).fetchone()
+    tot_assets_c = sum(r["cash"] for r in rec)
+    all_c = c.execute("SELECT ROUND(SUM(l.cash_debit-l.cash_credit),2) FROM journal_lines l"
+                      " JOIN journal_entries e ON e.id=l.entry_id AND e.is_deleted=0"
+                      " JOIN accounts a ON a.id=l.account_id WHERE a.type='asset'"
+                      " AND e.entry_date<?", (f"{Y2 + 1}-01-01",)).fetchone()[0]
+    check(f"الأرصدة الافتتاحية = أرصدة 31-12-{Y2} (الأصول {tot_assets_c:.2f})",
+          abs(tot_assets_c - (all_c or 0)) < 0.01 and ob["as_of"] == f"{Y2}-12-31",
+          (tot_assets_c, all_c))
+    check(f"ونتيجة {Y2} (لم تُقفل) ظاهرةٌ وحدها: ربح 370", abs(ob["unclosed_cash"] - 370) < 0.01,
+          ob["unclosed_cash"])
+    bal_sheet = sum(r["cash"] for r in ob["rows"])      # مدين − دائن
+    check("والميزانية الافتتاحية متوازنة (الأصول = الخصوم + الملكية + النتيجة)",
+          abs(bal_sheet - ob["unclosed_cash"]) < 0.01, (bal_sheet, ob["unclosed_cash"]))
+with db() as c:
+    sale(c, f"{Y2 + 1}-01-03", ACC, 90)
+with db(readonly=True) as c:
+    st = journal.statement(c, ACC, f"{Y2 + 1}-01-01", f"{Y2 + 1}-12-31")
+    rows = st["rows"] if isinstance(st, dict) else st
+    check(f"قيدٌ في {Y2 + 1} مقبول، وكشف العميل يبدأ برصيده الافتتاحي ({bal['c']:.0f})",
+          rows[0]["op"] == "رصيد سابق" and abs(rows[0]["cbal"] - bal["c"]) < 0.01, rows[0])
+with db() as c:
+    sale(c, f"{Y2}-11-30", ACC, 15)
+check(f"و{Y2} المفتوحة تقبل التصحيح بعد بدء {Y2 + 1}", True)
+with db(readonly=True) as c:
+    ob2 = fy.opening_balances(c, Y2 + 1)
+check("والأرصدة الافتتاحية تتعدّل معه تلقائياً (+15)",
+      abs(ob2["unclosed_cash"] - ob["unclosed_cash"] - 15) < 0.01)
+with db() as c:
+    ny2 = fy.start_next_year(c, "u9")
+check(f"و«بدء سنةٍ» ثانيةً يبدأ التي بعدها ({Y2 + 2})", ny2 == Y2 + 2)
+from ui.year_dialog import YearStartDialog  # noqa: E402
+dlg = YearStartDialog(None, {"username": "u9", "role": "super_admin"}, Y2 + 3)
+check("نافذة البدء تعرض الأرصدة الافتتاحية وزرّ البدء",
+      dlg.findChild(QtWidgets.QTableWidget).rowCount() >= 2 and dlg.btn.isEnabled())
+
 print(f"\n{len(OK)} ✔ · {len(BAD)} ✘")
 os._exit(1 if BAD else 0)

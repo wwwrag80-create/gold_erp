@@ -341,6 +341,62 @@ check("وإن فتحه المدير: التعديل بلا سؤال", len(asked)
 with db() as c:
     mweb.set_desk_locked(c, True, "t")
 
+print("── 8ب) ما يقفله رمز المدير: التعديل · الحذف · كلاهما (5.10.2)")
+code, h = call("GET", "sec")
+check("في لوحة رمز المدير علامتا «قفل التعديل» و«قفل الحذف» وزرّ الحفظ",
+      'data-dk="edit"' in h and 'data-dk="del"' in h and 'data-act="dkinds"' in h)
+r = sec(kind="desk", act="dkinds", cur="1111", edit=True, **{"del": False})
+check("حفظ الاختيار برمزٍ خاطئ: مرفوض", not r.get("ok"), r)
+r = sec(kind="desk", act="dkinds", cur="2580", edit=True, **{"del": False})
+with db(readonly=True) as c:
+    check("«التعديل وحده»: التعديل مقفل والحذف مفتوح", r.get("ok")
+          and mweb.desk_locked(c, "edit") and not mweb.desk_locked(c, "delete"), r)
+desk_guard.reset()
+answer["v"] = None                      # لو سُئل لأُلغي
+with db() as c:
+    rv = vouchers.create_voucher(c, "receipt", D0, "t", entity_id=B,
+                                 rows=[{"kind": "cash", "amount": 8}])
+    e3 = c.execute("SELECT entry_id FROM vouchers WHERE id=?", (rv["id"],)).fetchone()[0]
+n3 = len(asked)
+with db() as c:
+    _dd.delete(c, e3, "t", "فحص")
+check("والحذف يمرّ بلا سؤال", len(asked) == n3)
+try:
+    with db() as c:
+        _ent.update_entity(c, B, "t", name="تعديلٌ مقفل")
+    ok_ed = False
+except desk_guard.ManagerCodeRequired:
+    ok_ed = True
+check("والتعديل يطلب الرمز", ok_ed and len(asked) == n3 + 1)
+r = sec(kind="desk", act="dkinds", cur="2580", edit=False, **{"del": True})
+desk_guard.reset()
+with db() as c:
+    _ent.update_entity(c, B, "t", name="تعديلٌ مفتوح")
+n4 = len(asked)
+with db() as c:
+    rv = vouchers.create_voucher(c, "receipt", D0, "t", entity_id=B,
+                                 rows=[{"kind": "cash", "amount": 9}])
+    e4 = c.execute("SELECT entry_id FROM vouchers WHERE id=?", (rv["id"],)).fetchone()[0]
+try:
+    with db() as c:
+        _dd.delete(c, e4, "t", "فحص")
+    ok_del = False
+except desk_guard.ManagerCodeRequired:
+    ok_del = True
+check("«الحذف وحده»: التعديل بلا سؤال والحذف يطلب الرمز", len(asked) == n4 + 1
+      and ok_del)
+code, h = call("GET", "sec")
+check("وحاله ظاهرٌ في اللوحة", "الحذف وحده مقفل" in h)
+r = sec(kind="desk", act="dkinds", cur="2580", edit=False, **{"del": False})
+with db(readonly=True) as c:
+    check("بلا علامة: يُفتح الاثنان", r.get("ok") and not mweb.desk_locked(c))
+r = sec(kind="desk", act="dlock", cur="2580")
+with db(readonly=True) as c:
+    check("و«قفل التعديل والحذف» يقفل الاثنين معاً", mweb.desk_locked(c, "edit")
+          and mweb.desk_locked(c, "delete"))
+answer["v"] = "2580"
+desk_guard.reset()
+
 print("── 9) نافذة «رابط المدير» في دليل الموديلات (5.9)")
 import ui.desk_prompt as dp  # noqa: E402
 dp_answer = {"v": "1234"}

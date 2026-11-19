@@ -2270,6 +2270,12 @@ class MainWindow(QtWidgets.QMainWindow):
             a.triggered.connect(
                 lambda _=False, yy=y["year"]: self._switch_year(yy))
         m.addSeparator()
+        # 5.10.2: سنةٌ جديدة دون إقفال السابقة — والأرصدة الافتتاحية تنتقل
+        new_y = ys[-1]["year"] + 1 if ys else None
+        if new_y:
+            m.addAction(f"▶ بدء سنة {new_y} — الأرصدة الافتتاحية من {new_y - 1}"
+                        f" (دون إقفالها)…").triggered.connect(
+                lambda _=False, yy=new_y: self._start_year(yy))
         if nxt is not None:
             m.addAction(f"🔒 إقفال سنة {nxt} وبدء سنة {nxt + 1}…").triggered.connect(
                 lambda _=False, yy=nxt: self._close_year(yy))
@@ -2324,6 +2330,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if dlg.exec_() == QtWidgets.QDialog.Accepted and dlg.result_data:
             self._switch_year(dlg.result_data["next"])
         self._refresh_year_button()
+
+    def _start_year(self, y):
+        if not (self.is_super or self.user.get("role_local", "accountant")
+                == "accountant"):
+            err(self, "بدء سنةٍ جديدة للمحاسب أو المدير العام")
+            return
+        from ui.year_dialog import YearStartDialog
+        dlg = YearStartDialog(self, self.user, y)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted and dlg.started:
+            from services import work_year
+            with db(readonly=True) as c:
+                work_year.load(c, self.user.get("username"))
+            self._refresh_year_button()
+            self._rebuild_screens()
 
     def _reopen_year(self, y):
         from models import fiscal_years

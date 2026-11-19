@@ -53,22 +53,28 @@ def _mw():
     return manager_web
 
 
-def active(conn):
-    """القفل يسري: للمدير رمزٌ وحاله «مقفل»."""
+def kind_of(action):
+    """نوع العملية من اسمها: «حذف…» حذف، وما سواه (تعديل · تغيير · نقل ·
+    إقفال) تعديل — فيُقفل كلٌّ بما اختاره المدير (5.10.2)."""
+    return "delete" if str(action or "").strip().startswith("حذف") else "edit"
+
+
+def active(conn, kind=None):
+    """القفل يسري: للمدير رمزٌ وحاله «مقفل» — لهذا النوع إن حُدِّد."""
     try:
-        return _mw().desk_locked(conn)
+        return _mw().desk_locked(conn, kind)
     except Exception:
         return False
 
 
-def require(conn, action="التعديل والحذف"):
+def require(conn, action="التعديل والحذف", kind=None):
     """يُستدعى أول كل تعديلٍ أو حذف. يمرّ بلا سؤال إن لم يكن القفل مفعّلاً،
     أو كان الطلب من غير الواجهة؛ وإلا يطلب رمز المدير — والخطأ أو الإلغاء
     يرفع `ManagerCodeRequired` فلا يُنفَّذ شيء."""
     global _grant_until, _fails, _blocked_until
     if _prompt is None or threading.current_thread() is not threading.main_thread():
         return
-    if not active(conn):
+    if not active(conn, kind or kind_of(action)):
         return
     now = time.monotonic()
     if now < _grant_until:
