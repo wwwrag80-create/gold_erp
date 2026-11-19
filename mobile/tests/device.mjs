@@ -455,7 +455,7 @@ async function main() {
   ({ ws, ev } = await relaunch());
   await sleep(800);
   check("English: لغة الصفحة واتجاهها والشريط السفلي", await ev(`document.documentElement.dir === "ltr" &&
-    document.querySelector("#tabs").innerText.includes("Holdings") && document.querySelector(".op-tile .op-t").innerText === "Sale to customer"`));
+    document.querySelector("#tabs").innerText.includes("Holdings") && document.querySelector(".op-tile .op-t").innerText === "Sale"`));
   let langPref = "";
   try { langPref = adb("shell", "run-as", PKG, "cat", "shared_prefs/aur_lang.xml").toString(); } catch (e) { /* */ }
   check("English: والجهاز يعرفها (رسائله وإشعاراته بها)", /name="lang">en</.test(langPref), langPref);
