@@ -21,8 +21,8 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image, ImageFilter
 
-BENCH = Path(sys.argv[1])
-MODELS = Path(sys.argv[2])
+BENCH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("bench")
+MODELS = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("vm")
 ONLY = sys.argv[3:]
 
 IMNET = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
@@ -297,4 +297,5 @@ def main():
         {k: list(v) for k, v in results.items()}, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-main()
+if __name__ == "__main__":
+    main()

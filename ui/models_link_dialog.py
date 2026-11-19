@@ -115,6 +115,13 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         btn_open = kit.PushButton("🌐 فتح")
         btn_open.setObjectName("ghost")
         btn_open.clicked.connect(self.open_url)
+        # 5.10: البحث بالصورة على هذا الجهاز — متصفّحه يجهّز صور الدليل
+        # للبحث أسرع بكثيرٍ من الجوال، فيجدها الجوال جاهزة
+        btn_vis = kit.PushButton("📷 البحث بالصورة على هذا الجهاز")
+        btn_vis.setObjectName("ghost")
+        btn_vis.setToolTip("يفتح صفحة «البحث بالصورة» في متصفّح هذا الجهاز —"
+                           " وأول مرة يجهّز صور الدليل للبحث (أسرع من الجوال)")
+        btn_vis.clicked.connect(self.open_vision)
         self.qr = QtWidgets.QLabel()
         self.qr.setAlignment(QtCore.Qt.AlignCenter)
         self.qr.setFixedSize(176, 176)
@@ -214,6 +221,7 @@ class ModelsLinkDialog(QtWidgets.QDialog):
         link.addWidget(self.url, 1)
         link.addWidget(btn_copy)
         link.addWidget(btn_open)
+        link.addWidget(btn_vis)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(note)
@@ -667,6 +675,20 @@ class ModelsLinkDialog(QtWidgets.QDialog):
     def open_url(self):
         if self.url.text():
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.url.text()))
+
+    def open_vision(self):
+        """صفحة البحث بالصورة على عنوان هذا الجهاز نفسه (127.0.0.1): آمنٌ عند
+        المتصفّح كالرابط المشفّر، فيعمل المحرّك بكل أنوية المعالج."""
+        from database.database import db
+        from services import photo_server
+        cur = photo_server.current()
+        with db(readonly=True) as conn:
+            st = mw.settings(conn)
+        if not cur or not st.get("enabled") or not st.get("token"):
+            err(self, "فعّل الرابط أولاً (✔ تفعيل الرابط) ثم اضغط الزر.")
+            return
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(
+            f"http://127.0.0.1:{cur[1]}/{mw.PREFIX}/{st['token']}/vis"))
 
     def closeEvent(self, e):
         self._timer.stop()
