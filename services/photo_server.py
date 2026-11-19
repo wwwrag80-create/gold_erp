@@ -19,6 +19,7 @@
 """
 import html
 import mimetypes
+import os
 import secrets
 import socket
 import threading
@@ -220,10 +221,42 @@ class _Handler(BaseHTTPRequestHandler):
                 _drop_thread_conn()
             except Exception:
                 pass
+        if res.get("file"):
+            self._send_file(res.get("code", 200), res["file"],
+                            res.get("ctype", "application/octet-stream"),
+                            res.get("headers"))
+            return True
         self._send(res.get("code", 200), res.get("body", b""),
                    res.get("ctype", "text/html; charset=utf-8"),
                    res.get("headers"))
         return True
+
+    def _send_file(self, code, path, ctype, headers=None):
+        """ملفٌّ كبير (نموذج البحث بالصورة 5.10) يُرسل قطعاً من القرص —
+        لا يُحمَّل كاملاً في الذاكرة لكل طلب."""
+        try:
+            fh = open(path, "rb")
+            size = os.fstat(fh.fileno()).st_size
+        except OSError:
+            return self._send(404, "غير موجود", "text/plain")
+        with fh:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(size))
+            extra = dict(headers or {})
+            if "Cache-Control" not in extra:
+                self.send_header("Cache-Control", "no-store")
+            for k, v in extra.items():
+                self.send_header(k, v)
+            self.end_headers()
+            try:
+                while True:
+                    b = fh.read(256 * 1024)
+                    if not b:
+                        break
+                    self.wfile.write(b)
+            except Exception:
+                pass
 
     def do_POST(self):                                 # noqa: N802
         try:

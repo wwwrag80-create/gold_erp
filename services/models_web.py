@@ -953,6 +953,11 @@ def handle(method, parts, query, headers, body):
             manager_web.route(method, rest, query, headers, body, base,
                               _csrf(token, secret), bool(pin_hash)),
             method, rest, headers, base)
+    # 5.10: البحث بالصورة في الدليل (`services.vision_search`)
+    if rest[:1] == ["vis"]:
+        from services import vision_search
+        return vision_search.route(method, rest[1:], query, headers, body,
+                                   base, _csrf(token, secret))
     if method != "GET":
         return _resp(405, _GONE)
     if rest[:1] == ["img"] and len(rest) == 2:
@@ -1270,6 +1275,9 @@ white-space:nowrap}
 .instmsg{max-width:1500px;margin:0 auto;padding:10px 22px;background:#fff7e0;
 color:#2b2723;font-size:14px;line-height:1.7;border-top:1px solid #e8d9a8}
 @media (display-mode: standalone){.inst{display:none}}
+.camb{border-radius:9px;padding:9px 16px;font-size:15px;font-weight:800;
+background:#fff3cf;color:#4e3618;text-decoration:none;white-space:nowrap;
+box-shadow:0 0 0 2px #c9a24a inset}
 .bar input[type=search]{width:460px;padding:9px 12px;border:0;
 border-radius:9px;font-size:14px}
 main{padding:16px 22px;max-width:1500px;margin:auto}
@@ -1603,6 +1611,10 @@ def page_html(conn, query, base):
            "#f7ecd3\">🔓 التعديل والحذف مفتوح")
         + '</a>') if _hp else ""
     board = tab in ("customers", "pnl")
+    # 5.10: زرّ «البحث بالصورة» — يفتح كاميرا الجوال ويطابق الطقم بالدليل
+    cam = (f'<a class="camb" href="{_e(base)}/vis" title="صوِّر طقماً أمامك'
+           f' فيعرض لك أقرب موديلات الدليل إليه">📷 بحث بالصورة</a>'
+           if tab == "guide" else "")
     title = ((pnl_title if tab == "pnl" else
               "العملاء — المبيعات والسداد" if board else "دليل الموديلات")
              + (f" — {_e(co)}" if co else ""))
@@ -1634,7 +1646,7 @@ def page_html(conn, query, base):
 <style>{_CSS}{_BOARD_CSS}{_PNL_CSS}{_mweb.NAV_CSS}</style></head><body>
 <header><div class="hi"><div class="t"><h1>{title}</h1>
 <div class="sub">مباشرةً من جهاز المصنع · {now} · الأوزان {unit}</div></div>
-<div class="bar">{lock_chip}<button type="button" id="inst" class="inst"
+<div class="bar">{lock_chip}{cam}<button type="button" id="inst" class="inst"
  title="يضع الرابط على سطح مكتب هذا الجهاز أيقونةً تفتحه بنقرة">📌 تثبيت
  على سطح المكتب</button><input id="q" type="search"
  placeholder="{hint}"></div>
