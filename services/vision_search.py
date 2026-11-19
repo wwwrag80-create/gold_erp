@@ -72,7 +72,8 @@ SEARCH = {
 MAX_DIM = 2048
 RETRY_S = 60            # مهلةٌ بعد تنزيلٍ فاشل قبل إعادة المحاولة
 
-_lock = threading.Lock()
+# RLock: status() تُستدعى أحياناً والقفل ممسوك (5.10.1 — كان يتجمّد)
+_lock = threading.RLock()
 _dl = {"state": "", "done": 0, "total": 0, "error": "", "thread": None,
        "at": 0.0}
 
@@ -136,17 +137,20 @@ def ensure_async():
         return status()
     with _lock:
         t = _dl.get("thread")
-        if t is not None and t.is_alive():
-            return status()
+        busy = t is not None and t.is_alive()
         # بعد فشلٍ: لا إعادة قبل دقيقة — فلا تُنزَّل الحزمة كل ثوانٍ
         # والصفحة مفتوحةٌ تسأل
-        if _dl["state"] == "error" and time.time() - _dl.get("at", 0) < RETRY_S:
-            return status()
-        _dl.update(state="downloading", done=0, total=PACK_SIZE, error="",
-                   at=time.time())
-        t = threading.Thread(target=_download_safe, name="vision-pack",
-                             daemon=True)
-        _dl["thread"] = t
+        wait = (_dl["state"] == "error"
+                and time.time() - _dl.get("at", 0) < RETRY_S)
+        if busy or wait:
+            t = None
+        else:
+            _dl.update(state="downloading", done=0, total=PACK_SIZE, error="",
+                       at=time.time())
+            t = threading.Thread(target=_download_safe, name="vision-pack",
+                                 daemon=True)
+            _dl["thread"] = t
+    if t is not None:
         t.start()
     return status()
 
@@ -530,9 +534,8 @@ def page_html(conn, base, csrf):
  موديلات الدليل إليها — مع ما بالخزنة وما عند المناديب.</p>
  <div class="btns">
   <label class="big"><input id="cam" type="file" accept="image/*"
-   capture="environment" hidden>📷 تصوير الطقم</label>
-  <label class="alt"><input id="gal" type="file" accept="image/*"
-   hidden>🖼 صورة من الجوال</label>
+   capture="environment">📷 تصوير الطقم</label>
+  <label class="alt"><input id="gal" type="file" accept="image/*">🖼 صورة من الجوال</label>
  </div>
  <ul class="tips">
   <li>صوِّر من الأمام، والقطعة تملأ أغلب الصورة.</li>
@@ -559,9 +562,9 @@ def page_html(conn, base, csrf):
  <div id="rS" class="small"></div></div></div>
  <div class="btns">
   <label class="alt"><input id="cam2" type="file" accept="image/*"
-   capture="environment" hidden>📷 صورة أخرى</label>
+   capture="environment">📷 صورة أخرى</label>
   <label class="alt" id="addL"><input id="add" type="file" accept="image/*"
-   capture="environment" hidden>➕ لقطة ثانية للطقم نفسه (أدق)</label>
+   capture="environment">➕ لقطة ثانية للطقم نفسه (أدق)</label>
  </div>
  <div id="list"></div>
 </section>
@@ -589,6 +592,9 @@ main{max-width:760px;margin:0 auto;padding:12px 12px 40px}
 padding:14px;margin-bottom:12px}
 .lead{margin:0 0 12px;line-height:1.7}
 .btns{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+label.big,label.alt{position:relative;overflow:hidden}
+label.big input,label.alt input{position:absolute;inset:0;width:100%;
+height:100%;opacity:0;cursor:pointer;font-size:200px}
 .big,.alt{display:inline-flex;align-items:center;justify-content:center;
 gap:6px;border-radius:12px;padding:12px 16px;font-size:16px;font-weight:700;
 cursor:pointer;border:0;font-family:inherit}

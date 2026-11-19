@@ -44,10 +44,22 @@
   function mb(n) { return (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + ' م.ب'; }
 
   // ═════════ 1) الحزمة ═════════
+  // طلبٌ بمهلة: لا ينتظر الجوال جهازاً لا يردّ إلى الأبد
+  function getJSON(url, ms) {
+    var ac = self.AbortController ? new AbortController() : null;
+    var tm = setTimeout(function () { if (ac) ac.abort(); }, ms || 20000);
+    return fetch(url, {cache: 'no-store', credentials: 'same-origin', signal: ac ? ac.signal : undefined})
+      .then(function (r) { clearTimeout(tm); return r.json(); },
+            function (e) { clearTimeout(tm); throw e; });
+  }
   function waitPack() {
-    return fetch(BASE + '/vis/status', {cache: 'no-store', credentials: 'same-origin'})
-      .then(function (r) { return r.json(); })
+    return getJSON(BASE + '/vis/status', 20000)
+      .catch(function () {
+        prep('جهاز المصنع لا يردّ الآن — تُعاد المحاولة…', 0, 0, 'تأكّد أن البرنامج مفتوحٌ على جهاز المصنع.');
+        return sleep(5000).then(function () { return {state: 'retry'}; });
+      })
       .then(function (st) {
+        if (st.state === 'retry') return waitPack();
         if (st.state === 'ready') return st.manifest;
         if (st.state === 'error') {
           prep('تعذّر تنزيل أداة البحث على جهاز المصنع', 0, 0,
@@ -616,6 +628,7 @@
     prep('لا توجد صورٌ في الدليل بعد', 0, 0, 'أضف صور الموديلات من شاشة «دليل الموديلات» في البرنامج.');
     return;
   }
+  prep('جارٍ الاتصال بجهاز المصنع…', 0, 0, 'يمكنك التصوير الآن — يبدأ البحث متى جهزت الأداة.');
   waitPack().then(startEngine).then(loadIndex).then(buildIndex).then(function () {
     ready = true;
     show('prep', false);

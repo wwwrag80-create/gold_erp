@@ -343,5 +343,47 @@ with op.open(f"http://127.0.0.1:{port}/vt/x", timeout=20) as resp:
 check("ملفٌّ 2.5 م.ب يصل كاملاً مطابقاً", data == big.read_bytes()
       and cl == str(big.stat().st_size), (len(data), cl))
 
+print("── 7) لا تجمّد أثناء تنزيل الحزمة (5.10.1)")
+import threading as _th  # noqa: E402
+
+
+class _Slow(io.BytesIO):
+    headers = {"Content-Length": "600000"}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, n=-1):
+        _t.sleep(0.15)
+        return super().read(min(n, 50000))
+
+
+vs.PACK_SHA = "e" * 64
+vs._dl.update(state="", thread=None, at=0)
+import shutil as _sh  # noqa: E402
+_sh.rmtree(vs._root() / vs.PACK_TAG, ignore_errors=True)
+urllib.request.urlopen = lambda req, timeout=0: _Slow(b"x" * 600000)
+_res = []
+
+
+def _poll():
+    for _ in range(6):
+        _res.append(vs.ensure_async()["state"])
+        vs.status()
+        _t.sleep(0.2)
+
+
+_w = _th.Thread(target=_poll, daemon=True)
+_w.start()
+_w.join(8)
+check("الصفحة تسأل والحزمة تُنزَّل: كل طلبٍ يعود فوراً (لا تجمّد)",
+      not _w.is_alive() and _res and set(_res) == {"downloading"}, _res)
+r = call("GET", "vis")
+check("وصفحة /vis تُفتح أثناء التنزيل", r["code"] == 200 and "تصوير الطقم" in text(r))
+urllib.request.urlopen = _orig
+
 print(f"\n{len(OK)} ✔ · {len(BAD)} ✘")
 os._exit(1 if BAD else 0)
