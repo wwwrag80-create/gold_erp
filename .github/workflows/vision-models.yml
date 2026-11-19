@@ -1,0 +1,38 @@
+# نماذج «البحث بالصورة» المرشّحة — تُجلب من Hugging Face إلى إصدار
+# `vision-models` (للتقييم وحده، لا للتوزيع). يعمل عند تعديل قائمة النماذج.
+name: نماذج البحث بالصورة (للتقييم)
+
+on:
+  push:
+    branches: ["claude/gold-accounting-system-9o1vmw"]
+    paths: ["tools/vision/fetch_models.py", ".github/workflows/vision-models.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vision-models
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: جلب النماذج
+        run: python tools/vision/fetch_models.py vm
+      - name: نشرها في إصدار vision-models
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la vm
+          gh release view vision-models >/dev/null 2>&1 || \
+            gh release create vision-models --prerelease --target "$GITHUB_SHA" \
+              --title "Vision models (evaluation only)" \
+              --notes "Candidate image encoders for photo search — evaluation only."
+          gh release upload vision-models vm/* --clobber
