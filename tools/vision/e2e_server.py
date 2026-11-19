@@ -23,7 +23,10 @@ BENCH, PACK, OUT = (pathlib.Path(a) for a in sys.argv[1:4])
 T = tempfile.mkdtemp(prefix="vis_e2e_")
 os.environ["GOLD_ERP_DATA_DIR"] = T
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-os.environ["JADEITE_VISION_PACK_DIR"] = str(PACK)
+# مجلّد حزمةٍ جاهز — أو ملف الحزمة الرسمي نفسه (.zip) يُثبَّت بمسار البرنامج
+# الحقيقي (مطابقة البصمة المثبّتة فيه)
+if PACK.suffix != ".zip":
+    os.environ["JADEITE_VISION_PACK_DIR"] = str(PACK)
 import config  # noqa: E402
 
 config.DB_PATH = pathlib.Path(T) / "t.db"
@@ -53,6 +56,14 @@ with db() as c:
     mw.set_mode(c, "lan")
 for i in ids:
     shutil.copy(BENCH / "catalog" / f"{i}.png", mc.images_dir() / f"{i}.png")
+if PACK.suffix == ".zip":
+    import hashlib  # noqa: E402
+    from services import vision_search as vs  # noqa: E402
+    sha = hashlib.sha256(PACK.read_bytes()).hexdigest()
+    assert sha == vs.PACK_SHA, "الحزمة ليست الرسمية المثبّتة في البرنامج"
+    vs.install_zip(PACK, sha)
+    assert vs.pack_ready()
+    print("official pack installed", vs.manifest().get("id"), flush=True)
 mw.register()
 srv = photo_server._bind(0)
 import threading  # noqa: E402

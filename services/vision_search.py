@@ -37,8 +37,10 @@ from pathlib import Path
 # ── حزمة الأدوات (تُنشر في إصدار GitHub بالاسم نفسه) ──
 PACK_TAG = "vision-pack-1"
 PACK_FILE = "vision-pack-1.zip"
-PACK_SHA = ""
-PACK_SIZE = 0
+# DINOv3 ViT-S/16 (رخصة DINOv3: الاستعمال التجاري مسموح) بأوزانٍ نصف الحجم ·
+# ONNX Runtime Web 1.31.1 (MIT) — تُبنى في GitHub Actions من tools/vision/pack.json
+PACK_SHA = "1ec97e4c689c02485d8cacdee8d2a0bc7bde8e6cd8a877e4ccd57ecd00f82cc8"
+PACK_SIZE = 62139726
 PACK_URL = ("https://github.com/wwwrag80-create/gold_erp/releases/download/"
             f"{PACK_TAG}/{PACK_FILE}")
 # تجاوزٌ للتجربة: مجلّد حزمةٍ جاهز (بلا تنزيل)
@@ -55,6 +57,18 @@ CTYPES = {".js": "text/javascript; charset=utf-8",
           ".json": "application/json", ".txt": "text/plain; charset=utf-8"}
 
 MAX_VIEWS = 16          # بصمات الموديل الواحد (الطقم · القطع · نوافذ · داكن · مائل)
+# إعدادات المطابقة — من البرنامج لا من الحزمة، فتُضبط بتحديثٍ عادي.
+# اختيرت على مجموعة اختبار (tools/vision/bench): 60 طقماً في عائلاتٍ متقاربة
+# و180 لقطةً كالجوال — الطقم الصحيح أولاً 44% · بين الخمسة 78% · بين العشرة 91%
+# (للطقم كاملاً: 53% · 88% · 96%).
+SEARCH = {
+    "views": {"work": 384, "pieces": 5, "windows": True, "dark": True,
+              "tilts": [[0.82, 12], [0.82, -12]]},
+    "query": {"crops": [0.8, 0.62], "flip": True},
+    "agg": "meanmax",
+    "thr": {"hi": 0.7, "mid": 0.6, "gap": 0.02},
+    "batch": 4,
+}
 MAX_DIM = 2048
 RETRY_S = 60            # مهلةٌ بعد تنزيلٍ فاشل قبل إعادة المحاولة
 
@@ -94,11 +108,14 @@ def pack_ready():
 
 
 def manifest():
+    """إعداد النموذج من الحزمة، وفوقه إعدادات المطابقة من البرنامج."""
     try:
-        return json.loads((pack_dir() / "manifest.json").read_text(
+        m = json.loads((pack_dir() / "manifest.json").read_text(
             encoding="utf-8"))
     except Exception:
         return {}
+    m.update(json.loads(json.dumps(SEARCH)))
+    return m
 
 
 def status():
@@ -587,7 +604,7 @@ transition:width .3s}
 .err{border-color:#e5b4ae;background:#fff4f2;color:#8f2a1f}
 .ctitle{font-weight:700;margin-bottom:8px}
 #stage{position:relative;touch-action:none;user-select:none;margin:0 auto;
-max-width:100%}
+max-width:100%;overflow:hidden;border-radius:10px}
 #cv{display:block;width:100%;height:auto;border-radius:10px;background:#222}
 #box{position:absolute;border:2px solid #ffd76a;border-radius:6px;
 box-shadow:0 0 0 9999px rgba(0,0,0,.45);touch-action:none}

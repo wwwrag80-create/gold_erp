@@ -72,7 +72,10 @@ const { chromium, devices } = require('playwright');
   console.log('   طقم  ', JSON.stringify(S));
   console.log('   قطعة ', JSON.stringify(P));
   console.log(`   متوسط زمن البحث للّقطة: ${Math.round(ts / Math.max(1, photos.length))} م.ث`);
-  check('الطقم الصحيح بين الخمسة الأوائل في أغلب اللقطات (≥ 80%)', +A.top5 >= 80, A.top5);
+  // حرّاسٌ من التراجع (القيم المقيسة: الكل 78/91 · الطقم 88/96 بين الخمسة/العشرة)
+  check('الكل: الصحيح بين العشرة الأوائل ≥ 85%', +A.top10 >= 85, A.top10);
+  check('الطقم كاملاً: الصحيح بين الخمسة الأوائل ≥ 80%', +S.top5 >= 80, S.top5);
+  check('الطقم كاملاً: الصحيح بين العشرة الأوائل ≥ 90%', +S.top10 >= 90, S.top10);
 
   console.log('── 4) لقطةٌ ثانية للطقم نفسه تُدمج');
   const two = photos.filter(x => x.kind === 'set').slice(0, 2);
